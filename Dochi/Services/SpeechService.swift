@@ -28,8 +28,10 @@ final class SpeechService: ObservableObject {
     private let silenceTimeout: TimeInterval = 1.0  // 1초 무음이면 자동 완료
     private var continuousListeningTimeout: TimeInterval = 10.0
     private var isContinuousMode: Bool = false
+    private let soundService: SoundServiceProtocol
 
-    init() {
+    init(soundService: SoundServiceProtocol = SoundService()) {
+        self.soundService = soundService
         speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "ko-KR"))
     }
 
@@ -75,7 +77,7 @@ final class SpeechService: ObservableObject {
         state = .idle
         isContinuousMode = false
         if !captured.isEmpty {
-            SoundService.playInputComplete()
+            soundService.playInputComplete()
             onQueryCaptured?(captured)
         }
     }
@@ -209,7 +211,7 @@ final class SpeechService: ObservableObject {
                 if captured.isEmpty {
                     self.onSilenceTimeout?()
                 } else {
-                    SoundService.playInputComplete()
+                    self.soundService.playInputComplete()
                     self.onQueryCaptured?(captured)
                 }
             }
@@ -231,7 +233,7 @@ final class SpeechService: ObservableObject {
                     // 공백 무시하고 변형 중 하나라도 매칭되면 트리거
                     let normalized = text.replacingOccurrences(of: " ", with: "")
                     if normalizedPhrases.contains(where: { normalized.contains($0) }) {
-                        SoundService.playWakeWordDetected()
+                        self.soundService.playWakeWordDetected()
                         self.stopWakeWordDetection()
                         self.onWakeWordDetected?()
                         self.startListening()

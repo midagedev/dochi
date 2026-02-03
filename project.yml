@@ -18,6 +18,9 @@ targets:
       - path: Dochi
         excludes:
           - Info.plist
+          - Resources
+      - path: Dochi/Resources/CHANGELOG.md
+        buildPhase: resources
     info:
       path: Dochi/Info.plist
       properties:
@@ -39,3 +42,17 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_ENTITLEMENTS: Dochi/Dochi.entitlements
         SWIFT_STRICT_CONCURRENCY: targeted
+
+  DochiTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: DochiTests
+    dependencies:
+      - target: Dochi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi.tests
+        SWIFT_VERSION: "5.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: YES

@@ -54,11 +54,22 @@ final class AppSettings: ObservableObject {
         static let contextMaxSize = "settings.contextMaxSize"
     }
 
-    init() {
+    // MARK: - Dependencies
+
+    private let keychainService: KeychainServiceProtocol
+    let contextService: ContextServiceProtocol
+
+    init(
+        keychainService: KeychainServiceProtocol = KeychainService(),
+        contextService: ContextServiceProtocol = ContextService()
+    ) {
+        self.keychainService = keychainService
+        self.contextService = contextService
+
         let defaults = UserDefaults.standard
 
         // 마이그레이션
-        Self.migrateToFileBasedContext(defaults: defaults)
+        Self.migrateToFileBasedContext(defaults: defaults, contextService: contextService)
 
         self.wakeWordEnabled = defaults.bool(forKey: Keys.wakeWordEnabled)
         self.wakeWord = defaults.string(forKey: Keys.wakeWord) ?? "도치야"
@@ -80,25 +91,25 @@ final class AppSettings: ObservableObject {
     // MARK: - API Keys
 
     var apiKey: String {
-        get { KeychainService.load(account: "openai") ?? "" }
+        get { keychainService.load(account: "openai") ?? "" }
         set {
-            KeychainService.save(account: "openai", value: newValue)
+            keychainService.save(account: "openai", value: newValue)
             objectWillChange.send()
         }
     }
 
     var anthropicApiKey: String {
-        get { KeychainService.load(account: "anthropic") ?? "" }
+        get { keychainService.load(account: "anthropic") ?? "" }
         set {
-            KeychainService.save(account: "anthropic", value: newValue)
+            keychainService.save(account: "anthropic", value: newValue)
             objectWillChange.send()
         }
     }
 
     var zaiApiKey: String {
-        get { KeychainService.load(account: "zai") ?? "" }
+        get { keychainService.load(account: "zai") ?? "" }
         set {
-            KeychainService.save(account: "zai", value: newValue)
+            keychainService.save(account: "zai", value: newValue)
             objectWillChange.send()
         }
     }
@@ -116,12 +127,12 @@ final class AppSettings: ObservableObject {
     func buildInstructions() -> String {
         var parts: [String] = []
 
-        let systemPrompt = ContextService.loadSystem()
+        let systemPrompt = contextService.loadSystem()
         if !systemPrompt.isEmpty {
             parts.append(systemPrompt)
         }
 
-        let userMemory = ContextService.loadMemory()
+        let userMemory = contextService.loadMemory()
         if !userMemory.isEmpty {
             parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(userMemory)")
         }
@@ -131,16 +142,16 @@ final class AppSettings: ObservableObject {
 
     // MARK: - Migration
 
-    private static func migrateToFileBasedContext(defaults: UserDefaults) {
+    private static func migrateToFileBasedContext(defaults: UserDefaults, contextService: ContextServiceProtocol) {
         let migrationKey = "settings.migratedToFileContext"
         if !defaults.bool(forKey: migrationKey) {
             if let oldInstructions = defaults.string(forKey: "settings.instructions"),
                !oldInstructions.isEmpty,
-               ContextService.loadSystem().isEmpty {
-                ContextService.saveSystem(oldInstructions)
+               contextService.loadSystem().isEmpty {
+                contextService.saveSystem(oldInstructions)
             }
             defaults.set(true, forKey: migrationKey)
         }
-        ContextService.migrateIfNeeded()
+        contextService.migrateIfNeeded()
     }
 }

@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **See also:** [CONCEPT.md](./CONCEPT.md) for product vision, [ROADMAP.md](./ROADMAP.md) for planned features
+
 ## Build Commands
 
 ```bash
@@ -11,11 +13,12 @@ xcodegen generate
 # Build
 xcodebuild -project Dochi.xcodeproj -scheme Dochi -configuration Debug build
 
+# Run tests
+xcodebuild -project Dochi.xcodeproj -scheme DochiTests -configuration Debug test
+
 # Run the built app
 open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.app
 ```
-
-No tests exist. No linter is configured.
 
 ## Architecture
 
@@ -44,37 +47,110 @@ When wake word is enabled, sessions follow this flow:
 6. **Positive response** or **another 10s silence** → Session ends, context analyzed, wake word listening resumes
 7. **User can also say** "대화 종료", "그만할게", etc. to end session directly
 
+### Project Structure
+
+```
+Dochi/
+├── Models/
+│   ├── Settings.swift        # AppSettings with DI
+│   ├── Conversation.swift
+│   ├── Message.swift
+│   └── Enums.swift           # LLMProvider, SupertonicVoice
+├── ViewModels/
+│   └── DochiViewModel.swift  # Central orchestrator
+├── Views/
+│   ├── ContentView.swift
+│   ├── SettingsView.swift
+│   ├── ConversationView.swift
+│   └── ChangelogView.swift
+├── Services/
+│   ├── Protocols/            # Service protocols for DI
+│   │   ├── ContextServiceProtocol.swift
+│   │   ├── ConversationServiceProtocol.swift
+│   │   ├── KeychainServiceProtocol.swift
+│   │   └── SoundServiceProtocol.swift
+│   ├── LLMService.swift
+│   ├── SpeechService.swift
+│   ├── SupertonicService.swift
+│   ├── ContextService.swift
+│   ├── ConversationService.swift
+│   ├── KeychainService.swift
+│   ├── SoundService.swift
+│   ├── ChangelogService.swift
+│   └── Supertonic/           # TTS helpers
+└── Resources/
+    └── CHANGELOG.md
+
+DochiTests/
+├── Mocks/                    # Mock implementations for testing
+│   ├── MockContextService.swift
+│   ├── MockConversationService.swift
+│   ├── MockKeychainService.swift
+│   └── MockSoundService.swift
+└── Services/
+    ├── ContextServiceTests.swift
+    └── ConversationServiceTests.swift
+```
+
 ### Key Components
 
 **DochiViewModel** (`ViewModels/DochiViewModel.swift`) — Central orchestrator. Owns all services, manages `State` (idle/listening/processing/speaking) and `isSessionActive` for continuous conversation. Forwards child `objectWillChange` via Combine for SwiftUI reactivity.
 
-**Services** — Each is `@MainActor ObservableObject` communicating via closure callbacks:
-- `LLMService` — SSE streaming for 3 providers; sentence detection splits on `\n`
-- `SupertonicService` — ONNX model loading (downloaded from HuggingFace on first use), queue-based TTS with configurable `speed` and `diffusionSteps`
-- `SpeechService` — Apple Speech framework STT with wake word detection and continuous listening mode (`startContinuousListening` with timeout)
-- `ContextService` — Prompt file management (`~/Library/Application Support/Dochi/system.md` for persona, `memory.md` for user info)
-- `KeychainService` — File-based API key storage
+**Services** — Each is `@MainActor ObservableObject` communicating via closure callbacks. Static services (ContextService, ConversationService, KeychainService, SoundService) are protocol-based for testability:
+
+| Service | Protocol | Description |
+|---------|----------|-------------|
+| LLMService | - | SSE streaming for 3 providers |
+| SupertonicService | - | ONNX TTS with queue-based playback |
+| SpeechService | - | Apple STT with wake word detection |
+| ContextService | ContextServiceProtocol | Prompt file management |
+| ConversationService | ConversationServiceProtocol | Conversation history storage |
+| KeychainService | KeychainServiceProtocol | API key storage |
+| SoundService | SoundServiceProtocol | UI sound effects |
+| ChangelogService | - | Version tracking and changelog |
 
 **Callbacks in SpeechService:**
 - `onQueryCaptured` — STT result ready
 - `onWakeWordDetected` — Wake word matched
 - `onSilenceTimeout` — Continuous listening timed out with no speech
 
-**Models:**
-- `Enums.swift` — `LLMProvider` (with per-provider models, API URLs), `SupertonicVoice`
-- `Settings.swift` — `AppSettings` persists to UserDefaults; includes `ttsSpeed`, `ttsDiffusionSteps`
+### Dependency Injection
+
+Services are injected via init parameters with default implementations:
+
+```swift
+// AppSettings
+init(keychainService: KeychainServiceProtocol = KeychainService(),
+     contextService: ContextServiceProtocol = ContextService())
+
+// DochiViewModel
+init(settings: AppSettings,
+     contextService: ContextServiceProtocol = ContextService(),
+     conversationService: ConversationServiceProtocol = ConversationService())
+
+// SpeechService
+init(soundService: SoundServiceProtocol = SoundService())
+```
+
+For testing, inject mock implementations:
+```swift
+let mockContext = MockContextService()
+let settings = AppSettings(contextService: mockContext)
+```
 
 ### Prompt Files
 
 ```
 ~/Library/Application Support/Dochi/
 ├── system.md    # Persona + behavior guidelines (manual edit)
-└── memory.md    # User info (auto-accumulated)
+├── memory.md    # User info (auto-accumulated)
+└── conversations/
+    └── {uuid}.json  # Saved conversations
 ```
 
 **system.md** — AI identity and instructions, edited manually via sidebar
 **memory.md** — User memory, auto-populated on session end:
-1. `extractAndSaveContext()` sends conversation to LLM for analysis
+1. `saveAndAnalyzeConversation()` sends conversation to LLM for analysis
 2. Extracted info appended to `memory.md` with timestamp
 3. `buildInstructions()` includes both files in system prompt
 4. Auto-compression when exceeding `contextMaxSize` (default 15KB)
@@ -96,3 +172,17 @@ When wake word is enabled, sessions follow this flow:
 - External dependency: `microsoft/onnxruntime-swift-package-manager` v1.20.0, imported as `OnnxRuntimeBindings`
 - Supertonic helpers (`SupertonicHelpers.swift`) prefix all types with `Supertonic` to avoid namespace collisions
 - Wake word variations generated via LLM to improve STT matching accuracy
+- Protocol-based services enable easy mocking for unit tests
+
+### Testing
+
+Tests are in `DochiTests/` target. Run with:
+```bash
+xcodebuild -project Dochi.xcodeproj -scheme DochiTests test
+```
+
+Current test coverage:
+- ContextService: 10 tests (file operations, memory management)
+- ConversationService: 7 tests (CRUD operations)
+
+Mock services are provided in `DochiTests/Mocks/` for testing components that depend on services.

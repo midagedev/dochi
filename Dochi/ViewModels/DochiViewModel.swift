@@ -15,10 +15,18 @@ final class DochiViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var state: State = .idle
 
+    // 대화 히스토리
+    @Published var currentConversationId: UUID?
+    @Published var conversations: [Conversation] = []
+
     var settings: AppSettings
     let speechService: SpeechService
     let llmService: LLMService
     let supertonicService: SupertonicService
+
+    // Dependencies
+    private let contextService: ContextServiceProtocol
+    private let conversationService: ConversationServiceProtocol
 
     private var cancellables = Set<AnyCancellable>()
     @Published var wakeWordVariations: [String] = []
@@ -35,14 +43,21 @@ final class DochiViewModel: ObservableObject {
 
     // MARK: - Init
 
-    init(settings: AppSettings) {
+    init(
+        settings: AppSettings,
+        contextService: ContextServiceProtocol = ContextService(),
+        conversationService: ConversationServiceProtocol = ConversationService()
+    ) {
         self.settings = settings
+        self.contextService = contextService
+        self.conversationService = conversationService
         self.speechService = SpeechService()
         self.llmService = LLMService()
         self.supertonicService = SupertonicService()
 
         setupCallbacks()
         setupChangeForwarding()
+        loadConversations()
     }
 
     private func setupCallbacks() {
@@ -370,9 +385,13 @@ final class DochiViewModel: ObservableObject {
         isAskingToEndSession = false
 
         if !messages.isEmpty {
-            analyzeSessionForContext()
+            let sessionMessages = messages
+            Task {
+                await saveAndAnalyzeConversation(sessionMessages)
+            }
         }
         messages.removeAll()
+        currentConversationId = nil
 
         state = .idle
         startWakeWordIfNeeded()
@@ -395,30 +414,77 @@ final class DochiViewModel: ObservableObject {
 
     func clearConversation() {
         if !messages.isEmpty {
-            analyzeSessionForContext()
+            let sessionMessages = messages
+            Task {
+                await saveAndAnalyzeConversation(sessionMessages)
+            }
         }
         messages.removeAll()
+        currentConversationId = nil
+    }
+
+    // MARK: - Conversation History
+
+    private func loadConversations() {
+        conversations = conversationService.list()
+    }
+
+    func loadConversation(_ conversation: Conversation) {
+        // 현재 대화가 있으면 먼저 저장
+        if !messages.isEmpty {
+            let sessionMessages = messages
+            Task {
+                await saveAndAnalyzeConversation(sessionMessages)
+            }
+        }
+
+        currentConversationId = conversation.id
+        messages = conversation.messages
+    }
+
+    func deleteConversation(id: UUID) {
+        conversationService.delete(id: id)
+        conversations.removeAll { $0.id == id }
+
+        if currentConversationId == id {
+            currentConversationId = nil
+            messages.removeAll()
+        }
+    }
+
+    private func saveCurrentConversation(title: String) {
+        let id = currentConversationId ?? UUID()
+        let now = Date()
+
+        let conversation = Conversation(
+            id: id,
+            title: title,
+            messages: messages,
+            createdAt: conversations.first(where: { $0.id == id })?.createdAt ?? now,
+            updatedAt: now
+        )
+
+        conversationService.save(conversation)
+        loadConversations()
     }
 
     // MARK: - Session Context Analysis
 
-    private func analyzeSessionForContext() {
-        let sessionMessages = messages
+    private func saveAndAnalyzeConversation(_ sessionMessages: [Message]) async {
         guard sessionMessages.count >= 2 else { return }
 
-        Task {
-            await extractAndSaveContext(from: sessionMessages)
-        }
-    }
-
-    private func extractAndSaveContext(from sessionMessages: [Message]) async {
         let providers: [LLMProvider] = [.openai, .anthropic, .zai]
         guard let provider = providers.first(where: { !settings.apiKey(for: $0).isEmpty }) else {
+            // API 키 없으면 기본 제목으로 저장
+            let defaultTitle = generateDefaultTitle(from: sessionMessages)
+            await MainActor.run {
+                saveConversationWithTitle(defaultTitle, messages: sessionMessages)
+            }
             return
         }
 
         let apiKey = settings.apiKey(for: provider)
-        let currentContext = ContextService.loadMemory()
+        let currentContext = contextService.loadMemory()
 
         let conversationText = sessionMessages.map { msg in
             let role = msg.role == .user ? "사용자" : "어시스턴트"
@@ -437,29 +503,82 @@ final class DochiViewModel: ObservableObject {
 
         ---
 
-        위 대화에서 장기적으로 기억해야 할 사용자 정보가 있다면 추출해주세요.
-        - 사용자의 이름, 선호도, 관심사, 중요한 사실 등
-        - 이미 저장된 정보와 중복되면 제외
-        - 새로 추가하거나 수정할 내용만 마크다운 형식으로 출력
-        - 기억할 내용이 없으면 "없음"만 출력
-        - 절대 인사말이나 설명 없이 내용만 출력
+        두 가지를 JSON 형식으로 출력해주세요:
+        1. "title": 이 대화를 3~10자로 요약한 제목 (한글)
+        2. "memory": 장기적으로 기억할 사용자 정보 (이름, 선호도, 관심사 등). 기존과 중복되거나 없으면 null
+
+        반드시 아래 형식만 출력 (다른 텍스트 없이):
+        {"title": "...", "memory": "..." 또는 null}
         """
 
         do {
             let response = try await callLLMSimple(provider: provider, apiKey: apiKey, prompt: prompt)
             let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            if !trimmed.isEmpty && trimmed != "없음" && trimmed.count > 3 {
-                let timestamp = ISO8601DateFormatter().string(from: Date())
-                let entry = "\n\n<!-- \(timestamp) -->\n\(trimmed)"
-                ContextService.appendMemory(entry)
-                print("[Dochi] 컨텍스트 추가됨: \(trimmed.prefix(50))...")
+            // JSON 파싱
+            if let jsonData = trimmed.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
 
-                await compressContextIfNeeded()
+                let title = json["title"] as? String ?? generateDefaultTitle(from: sessionMessages)
+
+                // 대화 저장
+                await MainActor.run {
+                    saveConversationWithTitle(title, messages: sessionMessages)
+                }
+
+                // 메모리 업데이트
+                if let memory = json["memory"] as? String, !memory.isEmpty {
+                    let timestamp = ISO8601DateFormatter().string(from: Date())
+                    let entry = "\n\n<!-- \(timestamp) -->\n\(memory)"
+                    contextService.appendMemory(entry)
+                    print("[Dochi] 컨텍스트 추가됨: \(memory.prefix(50))...")
+
+                    await compressContextIfNeeded()
+                }
+            } else {
+                // JSON 파싱 실패 시 기본 제목으로 저장
+                let defaultTitle = generateDefaultTitle(from: sessionMessages)
+                await MainActor.run {
+                    saveConversationWithTitle(defaultTitle, messages: sessionMessages)
+                }
             }
         } catch {
             print("[Dochi] 컨텍스트 분석 실패: \(error.localizedDescription)")
+            let defaultTitle = generateDefaultTitle(from: sessionMessages)
+            await MainActor.run {
+                saveConversationWithTitle(defaultTitle, messages: sessionMessages)
+            }
         }
+    }
+
+    private func saveConversationWithTitle(_ title: String, messages: [Message]) {
+        let id = currentConversationId ?? UUID()
+        let now = Date()
+
+        let conversation = Conversation(
+            id: id,
+            title: title,
+            messages: messages,
+            createdAt: conversations.first(where: { $0.id == id })?.createdAt ?? now,
+            updatedAt: now
+        )
+
+        conversationService.save(conversation)
+        loadConversations()
+        print("[Dochi] 대화 저장됨: \(title)")
+    }
+
+    private func generateDefaultTitle(from messages: [Message]) -> String {
+        // 첫 사용자 메시지에서 제목 생성
+        if let firstUserMessage = messages.first(where: { $0.role == .user }) {
+            let content = firstUserMessage.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if content.count <= 10 {
+                return content
+            } else {
+                return String(content.prefix(10)) + "..."
+            }
+        }
+        return "대화"
     }
 
     // MARK: - Context Compression
@@ -467,7 +586,7 @@ final class DochiViewModel: ObservableObject {
     private func compressContextIfNeeded() async {
         guard settings.contextAutoCompress else { return }
 
-        let currentSize = ContextService.memorySize
+        let currentSize = contextService.memorySize
         let maxSize = settings.contextMaxSize
         guard currentSize > maxSize else { return }
 
@@ -480,7 +599,7 @@ final class DochiViewModel: ObservableObject {
         }
 
         let apiKey = settings.apiKey(for: provider)
-        let currentContext = ContextService.loadMemory()
+        let currentContext = contextService.loadMemory()
 
         let prompt = """
         다음은 사용자에 대해 기억하고 있는 정보입니다:
@@ -504,8 +623,8 @@ final class DochiViewModel: ObservableObject {
             let compressed = response.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !compressed.isEmpty && compressed.count < currentContext.count {
-                ContextService.saveMemory(compressed)
-                let newSize = ContextService.memorySize
+                contextService.saveMemory(compressed)
+                let newSize = contextService.memorySize
                 print("[Dochi] 컨텍스트 압축 완료 (\(currentSize) → \(newSize) bytes)")
             }
         } catch {

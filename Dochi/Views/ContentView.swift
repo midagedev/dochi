@@ -4,7 +4,10 @@ struct ContentView: View {
     @EnvironmentObject var viewModel: DochiViewModel
 
     @State private var showSettings = false
+    @State private var showChangelog = false
     @State private var inputText = ""
+
+    private let changelogService = ChangelogService()
 
     var body: some View {
         NavigationSplitView {
@@ -23,8 +26,24 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
+        .sheet(isPresented: $showChangelog) {
+            ChangelogView(changelogService: changelogService, showFullChangelog: false)
+        }
         .onAppear {
             viewModel.connectOnLaunch()
+            checkForNewVersion()
+        }
+    }
+
+    private func checkForNewVersion() {
+        if changelogService.hasNewVersion {
+            // 약간 딜레이 후 표시 (앱 로딩 완료 후)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                showChangelog = true
+            }
+        } else if changelogService.isFirstLaunch {
+            // 첫 실행 시에는 버전만 기록
+            changelogService.markCurrentVersionAsSeen()
         }
     }
 
@@ -228,6 +247,10 @@ struct SidebarView: View {
     @State private var showSystemEditor = false
     @State private var showMemoryEditor = false
 
+    private var contextService: ContextServiceProtocol {
+        viewModel.settings.contextService
+    }
+
     var body: some View {
         List {
             Section("시스템 프롬프트") {
@@ -240,7 +263,7 @@ struct SidebarView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("system.md")
                                 .font(.body)
-                            let system = ContextService.loadSystem()
+                            let system = contextService.loadSystem()
                             Text(system.isEmpty ? "설정되지 않음" : system)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -261,7 +284,7 @@ struct SidebarView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("memory.md")
                                 .font(.body)
-                            let memory = ContextService.loadMemory()
+                            let memory = contextService.loadMemory()
                             Text(memory.isEmpty ? "비어 있음" : "\(memory.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -280,7 +303,7 @@ struct SidebarView: View {
                 if !viewModel.messages.isEmpty {
                     HStack {
                         Image(systemName: "bubble.left.and.bubble.right")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.blue)
                         Text("현재 대화")
                             .font(.body)
                         Spacer()
@@ -290,13 +313,52 @@ struct SidebarView: View {
                     }
                 }
             }
+
+            Section("대화 기록") {
+                if viewModel.conversations.isEmpty {
+                    Text("저장된 대화가 없습니다")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.conversations) { conv in
+                        Button {
+                            viewModel.loadConversation(conv)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(conv.title)
+                                        .font(.body)
+                                        .lineLimit(1)
+                                    Text(conv.updatedAt, style: .relative)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if viewModel.currentConversationId == conv.id {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption)
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                viewModel.deleteConversation(id: conv.id)
+                            } label: {
+                                Label("삭제", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
         }
         .listStyle(.sidebar)
         .sheet(isPresented: $showSystemEditor) {
-            SystemEditorView()
+            SystemEditorView(contextService: contextService)
         }
         .sheet(isPresented: $showMemoryEditor) {
-            MemoryEditorView()
+            MemoryEditorView(contextService: contextService)
         }
         .safeAreaInset(edge: .bottom) {
             Button {

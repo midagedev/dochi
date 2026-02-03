@@ -9,6 +9,13 @@ struct SettingsView: View {
     @State private var zaiKey: String = ""
     @State private var showSystemEditor = false
     @State private var showMemoryEditor = false
+    @State private var showChangelog = false
+
+    private let changelogService = ChangelogService()
+
+    private var contextService: ContextServiceProtocol {
+        viewModel.settings.contextService
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -80,7 +87,7 @@ struct SettingsView: View {
                 // MARK: - System Prompt
                 Section("시스템 프롬프트") {
                     VStack(alignment: .leading) {
-                        let system = ContextService.loadSystem()
+                        let system = contextService.loadSystem()
                         Text(system.isEmpty
                              ? "페르소나와 행동 지침이 설정되지 않았습니다."
                              : system)
@@ -103,7 +110,7 @@ struct SettingsView: View {
                 // MARK: - User Memory
                 Section("사용자 기억") {
                     VStack(alignment: .leading) {
-                        let memory = ContextService.loadMemory()
+                        let memory = contextService.loadMemory()
                         Text(memory.isEmpty
                              ? "저장된 기억이 없습니다. 대화 종료 시 자동으로 추가됩니다."
                              : memory)
@@ -117,11 +124,11 @@ struct SettingsView: View {
                             }
                             if !memory.isEmpty {
                                 Button("초기화", role: .destructive) {
-                                    ContextService.saveMemory("")
+                                    contextService.saveMemory("")
                                 }
                             }
                             Spacer()
-                            Text("\(ContextService.memorySize / 1024)KB / \(viewModel.settings.contextMaxSize / 1024)KB")
+                            Text("\(contextService.memorySize / 1024)KB / \(viewModel.settings.contextMaxSize / 1024)KB")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -151,20 +158,45 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                // MARK: - About
+                Section("정보") {
+                    HStack {
+                        Text("버전")
+                        Spacer()
+                        Text("v\(changelogService.currentVersion) (\(changelogService.currentBuild))")
+                            .foregroundStyle(.secondary)
+                    }
+                    Button {
+                        showChangelog = true
+                    } label: {
+                        HStack {
+                            Text("새로운 기능")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .formStyle(.grouped)
         }
-        .frame(width: 500, height: 600)
+        .frame(width: 500, height: 650)
         .onAppear {
             openaiKey = viewModel.settings.apiKey
             anthropicKey = viewModel.settings.anthropicApiKey
             zaiKey = viewModel.settings.zaiApiKey
         }
         .sheet(isPresented: $showSystemEditor) {
-            SystemEditorView()
+            SystemEditorView(contextService: contextService)
         }
         .sheet(isPresented: $showMemoryEditor) {
-            MemoryEditorView()
+            MemoryEditorView(contextService: contextService)
+        }
+        .sheet(isPresented: $showChangelog) {
+            ChangelogView(changelogService: changelogService, showFullChangelog: true)
         }
     }
 
@@ -200,6 +232,7 @@ struct SettingsView: View {
 struct SystemEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var content: String = ""
+    let contextService: ContextServiceProtocol
 
     var body: some View {
         VStack(spacing: 0) {
@@ -208,7 +241,7 @@ struct SystemEditorView: View {
                     .font(.headline)
                 Spacer()
                 Button("저장") {
-                    ContextService.saveSystem(content)
+                    contextService.saveSystem(content)
                     dismiss()
                 }
                 .keyboardShortcut(.return, modifiers: .command)
@@ -226,7 +259,7 @@ struct SystemEditorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(ContextService.systemPath)
+                Text(contextService.systemPath)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .textSelection(.enabled)
@@ -235,7 +268,7 @@ struct SystemEditorView: View {
         }
         .frame(width: 600, height: 500)
         .onAppear {
-            content = ContextService.loadSystem()
+            content = contextService.loadSystem()
         }
     }
 }
@@ -243,6 +276,7 @@ struct SystemEditorView: View {
 struct MemoryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var content: String = ""
+    let contextService: ContextServiceProtocol
 
     var body: some View {
         VStack(spacing: 0) {
@@ -251,7 +285,7 @@ struct MemoryEditorView: View {
                     .font(.headline)
                 Spacer()
                 Button("저장") {
-                    ContextService.saveMemory(content)
+                    contextService.saveMemory(content)
                     dismiss()
                 }
                 .keyboardShortcut(.return, modifiers: .command)
@@ -269,7 +303,7 @@ struct MemoryEditorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(ContextService.memoryPath)
+                Text(contextService.memoryPath)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .textSelection(.enabled)
@@ -278,7 +312,7 @@ struct MemoryEditorView: View {
         }
         .frame(width: 600, height: 500)
         .onAppear {
-            content = ContextService.loadMemory()
+            content = contextService.loadMemory()
         }
     }
 }
