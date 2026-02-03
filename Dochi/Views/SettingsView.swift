@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var anthropicKey: String = ""
     @State private var zaiKey: String = ""
     @State private var showInstructionEditor = false
+    @State private var showContextEditor = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,11 +65,25 @@ struct SettingsView: View {
                         }
                     }
 
-                    Section("텍스트 모드 — TTS 음성") {
-                        Picker("Supertonic 음성", selection: $viewModel.settings.supertonicVoice) {
+                    Section("텍스트 모드 — TTS") {
+                        Picker("음성", selection: $viewModel.settings.supertonicVoice) {
                             ForEach(SupertonicVoice.allCases, id: \.self) { voice in
                                 Text(voice.displayName).tag(voice)
                             }
+                        }
+                        HStack {
+                            Text("속도")
+                            Slider(value: $viewModel.settings.ttsSpeed, in: 0.8...1.5, step: 0.05)
+                            Text(String(format: "%.2f", viewModel.settings.ttsSpeed))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 36)
+                        }
+                        HStack {
+                            Text("표현력")
+                            Slider(value: diffusionStepsBinding, in: 4...20, step: 2)
+                            Text("\(viewModel.settings.ttsDiffusionSteps)")
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 20)
                         }
                     }
                 }
@@ -102,14 +117,41 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: - Long-term Context
+                Section("장기 기억") {
+                    VStack(alignment: .leading) {
+                        let context = ContextService.load()
+                        Text(context.isEmpty
+                             ? "저장된 컨텍스트가 없습니다. 대화 종료 시 자동으로 기억할 정보가 추가됩니다."
+                             : context)
+                            .font(.body)
+                            .foregroundStyle(context.isEmpty ? .tertiary : .primary)
+                            .lineLimit(5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            Button("편집") {
+                                showContextEditor = true
+                            }
+                            if !context.isEmpty {
+                                Button("초기화", role: .destructive) {
+                                    ContextService.save("")
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // MARK: - Wake Word
                 Section("웨이크워드") {
-                    HStack {
-                        Text("웨이크워드")
-                        Spacer()
-                        TextField("웨이크워드", text: $viewModel.settings.wakeWord)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 150)
+                    Toggle("웨이크워드 활성화", isOn: wakeWordBinding)
+                    if viewModel.settings.wakeWordEnabled {
+                        HStack {
+                            Text("웨이크워드")
+                            Spacer()
+                            TextField("웨이크워드", text: $viewModel.settings.wakeWord)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 150)
+                        }
                     }
                 }
             }
@@ -124,6 +166,30 @@ struct SettingsView: View {
         .sheet(isPresented: $showInstructionEditor) {
             InstructionEditorView(instructions: $viewModel.settings.instructions)
         }
+        .sheet(isPresented: $showContextEditor) {
+            ContextEditorView()
+        }
+    }
+
+    private var diffusionStepsBinding: Binding<Double> {
+        Binding(
+            get: { Double(viewModel.settings.ttsDiffusionSteps) },
+            set: { viewModel.settings.ttsDiffusionSteps = Int($0) }
+        )
+    }
+
+    private var wakeWordBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings.wakeWordEnabled },
+            set: { enabled in
+                viewModel.settings.wakeWordEnabled = enabled
+                if enabled {
+                    viewModel.startWakeWordIfNeeded()
+                } else {
+                    viewModel.stopWakeWord()
+                }
+            }
+        )
     }
 
     private var modeBinding: Binding<AppMode> {
@@ -154,5 +220,48 @@ struct InstructionEditorView: View {
                 .padding(8)
         }
         .frame(width: 500, height: 400)
+    }
+}
+
+struct ContextEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var content: String = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("장기 기억 편집")
+                    .font(.headline)
+                Spacer()
+                Button("저장") {
+                    ContextService.save(content)
+                    dismiss()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("취소") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+            Divider()
+            TextEditor(text: $content)
+                .font(.system(.body, design: .monospaced))
+                .padding(8)
+            Divider()
+            HStack {
+                Text("대화 종료 시 자동으로 기억할 정보가 추가됩니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(ContextService.path)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+            }
+            .padding(8)
+        }
+        .frame(width: 600, height: 500)
+        .onAppear {
+            content = ContextService.load()
+        }
     }
 }

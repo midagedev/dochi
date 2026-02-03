@@ -60,6 +60,20 @@ struct ConversationView: View {
                 }
             }
 
+            // Wake word monitor
+            if isWakeWordActive {
+                VStack {
+                    Spacer()
+                    WakeWordMonitor(
+                        variations: viewModel.wakeWordVariations,
+                        transcript: viewModel.speechService.wakeWordTranscript
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             // Listening overlay
             if isListening {
                 VStack {
@@ -71,9 +85,14 @@ struct ConversationView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: isListening)
+        .animation(.easeInOut(duration: 0.3), value: isWakeWordActive)
     }
 
     // MARK: - Mode-aware Computed Properties
+
+    private var isWakeWordActive: Bool {
+        viewModel.isTextMode && viewModel.speechService.state == .waitingForWakeWord
+    }
 
     private var isListening: Bool {
         if viewModel.isTextMode {
@@ -101,9 +120,9 @@ struct ConversationView: View {
 
     private var assistantTranscript: String {
         if viewModel.isTextMode {
-            return viewModel.llmService.partialResponse
+            return viewModel.llmService.isStreaming ? viewModel.llmService.partialResponse : ""
         } else {
-            return viewModel.realtime.assistantTranscript
+            return viewModel.realtime.state == .responding ? viewModel.realtime.assistantTranscript : ""
         }
     }
 
@@ -184,6 +203,102 @@ struct ConversationView: View {
             }
             if alignment == .leading { Spacer(minLength: 60) }
         }
+    }
+}
+
+// MARK: - Wake Word Monitor
+
+struct WakeWordMonitor: View {
+    let variations: [String]
+    let transcript: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // 실시간 인식 텍스트
+            HStack(spacing: 8) {
+                Image(systemName: "waveform")
+                    .foregroundStyle(.mint)
+                    .font(.caption)
+                if transcript.isEmpty {
+                    Text("음성 대기 중...")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text(transcript)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                }
+                Spacer()
+            }
+
+            // 등록된 변형 목록
+            if !variations.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(variations, id: \.self) { word in
+                        let matched = !transcript.isEmpty
+                            && transcript.replacingOccurrences(of: " ", with: "")
+                                .contains(word.replacingOccurrences(of: " ", with: ""))
+                        Text(word)
+                            .font(.caption2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(matched ? Color.mint.opacity(0.3) : Color.secondary.opacity(0.1))
+                            .foregroundStyle(matched ? .mint : .secondary)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = computeRows(proposal: proposal, subviews: subviews)
+        var height: CGFloat = 0
+        for (i, row) in rows.enumerated() {
+            let rowHeight = row.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+            height += rowHeight + (i > 0 ? spacing : 0)
+        }
+        return CGSize(width: proposal.width ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = computeRows(proposal: proposal, subviews: subviews)
+        var y = bounds.minY
+        for (i, row) in rows.enumerated() {
+            if i > 0 { y += spacing }
+            var x = bounds.minX
+            let rowHeight = row.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+            for subview in row {
+                let size = subview.sizeThatFits(.unspecified)
+                subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += rowHeight
+        }
+    }
+
+    private func computeRows(proposal: ProposedViewSize, subviews: Subviews) -> [[LayoutSubviews.Element]] {
+        let maxWidth = proposal.width ?? .infinity
+        var rows: [[LayoutSubviews.Element]] = [[]]
+        var currentWidth: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentWidth + size.width > maxWidth && !rows[rows.count - 1].isEmpty {
+                rows.append([])
+                currentWidth = 0
+            }
+            rows[rows.count - 1].append(subview)
+            currentWidth += size.width + spacing
+        }
+        return rows
     }
 }
 

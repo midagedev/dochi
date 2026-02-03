@@ -16,6 +16,8 @@ final class SpeechService: ObservableObject {
     @Published var error: String?
 
     var onQueryCaptured: ((String) -> Void)?
+    var onWakeWordDetected: (() -> Void)?
+    var onSilenceTimeout: (() -> Void)?
 
     private nonisolated(unsafe) var audioEngine: AVAudioEngine?
     private nonisolated(unsafe) var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -24,6 +26,8 @@ final class SpeechService: ObservableObject {
     private var wakeWordRestartTimer: Timer?
     private var silenceTimer: Timer?
     private let silenceTimeout: TimeInterval = 1.0  // 1초 무음이면 자동 완료
+    private var continuousListeningTimeout: TimeInterval = 10.0
+    private var isContinuousMode: Bool = false
 
     init() {
         speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "ko-KR"))
@@ -47,7 +51,21 @@ final class SpeechService: ObservableObject {
 
         transcript = ""
         error = nil
+        isContinuousMode = false
         doStartRecognition(mode: .query)
+    }
+
+    /// 연속 대화 모드: 타임아웃 시 onSilenceTimeout 호출
+    func startContinuousListening(timeout: TimeInterval = 10.0) {
+        guard state == .idle || state == .waitingForWakeWord else { return }
+        if state == .waitingForWakeWord { stopWakeWordDetection() }
+
+        transcript = ""
+        error = nil
+        isContinuousMode = true
+        continuousListeningTimeout = timeout
+        doStartRecognition(mode: .query)
+        startContinuousTimeout()
     }
 
     func stopListening() {
@@ -55,6 +73,7 @@ final class SpeechService: ObservableObject {
         let captured = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         tearDownAudio()
         state = .idle
+        isContinuousMode = false
         if !captured.isEmpty {
             SoundService.playInputComplete()
             onQueryCaptured?(captured)
@@ -63,10 +82,10 @@ final class SpeechService: ObservableObject {
 
     // MARK: - Wake Word
 
-    func startWakeWordDetection(wakeWord: String) {
-        guard state == .idle else { return }
+    func startWakeWordDetection(phrases: [String]) {
+        guard state == .idle, !phrases.isEmpty else { return }
         wakeWordTranscript = ""
-        doStartRecognition(mode: .wakeWord(phrase: wakeWord))
+        doStartRecognition(mode: .wakeWord(phrases: phrases))
     }
 
     func stopWakeWordDetection() {
@@ -80,7 +99,7 @@ final class SpeechService: ObservableObject {
 
     private enum RecognitionMode {
         case query
-        case wakeWord(phrase: String)
+        case wakeWord(phrases: [String])
     }
 
     private func doStartRecognition(mode: RecognitionMode) {
@@ -126,10 +145,10 @@ final class SpeechService: ObservableObject {
         case .query:
             state = .listening
             beginQueryRecognition(request: request)
-        case .wakeWord(let phrase):
+        case .wakeWord(let phrases):
             state = .waitingForWakeWord
-            print("[Dochi] 웨이크워드 대기: '\(phrase)'")
-            beginWakeWordRecognition(request: request, phrase: phrase)
+            print("[Dochi] 웨이크워드 대기: \(phrases)")
+            beginWakeWordRecognition(request: request, phrases: phrases)
         }
 
         engine.prepare()
@@ -168,11 +187,38 @@ final class SpeechService: ObservableObject {
                 self.stopListening()
             }
         }
+
+        // 연속 모드면 전체 타임아웃도 리셋
+        if isContinuousMode {
+            startContinuousTimeout()
+        }
     }
 
-    private func beginWakeWordRecognition(request: SFSpeechAudioBufferRecognitionRequest, phrase: String) {
-        // 공백 제거한 웨이크워드로 매칭 (인식 결과에 공백이 다르게 들어올 수 있음)
-        let targetNormalized = phrase.replacingOccurrences(of: " ", with: "")
+    private var continuousTimer: Timer?
+
+    private func startContinuousTimeout() {
+        continuousTimer?.invalidate()
+        continuousTimer = Timer.scheduledTimer(withTimeInterval: continuousListeningTimeout, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self, self.state == .listening, self.isContinuousMode else { return }
+                // 타임아웃 시 캡처된 게 없으면 onSilenceTimeout 호출
+                let captured = self.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.tearDownAudio()
+                self.state = .idle
+                self.isContinuousMode = false
+                if captured.isEmpty {
+                    self.onSilenceTimeout?()
+                } else {
+                    SoundService.playInputComplete()
+                    self.onQueryCaptured?(captured)
+                }
+            }
+        }
+    }
+
+    private func beginWakeWordRecognition(request: SFSpeechAudioBufferRecognitionRequest, phrases: [String]) {
+        // 공백 제거한 웨이크워드들로 매칭 (인식 결과에 공백이 다르게 들어올 수 있음)
+        let normalizedPhrases = phrases.map { $0.replacingOccurrences(of: " ", with: "") }
 
         recognitionTask = speechRecognizer?.recognitionTask(with: request) { [weak self] result, err in
             DispatchQueue.main.async {
@@ -182,11 +228,12 @@ final class SpeechService: ObservableObject {
                     let text = result.bestTranscription.formattedString
                     self.wakeWordTranscript = text
 
-                    // 공백 무시하고 비교
+                    // 공백 무시하고 변형 중 하나라도 매칭되면 트리거
                     let normalized = text.replacingOccurrences(of: " ", with: "")
-                    if normalized.contains(targetNormalized) {
+                    if normalizedPhrases.contains(where: { normalized.contains($0) }) {
                         SoundService.playWakeWordDetected()
                         self.stopWakeWordDetection()
+                        self.onWakeWordDetected?()
                         self.startListening()
                         return
                     }
@@ -203,7 +250,7 @@ final class SpeechService: ObservableObject {
                         DispatchQueue.main.async {
                             guard let self else { return }
                             self.state = .idle
-                            self.startWakeWordDetection(wakeWord: phrase)
+                            self.startWakeWordDetection(phrases: phrases)
                         }
                     }
                 }
@@ -214,6 +261,8 @@ final class SpeechService: ObservableObject {
     private func tearDownAudio() {
         silenceTimer?.invalidate()
         silenceTimer = nil
+        continuousTimer?.invalidate()
+        continuousTimer = nil
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine = nil

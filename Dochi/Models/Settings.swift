@@ -15,9 +15,6 @@ final class AppSettings: ObservableObject {
     @Published var wakeWord: String {
         didSet { UserDefaults.standard.set(wakeWord, forKey: Keys.wakeWord) }
     }
-    @Published var contextFiles: [URL] {
-        didSet { saveContextFiles() }
-    }
 
     // Dual mode settings
     @Published var appMode: AppMode {
@@ -38,6 +35,12 @@ final class AppSettings: ObservableObject {
     @Published var supertonicVoice: SupertonicVoice {
         didSet { UserDefaults.standard.set(supertonicVoice.rawValue, forKey: Keys.supertonicVoice) }
     }
+    @Published var ttsSpeed: Float {
+        didSet { UserDefaults.standard.set(ttsSpeed, forKey: Keys.ttsSpeed) }
+    }
+    @Published var ttsDiffusionSteps: Int {
+        didSet { UserDefaults.standard.set(ttsDiffusionSteps, forKey: Keys.ttsDiffusionSteps) }
+    }
 
     static let availableVoices = ["alloy", "ash", "ballad", "coral", "echo", "nova", "sage", "shimmer", "verse"]
 
@@ -46,11 +49,12 @@ final class AppSettings: ObservableObject {
         static let voice = "settings.voice"
         static let wakeWordEnabled = "settings.wakeWordEnabled"
         static let wakeWord = "settings.wakeWord"
-        static let contextFiles = "settings.contextFiles"
         static let appMode = "settings.appMode"
         static let llmProvider = "settings.llmProvider"
         static let llmModel = "settings.llmModel"
         static let supertonicVoice = "settings.supertonicVoice"
+        static let ttsSpeed = "settings.ttsSpeed"
+        static let ttsDiffusionSteps = "settings.ttsDiffusionSteps"
     }
 
     init() {
@@ -59,7 +63,6 @@ final class AppSettings: ObservableObject {
         self.voice = defaults.string(forKey: Keys.voice) ?? "nova"
         self.wakeWordEnabled = defaults.bool(forKey: Keys.wakeWordEnabled)
         self.wakeWord = defaults.string(forKey: Keys.wakeWord) ?? "도치야"
-        self.contextFiles = Self.loadContextFiles()
 
         // Dual mode defaults
         let modeRaw = defaults.string(forKey: Keys.appMode) ?? AppMode.realtime.rawValue
@@ -72,6 +75,8 @@ final class AppSettings: ObservableObject {
 
         let voiceRaw = defaults.string(forKey: Keys.supertonicVoice) ?? SupertonicVoice.F1.rawValue
         self.supertonicVoice = SupertonicVoice(rawValue: voiceRaw) ?? .F1
+        self.ttsSpeed = defaults.object(forKey: Keys.ttsSpeed) as? Float ?? 1.15
+        self.ttsDiffusionSteps = defaults.object(forKey: Keys.ttsDiffusionSteps) as? Int ?? 10
     }
 
     // MARK: - API Keys
@@ -108,29 +113,22 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    // MARK: - Context Files
-
-    private func saveContextFiles() {
-        let paths = contextFiles.map(\.path)
-        UserDefaults.standard.set(paths, forKey: Keys.contextFiles)
-    }
-
-    private static func loadContextFiles() -> [URL] {
-        let paths = UserDefaults.standard.stringArray(forKey: Keys.contextFiles) ?? []
-        return paths.map { URL(fileURLWithPath: $0) }
-    }
+    // MARK: - Build Instructions
 
     func buildInstructions() -> String {
         var parts: [String] = []
+
+        // 기본 인스트럭션
         if !instructions.isEmpty {
             parts.append(instructions)
         }
-        let context = contextFiles.compactMap { url in
-            try? String(contentsOf: url, encoding: .utf8)
-        }.joined(separator: "\n\n---\n\n")
-        if !context.isEmpty {
-            parts.append("다음은 참고 자료입니다:\n\n\(context)")
+
+        // 장기 컨텍스트 (context.md)
+        let longTermContext = ContextService.load()
+        if !longTermContext.isEmpty {
+            parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(longTermContext)")
         }
+
         return parts.isEmpty ? "You are a helpful assistant. Respond in Korean." : parts.joined(separator: "\n\n")
     }
 }

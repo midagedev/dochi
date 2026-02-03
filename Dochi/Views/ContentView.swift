@@ -54,9 +54,13 @@ struct ContentView: View {
 
             // State indicator
             if viewModel.isConnected {
-                Text(stateLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if isWakeWordActive {
+                    WakeWordIndicator(wakeWord: viewModel.settings.wakeWord)
+                } else {
+                    Text(stateLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer()
@@ -151,6 +155,10 @@ struct ContentView: View {
         viewModel.errorMessage ?? (viewModel.isRealtimeMode ? viewModel.realtime.error : viewModel.llmService.error ?? viewModel.supertonicService.error)
     }
 
+    private var isWakeWordActive: Bool {
+        viewModel.isTextMode && viewModel.speechService.state == .waitingForWakeWord
+    }
+
     private var isResponding: Bool {
         if viewModel.isTextMode {
             return viewModel.textModeState == .processing || viewModel.textModeState == .speaking
@@ -226,27 +234,119 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Wake Word Indicator
+
+struct WakeWordIndicator: View {
+    let wakeWord: String
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(Color.mint.opacity(0.25))
+                    .frame(width: 20, height: 20)
+                    .scaleEffect(pulse ? 1.5 : 1.0)
+                    .opacity(pulse ? 0.0 : 0.6)
+                Image(systemName: "ear")
+                    .font(.caption)
+                    .foregroundStyle(.mint)
+            }
+            Text("\"\(wakeWord)\" 대기 중")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false)) {
+                pulse = true
+            }
+        }
+        .onDisappear { pulse = false }
+    }
+}
+
 // MARK: - Sidebar
 
 struct SidebarView: View {
     @EnvironmentObject var viewModel: DochiViewModel
     @Binding var showSettings: Bool
+    @State private var showInstructionEditor = false
+    @State private var showContextEditor = false
 
     var body: some View {
         List {
+            // MARK: - 초기 프롬프트
+            Section("초기 프롬프트") {
+                Button {
+                    showInstructionEditor = true
+                } label: {
+                    HStack {
+                        Image(systemName: "text.quote")
+                            .foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("인스트럭션")
+                                .font(.body)
+                            Text(viewModel.settings.instructions.isEmpty
+                                 ? "설정되지 않음"
+                                 : viewModel.settings.instructions)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            // MARK: - 장기 기억
+            Section("장기 기억") {
+                Button {
+                    showContextEditor = true
+                } label: {
+                    HStack {
+                        Image(systemName: "brain")
+                            .foregroundStyle(.purple)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("context.md")
+                                .font(.body)
+                            let context = ContextService.load()
+                            Text(context.isEmpty ? "비어 있음" : "\(context.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            // MARK: - 대화
             Section("대화") {
                 Button {
                     viewModel.clearConversation()
                 } label: {
                     Label("새 대화", systemImage: "plus.circle")
                 }
-            }
-
-            Section("컨텍스트") {
-                ContextView()
+                if !viewModel.messages.isEmpty {
+                    HStack {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .foregroundStyle(.secondary)
+                        Text("현재 대화")
+                            .font(.body)
+                        Spacer()
+                        Text("\(viewModel.messages.count)개")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .listStyle(.sidebar)
+        .sheet(isPresented: $showInstructionEditor) {
+            InstructionEditorView(instructions: $viewModel.settings.instructions)
+        }
+        .sheet(isPresented: $showContextEditor) {
+            ContextEditorView()
+        }
         .safeAreaInset(edge: .bottom) {
             Button {
                 showSettings = true

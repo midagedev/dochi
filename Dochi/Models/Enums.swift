@@ -33,7 +33,7 @@ enum LLMProvider: String, CaseIterable, Codable {
         switch self {
         case .openai: ["gpt-4o", "gpt-4o-mini"]
         case .anthropic: ["claude-sonnet-4-20250514", "claude-haiku-4-20250414"]
-        case .zai: ["glm-4.7", "glm-4"]
+        case .zai: ["glm-4.7"]
         }
     }
 

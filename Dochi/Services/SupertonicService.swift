@@ -97,6 +97,9 @@ final class SupertonicService: ObservableObject {
     // MARK: - Queue-based Speak
 
     /// 문장 하나를 큐에 추가. LLM 스트리밍 중 호출됨.
+    var speed: Float = 1.15
+    var diffusionSteps: Int = 10
+
     func enqueueSentence(_ text: String, lang: String = "ko", voice: SupertonicVoice) {
         sentenceQueue.append(text)
         processQueue(lang: lang, voice: voice)
@@ -133,6 +136,8 @@ final class SupertonicService: ObservableObject {
         let capturedTTS = tts
         let capturedStyle = style
         let sampleRate = tts.sampleRate
+        let capturedSpeed = speed
+        let capturedSteps = diffusionSteps
 
         queueTask = Task { [weak self] in
             // 오디오 엔진을 한 번만 세팅
@@ -156,7 +161,7 @@ final class SupertonicService: ObservableObject {
 
                 do {
                     let result: (wav: [Float], duration: Float) = try await Task.detached {
-                        try capturedTTS.call(sentence, lang, capturedStyle, 8, speed: 1.05)
+                        try capturedTTS.call(sentence, lang, capturedStyle, capturedSteps, speed: capturedSpeed)
                     }.value
 
                     try Task.checkCancellation()
