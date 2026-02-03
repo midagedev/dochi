@@ -3,7 +3,7 @@
 
 import Foundation
 import Accelerate
-import OnnxRuntimeBindings
+@preconcurrency import OnnxRuntimeBindings
 
 // MARK: - Available Languages
 
@@ -353,12 +353,12 @@ func supertonicSplitSentences(_ text: String) -> [String] {
 
 // MARK: - ONNX Runtime Integration
 
-struct SupertonicStyle {
+struct SupertonicStyle: @unchecked Sendable {
     let ttl: ORTValue
     let dp: ORTValue
 }
 
-class SupertonicTTS {
+final class SupertonicTTS: @unchecked Sendable {
     let cfgs: SupertonicConfig
     let textProcessor: SupertonicUnicodeProcessor
     let dpOrt: ORTSession

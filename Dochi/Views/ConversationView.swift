@@ -113,10 +113,13 @@ struct ConversationView: View {
     // MARK: - States
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
+        VStack(spacing: 16) {
+            Image("DochiMascot")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 100, height: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .opacity(0.2)
             Text("도치에게 말을 걸어보세요")
                 .font(.title3)
                 .foregroundStyle(.secondary)
@@ -129,10 +132,13 @@ struct ConversationView: View {
     }
 
     private var connectedEmptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "text.bubble.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.green)
+        VStack(spacing: 16) {
+            Image("DochiMascot")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 100, height: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .opacity(0.2)
             Text("연결됨 — 메시지를 입력하세요")
                 .font(.title3)
                 .foregroundStyle(.secondary)
@@ -383,5 +389,19 @@ struct MessageBubbleView: View {
             }
             if message.role == .assistant { Spacer(minLength: 60) }
         }
+    }
+}
+
+// MARK: - Dochi Avatar
+
+struct DochiAvatar: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image("DochiMascot")
+            .resizable()
+            .scaledToFill()
+            .frame(width: size, height: size)
+            .clipShape(Circle())
     }
 }

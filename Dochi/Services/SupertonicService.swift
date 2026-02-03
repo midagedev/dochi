@@ -1,6 +1,6 @@
 import Foundation
 import AVFoundation
-import OnnxRuntimeBindings
+@preconcurrency import OnnxRuntimeBindings
 
 @MainActor
 final class SupertonicService: ObservableObject {
