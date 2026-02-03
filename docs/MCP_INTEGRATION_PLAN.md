@@ -152,16 +152,21 @@ LLM 재호출 (반복)
 
 ---
 
-## Phase 8: 설정 UI 📝 예정
+## Phase 8: 설정 UI ✅ 완료
 
-### 작업 내용
-- [ ] MCP 서버 목록 관리 UI
-- [ ] 서버 추가/제거/활성화
-- [ ] 연결 상태 표시
+### 완료된 작업
+- [x] MCP 서버 목록 관리 UI
+  - 서버 목록 표시 (이름, URL, 연결 상태)
+  - 서버 추가 (AddMCPServerView)
+  - 서버 삭제
+  - 서버 활성화/비활성화 토글
+- [x] 연결 상태 표시 (초록/주황/회색 인디케이터)
+- [x] 사용 가능한 도구 목록 표시 (DisclosureGroup)
+- [x] AppSettings에 MCP 서버 설정 저장/로드
 
-### 수정 예정 파일
-- `Dochi/Views/SettingsView.swift`
-- `Dochi/Models/Settings.swift`
+### 수정된 파일
+- `Dochi/Views/SettingsView.swift` - MCP 서버 섹션, MCPServerRow, AddMCPServerView
+- `Dochi/Models/Settings.swift` - mcpServers 배열, CRUD 메서드
 
 ---
 
@@ -175,8 +180,8 @@ LLM 재호출 (반복)
 | 4. LLMService | ✅ 완료 | tool calling 파싱 |
 | 5. Tool Loop | ✅ 완료 | ViewModel 통합 |
 | 6. 테스트 | ✅ 완료 | 48개 테스트 |
-| 7. 서버 연동 | 📝 예정 | |
-| 8. 설정 UI | 📝 예정 | |
+| 7. 서버 연동 | 📝 예정 | E2E 테스트 |
+| 8. 설정 UI | ✅ 완료 | 서버 관리 UI |
 
 ---
 

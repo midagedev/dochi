@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var showSystemEditor = false
     @State private var showMemoryEditor = false
     @State private var showChangelog = false
+    @State private var showAddMCPServer = false
 
     private let changelogService = ChangelogService()
 
@@ -145,6 +146,64 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: - MCP Servers
+                Section("MCP 서버") {
+                    if viewModel.settings.mcpServers.isEmpty {
+                        Text("등록된 MCP 서버가 없습니다.")
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        ForEach(viewModel.settings.mcpServers) { server in
+                            MCPServerRow(
+                                server: server,
+                                isConnected: viewModel.mcpService.connectedServers[server.id] != nil,
+                                onToggle: { enabled in
+                                    var updated = server
+                                    updated.isEnabled = enabled
+                                    viewModel.settings.updateMCPServer(updated)
+                                    if enabled {
+                                        Task {
+                                            try? await viewModel.mcpService.connect(config: updated)
+                                        }
+                                    } else {
+                                        Task {
+                                            await viewModel.mcpService.disconnect(serverId: server.id)
+                                        }
+                                    }
+                                },
+                                onDelete: {
+                                    Task {
+                                        await viewModel.mcpService.disconnect(serverId: server.id)
+                                    }
+                                    viewModel.settings.removeMCPServer(id: server.id)
+                                }
+                            )
+                        }
+                    }
+                    Button {
+                        showAddMCPServer = true
+                    } label: {
+                        Label("서버 추가", systemImage: "plus.circle")
+                    }
+
+                    if !viewModel.mcpService.availableTools.isEmpty {
+                        DisclosureGroup("사용 가능한 도구 (\(viewModel.mcpService.availableTools.count)개)") {
+                            ForEach(viewModel.mcpService.availableTools) { tool in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(tool.name)
+                                        .font(.body.monospaced())
+                                    if let desc = tool.description {
+                                        Text(desc)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                }
+
                 // MARK: - Wake Word
                 Section("웨이크워드") {
                     Toggle("웨이크워드 활성화", isOn: wakeWordBinding)
@@ -183,7 +242,7 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: 500, height: 650)
+        .frame(width: 500, height: 750)
         .onAppear {
             openaiKey = viewModel.settings.apiKey
             anthropicKey = viewModel.settings.anthropicApiKey
@@ -197,6 +256,16 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showChangelog) {
             ChangelogView(changelogService: changelogService, showFullChangelog: true)
+        }
+        .sheet(isPresented: $showAddMCPServer) {
+            AddMCPServerView { config in
+                viewModel.settings.addMCPServer(config)
+                if config.isEnabled {
+                    Task {
+                        try? await viewModel.mcpService.connect(config: config)
+                    }
+                }
+            }
         }
     }
 
@@ -314,5 +383,117 @@ struct MemoryEditorView: View {
         .onAppear {
             content = contextService.loadMemory()
         }
+    }
+}
+
+// MARK: - MCP Server Row
+
+struct MCPServerRow: View {
+    let server: MCPServerConfig
+    let isConnected: Bool
+    let onToggle: (Bool) -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(isConnected ? Color.green : (server.isEnabled ? Color.orange : Color.gray))
+                        .frame(width: 8, height: 8)
+                    Text(server.name)
+                        .font(.body)
+                }
+                Text(server.command)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Toggle("", isOn: Binding(
+                get: { server.isEnabled },
+                set: { onToggle($0) }
+            ))
+            .labelsHidden()
+
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Image(systemName: "trash")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
+
+// MARK: - Add MCP Server View
+
+struct AddMCPServerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String = ""
+    @State private var url: String = "http://"
+    @State private var isEnabled: Bool = true
+
+    let onAdd: (MCPServerConfig) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("MCP 서버 추가")
+                    .font(.headline)
+                Spacer()
+                Button("추가") {
+                    let config = MCPServerConfig(
+                        name: name.isEmpty ? "MCP Server" : name,
+                        command: url,
+                        isEnabled: isEnabled
+                    )
+                    onAdd(config)
+                    dismiss()
+                }
+                .disabled(url.isEmpty || !isValidURL)
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("취소") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+
+            Divider()
+
+            Form {
+                TextField("이름", text: $name, prompt: Text("MCP Server"))
+                TextField("URL", text: $url, prompt: Text("http://localhost:8080"))
+                    .textFieldStyle(.roundedBorder)
+                if !url.isEmpty && !isValidURL {
+                    Text("올바른 HTTP/HTTPS URL을 입력하세요")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                Toggle("활성화", isOn: $isEnabled)
+            }
+            .formStyle(.grouped)
+            .padding()
+
+            Spacer()
+
+            Divider()
+
+            HStack {
+                Text("현재 HTTP 기반 MCP 서버만 지원합니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(8)
+        }
+        .frame(width: 400, height: 300)
+    }
+
+    private var isValidURL: Bool {
+        guard let url = URL(string: url) else { return false }
+        return url.scheme == "http" || url.scheme == "https"
     }
 }

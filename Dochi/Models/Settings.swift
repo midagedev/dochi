@@ -42,6 +42,11 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(contextMaxSize, forKey: Keys.contextMaxSize) }
     }
 
+    // MCP servers
+    @Published var mcpServers: [MCPServerConfig] {
+        didSet { saveMCPServers() }
+    }
+
     private enum Keys {
         static let wakeWordEnabled = "settings.wakeWordEnabled"
         static let wakeWord = "settings.wakeWord"
@@ -52,6 +57,7 @@ final class AppSettings: ObservableObject {
         static let ttsDiffusionSteps = "settings.ttsDiffusionSteps"
         static let contextAutoCompress = "settings.contextAutoCompress"
         static let contextMaxSize = "settings.contextMaxSize"
+        static let mcpServers = "settings.mcpServers"
     }
 
     // MARK: - Dependencies
@@ -86,6 +92,36 @@ final class AppSettings: ObservableObject {
 
         self.contextAutoCompress = defaults.object(forKey: Keys.contextAutoCompress) as? Bool ?? true
         self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? 15360
+
+        // MCP servers
+        if let data = defaults.data(forKey: Keys.mcpServers),
+           let servers = try? JSONDecoder().decode([MCPServerConfig].self, from: data) {
+            self.mcpServers = servers
+        } else {
+            self.mcpServers = []
+        }
+    }
+
+    // MARK: - MCP Servers
+
+    private func saveMCPServers() {
+        if let data = try? JSONEncoder().encode(mcpServers) {
+            UserDefaults.standard.set(data, forKey: Keys.mcpServers)
+        }
+    }
+
+    func addMCPServer(_ config: MCPServerConfig) {
+        mcpServers.append(config)
+    }
+
+    func removeMCPServer(id: UUID) {
+        mcpServers.removeAll { $0.id == id }
+    }
+
+    func updateMCPServer(_ config: MCPServerConfig) {
+        if let index = mcpServers.firstIndex(where: { $0.id == config.id }) {
+            mcpServers[index] = config
+        }
     }
 
     // MARK: - API Keys
