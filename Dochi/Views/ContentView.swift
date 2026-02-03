@@ -270,25 +270,24 @@ struct WakeWordIndicator: View {
 struct SidebarView: View {
     @EnvironmentObject var viewModel: DochiViewModel
     @Binding var showSettings: Bool
-    @State private var showInstructionEditor = false
-    @State private var showContextEditor = false
+    @State private var showSystemEditor = false
+    @State private var showMemoryEditor = false
 
     var body: some View {
         List {
-            // MARK: - 초기 프롬프트
-            Section("초기 프롬프트") {
+            // MARK: - 시스템 프롬프트
+            Section("시스템 프롬프트") {
                 Button {
-                    showInstructionEditor = true
+                    showSystemEditor = true
                 } label: {
                     HStack {
-                        Image(systemName: "text.quote")
+                        Image(systemName: "person.fill")
                             .foregroundStyle(.blue)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("인스트럭션")
+                            Text("system.md")
                                 .font(.body)
-                            Text(viewModel.settings.instructions.isEmpty
-                                 ? "설정되지 않음"
-                                 : viewModel.settings.instructions)
+                            let system = ContextService.loadSystem()
+                            Text(system.isEmpty ? "설정되지 않음" : system)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -298,19 +297,19 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
             }
 
-            // MARK: - 장기 기억
-            Section("장기 기억") {
+            // MARK: - 사용자 기억
+            Section("사용자 기억") {
                 Button {
-                    showContextEditor = true
+                    showMemoryEditor = true
                 } label: {
                     HStack {
                         Image(systemName: "brain")
                             .foregroundStyle(.purple)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("context.md")
+                            Text("memory.md")
                                 .font(.body)
-                            let context = ContextService.load()
-                            Text(context.isEmpty ? "비어 있음" : "\(context.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
+                            let memory = ContextService.loadMemory()
+                            Text(memory.isEmpty ? "비어 있음" : "\(memory.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -341,11 +340,11 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .sheet(isPresented: $showInstructionEditor) {
-            InstructionEditorView(instructions: $viewModel.settings.instructions)
+        .sheet(isPresented: $showSystemEditor) {
+            SystemEditorView()
         }
-        .sheet(isPresented: $showContextEditor) {
-            ContextEditorView()
+        .sheet(isPresented: $showMemoryEditor) {
+            MemoryEditorView()
         }
         .safeAreaInset(edge: .bottom) {
             Button {

@@ -35,11 +35,17 @@ xcodebuild -project Dochi.xcodeproj -scheme Dochi build
 - 10초 무응답 시 "대화를 종료할까요?" 질문
 - 직접 종료 요청 지원 ("대화 종료", "그만할게", "잘가" 등)
 
-### 장기 기억
-- 세션 종료 시 LLM이 대화를 분석하여 중요 정보 자동 추출
-- `~/Library/Application Support/Dochi/context.md`에 저장
-- 다음 세션 시작 시 시스템 프롬프트에 자동 포함
-- 사이드바에서 확인/편집/초기화 가능
+### 프롬프트 파일 관리
+```
+~/Library/Application Support/Dochi/
+├── system.md    # 페르소나 + 행동 지침 (수동 편집)
+└── memory.md    # 사용자 기억 (자동 누적)
+```
+- **system.md**: AI의 정체성과 행동 지침 정의
+- **memory.md**: 세션 종료 시 LLM이 대화 분석하여 중요 정보 자동 추출
+- 다음 세션 시작 시 두 파일 모두 시스템 프롬프트에 포함
+- 사이드바에서 확인/편집 가능
+- 자동 압축: memory.md 크기 초과 시 LLM으로 요약 (기본 15KB)
 
 ### TTS 설정
 - 속도 조절 (0.8x ~ 1.5x)
@@ -61,7 +67,7 @@ Dochi/
 │   ├── Message.swift        # 대화 메시지 모델
 │   └── Settings.swift       # 앱 설정 (UserDefaults 기반)
 ├── Services/
-│   ├── ContextService.swift # 장기 기억 파일 관리
+│   ├── ContextService.swift # system.md, memory.md 파일 관리
 │   ├── KeychainService.swift # API 키 저장
 │   ├── LLMService.swift     # LLM SSE 스트리밍
 │   ├── RealtimeService.swift # OpenAI Realtime WebSocket

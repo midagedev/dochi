@@ -3,9 +3,6 @@ import SwiftUI
 
 @MainActor
 final class AppSettings: ObservableObject {
-    @Published var instructions: String {
-        didSet { UserDefaults.standard.set(instructions, forKey: Keys.instructions) }
-    }
     @Published var voice: String {
         didSet { UserDefaults.standard.set(voice, forKey: Keys.voice) }
     }
@@ -53,7 +50,6 @@ final class AppSettings: ObservableObject {
     static let availableVoices = ["alloy", "ash", "ballad", "coral", "echo", "nova", "sage", "shimmer", "verse"]
 
     private enum Keys {
-        static let instructions = "settings.instructions"
         static let voice = "settings.voice"
         static let wakeWordEnabled = "settings.wakeWordEnabled"
         static let wakeWord = "settings.wakeWord"
@@ -69,8 +65,10 @@ final class AppSettings: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
-        self.instructions = defaults.string(forKey: Keys.instructions) ?? ""
         self.voice = defaults.string(forKey: Keys.voice) ?? "nova"
+
+        // 마이그레이션: UserDefaults 인스트럭션 → system.md, context.md → memory.md
+        Self.migrateToFileBasedContext(defaults: defaults)
         self.wakeWordEnabled = defaults.bool(forKey: Keys.wakeWordEnabled)
         self.wakeWord = defaults.string(forKey: Keys.wakeWord) ?? "도치야"
 
@@ -132,17 +130,37 @@ final class AppSettings: ObservableObject {
     func buildInstructions() -> String {
         var parts: [String] = []
 
-        // 기본 인스트럭션
-        if !instructions.isEmpty {
-            parts.append(instructions)
+        // 시스템 프롬프트 (system.md)
+        let systemPrompt = ContextService.loadSystem()
+        if !systemPrompt.isEmpty {
+            parts.append(systemPrompt)
         }
 
-        // 장기 컨텍스트 (context.md)
-        let longTermContext = ContextService.load()
-        if !longTermContext.isEmpty {
-            parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(longTermContext)")
+        // 사용자 기억 (memory.md)
+        let userMemory = ContextService.loadMemory()
+        if !userMemory.isEmpty {
+            parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(userMemory)")
         }
 
         return parts.isEmpty ? "You are a helpful assistant. Respond in Korean." : parts.joined(separator: "\n\n")
+    }
+
+    // MARK: - Migration
+
+    private static func migrateToFileBasedContext(defaults: UserDefaults) {
+        // 1. UserDefaults 인스트럭션 → system.md (한 번만)
+        let migrationKey = "settings.migratedToFileContext"
+        if !defaults.bool(forKey: migrationKey) {
+            if let oldInstructions = defaults.string(forKey: "settings.instructions"),
+               !oldInstructions.isEmpty,
+               ContextService.loadSystem().isEmpty {
+                ContextService.saveSystem(oldInstructions)
+                print("[Dochi] 인스트럭션 → system.md 마이그레이션 완료")
+            }
+            defaults.set(true, forKey: migrationKey)
+        }
+
+        // 2. context.md → memory.md
+        ContextService.migrateIfNeeded()
     }
 }

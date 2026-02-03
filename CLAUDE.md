@@ -54,7 +54,7 @@ When wake word is enabled, sessions follow this flow:
 - `LLMService` — SSE streaming for 3 providers; sentence detection splits on `\n`
 - `SupertonicService` — ONNX model loading (downloaded from HuggingFace on first use), queue-based TTS with configurable `speed` and `diffusionSteps`
 - `SpeechService` — Apple Speech framework STT with wake word detection and continuous listening mode (`startContinuousListening` with timeout)
-- `ContextService` — Long-term memory file management (`~/Library/Application Support/Dochi/context.md`)
+- `ContextService` — Prompt file management (`~/Library/Application Support/Dochi/system.md` for persona, `memory.md` for user info)
 - `KeychainService` — File-based API key storage
 
 **Callbacks in SpeechService:**
@@ -66,12 +66,20 @@ When wake word is enabled, sessions follow this flow:
 - `Enums.swift` — `AppMode`, `LLMProvider` (with per-provider models, API URLs), `SupertonicVoice`
 - `Settings.swift` — `AppSettings` persists to UserDefaults; includes `ttsSpeed`, `ttsDiffusionSteps`
 
-### Long-term Memory
+### Prompt Files
 
-Session end triggers `extractAndSaveContext()`:
-1. Sends full conversation to LLM asking for memorable user info
-2. Appends extracted info to `context.md` with timestamp
-3. On next session, `buildInstructions()` includes context.md content in system prompt
+```
+~/Library/Application Support/Dochi/
+├── system.md    # Persona + behavior guidelines (manual edit)
+└── memory.md    # User info (auto-accumulated)
+```
+
+**system.md** — AI identity and instructions, edited manually via sidebar
+**memory.md** — User memory, auto-populated on session end:
+1. `extractAndSaveContext()` sends conversation to LLM for analysis
+2. Extracted info appended to `memory.md` with timestamp
+3. `buildInstructions()` includes both files in system prompt
+4. Auto-compression when exceeding `contextMaxSize` (default 15KB)
 
 ### LLM Provider Details
 

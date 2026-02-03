@@ -535,7 +535,7 @@ final class DochiViewModel: ObservableObject {
         }
 
         let apiKey = settings.apiKey(for: provider)
-        let currentContext = ContextService.load()
+        let currentContext = ContextService.loadMemory()
 
         // 대화 내용을 텍스트로 변환
         let conversationText = sessionMessages.map { msg in
@@ -571,7 +571,7 @@ final class DochiViewModel: ObservableObject {
             if !trimmed.isEmpty && trimmed != "없음" && trimmed.count > 3 {
                 let timestamp = ISO8601DateFormatter().string(from: Date())
                 let entry = "\n\n<!-- \(timestamp) -->\n\(trimmed)"
-                ContextService.append(entry)
+                ContextService.appendMemory(entry)
                 print("[Dochi] 컨텍스트 추가됨: \(trimmed.prefix(50))...")
 
                 // 자동 압축 체크
@@ -587,7 +587,7 @@ final class DochiViewModel: ObservableObject {
     private func compressContextIfNeeded() async {
         guard settings.contextAutoCompress else { return }
 
-        let currentSize = ContextService.size
+        let currentSize = ContextService.memorySize
         let maxSize = settings.contextMaxSize
         guard currentSize > maxSize else { return }
 
@@ -601,7 +601,7 @@ final class DochiViewModel: ObservableObject {
         }
 
         let apiKey = settings.apiKey(for: provider)
-        let currentContext = ContextService.load()
+        let currentContext = ContextService.loadMemory()
 
         let prompt = """
         다음은 사용자에 대해 기억하고 있는 정보입니다:
@@ -625,8 +625,8 @@ final class DochiViewModel: ObservableObject {
             let compressed = response.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !compressed.isEmpty && compressed.count < currentContext.count {
-                ContextService.save(compressed)
-                let newSize = ContextService.size
+                ContextService.saveMemory(compressed)
+                let newSize = ContextService.memorySize
                 print("[Dochi] 컨텍스트 압축 완료 (\(currentSize) → \(newSize) bytes)")
             }
         } catch {

@@ -7,8 +7,8 @@ struct SettingsView: View {
     @State private var openaiKey: String = ""
     @State private var anthropicKey: String = ""
     @State private var zaiKey: String = ""
-    @State private var showInstructionEditor = false
-    @State private var showContextEditor = false
+    @State private var showSystemEditor = false
+    @State private var showMemoryEditor = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -99,46 +99,51 @@ struct SettingsView: View {
                     }
                 }
 
-                // MARK: - Instructions
-                Section("인스트럭션") {
+                // MARK: - System Prompt
+                Section("시스템 프롬프트") {
                     VStack(alignment: .leading) {
-                        Text(viewModel.settings.instructions.isEmpty
-                             ? "시스템 프롬프트가 설정되지 않았습니다."
-                             : viewModel.settings.instructions)
+                        let system = ContextService.loadSystem()
+                        Text(system.isEmpty
+                             ? "페르소나와 행동 지침이 설정되지 않았습니다."
+                             : system)
                             .font(.body)
-                            .foregroundStyle(
-                                viewModel.settings.instructions.isEmpty ? .tertiary : .primary
-                            )
+                            .foregroundStyle(system.isEmpty ? .tertiary : .primary)
                             .lineLimit(3)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("편집") {
-                            showInstructionEditor = true
+                        HStack {
+                            Button("편집") {
+                                showSystemEditor = true
+                            }
+                            Spacer()
+                            Text("system.md")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                         }
                     }
                 }
 
-                // MARK: - Long-term Context
-                Section("장기 기억") {
+                // MARK: - User Memory
+                Section("사용자 기억") {
                     VStack(alignment: .leading) {
-                        let context = ContextService.load()
-                        Text(context.isEmpty
-                             ? "저장된 컨텍스트가 없습니다. 대화 종료 시 자동으로 기억할 정보가 추가됩니다."
-                             : context)
+                        let memory = ContextService.loadMemory()
+                        Text(memory.isEmpty
+                             ? "저장된 기억이 없습니다. 대화 종료 시 자동으로 추가됩니다."
+                             : memory)
                             .font(.body)
-                            .foregroundStyle(context.isEmpty ? .tertiary : .primary)
+                            .foregroundStyle(memory.isEmpty ? .tertiary : .primary)
                             .lineLimit(5)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         HStack {
                             Button("편집") {
-                                showContextEditor = true
+                                showMemoryEditor = true
                             }
-                            if !context.isEmpty {
+                            if !memory.isEmpty {
                                 Button("초기화", role: .destructive) {
-                                    ContextService.save("")
+                                    ContextService.saveMemory("")
                                 }
                             }
                             Spacer()
-                            Text("\(ContextService.size / 1024)KB / \(viewModel.settings.contextMaxSize / 1024)KB")
+                            Text("\(ContextService.memorySize / 1024)KB / \(viewModel.settings.contextMaxSize / 1024)KB")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -177,11 +182,11 @@ struct SettingsView: View {
             anthropicKey = viewModel.settings.anthropicApiKey
             zaiKey = viewModel.settings.zaiApiKey
         }
-        .sheet(isPresented: $showInstructionEditor) {
-            InstructionEditorView(instructions: $viewModel.settings.instructions)
+        .sheet(isPresented: $showSystemEditor) {
+            SystemEditorView()
         }
-        .sheet(isPresented: $showContextEditor) {
-            ContextEditorView()
+        .sheet(isPresented: $showMemoryEditor) {
+            MemoryEditorView()
         }
     }
 
@@ -221,41 +226,61 @@ struct SettingsView: View {
     }
 }
 
-struct InstructionEditorView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var instructions: String
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("인스트럭션 편집")
-                    .font(.headline)
-                Spacer()
-                Button("완료") { dismiss() }
-                    .keyboardShortcut(.escape)
-            }
-            .padding()
-            Divider()
-            TextEditor(text: $instructions)
-                .font(.system(.body, design: .monospaced))
-                .padding(8)
-        }
-        .frame(width: 500, height: 400)
-    }
-}
-
-struct ContextEditorView: View {
+struct SystemEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var content: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("장기 기억 편집")
+                Text("시스템 프롬프트 편집")
                     .font(.headline)
                 Spacer()
                 Button("저장") {
-                    ContextService.save(content)
+                    ContextService.saveSystem(content)
+                    dismiss()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("취소") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+            Divider()
+            TextEditor(text: $content)
+                .font(.system(.body, design: .monospaced))
+                .padding(8)
+            Divider()
+            HStack {
+                Text("AI의 페르소나와 행동 지침을 정의합니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(ContextService.systemPath)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+            }
+            .padding(8)
+        }
+        .frame(width: 600, height: 500)
+        .onAppear {
+            content = ContextService.loadSystem()
+        }
+    }
+}
+
+struct MemoryEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var content: String = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("사용자 기억 편집")
+                    .font(.headline)
+                Spacer()
+                Button("저장") {
+                    ContextService.saveMemory(content)
                     dismiss()
                 }
                 .keyboardShortcut(.return, modifiers: .command)
@@ -273,7 +298,7 @@ struct ContextEditorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(ContextService.path)
+                Text(ContextService.memoryPath)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .textSelection(.enabled)
@@ -282,7 +307,7 @@ struct ContextEditorView: View {
         }
         .frame(width: 600, height: 500)
         .onAppear {
-            content = ContextService.load()
+            content = ContextService.loadMemory()
         }
     }
 }
