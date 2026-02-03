@@ -3,9 +3,6 @@ import SwiftUI
 
 @MainActor
 final class AppSettings: ObservableObject {
-    @Published var voice: String {
-        didSet { UserDefaults.standard.set(voice, forKey: Keys.voice) }
-    }
     @Published var wakeWordEnabled: Bool {
         didSet { UserDefaults.standard.set(wakeWordEnabled, forKey: Keys.wakeWordEnabled) }
     }
@@ -13,14 +10,10 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(wakeWord, forKey: Keys.wakeWord) }
     }
 
-    // Dual mode settings
-    @Published var appMode: AppMode {
-        didSet { UserDefaults.standard.set(appMode.rawValue, forKey: Keys.appMode) }
-    }
+    // LLM settings
     @Published var llmProvider: LLMProvider {
         didSet {
             UserDefaults.standard.set(llmProvider.rawValue, forKey: Keys.llmProvider)
-            // 제공자 변경 시 해당 제공자의 첫 번째 모델로 초기화
             if !llmProvider.models.contains(llmModel) {
                 llmModel = llmProvider.models.first ?? ""
             }
@@ -29,6 +22,8 @@ final class AppSettings: ObservableObject {
     @Published var llmModel: String {
         didSet { UserDefaults.standard.set(llmModel, forKey: Keys.llmModel) }
     }
+
+    // TTS settings
     @Published var supertonicVoice: SupertonicVoice {
         didSet { UserDefaults.standard.set(supertonicVoice.rawValue, forKey: Keys.supertonicVoice) }
     }
@@ -39,7 +34,7 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(ttsDiffusionSteps, forKey: Keys.ttsDiffusionSteps) }
     }
 
-    // Context compression
+    // Memory compression
     @Published var contextAutoCompress: Bool {
         didSet { UserDefaults.standard.set(contextAutoCompress, forKey: Keys.contextAutoCompress) }
     }
@@ -47,13 +42,9 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(contextMaxSize, forKey: Keys.contextMaxSize) }
     }
 
-    static let availableVoices = ["alloy", "ash", "ballad", "coral", "echo", "nova", "sage", "shimmer", "verse"]
-
     private enum Keys {
-        static let voice = "settings.voice"
         static let wakeWordEnabled = "settings.wakeWordEnabled"
         static let wakeWord = "settings.wakeWord"
-        static let appMode = "settings.appMode"
         static let llmProvider = "settings.llmProvider"
         static let llmModel = "settings.llmModel"
         static let supertonicVoice = "settings.supertonicVoice"
@@ -65,16 +56,12 @@ final class AppSettings: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
-        self.voice = defaults.string(forKey: Keys.voice) ?? "nova"
 
-        // 마이그레이션: UserDefaults 인스트럭션 → system.md, context.md → memory.md
+        // 마이그레이션
         Self.migrateToFileBasedContext(defaults: defaults)
+
         self.wakeWordEnabled = defaults.bool(forKey: Keys.wakeWordEnabled)
         self.wakeWord = defaults.string(forKey: Keys.wakeWord) ?? "도치야"
-
-        // Dual mode defaults
-        let modeRaw = defaults.string(forKey: Keys.appMode) ?? AppMode.realtime.rawValue
-        self.appMode = AppMode(rawValue: modeRaw) ?? .realtime
 
         let providerRaw = defaults.string(forKey: Keys.llmProvider) ?? LLMProvider.openai.rawValue
         let provider = LLMProvider(rawValue: providerRaw) ?? .openai
@@ -86,7 +73,6 @@ final class AppSettings: ObservableObject {
         self.ttsSpeed = defaults.object(forKey: Keys.ttsSpeed) as? Float ?? 1.15
         self.ttsDiffusionSteps = defaults.object(forKey: Keys.ttsDiffusionSteps) as? Int ?? 10
 
-        // Context compression (default: enabled, max 15KB)
         self.contextAutoCompress = defaults.object(forKey: Keys.contextAutoCompress) as? Bool ?? true
         self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? 15360
     }
@@ -130,13 +116,11 @@ final class AppSettings: ObservableObject {
     func buildInstructions() -> String {
         var parts: [String] = []
 
-        // 시스템 프롬프트 (system.md)
         let systemPrompt = ContextService.loadSystem()
         if !systemPrompt.isEmpty {
             parts.append(systemPrompt)
         }
 
-        // 사용자 기억 (memory.md)
         let userMemory = ContextService.loadMemory()
         if !userMemory.isEmpty {
             parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(userMemory)")
@@ -148,19 +132,15 @@ final class AppSettings: ObservableObject {
     // MARK: - Migration
 
     private static func migrateToFileBasedContext(defaults: UserDefaults) {
-        // 1. UserDefaults 인스트럭션 → system.md (한 번만)
         let migrationKey = "settings.migratedToFileContext"
         if !defaults.bool(forKey: migrationKey) {
             if let oldInstructions = defaults.string(forKey: "settings.instructions"),
                !oldInstructions.isEmpty,
                ContextService.loadSystem().isEmpty {
                 ContextService.saveSystem(oldInstructions)
-                print("[Dochi] 인스트럭션 → system.md 마이그레이션 완료")
             }
             defaults.set(true, forKey: migrationKey)
         }
-
-        // 2. context.md → memory.md
         ContextService.migrateIfNeeded()
     }
 }

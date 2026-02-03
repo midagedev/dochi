@@ -24,16 +24,6 @@ struct SettingsView: View {
             Divider()
 
             Form {
-                // MARK: - Mode
-                Section("모드") {
-                    Picker("앱 모드", selection: modeBinding) {
-                        ForEach(AppMode.allCases, id: \.self) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
                 // MARK: - API Keys
                 Section("API 키") {
                     SecureField("OpenAI API 키", text: $openaiKey)
@@ -50,52 +40,40 @@ struct SettingsView: View {
                         }
                 }
 
-                // MARK: - Text Mode Settings
-                if viewModel.settings.appMode == .text {
-                    Section("텍스트 모드 — LLM") {
-                        Picker("제공자", selection: $viewModel.settings.llmProvider) {
-                            ForEach(LLMProvider.allCases, id: \.self) { provider in
-                                Text(provider.displayName).tag(provider)
-                            }
-                        }
-                        Picker("모델", selection: $viewModel.settings.llmModel) {
-                            ForEach(viewModel.settings.llmProvider.models, id: \.self) { model in
-                                Text(model).tag(model)
-                            }
+                // MARK: - LLM
+                Section("LLM") {
+                    Picker("제공자", selection: $viewModel.settings.llmProvider) {
+                        ForEach(LLMProvider.allCases, id: \.self) { provider in
+                            Text(provider.displayName).tag(provider)
                         }
                     }
-
-                    Section("텍스트 모드 — TTS") {
-                        Picker("음성", selection: $viewModel.settings.supertonicVoice) {
-                            ForEach(SupertonicVoice.allCases, id: \.self) { voice in
-                                Text(voice.displayName).tag(voice)
-                            }
-                        }
-                        HStack {
-                            Text("속도")
-                            Slider(value: $viewModel.settings.ttsSpeed, in: 0.8...1.5, step: 0.05)
-                            Text(String(format: "%.2f", viewModel.settings.ttsSpeed))
-                                .font(.caption.monospacedDigit())
-                                .frame(width: 36)
-                        }
-                        HStack {
-                            Text("표현력")
-                            Slider(value: diffusionStepsBinding, in: 4...20, step: 2)
-                            Text("\(viewModel.settings.ttsDiffusionSteps)")
-                                .font(.caption.monospacedDigit())
-                                .frame(width: 20)
+                    Picker("모델", selection: $viewModel.settings.llmModel) {
+                        ForEach(viewModel.settings.llmProvider.models, id: \.self) { model in
+                            Text(model).tag(model)
                         }
                     }
                 }
 
-                // MARK: - Realtime Mode Settings
-                if viewModel.settings.appMode == .realtime {
-                    Section("리얼타임 모드 — 음성") {
-                        Picker("음성", selection: $viewModel.settings.voice) {
-                            ForEach(AppSettings.availableVoices, id: \.self) { voice in
-                                Text(voice).tag(voice)
-                            }
+                // MARK: - TTS
+                Section("TTS") {
+                    Picker("음성", selection: $viewModel.settings.supertonicVoice) {
+                        ForEach(SupertonicVoice.allCases, id: \.self) { voice in
+                            Text(voice.displayName).tag(voice)
                         }
+                    }
+                    HStack {
+                        Text("속도")
+                        Slider(value: $viewModel.settings.ttsSpeed, in: 0.8...1.5, step: 0.05)
+                        Text(String(format: "%.2f", viewModel.settings.ttsSpeed))
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 36)
+                    }
+                    HStack {
+                        Text("표현력")
+                        Slider(value: diffusionStepsBinding, in: 4...20, step: 2)
+                        Text("\(viewModel.settings.ttsDiffusionSteps)")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 20)
                     }
                 }
 
@@ -215,13 +193,6 @@ struct SettingsView: View {
                     viewModel.stopWakeWord()
                 }
             }
-        )
-    }
-
-    private var modeBinding: Binding<AppMode> {
-        Binding(
-            get: { viewModel.settings.appMode },
-            set: { viewModel.switchMode(to: $0) }
         )
     }
 }

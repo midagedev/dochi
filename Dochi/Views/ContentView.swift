@@ -23,21 +23,15 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
+        .onAppear {
+            viewModel.connectOnLaunch()
+        }
     }
 
     // MARK: - Toolbar
 
     private var toolbarArea: some View {
         HStack(spacing: 12) {
-            // Mode toggle
-            Picker("모드", selection: modeBinding) {
-                ForEach(AppMode.allCases, id: \.self) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 160)
-
             // Connection toggle
             Button {
                 viewModel.toggleConnection()
@@ -88,104 +82,70 @@ struct ContentView: View {
         .padding(.vertical, 8)
     }
 
-    private var modeBinding: Binding<AppMode> {
-        Binding(
-            get: { viewModel.settings.appMode },
-            set: { viewModel.switchMode(to: $0) }
-        )
-    }
-
     private var connectionColor: Color {
-        if viewModel.isTextMode {
-            switch viewModel.supertonicService.state {
-            case .unloaded: return .red
-            case .loading: return .yellow
-            case .ready:
-                switch viewModel.textModeState {
-                case .idle: return .green
-                case .listening: return .orange
-                case .processing: return .blue
-                case .speaking: return .purple
-                }
-            case .synthesizing: return .blue
-            case .playing: return .purple
-            }
-        } else {
-            switch viewModel.realtime.state {
-            case .disconnected: return .red
-            case .connecting: return .yellow
-            case .connected: return .green
+        switch viewModel.supertonicService.state {
+        case .unloaded: return .red
+        case .loading: return .yellow
+        case .ready:
+            switch viewModel.state {
+            case .idle: return .green
             case .listening: return .orange
-            case .responding: return .blue
+            case .processing: return .blue
+            case .speaking: return .purple
             }
+        case .synthesizing: return .blue
+        case .playing: return .purple
         }
     }
 
     private var connectionLabel: String {
-        if viewModel.isTextMode {
-            switch viewModel.supertonicService.state {
-            case .unloaded: return "연결"
-            case .loading: return "로딩 중..."
-            case .ready, .synthesizing, .playing: return "연결됨"
-            }
-        } else {
-            return viewModel.isConnected ? "연결됨" : "연결"
+        switch viewModel.supertonicService.state {
+        case .unloaded: return "연결"
+        case .loading: return "로딩 중..."
+        case .ready, .synthesizing, .playing: return "연결됨"
         }
     }
 
     private var stateLabel: String {
-        if viewModel.isTextMode {
-            switch viewModel.textModeState {
-            case .idle: return "대기 중"
-            case .listening: return "듣는 중..."
-            case .processing: return "응답 생성 중..."
-            case .speaking: return "음성 재생 중..."
-            }
-        } else {
-            switch viewModel.realtime.state {
-            case .connected: return "대기 중 — 말하면 자동 인식"
-            case .listening: return "듣는 중..."
-            case .responding: return "응답 생성 중..."
-            default: return ""
-            }
+        switch viewModel.state {
+        case .idle: return "대기 중"
+        case .listening: return "듣는 중..."
+        case .processing: return "응답 생성 중..."
+        case .speaking: return "음성 재생 중..."
         }
     }
 
     private var currentError: String? {
-        viewModel.errorMessage ?? (viewModel.isRealtimeMode ? viewModel.realtime.error : viewModel.llmService.error ?? viewModel.supertonicService.error)
+        viewModel.errorMessage ?? viewModel.llmService.error ?? viewModel.supertonicService.error
     }
 
     private var isWakeWordActive: Bool {
-        viewModel.isTextMode && viewModel.speechService.state == .waitingForWakeWord
+        viewModel.speechService.state == .waitingForWakeWord
     }
 
     private var isResponding: Bool {
-        if viewModel.isTextMode {
-            return viewModel.textModeState == .processing || viewModel.textModeState == .speaking
-        } else {
-            return viewModel.realtime.state == .responding
-        }
+        viewModel.state == .processing || viewModel.state == .speaking
     }
 
     // MARK: - Input Area
 
     private var inputArea: some View {
         HStack(spacing: 12) {
-            // Text mode: Push-to-talk mic button
-            if viewModel.isTextMode && viewModel.isConnected {
+            // Push-to-talk mic button
+            if viewModel.isConnected {
                 Button {
-                    if viewModel.textModeState == .listening {
-                        viewModel.stopTextModeListening()
+                    if viewModel.state == .listening {
+                        viewModel.stopListening()
                     } else {
-                        viewModel.startTextModeListening()
+                        viewModel.startListening()
                     }
                 } label: {
-                    Image(systemName: viewModel.textModeState == .listening ? "mic.fill" : "mic")
+                    Image(systemName: viewModel.state == .listening ? "mic.fill" : "mic")
                         .font(.title2)
-                        .foregroundStyle(viewModel.textModeState == .listening ? .orange : .secondary)
+                        .foregroundStyle(viewModel.state == .listening ? .orange : .secondary)
                 }
                 .buttonStyle(.borderless)
-                .disabled(viewModel.textModeState == .processing || viewModel.textModeState == .speaking)
+                .disabled(viewModel.state == .processing || viewModel.state == .speaking)
             }
 
             TextField("메시지를 입력하세요...", text: $inputText, axis: .vertical)
@@ -216,14 +176,9 @@ struct ContentView: View {
 
     private var sendDisabled: Bool {
         let empty = inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if viewModel.isTextMode {
-            // 텍스트 모드: API 키만 있으면 전송 가능 (Supertonic 미로드 시 텍스트만 표시)
-            let provider = viewModel.settings.llmProvider
-            let hasKey = !viewModel.settings.apiKey(for: provider).isEmpty
-            return empty || !hasKey || viewModel.textModeState == .processing
-        } else {
-            return empty || !viewModel.isConnected
-        }
+        let provider = viewModel.settings.llmProvider
+        let hasKey = !viewModel.settings.apiKey(for: provider).isEmpty
+        return empty || !hasKey || viewModel.state == .processing
     }
 
     private func submitText() {
@@ -275,7 +230,6 @@ struct SidebarView: View {
 
     var body: some View {
         List {
-            // MARK: - 시스템 프롬프트
             Section("시스템 프롬프트") {
                 Button {
                     showSystemEditor = true
@@ -297,7 +251,6 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
             }
 
-            // MARK: - 사용자 기억
             Section("사용자 기억") {
                 Button {
                     showMemoryEditor = true
@@ -318,7 +271,6 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
             }
 
-            // MARK: - 대화
             Section("대화") {
                 Button {
                     viewModel.clearConversation()

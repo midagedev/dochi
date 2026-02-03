@@ -23,7 +23,7 @@ struct ConversationView: View {
                         if isShowingUserTranscript {
                             liveBubble(
                                 label: "나",
-                                text: userTranscript,
+                                text: viewModel.speechService.transcript,
                                 color: Color.blue.opacity(0.1),
                                 alignment: .trailing
                             )
@@ -78,7 +78,7 @@ struct ConversationView: View {
             if isListening {
                 VStack {
                     Spacer()
-                    ListeningOverlay(transcript: userTranscript)
+                    ListeningOverlay(transcript: viewModel.speechService.transcript)
                         .padding(.bottom, 80)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -88,50 +88,26 @@ struct ConversationView: View {
         .animation(.easeInOut(duration: 0.3), value: isWakeWordActive)
     }
 
-    // MARK: - Mode-aware Computed Properties
+    // MARK: - Computed Properties
 
     private var isWakeWordActive: Bool {
-        viewModel.isTextMode && viewModel.speechService.state == .waitingForWakeWord
+        viewModel.speechService.state == .waitingForWakeWord
     }
 
     private var isListening: Bool {
-        if viewModel.isTextMode {
-            return viewModel.textModeState == .listening
-        } else {
-            return viewModel.realtime.state == .listening
-        }
+        viewModel.state == .listening
     }
 
     private var isShowingUserTranscript: Bool {
-        if viewModel.isTextMode {
-            return viewModel.textModeState == .listening && !viewModel.speechService.transcript.isEmpty
-        } else {
-            return viewModel.realtime.state == .listening && !viewModel.realtime.userTranscript.isEmpty
-        }
-    }
-
-    private var userTranscript: String {
-        if viewModel.isTextMode {
-            return viewModel.speechService.transcript
-        } else {
-            return viewModel.realtime.userTranscript
-        }
+        viewModel.state == .listening && !viewModel.speechService.transcript.isEmpty
     }
 
     private var assistantTranscript: String {
-        if viewModel.isTextMode {
-            return viewModel.llmService.isStreaming ? viewModel.llmService.partialResponse : ""
-        } else {
-            return viewModel.realtime.state == .responding ? viewModel.realtime.assistantTranscript : ""
-        }
+        viewModel.llmService.isStreaming ? viewModel.llmService.partialResponse : ""
     }
 
     private var isThinking: Bool {
-        if viewModel.isTextMode {
-            return viewModel.textModeState == .processing && viewModel.llmService.partialResponse.isEmpty
-        } else {
-            return viewModel.realtime.state == .responding && viewModel.realtime.assistantTranscript.isEmpty
-        }
+        viewModel.state == .processing && viewModel.llmService.partialResponse.isEmpty
     }
 
     // MARK: - States
@@ -144,9 +120,7 @@ struct ConversationView: View {
             Text("도치에게 말을 걸어보세요")
                 .font(.title3)
                 .foregroundStyle(.secondary)
-            Text(viewModel.isTextMode
-                 ? "설정에서 LLM API 키를 입력하고 연결하세요"
-                 : "설정에서 OpenAI API 키를 입력하고 연결하세요")
+            Text("설정에서 LLM API 키를 입력하고 연결하세요")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -156,15 +130,13 @@ struct ConversationView: View {
 
     private var connectedEmptyState: some View {
         VStack(spacing: 12) {
-            Image(systemName: viewModel.isTextMode ? "text.bubble.fill" : "waveform.circle.fill")
+            Image(systemName: "text.bubble.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.green)
-            Text("연결됨 — \(viewModel.isTextMode ? "메시지를 입력하세요" : "말해보세요")")
+            Text("연결됨 — 메시지를 입력하세요")
                 .font(.title3)
                 .foregroundStyle(.secondary)
-            Text(viewModel.isTextMode
-                 ? "텍스트 입력 또는 마이크 버튼으로 음성 입력"
-                 : "음성을 자동으로 감지합니다")
+            Text("텍스트 입력 또는 마이크 버튼으로 음성 입력")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -214,7 +186,6 @@ struct WakeWordMonitor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // 실시간 인식 텍스트
             HStack(spacing: 8) {
                 Image(systemName: "waveform")
                     .foregroundStyle(.mint)
@@ -232,7 +203,6 @@ struct WakeWordMonitor: View {
                 Spacer()
             }
 
-            // 등록된 변형 목록
             if !variations.isEmpty {
                 FlowLayout(spacing: 6) {
                     ForEach(variations, id: \.self) { word in

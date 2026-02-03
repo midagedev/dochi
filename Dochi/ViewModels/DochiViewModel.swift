@@ -4,21 +4,18 @@ import Combine
 
 @MainActor
 final class DochiViewModel: ObservableObject {
-    // MARK: - Text Mode State
-
-    enum TextModeState: Equatable {
+    enum State: Equatable {
         case idle
-        case listening      // SpeechService(STT) 활성
+        case listening      // STT 활성
         case processing     // LLM 응답 생성 중
-        case speaking       // Supertonic TTS 재생 중
+        case speaking       // TTS 재생 중
     }
 
     @Published var messages: [Message] = []
     @Published var errorMessage: String?
-    @Published var textModeState: TextModeState = .idle
+    @Published var state: State = .idle
 
     var settings: AppSettings
-    let realtime: RealtimeService
     let speechService: SpeechService
     let llmService: LLMService
     let supertonicService: SupertonicService
@@ -29,96 +26,70 @@ final class DochiViewModel: ObservableObject {
 
     // 연속 대화 모드
     @Published var isSessionActive: Bool = false
-    private var sessionTimeoutTimer: Timer?
     private var isAskingToEndSession: Bool = false
     private let sessionTimeoutSeconds: TimeInterval = 10.0
 
-    // MARK: - Computed
-
-    var isTextMode: Bool { settings.appMode == .text }
-    var isRealtimeMode: Bool { settings.appMode == .realtime }
-
     var isConnected: Bool {
-        if isRealtimeMode {
-            return realtime.state != .disconnected && realtime.state != .connecting
-        } else {
-            // 텍스트 모드에서는 Supertonic이 ready면 "연결됨"
-            return supertonicService.state == .ready || textModeState != .idle
-        }
+        supertonicService.state == .ready || state != .idle
     }
 
     // MARK: - Init
 
     init(settings: AppSettings) {
         self.settings = settings
-        self.realtime = RealtimeService()
         self.speechService = SpeechService()
         self.llmService = LLMService()
         self.supertonicService = SupertonicService()
 
-        setupRealtimeCallbacks()
-        setupTextModeCallbacks()
+        setupCallbacks()
         setupChangeForwarding()
     }
 
-    private func setupRealtimeCallbacks() {
-        realtime.onResponseComplete = { [weak self] transcript in
-            guard let self else { return }
-            self.messages.append(Message(role: .assistant, content: transcript))
-        }
-    }
-
-    private func setupTextModeCallbacks() {
+    private func setupCallbacks() {
         // 웨이크워드 감지 → 세션 시작
         speechService.onWakeWordDetected = { [weak self] in
-            guard let self, self.isTextMode else { return }
+            guard let self else { return }
             self.isSessionActive = true
-            self.textModeState = .listening
+            self.state = .listening
             print("[Dochi] 세션 시작")
         }
 
         // STT 완료 → 응답 처리
         speechService.onQueryCaptured = { [weak self] query in
-            guard let self, self.isTextMode else { return }
-            self.cancelSessionTimeout()
+            guard let self else { return }
 
-            // 세션 종료 질문에 대한 응답 처리
             if self.isAskingToEndSession {
                 self.isAskingToEndSession = false
                 self.handleEndSessionResponse(query)
                 return
             }
 
-            // 사용자가 직접 세션 종료 요청
             if self.isSessionActive && self.isEndSessionRequest(query) {
                 self.confirmAndEndSession()
                 return
             }
 
-            self.handleTextModeQuery(query)
+            self.handleQuery(query)
         }
 
-        // STT 무음 타임아웃 (사용자가 아무 말 안함)
+        // STT 무음 타임아웃
         speechService.onSilenceTimeout = { [weak self] in
-            guard let self, self.isTextMode, self.isSessionActive else { return }
-            self.cancelSessionTimeout()
+            guard let self, self.isSessionActive else { return }
 
-            // 세션 종료 질문 중이었으면 → 종료로 처리
             if self.isAskingToEndSession {
                 self.isAskingToEndSession = false
                 self.endSession()
                 return
             }
 
-            // 세션 종료 여부 질문
             self.askToEndSession()
         }
 
         // LLM 문장 단위 → TTS 큐에 즉시 추가
         llmService.onSentenceReady = { [weak self] sentence in
-            guard let self, self.isTextMode else { return }
+            guard let self else { return }
             if self.supertonicService.state == .ready || self.supertonicService.state == .synthesizing || self.supertonicService.state == .playing {
-                self.textModeState = .speaking
+                self.state = .speaking
                 self.supertonicService.speed = self.settings.ttsSpeed
                 self.supertonicService.diffusionSteps = self.settings.ttsDiffusionSteps
                 self.supertonicService.enqueueSentence(sentence, voice: self.settings.supertonicVoice)
@@ -127,20 +98,18 @@ final class DochiViewModel: ObservableObject {
 
         // LLM 응답 완료 → 메시지 히스토리에 추가
         llmService.onResponseComplete = { [weak self] response in
-            guard let self, self.isTextMode else { return }
+            guard let self else { return }
             self.messages.append(Message(role: .assistant, content: response))
         }
 
-        // TTS 큐 재생 완료 → 연속 대화 또는 웨이크워드 대기
+        // TTS 재생 완료 → 연속 대화 또는 웨이크워드 대기
         supertonicService.onSpeakingComplete = { [weak self] in
             guard let self else { return }
-            self.textModeState = .idle
+            self.state = .idle
 
             if self.isSessionActive {
-                // 연속 대화: 바로 STT 시작하고 타임아웃 설정
                 self.startContinuousListening()
             } else {
-                // 세션 비활성: 웨이크워드 대기
                 self.startWakeWordIfNeeded()
             }
         }
@@ -148,19 +117,14 @@ final class DochiViewModel: ObservableObject {
         // Supertonic 로드 완료 → 웨이크워드 시작
         supertonicService.$state
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                guard let self, self.isTextMode, state == .ready, self.textModeState == .idle else { return }
+            .sink { [weak self] ttsState in
+                guard let self, ttsState == .ready, self.state == .idle else { return }
                 self.startWakeWordIfNeeded()
             }
             .store(in: &cancellables)
     }
 
     private func setupChangeForwarding() {
-        // 자식 ObservableObject 변경 전파
-        realtime.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
         speechService.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -177,39 +141,23 @@ final class DochiViewModel: ObservableObject {
 
     // MARK: - Connection
 
+    func connectOnLaunch() {
+        if supertonicService.state == .unloaded {
+            connect()
+        }
+    }
+
     func toggleConnection() {
-        if isRealtimeMode {
-            if isConnected {
-                realtime.disconnect()
-            } else {
-                connectRealtime()
-            }
-        } else {
-            if supertonicService.state == .ready {
-                stopWakeWord()
-                supertonicService.tearDown()
-                textModeState = .idle
-            } else if supertonicService.state == .unloaded {
-                connectTextMode()
-            }
+        if supertonicService.state == .ready {
+            stopWakeWord()
+            supertonicService.tearDown()
+            state = .idle
+        } else if supertonicService.state == .unloaded {
+            connect()
         }
     }
 
-    private func connectRealtime() {
-        let apiKey = settings.apiKey
-        guard !apiKey.isEmpty else {
-            errorMessage = "OpenAI API 키를 설정해주세요."
-            return
-        }
-        errorMessage = nil
-        realtime.connect(
-            apiKey: apiKey,
-            instructions: settings.buildInstructions(),
-            voice: settings.voice
-        )
-    }
-
-    private func connectTextMode() {
+    private func connect() {
         let provider = settings.llmProvider
         let apiKey = settings.apiKey(for: provider)
         guard !apiKey.isEmpty else {
@@ -220,45 +168,15 @@ final class DochiViewModel: ObservableObject {
         supertonicService.loadIfNeeded(voice: settings.supertonicVoice)
     }
 
-    // MARK: - Mode Switch
-
-    func switchMode(to mode: AppMode) {
-        guard mode != settings.appMode else { return }
-
-        // 기존 모드 정리
-        if isRealtimeMode {
-            realtime.disconnect()
-        } else {
-            supertonicService.tearDown()
-            llmService.cancel()
-            speechService.stopListening()
-            speechService.stopWakeWordDetection()
-            textModeState = .idle
-        }
-
-        settings.appMode = mode
-    }
-
     // MARK: - Text Input
 
     func sendMessage(_ text: String) {
-        if isRealtimeMode {
-            guard isConnected else {
-                errorMessage = "먼저 연결해주세요."
-                return
-            }
-            messages.append(Message(role: .user, content: text))
-            realtime.sendTextMessage(text)
-        } else {
-            handleTextModeQuery(text)
-        }
+        handleQuery(text)
     }
 
-    // MARK: - Text Mode Pipeline
-
-    private func handleTextModeQuery(_ query: String) {
+    private func handleQuery(_ query: String) {
         messages.append(Message(role: .user, content: query))
-        textModeState = .processing
+        state = .processing
 
         let provider = settings.llmProvider
         let model = settings.llmModel
@@ -277,32 +195,27 @@ final class DochiViewModel: ObservableObject {
     // MARK: - Wake Word
 
     func startWakeWordIfNeeded() {
-        guard isTextMode,
-              settings.wakeWordEnabled,
-              textModeState == .idle,
+        guard settings.wakeWordEnabled,
+              state == .idle,
               speechService.state == .idle,
               !settings.wakeWord.isEmpty
         else { return }
 
         let wakeWord = settings.wakeWord
 
-        // 캐시된 변형이 있으면 바로 시작
         if wakeWord == lastGeneratedWakeWord, !wakeWordVariations.isEmpty {
             speechService.startWakeWordDetection(phrases: wakeWordVariations)
             return
         }
 
-        // LLM으로 발음 유사 변형 생성
         Task {
             let variations = await generateWakeWordVariations(wakeWord)
             self.wakeWordVariations = variations
             self.lastGeneratedWakeWord = wakeWord
             print("[Dochi] 웨이크워드 변형 (\(variations.count)개): \(variations)")
 
-            // 생성 중 상태가 바뀌지 않았으면 시작
-            guard self.isTextMode,
-                  self.settings.wakeWordEnabled,
-                  self.textModeState == .idle,
+            guard self.settings.wakeWordEnabled,
+                  self.state == .idle,
                   self.speechService.state == .idle
             else { return }
             self.speechService.startWakeWordDetection(phrases: variations)
@@ -314,7 +227,6 @@ final class DochiViewModel: ObservableObject {
     }
 
     private func generateWakeWordVariations(_ wakeWord: String) async -> [String] {
-        // 사용 가능한 API 키가 있는 제공자 찾기
         let providers: [LLMProvider] = [.openai, .anthropic, .zai]
         guard let provider = providers.first(where: { !settings.apiKey(for: $0).isEmpty }) else {
             return [wakeWord]
@@ -401,19 +313,14 @@ final class DochiViewModel: ObservableObject {
     // MARK: - Continuous Conversation
 
     private func startContinuousListening() {
-        textModeState = .listening
+        state = .listening
         speechService.startContinuousListening(timeout: sessionTimeoutSeconds)
         print("[Dochi] 연속 대화 STT 시작 (타임아웃: \(sessionTimeoutSeconds)초)")
     }
 
-    private func cancelSessionTimeout() {
-        sessionTimeoutTimer?.invalidate()
-        sessionTimeoutTimer = nil
-    }
-
     private func askToEndSession() {
         isAskingToEndSession = true
-        textModeState = .speaking
+        state = .speaking
         supertonicService.speed = settings.ttsSpeed
         supertonicService.diffusionSteps = settings.ttsDiffusionSteps
         supertonicService.speak("대화를 종료할까요?", voice: settings.supertonicVoice)
@@ -425,12 +332,10 @@ final class DochiViewModel: ObservableObject {
         let positiveKeywords = ["응", "어", "예", "네", "그래", "종료", "끝", "됐어", "괜찮아", "ㅇㅇ", "웅", "yes", "yeah", "ok", "okay"]
 
         if positiveKeywords.contains(where: { normalized.contains($0) }) {
-            // 긍정 → 세션 종료
             endSession()
         } else {
-            // 부정 또는 다른 대화 → 계속
             print("[Dochi] 세션 계속")
-            handleTextModeQuery(response)
+            handleQuery(response)
         }
     }
 
@@ -446,14 +351,12 @@ final class DochiViewModel: ObservableObject {
     }
 
     private func confirmAndEndSession() {
-        textModeState = .speaking
+        state = .speaking
         supertonicService.speed = settings.ttsSpeed
         supertonicService.diffusionSteps = settings.ttsDiffusionSteps
         supertonicService.speak("네, 대화를 종료할게요. 다음에 또 불러주세요!", voice: settings.supertonicVoice)
 
-        // TTS 완료 후 세션 종료 (onSpeakingComplete에서 처리되지 않도록 플래그 설정)
         Task {
-            // TTS 재생 완료 대기
             while supertonicService.state == .playing || supertonicService.state == .synthesizing {
                 try? await Task.sleep(for: .milliseconds(100))
             }
@@ -465,62 +368,43 @@ final class DochiViewModel: ObservableObject {
         print("[Dochi] 세션 종료")
         isSessionActive = false
         isAskingToEndSession = false
-        cancelSessionTimeout()
 
-        // 컨텍스트 분석 후 대화 초기화
         if !messages.isEmpty {
             analyzeSessionForContext()
         }
         messages.removeAll()
 
-        // 웨이크워드 대기로 전환
-        textModeState = .idle
+        state = .idle
         startWakeWordIfNeeded()
     }
 
-    // MARK: - Push-to-Talk (Text Mode)
+    // MARK: - Push-to-Talk
 
-    func startTextModeListening() {
-        guard isTextMode, textModeState == .idle else { return }
+    func startListening() {
+        guard state == .idle else { return }
         stopWakeWord()
-        isSessionActive = true  // 수동 시작도 세션 활성화
-        textModeState = .listening
+        isSessionActive = true
+        state = .listening
         speechService.startListening()
     }
 
-    func stopTextModeListening() {
-        guard isTextMode, textModeState == .listening else { return }
+    func stopListening() {
+        guard state == .listening else { return }
         speechService.stopListening()
-        // onQueryCaptured 콜백이 호출되면 handleTextModeQuery로 이동
-    }
-
-    // MARK: - User Speech (Realtime)
-
-    func addUserTranscriptToHistory() {
-        let text = realtime.userTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty {
-            messages.append(Message(role: .user, content: text))
-        }
     }
 
     func clearConversation() {
-        // 세션 종료 전 컨텍스트 분석
         if !messages.isEmpty {
             analyzeSessionForContext()
         }
-
         messages.removeAll()
-        if isRealtimeMode && isConnected {
-            realtime.disconnect()
-            connectRealtime()
-        }
     }
 
     // MARK: - Session Context Analysis
 
     private func analyzeSessionForContext() {
         let sessionMessages = messages
-        guard sessionMessages.count >= 2 else { return }  // 최소 1턴 이상
+        guard sessionMessages.count >= 2 else { return }
 
         Task {
             await extractAndSaveContext(from: sessionMessages)
@@ -528,7 +412,6 @@ final class DochiViewModel: ObservableObject {
     }
 
     private func extractAndSaveContext(from sessionMessages: [Message]) async {
-        // 사용 가능한 API 키가 있는 제공자 찾기
         let providers: [LLMProvider] = [.openai, .anthropic, .zai]
         guard let provider = providers.first(where: { !settings.apiKey(for: $0).isEmpty }) else {
             return
@@ -537,7 +420,6 @@ final class DochiViewModel: ObservableObject {
         let apiKey = settings.apiKey(for: provider)
         let currentContext = ContextService.loadMemory()
 
-        // 대화 내용을 텍스트로 변환
         let conversationText = sessionMessages.map { msg in
             let role = msg.role == .user ? "사용자" : "어시스턴트"
             return "[\(role)] \(msg.content)"
@@ -567,14 +449,12 @@ final class DochiViewModel: ObservableObject {
             let response = try await callLLMSimple(provider: provider, apiKey: apiKey, prompt: prompt)
             let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // "없음"이 아니고 의미있는 내용이면 저장
             if !trimmed.isEmpty && trimmed != "없음" && trimmed.count > 3 {
                 let timestamp = ISO8601DateFormatter().string(from: Date())
                 let entry = "\n\n<!-- \(timestamp) -->\n\(trimmed)"
                 ContextService.appendMemory(entry)
                 print("[Dochi] 컨텍스트 추가됨: \(trimmed.prefix(50))...")
 
-                // 자동 압축 체크
                 await compressContextIfNeeded()
             }
         } catch {
@@ -593,7 +473,6 @@ final class DochiViewModel: ObservableObject {
 
         print("[Dochi] 컨텍스트 압축 시작 (현재: \(currentSize) bytes, 제한: \(maxSize) bytes)")
 
-        // 사용 가능한 API 키가 있는 제공자 찾기
         let providers: [LLMProvider] = [.openai, .anthropic, .zai]
         guard let provider = providers.first(where: { !settings.apiKey(for: $0).isEmpty }) else {
             print("[Dochi] 컨텍스트 압축 불가: API 키 없음")

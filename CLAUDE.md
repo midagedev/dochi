@@ -19,19 +19,18 @@ No tests exist. No linter is configured.
 
 ## Architecture
 
-Dochi is a macOS SwiftUI voice assistant with two operational modes:
-
-- **Realtime mode**: OpenAI Realtime API via WebSocket — bidirectional audio streaming, server-side VAD, built-in transcription and voice synthesis
-- **Text mode**: Multi-provider LLM chat (OpenAI, Anthropic, Z.AI) with Apple STT input and local Supertonic TTS output via ONNX Runtime
+Dochi is a macOS SwiftUI voice assistant with:
+- Multi-provider LLM chat (OpenAI, Anthropic, Z.AI)
+- Apple STT input
+- Local Supertonic TTS output via ONNX Runtime
 
 ### Data Flow
 
 ```
-Realtime:  Mic → AVAudioEngine → WebSocket (PCM16 base64) → OpenAI Realtime → Audio playback
-Text:      Mic → SpeechService(STT) → LLMService(SSE stream) → SupertonicService(ONNX TTS) → AVAudioPlayerNode
+Mic → SpeechService(STT) → LLMService(SSE stream) → SupertonicService(ONNX TTS) → AVAudioPlayerNode
 ```
 
-Text mode streams TTS sentence-by-sentence: `LLMService.onSentenceReady` fires on each newline boundary during SSE streaming, feeding sentences into `SupertonicService.enqueueSentence()` which runs a queue-based synthesis/playback loop.
+TTS streams sentence-by-sentence: `LLMService.onSentenceReady` fires on each newline boundary during SSE streaming, feeding sentences into `SupertonicService.enqueueSentence()` which runs a queue-based synthesis/playback loop.
 
 ### Continuous Conversation Mode
 
@@ -47,10 +46,9 @@ When wake word is enabled, sessions follow this flow:
 
 ### Key Components
 
-**DochiViewModel** (`ViewModels/DochiViewModel.swift`) — Central orchestrator. Owns all services, routes between modes, manages `TextModeState` (idle/listening/processing/speaking) and `isSessionActive` for continuous conversation. Forwards child `objectWillChange` via Combine for SwiftUI reactivity.
+**DochiViewModel** (`ViewModels/DochiViewModel.swift`) — Central orchestrator. Owns all services, manages `State` (idle/listening/processing/speaking) and `isSessionActive` for continuous conversation. Forwards child `objectWillChange` via Combine for SwiftUI reactivity.
 
 **Services** — Each is `@MainActor ObservableObject` communicating via closure callbacks:
-- `RealtimeService` — WebSocket lifecycle, audio capture/playback at 24kHz PCM16
 - `LLMService` — SSE streaming for 3 providers; sentence detection splits on `\n`
 - `SupertonicService` — ONNX model loading (downloaded from HuggingFace on first use), queue-based TTS with configurable `speed` and `diffusionSteps`
 - `SpeechService` — Apple Speech framework STT with wake word detection and continuous listening mode (`startContinuousListening` with timeout)
@@ -63,7 +61,7 @@ When wake word is enabled, sessions follow this flow:
 - `onSilenceTimeout` — Continuous listening timed out with no speech
 
 **Models:**
-- `Enums.swift` — `AppMode`, `LLMProvider` (with per-provider models, API URLs), `SupertonicVoice`
+- `Enums.swift` — `LLMProvider` (with per-provider models, API URLs), `SupertonicVoice`
 - `Settings.swift` — `AppSettings` persists to UserDefaults; includes `ttsSpeed`, `ttsDiffusionSteps`
 
 ### Prompt Files

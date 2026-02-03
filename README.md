@@ -1,9 +1,11 @@
 # Dochi (도치)
 
-macOS 음성 비서 앱. 두 가지 모드를 지원합니다.
+macOS 음성 비서 앱.
 
-- **리얼타임 모드**: OpenAI Realtime API (WebSocket) 기반 실시간 음성 대화
-- **텍스트 모드**: 멀티 LLM (OpenAI, Anthropic, Z.AI) + Supertonic 로컬 TTS
+- 멀티 LLM 지원 (OpenAI, Anthropic, Z.AI)
+- Supertonic 로컬 TTS (ONNX, F1~F5/M1~M5 10종 음성)
+- Apple Speech 프레임워크 STT
+- 웨이크워드 + 연속 대화
 
 ## 요구사항
 
@@ -21,8 +23,7 @@ xcodebuild -project Dochi.xcodeproj -scheme Dochi build
 ## 기능
 
 ### 음성 대화
-- OpenAI Realtime API 실시간 음성 대화 (서버 VAD, Whisper 트랜스크립션)
-- 텍스트 모드: OpenAI / Anthropic / Z.AI SSE 스트리밍
+- OpenAI / Anthropic / Z.AI SSE 스트리밍
 - Supertonic ONNX 로컬 TTS (한국어, 영어 등 다국어 지원, F1~F5/M1~M5 10종 음성)
 - Apple Speech 프레임워크 STT
 - 문장 단위 스트리밍 TTS (LLM 응답 중 즉시 음성 재생)
@@ -54,7 +55,7 @@ xcodebuild -project Dochi.xcodeproj -scheme Dochi build
 ## 사용법
 
 1. 설정에서 API 키 입력 (OpenAI / Anthropic / Z.AI 중 하나 이상)
-2. 텍스트 모드 선택 → "연결" 클릭 (TTS 모델 로드)
+2. "연결" 클릭 (TTS 모델 로드)
 3. 웨이크워드 활성화 시: "도치야" 호출 → 대화 시작
 4. 대화 종료: "대화 종료", "그만할게" 등 또는 10초 무응답 후 확인
 

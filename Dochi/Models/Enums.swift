@@ -1,19 +1,5 @@
 import Foundation
 
-// MARK: - App Mode
-
-enum AppMode: String, CaseIterable, Codable {
-    case text = "text"
-    case realtime = "realtime"
-
-    var displayName: String {
-        switch self {
-        case .text: "텍스트"
-        case .realtime: "리얼타임"
-        }
-    }
-}
-
 // MARK: - LLM Provider
 
 enum LLMProvider: String, CaseIterable, Codable {
