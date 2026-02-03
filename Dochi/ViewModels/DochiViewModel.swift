@@ -6,9 +6,10 @@ import Combine
 final class DochiViewModel: ObservableObject {
     enum State: Equatable {
         case idle
-        case listening      // STT 활성
-        case processing     // LLM 응답 생성 중
-        case speaking       // TTS 재생 중
+        case listening              // STT 활성
+        case processing             // LLM 응답 생성 중
+        case executingTool(String)  // MCP 도구 실행 중 (도구 이름)
+        case speaking               // TTS 재생 중
     }
 
     @Published var messages: [Message] = []
@@ -23,10 +24,16 @@ final class DochiViewModel: ObservableObject {
     let speechService: SpeechService
     let llmService: LLMService
     let supertonicService: SupertonicService
+    let mcpService: MCPServiceProtocol
 
     // Dependencies
     private let contextService: ContextServiceProtocol
     private let conversationService: ConversationServiceProtocol
+
+    // Tool loop 관련
+    @Published var currentToolExecution: String?
+    private var toolLoopMessages: [Message] = []
+    private let maxToolIterations = 10
 
     private var cancellables = Set<AnyCancellable>()
     @Published var wakeWordVariations: [String] = []
@@ -46,7 +53,8 @@ final class DochiViewModel: ObservableObject {
     init(
         settings: AppSettings,
         contextService: ContextServiceProtocol = ContextService(),
-        conversationService: ConversationServiceProtocol = ConversationService()
+        conversationService: ConversationServiceProtocol = ConversationService(),
+        mcpService: MCPServiceProtocol? = nil
     ) {
         self.settings = settings
         self.contextService = contextService
@@ -54,6 +62,7 @@ final class DochiViewModel: ObservableObject {
         self.speechService = SpeechService()
         self.llmService = LLMService()
         self.supertonicService = SupertonicService()
+        self.mcpService = mcpService ?? MCPService()
 
         setupCallbacks()
         setupChangeForwarding()
@@ -115,6 +124,14 @@ final class DochiViewModel: ObservableObject {
         llmService.onResponseComplete = { [weak self] response in
             guard let self else { return }
             self.messages.append(Message(role: .assistant, content: response))
+        }
+
+        // LLM이 tool 호출 요청 → tool 실행 후 재호출
+        llmService.onToolCallsReceived = { [weak self] toolCalls in
+            guard let self else { return }
+            Task {
+                await self.executeToolLoop(toolCalls: toolCalls)
+            }
         }
 
         // TTS 재생 완료 → 연속 대화 또는 웨이크워드 대기
@@ -193,18 +210,131 @@ final class DochiViewModel: ObservableObject {
         messages.append(Message(role: .user, content: query))
         state = .processing
 
+        // Tool loop 초기화
+        toolLoopMessages = messages
+
+        sendLLMRequest(messages: messages, toolResults: nil)
+    }
+
+    private func sendLLMRequest(messages: [Message], toolResults: [ToolResult]?) {
         let provider = settings.llmProvider
         let model = settings.llmModel
         let apiKey = settings.apiKey(for: provider)
         let systemPrompt = settings.buildInstructions()
+
+        // MCP에서 사용 가능한 도구 목록
+        let tools: [[String: Any]]? = {
+            let mcpTools = mcpService.availableTools
+            return mcpTools.isEmpty ? nil : mcpTools.map { $0.asDictionary }
+        }()
 
         llmService.sendMessage(
             messages: messages,
             systemPrompt: systemPrompt,
             provider: provider,
             model: model,
-            apiKey: apiKey
+            apiKey: apiKey,
+            tools: tools,
+            toolResults: toolResults
         )
+    }
+
+    // MARK: - Tool Loop
+
+    private func executeToolLoop(toolCalls: [ToolCall]) async {
+        var iteration = 0
+        var currentToolCalls = toolCalls
+
+        while !currentToolCalls.isEmpty && iteration < maxToolIterations {
+            iteration += 1
+            print("[Dochi] Tool loop iteration \(iteration), \(currentToolCalls.count) tools to execute")
+
+            // 현재 partial response를 assistant 메시지로 저장 (tool_calls 포함)
+            let assistantMessage = Message(
+                role: .assistant,
+                content: llmService.partialResponse,
+                toolCalls: currentToolCalls
+            )
+            toolLoopMessages.append(assistantMessage)
+
+            // 각 tool 실행
+            var results: [ToolResult] = []
+            for toolCall in currentToolCalls {
+                currentToolExecution = toolCall.name
+                state = .executingTool(toolCall.name)
+                print("[Dochi] Executing tool: \(toolCall.name)")
+
+                do {
+                    let mcpResult = try await mcpService.callTool(
+                        name: toolCall.name,
+                        arguments: toolCall.arguments
+                    )
+                    results.append(ToolResult(
+                        toolCallId: toolCall.id,
+                        content: mcpResult.content,
+                        isError: mcpResult.isError
+                    ))
+                    print("[Dochi] Tool \(toolCall.name) completed")
+                } catch {
+                    results.append(ToolResult(
+                        toolCallId: toolCall.id,
+                        content: "Error: \(error.localizedDescription)",
+                        isError: true
+                    ))
+                    print("[Dochi] Tool \(toolCall.name) failed: \(error)")
+                }
+            }
+
+            currentToolExecution = nil
+            state = .processing
+
+            // tool 결과와 함께 LLM 재호출
+            // continuation을 사용해서 다음 응답 대기
+            currentToolCalls = await withCheckedContinuation { continuation in
+                var receivedToolCalls: [ToolCall]?
+                var completed = false
+
+                llmService.onToolCallsReceived = { [weak self] toolCalls in
+                    guard let self, !completed else { return }
+                    completed = true
+                    receivedToolCalls = toolCalls
+                    continuation.resume(returning: toolCalls)
+                }
+
+                llmService.onResponseComplete = { [weak self] response in
+                    guard let self, !completed else { return }
+                    completed = true
+                    // 최종 응답 - 메시지에 추가
+                    self.messages = self.toolLoopMessages
+                    self.messages.append(Message(role: .assistant, content: response))
+                    continuation.resume(returning: [])
+                }
+
+                sendLLMRequest(messages: toolLoopMessages, toolResults: results)
+            }
+        }
+
+        if iteration >= maxToolIterations {
+            print("[Dochi] Tool loop reached max iterations (\(maxToolIterations))")
+            errorMessage = "도구 실행 횟수가 최대치(\(maxToolIterations))에 도달했습니다."
+        }
+
+        // Tool loop 완료 후 콜백 복원
+        setupLLMCallbacks()
+    }
+
+    private func setupLLMCallbacks() {
+        llmService.onResponseComplete = { [weak self] response in
+            guard let self else { return }
+            self.messages.append(Message(role: .assistant, content: response))
+        }
+
+        llmService.onToolCallsReceived = { [weak self] toolCalls in
+            guard let self else { return }
+            Task {
+                await self.executeToolLoop(toolCalls: toolCalls)
+            }
+        }
     }
 
     // MARK: - Wake Word

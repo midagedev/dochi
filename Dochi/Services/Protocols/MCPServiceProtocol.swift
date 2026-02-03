@@ -52,9 +52,13 @@ struct MCPServerConfig: Identifiable, Codable, Sendable {
 }
 
 /// MCP 서비스 프로토콜
-protocol MCPServiceProtocol: AnyObject, Sendable {
+@MainActor
+protocol MCPServiceProtocol: AnyObject {
     /// 사용 가능한 모든 도구 목록
-    var availableTools: [MCPToolInfo] { get async }
+    var availableTools: [MCPToolInfo] { get }
+
+    /// 연결된 서버 목록
+    var connectedServers: [UUID: String] { get }
 
     /// 서버에 연결
     func connect(config: MCPServerConfig) async throws

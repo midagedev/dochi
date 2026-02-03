@@ -75,20 +75,24 @@ Dochi에 Model Context Protocol (MCP)을 연동하여 도구 사용(tool use) �
 
 ---
 
-## Phase 5: Tool Loop 구현 🔄 진행 예정
+## Phase 5: Tool Loop 구현 ✅ 완료
 
-### 작업 내용
-- [ ] `DochiViewModel`에 MCPService 주입
-- [ ] tool loop 로직 구현:
-  1. 사용자 메시지 + tools → LLM
-  2. LLM이 tool_call 반환 시 → MCP로 실행
-  3. 실행 결과 + 이전 메시지 → LLM 재호출
-  4. 최종 텍스트 응답까지 반복
-- [ ] UI에 도구 실행 상태 표시
+### 완료된 작업
+- [x] `DochiViewModel`에 MCPService 주입 (DI 패턴)
+- [x] tool loop 로직 구현:
+  - `handleQuery()`에서 MCP 도구 목록을 LLM에 전달
+  - `onToolCallsReceived` 콜백으로 tool_calls 수신
+  - `executeToolLoop()`에서 각 tool 실행 → 결과 수집 → LLM 재호출
+  - 최대 10회 반복 제한
+- [x] UI에 도구 실행 상태 표시
+  - `State.executingTool(String)` 추가
+  - 상태바에 실행 중인 도구 이름 표시
 
-### 수정 예정 파일
+### 수정된 파일
 - `Dochi/ViewModels/DochiViewModel.swift`
-- `Dochi/Views/ConversationView.swift` (선택적)
+- `Dochi/Views/ContentView.swift`
+- `Dochi/Services/Protocols/MCPServiceProtocol.swift` (프로토콜 @MainActor 지원)
+- `Dochi/Services/MCPService.swift` (프로토콜 conformance)
 
 ### 흐름도
 ```
@@ -111,17 +115,25 @@ LLM 재호출 (반복)
 
 ---
 
-## Phase 6: 테스트 추가 📝 예정
+## Phase 6: 테스트 추가 ✅ 완료
 
-### 작업 내용
-- [ ] `ToolCall` 모델 테스트 (생성, JSON 파싱)
-- [ ] `Message` + toolCalls Codable 테스트
-- [ ] `MockMCPService` 구현
-- [ ] tool loop 단위 테스트
+### 완료된 작업
+- [x] `ToolCall` 모델 테스트 (10개 테스트)
+  - 생성, JSON 파싱, 빈 arguments, 유효하지 않은 JSON 처리
+- [x] `Message` + toolCalls Codable 테스트 (10개 테스트)
+  - 인코딩/디코딩, round-trip, 중첩된 arguments
+- [x] `MCPToolInfo`, `MCPServerConfig` 테스트 (11개 테스트)
+  - asDictionary 변환, Codable
+- [x] `MockMCPService` 구현 (테스트용)
 
-### 새 파일 예정
+### 새 파일
 - `DochiTests/Models/ToolCallTests.swift`
+- `DochiTests/Models/MessageTests.swift`
+- `DochiTests/Models/MCPToolInfoTests.swift`
 - `DochiTests/Mocks/MockMCPService.swift`
+
+### 테스트 현황
+- 총 48개 테스트, 전체 통과
 
 ---
 
@@ -161,8 +173,8 @@ LLM 재호출 (반복)
 | 2. SDK 추가 | ✅ 완료 | |
 | 3. MCPService | ✅ 완료 | HTTP만 지원 |
 | 4. LLMService | ✅ 완료 | tool calling 파싱 |
-| 5. Tool Loop | 🔄 예정 | ViewModel 통합 |
-| 6. 테스트 | 📝 예정 | |
+| 5. Tool Loop | ✅ 완료 | ViewModel 통합 |
+| 6. 테스트 | ✅ 완료 | 48개 테스트 |
 | 7. 서버 연동 | 📝 예정 | |
 | 8. 설정 UI | 📝 예정 | |
 

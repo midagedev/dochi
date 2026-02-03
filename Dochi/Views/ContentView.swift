@@ -110,6 +110,7 @@ struct ContentView: View {
             case .idle: return .green
             case .listening: return .orange
             case .processing: return .blue
+            case .executingTool: return .cyan
             case .speaking: return .purple
             }
         case .synthesizing: return .blue
@@ -130,6 +131,7 @@ struct ContentView: View {
         case .idle: return "대기 중"
         case .listening: return "듣는 중..."
         case .processing: return "응답 생성 중..."
+        case .executingTool(let name): return "\(name) 실행 중..."
         case .speaking: return "음성 재생 중..."
         }
     }
@@ -143,7 +145,10 @@ struct ContentView: View {
     }
 
     private var isResponding: Bool {
-        viewModel.state == .processing || viewModel.state == .speaking
+        switch viewModel.state {
+        case .processing, .executingTool, .speaking: return true
+        case .idle, .listening: return false
+        }
     }
 
     // MARK: - Input Area

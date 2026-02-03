@@ -4,7 +4,7 @@ import MCP
 /// MCP 서비스 - 여러 MCP 서버 관리 및 도구 실행
 /// 현재는 HTTP 기반 MCP 서버만 지원
 @MainActor
-final class MCPService: ObservableObject {
+final class MCPService: ObservableObject, MCPServiceProtocol {
     @Published private(set) var connectedServers: [UUID: String] = [:]
     @Published private(set) var error: String?
 
