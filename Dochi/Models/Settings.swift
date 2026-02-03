@@ -42,6 +42,14 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(ttsDiffusionSteps, forKey: Keys.ttsDiffusionSteps) }
     }
 
+    // Context compression
+    @Published var contextAutoCompress: Bool {
+        didSet { UserDefaults.standard.set(contextAutoCompress, forKey: Keys.contextAutoCompress) }
+    }
+    @Published var contextMaxSize: Int {
+        didSet { UserDefaults.standard.set(contextMaxSize, forKey: Keys.contextMaxSize) }
+    }
+
     static let availableVoices = ["alloy", "ash", "ballad", "coral", "echo", "nova", "sage", "shimmer", "verse"]
 
     private enum Keys {
@@ -55,6 +63,8 @@ final class AppSettings: ObservableObject {
         static let supertonicVoice = "settings.supertonicVoice"
         static let ttsSpeed = "settings.ttsSpeed"
         static let ttsDiffusionSteps = "settings.ttsDiffusionSteps"
+        static let contextAutoCompress = "settings.contextAutoCompress"
+        static let contextMaxSize = "settings.contextMaxSize"
     }
 
     init() {
@@ -77,6 +87,10 @@ final class AppSettings: ObservableObject {
         self.supertonicVoice = SupertonicVoice(rawValue: voiceRaw) ?? .F1
         self.ttsSpeed = defaults.object(forKey: Keys.ttsSpeed) as? Float ?? 1.15
         self.ttsDiffusionSteps = defaults.object(forKey: Keys.ttsDiffusionSteps) as? Int ?? 10
+
+        // Context compression (default: enabled, max 15KB)
+        self.contextAutoCompress = defaults.object(forKey: Keys.contextAutoCompress) as? Bool ?? true
+        self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? 15360
     }
 
     // MARK: - API Keys

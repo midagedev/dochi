@@ -39,4 +39,9 @@ enum ContextService {
     static var path: String {
         contextFileURL.path
     }
+
+    /// 컨텍스트 파일 크기 (바이트)
+    static var size: Int {
+        (try? FileManager.default.attributesOfItem(atPath: contextFileURL.path)[.size] as? Int) ?? 0
+    }
 }

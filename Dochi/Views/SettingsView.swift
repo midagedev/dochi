@@ -137,6 +137,20 @@ struct SettingsView: View {
                                     ContextService.save("")
                                 }
                             }
+                            Spacer()
+                            Text("\(ContextService.size / 1024)KB / \(viewModel.settings.contextMaxSize / 1024)KB")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Toggle("자동 압축", isOn: $viewModel.settings.contextAutoCompress)
+                    if viewModel.settings.contextAutoCompress {
+                        HStack {
+                            Text("최대 크기")
+                            Slider(value: contextMaxSizeBinding, in: 5...50, step: 5)
+                            Text("\(viewModel.settings.contextMaxSize / 1024)KB")
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 40)
                         }
                     }
                 }
@@ -175,6 +189,13 @@ struct SettingsView: View {
         Binding(
             get: { Double(viewModel.settings.ttsDiffusionSteps) },
             set: { viewModel.settings.ttsDiffusionSteps = Int($0) }
+        )
+    }
+
+    private var contextMaxSizeBinding: Binding<Double> {
+        Binding(
+            get: { Double(viewModel.settings.contextMaxSize) / 1024.0 },
+            set: { viewModel.settings.contextMaxSize = Int($0 * 1024) }
         )
     }
 

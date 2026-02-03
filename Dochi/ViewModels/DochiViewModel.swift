@@ -573,9 +573,64 @@ final class DochiViewModel: ObservableObject {
                 let entry = "\n\n<!-- \(timestamp) -->\n\(trimmed)"
                 ContextService.append(entry)
                 print("[Dochi] 컨텍스트 추가됨: \(trimmed.prefix(50))...")
+
+                // 자동 압축 체크
+                await compressContextIfNeeded()
             }
         } catch {
             print("[Dochi] 컨텍스트 분석 실패: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Context Compression
+
+    private func compressContextIfNeeded() async {
+        guard settings.contextAutoCompress else { return }
+
+        let currentSize = ContextService.size
+        let maxSize = settings.contextMaxSize
+        guard currentSize > maxSize else { return }
+
+        print("[Dochi] 컨텍스트 압축 시작 (현재: \(currentSize) bytes, 제한: \(maxSize) bytes)")
+
+        // 사용 가능한 API 키가 있는 제공자 찾기
+        let providers: [LLMProvider] = [.openai, .anthropic, .zai]
+        guard let provider = providers.first(where: { !settings.apiKey(for: $0).isEmpty }) else {
+            print("[Dochi] 컨텍스트 압축 불가: API 키 없음")
+            return
+        }
+
+        let apiKey = settings.apiKey(for: provider)
+        let currentContext = ContextService.load()
+
+        let prompt = """
+        다음은 사용자에 대해 기억하고 있는 정보입니다:
+
+        \(currentContext)
+
+        ---
+
+        위 정보를 다음 기준으로 정리해주세요:
+        - 중요도 순으로 정렬
+        - 중복되거나 비슷한 내용은 하나로 통합
+        - 오래되거나 불필요해 보이는 정보는 제거
+        - 타임스탬프 주석(<!-- ... -->)은 제거
+        - 결과물은 현재 크기의 절반 이하로
+        - 마크다운 형식 유지
+        - 절대 인사말이나 설명 없이 정리된 내용만 출력
+        """
+
+        do {
+            let response = try await callLLMSimple(provider: provider, apiKey: apiKey, prompt: prompt)
+            let compressed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !compressed.isEmpty && compressed.count < currentContext.count {
+                ContextService.save(compressed)
+                let newSize = ContextService.size
+                print("[Dochi] 컨텍스트 압축 완료 (\(currentSize) → \(newSize) bytes)")
+            }
+        } catch {
+            print("[Dochi] 컨텍스트 압축 실패: \(error.localizedDescription)")
         }
     }
 }
