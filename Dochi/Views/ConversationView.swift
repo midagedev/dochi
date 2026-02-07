@@ -89,17 +89,7 @@ struct ConversationView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            // Listening overlay
-            if isListening {
-                VStack {
-                    Spacer()
-                    ListeningOverlay(transcript: viewModel.speechService.transcript)
-                        .padding(.bottom, 80)
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
         }
-        .animation(.easeInOut(duration: 0.3), value: isListening)
         .animation(.easeInOut(duration: 0.3), value: isWakeWordActive)
     }
 
@@ -291,51 +281,6 @@ struct FlowLayout: Layout {
             currentWidth += size.width + spacing
         }
         return rows
-    }
-}
-
-// MARK: - Listening Overlay
-
-struct ListeningOverlay: View {
-    let transcript: String
-    @State private var pulse = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.orange.opacity(0.2))
-                    .frame(width: 44, height: 44)
-                    .scaleEffect(pulse ? 1.3 : 1.0)
-                Image(systemName: "mic.fill")
-                    .font(.title3)
-                    .foregroundStyle(.orange)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("듣는 중...")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if !transcript.isEmpty {
-                    Text(transcript)
-                        .font(.body)
-                        .lineLimit(2)
-                        .truncationMode(.head)
-                }
-            }
-            Spacer()
-            AudioBarsView()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.ultraThickMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .orange.opacity(0.2), radius: 8, y: 4)
-        .padding(.horizontal, 20)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
     }
 }
 

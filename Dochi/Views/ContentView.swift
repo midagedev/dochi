@@ -6,6 +6,9 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showChangelog = false
     @State private var inputText = ""
+    @State private var glowPulse = false
+    @State private var glowFlash = false
+    @State private var previousTranscript = ""
 
     private let changelogService = ChangelogService()
 
@@ -173,25 +176,92 @@ struct ContentView: View {
 
     // MARK: - Input Area
 
+    private var isListening: Bool {
+        viewModel.state == .listening
+    }
+
     private var inputArea: some View {
         HStack(spacing: 12) {
-            // Push-to-talk mic button
+            // 마이크 버튼 (연결 시)
             if viewModel.isConnected {
-                Button {
-                    if viewModel.state == .listening {
-                        viewModel.stopListening()
-                    } else {
-                        viewModel.startListening()
-                    }
-                } label: {
-                    Image(systemName: viewModel.state == .listening ? "mic.fill" : "mic")
-                        .font(.title2)
-                        .foregroundStyle(viewModel.state == .listening ? .orange : .secondary)
-                }
-                .buttonStyle(.borderless)
-                .disabled(false)
+                micButton
             }
 
+            if isListening {
+                listeningContent
+            } else {
+                textInputContent
+            }
+        }
+        .padding()
+        .background(listeningGlow)
+        .animation(.easeInOut(duration: 0.3), value: isListening)
+        .onChange(of: isListening) { _, newValue in
+            if newValue {
+                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                    glowPulse = true
+                }
+                previousTranscript = ""
+            } else {
+                glowPulse = false
+                glowFlash = false
+            }
+        }
+        .onChange(of: viewModel.speechService.transcript) { oldValue, newValue in
+            guard isListening, !newValue.isEmpty, newValue != oldValue else { return }
+            // 트랜스크립트 변경 시 반짝임
+            glowFlash = true
+            withAnimation(.easeOut(duration: 0.3)) {
+                glowFlash = false
+            }
+        }
+    }
+
+    private var micButton: some View {
+        Button {
+            if isListening {
+                viewModel.stopListening()
+            } else {
+                viewModel.startListening()
+            }
+        } label: {
+            ZStack {
+                if isListening {
+                    Circle()
+                        .fill(Color.orange.opacity(0.2))
+                        .frame(width: 36, height: 36)
+                        .scaleEffect(glowPulse ? 1.4 : 1.0)
+                        .opacity(glowPulse ? 0.0 : 0.6)
+                }
+                Image(systemName: isListening ? "mic.fill" : "mic")
+                    .font(.title2)
+                    .foregroundStyle(isListening ? .orange : .secondary)
+            }
+            .frame(width: 36, height: 36)
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private var listeningContent: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("듣는 중...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if !viewModel.speechService.transcript.isEmpty {
+                    Text(viewModel.speechService.transcript)
+                        .font(.body)
+                        .lineLimit(3)
+                        .truncationMode(.head)
+                }
+            }
+            Spacer()
+            AudioBarsView()
+        }
+    }
+
+    private var textInputContent: some View {
+        HStack(spacing: 12) {
             TextField("메시지를 입력하세요...", text: $inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
@@ -222,7 +292,18 @@ struct ContentView: View {
                 .disabled(sendDisabled)
             }
         }
-        .padding()
+    }
+
+    @ViewBuilder
+    private var listeningGlow: some View {
+        if isListening {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.orange.opacity(0.06))
+                .shadow(
+                    color: .orange.opacity(glowFlash ? 0.6 : (glowPulse ? 0.4 : 0.1)),
+                    radius: glowFlash ? 16 : (glowPulse ? 12 : 4)
+                )
+        }
     }
 
     private var sendDisabled: Bool {
