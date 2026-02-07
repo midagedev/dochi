@@ -14,9 +14,17 @@ struct ConversationView: View {
                             connectedEmptyState
                         }
 
-                        ForEach(viewModel.messages.filter { $0.role != .tool && $0.toolCalls == nil }) { message in
-                            MessageBubbleView(message: message)
-                                .id(message.id)
+                        ForEach(viewModel.messages) { message in
+                            if message.toolCalls != nil {
+                                ToolCallBubbleView(message: message)
+                                    .id(message.id)
+                            } else if message.role == .tool {
+                                ToolResultBubbleView(message: message)
+                                    .id(message.id)
+                            } else if message.role != .system {
+                                MessageBubbleView(message: message)
+                                    .id(message.id)
+                            }
                         }
 
                         // 실시간 사용자 트랜스크립트
@@ -30,8 +38,10 @@ struct ConversationView: View {
                             .id("user-live")
                         }
 
-                        // AI thinking
-                        if isThinking {
+                        // AI thinking / tool executing
+                        if case .executingTool(let name) = viewModel.state {
+                            ExecutingToolBubbleView(toolName: name).id("thinking")
+                        } else if isThinking {
                             thinkingBubble.id("thinking")
                         }
 
@@ -362,6 +372,151 @@ struct ThinkingDotsView: View {
                     active = (active + 1) % 3
                 }
             }
+        }
+    }
+}
+
+// MARK: - Tool Helpers
+
+private enum ToolDisplay {
+    static func displayName(_ name: String) -> String {
+        switch name {
+        case "web_search": return "웹검색"
+        case "generate_image": return "이미지 생성"
+        case "create_reminder": return "미리알림 생성"
+        case "list_reminders": return "미리알림 조회"
+        case "complete_reminder": return "미리알림 완료"
+        case "set_alarm": return "알람 설정"
+        case "list_alarms": return "알람 조회"
+        case "cancel_alarm": return "알람 취소"
+        default: return name
+        }
+    }
+
+    static func icon(_ name: String) -> String {
+        switch name {
+        case "web_search": return "globe.magnifyingglass"
+        case "generate_image": return "photo.artframe"
+        case "create_reminder", "list_reminders", "complete_reminder": return "checklist"
+        case "set_alarm", "list_alarms", "cancel_alarm": return "alarm"
+        default: return "wrench.and.screwdriver"
+        }
+    }
+}
+
+// MARK: - Tool Call Bubble
+
+struct ToolCallBubbleView: View {
+    let message: Message
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(message.toolCalls ?? []) { toolCall in
+                    HStack(spacing: 6) {
+                        Image(systemName: ToolDisplay.icon(toolCall.name))
+                            .font(.caption2)
+                            .foregroundStyle(.cyan)
+                        Text(ToolDisplay.displayName(toolCall.name))
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.cyan.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            Spacer(minLength: 60)
+        }
+    }
+}
+
+// MARK: - Tool Result Bubble
+
+struct ToolResultBubbleView: View {
+    let message: Message
+    @State private var isExpanded = false
+
+    private var isError: Bool {
+        message.content.hasPrefix("Error:")
+    }
+
+    private var summaryText: String {
+        let firstLine = message.content.components(separatedBy: .newlines).first ?? message.content
+        if firstLine.count > 80 {
+            return String(firstLine.prefix(80)) + "…"
+        }
+        return firstLine
+    }
+
+    private var isLongContent: Bool {
+        message.content.count > 80 || message.content.contains("\n")
+    }
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 0) {
+                if isLongContent {
+                    DisclosureGroup(isExpanded: $isExpanded) {
+                        Text(message.content)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .padding(.top, 4)
+                    } label: {
+                        resultLabel
+                    }
+                } else {
+                    resultLabel
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isError ? Color.red.opacity(0.08) : Color.cyan.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            Spacer(minLength: 60)
+        }
+    }
+
+    private var resultLabel: some View {
+        HStack(spacing: 6) {
+            Image(systemName: isError ? "xmark.circle.fill" : "checkmark.circle.fill")
+                .font(.caption2)
+                .foregroundStyle(isError ? .red : .green)
+            Text(summaryText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+}
+
+// MARK: - Executing Tool Bubble
+
+struct ExecutingToolBubbleView: View {
+    let toolName: String
+
+    var body: some View {
+        HStack(alignment: .top) {
+            HStack(spacing: 6) {
+                Image(systemName: ToolDisplay.icon(toolName))
+                    .font(.caption2)
+                    .foregroundStyle(.cyan)
+                Text(ToolDisplay.displayName(toolName))
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                Text("실행 중...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ProgressView()
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.cyan.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            Spacer(minLength: 60)
         }
     }
 }
