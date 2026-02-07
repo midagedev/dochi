@@ -204,6 +204,14 @@ final class DochiViewModel: ObservableObject {
     // MARK: - Connection
 
     func connectOnLaunch() {
+        // 앱 시작 시 마이크/음성인식 권한을 한 번만 요청
+        Task {
+            let granted = await speechService.requestAuthorization()
+            if !granted {
+                print("[Dochi] 마이크/음성인식 권한 거부됨")
+            }
+        }
+
         if supertonicService.state == .unloaded {
             connect()
         }

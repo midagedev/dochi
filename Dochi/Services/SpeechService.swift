@@ -29,6 +29,7 @@ final class SpeechService: ObservableObject {
     private var continuousListeningTimeout: TimeInterval = 10.0
     private var isContinuousMode: Bool = false
     private let soundService: SoundServiceProtocol
+    private var authorizationGranted = false
 
     init(soundService: SoundServiceProtocol = SoundService()) {
         self.soundService = soundService
@@ -37,12 +38,38 @@ final class SpeechService: ObservableObject {
 
     // MARK: - Authorization
 
+    /// 마이크 + 음성인식 권한을 한 번에 요청. 앱 시작 시 호출.
     func requestAuthorization() async -> Bool {
-        await withCheckedContinuation { continuation in
+        // 이미 권한 확인 완료
+        if authorizationGranted { return true }
+
+        // 1) 음성인식 권한
+        let speechGranted = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in
                 continuation.resume(returning: status == .authorized)
             }
         }
+
+        guard speechGranted else {
+            error = "음성 인식 권한이 거부되었습니다."
+            return false
+        }
+
+        // 2) 마이크 권한
+        let micGranted: Bool
+        if #available(macOS 14.0, *) {
+            micGranted = await AVAudioApplication.requestRecordPermission()
+        } else {
+            micGranted = true // macOS 14 미만에서는 별도 요청 불필요
+        }
+
+        guard micGranted else {
+            error = "마이크 권한이 거부되었습니다."
+            return false
+        }
+
+        authorizationGranted = true
+        return true
     }
 
     // MARK: - Push-to-Talk
@@ -116,6 +143,12 @@ final class SpeechService: ObservableObject {
     }
 
     private func doStartRecognition(mode: RecognitionMode) {
+        guard authorizationGranted else {
+            error = "마이크/음성인식 권한이 필요합니다. 시스템 설정에서 허용해주세요."
+            print("[Dochi] ERROR: 권한 미부여")
+            return
+        }
+
         let available = speechRecognizer?.isAvailable ?? false
         let onDevice = speechRecognizer?.supportsOnDeviceRecognition ?? false
         print("[Dochi] 음성인식 시작 - available: \(available), onDevice: \(onDevice)")
