@@ -608,12 +608,19 @@ final class DochiViewModel: ObservableObject {
     // MARK: - Push-to-Talk
 
     func startListening() {
-        // speaking 중이면 TTS 중단 후 바로 listening 전환 (barge-in)
-        if state == .speaking {
+        // 응답 중이면 중단 후 바로 listening 전환 (barge-in)
+        switch state {
+        case .speaking:
             supertonicService.stopPlayback()
             llmService.cancel()
-        } else if state != .idle {
-            return
+        case .processing, .executingTool:
+            llmService.cancel()
+            supertonicService.stopPlayback()
+            currentToolExecution = nil
+        case .listening:
+            return // 이미 듣는 중
+        case .idle:
+            break
         }
         stopWakeWord()
         isSessionActive = true
@@ -625,6 +632,23 @@ final class DochiViewModel: ObservableObject {
     func stopListening() {
         guard state == .listening else { return }
         speechService.stopListening()
+    }
+
+    /// 현재 진행 중인 응답(LLM/TTS/도구실행)을 취소하고 마지막 사용자 메시지도 제거
+    func cancelResponse() {
+        llmService.cancel()
+        supertonicService.stopPlayback()
+        speechService.stopListening()
+        currentToolExecution = nil
+
+        // 마지막 사용자 메시지 제거 (잘못 인식된 입력 되돌리기)
+        if let lastUserIndex = messages.lastIndex(where: { $0.role == .user }) {
+            // 사용자 메시지 이후에 추가된 assistant 메시지도 같이 제거
+            messages.removeSubrange(lastUserIndex...)
+        }
+
+        state = .idle
+        startWakeWordIfNeeded()
     }
 
     func clearConversation() {

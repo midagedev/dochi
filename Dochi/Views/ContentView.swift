@@ -172,7 +172,7 @@ struct ContentView: View {
                         .foregroundStyle(viewModel.state == .listening ? .orange : .secondary)
                 }
                 .buttonStyle(.borderless)
-                .disabled(viewModel.state == .processing)
+                .disabled(false)
             }
 
             TextField("메시지를 입력하세요...", text: $inputText, axis: .vertical)
@@ -181,8 +181,15 @@ struct ContentView: View {
                 .onSubmit { submitText() }
 
             if isResponding {
-                ProgressView()
-                    .controlSize(.small)
+                Button {
+                    viewModel.cancelResponse()
+                } label: {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.borderless)
+                .help("응답 취소")
             } else {
                 Button {
                     submitText()
