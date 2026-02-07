@@ -401,17 +401,42 @@ final class LLMService: ObservableObject {
 
     // MARK: - Sentence Detection
 
+    private static let punctuationTerminators: Set<Character> = [".", "?", "!", "。"]
+
     private func feedSentenceBuffer(_ text: String) {
         sentenceBuffer += text
 
-        while let nlRange = sentenceBuffer.range(of: "\n") {
-            let line = String(sentenceBuffer[sentenceBuffer.startIndex..<nlRange.lowerBound])
+        while let splitIndex = findSentenceBoundary() {
+            let sentence = String(sentenceBuffer[sentenceBuffer.startIndex...splitIndex])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            sentenceBuffer = String(sentenceBuffer[nlRange.upperBound...])
-            if !line.isEmpty {
-                onSentenceReady?(line)
+            sentenceBuffer = String(sentenceBuffer[sentenceBuffer.index(after: splitIndex)...])
+            if !sentence.isEmpty {
+                onSentenceReady?(sentence)
             }
         }
+    }
+
+    /// 줄바꿈이면 즉시 분할, 구두점은 뒤에 공백이 있을 때만 분할
+    private func findSentenceBoundary() -> String.Index? {
+        var i = sentenceBuffer.startIndex
+        while i < sentenceBuffer.endIndex {
+            let ch = sentenceBuffer[i]
+            if ch == "\n" {
+                return i
+            }
+            if Self.punctuationTerminators.contains(ch) {
+                let next = sentenceBuffer.index(after: i)
+                if next < sentenceBuffer.endIndex && sentenceBuffer[next].isWhitespace {
+                    return i
+                }
+                // 구두점 뒤에 아직 문자가 안 왔으면 대기
+                if next == sentenceBuffer.endIndex {
+                    return nil
+                }
+            }
+            i = sentenceBuffer.index(after: i)
+        }
+        return nil
     }
 
     private func flushSentenceBuffer() {
