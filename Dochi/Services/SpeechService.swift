@@ -104,6 +104,17 @@ final class SpeechService: ObservableObject {
         case wakeWord(phrases: [String])
     }
 
+    /// 오디오 탭을 nonisolated 컨텍스트에서 설치 (Swift 6 concurrency 호환)
+    private nonisolated static func installAudioTap(
+        on inputNode: AVAudioInputNode,
+        format: AVAudioFormat,
+        request: SFSpeechAudioBufferRecognitionRequest
+    ) {
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            request.append(buffer)
+        }
+    }
+
     private func doStartRecognition(mode: RecognitionMode) {
         let available = speechRecognizer?.isAvailable ?? false
         let onDevice = speechRecognizer?.supportsOnDeviceRecognition ?? false
@@ -136,9 +147,8 @@ final class SpeechService: ObservableObject {
             return
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-            request.append(buffer)
-        }
+        // 오디오 스레드에서 실행되는 tap을 nonisolated 컨텍스트에서 설치
+        Self.installAudioTap(on: inputNode, format: format, request: request)
 
         self.audioEngine = engine
         self.recognitionRequest = request
