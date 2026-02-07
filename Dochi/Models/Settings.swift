@@ -176,6 +176,12 @@ final class AppSettings: ObservableObject {
             parts.append(systemPrompt)
         }
 
+        // 현재 날짜/시각 정보
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "yyyy년 M월 d일 EEEE a h시 m분"
+        parts.append("현재 시각: \(formatter.string(from: Date()))")
+
         let userMemory = contextService.loadMemory()
         if !userMemory.isEmpty {
             parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(userMemory)")
