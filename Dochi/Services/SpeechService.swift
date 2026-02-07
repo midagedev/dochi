@@ -12,6 +12,8 @@ final class SpeechService: ObservableObject {
 
     @Published var state: State = .idle
     @Published var transcript: String = ""
+    /// 인식기 리셋 시 보존된 이전 텍스트
+    private var preservedTranscript: String = ""
     @Published var wakeWordTranscript: String = ""  // 디버그용: 웨이크워드 모드에서 인식된 텍스트
     @Published var error: String?
 
@@ -85,6 +87,7 @@ final class SpeechService: ObservableObject {
         if state == .waitingForWakeWord { stopWakeWordDetection() }
 
         transcript = ""
+        preservedTranscript = ""
         error = nil
         isContinuousMode = false
         doStartRecognition(mode: .query)
@@ -96,6 +99,7 @@ final class SpeechService: ObservableObject {
         if state == .waitingForWakeWord { stopWakeWordDetection() }
 
         transcript = ""
+        preservedTranscript = ""
         error = nil
         isContinuousMode = true
         continuousListeningTimeout = timeout
@@ -219,8 +223,26 @@ final class SpeechService: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let result {
-                    self.transcript = result.bestTranscription.formattedString
-                    // 말할 때마다 타이머 리셋 — 무음 2초 후 자동 완료
+                    let newText = result.bestTranscription.formattedString
+
+                    // 인식기가 앞문장을 날리는 현상 대응:
+                    // 기존 텍스트(보존분 제외)의 절반 이상이 사라지면 리셋으로 간주
+                    let currentPartial = self.preservedTranscript.isEmpty
+                        ? self.transcript
+                        : String(self.transcript.dropFirst(self.preservedTranscript.count)).trimmingCharacters(in: .whitespaces)
+
+                    if !currentPartial.isEmpty && newText.count < currentPartial.count / 2 {
+                        // 이전 텍스트 보존
+                        self.preservedTranscript = self.transcript
+                        print("[STT] 인식기 리셋 감지, 보존: \(self.preservedTranscript)")
+                    }
+
+                    if self.preservedTranscript.isEmpty {
+                        self.transcript = newText
+                    } else {
+                        self.transcript = self.preservedTranscript + " " + newText
+                    }
+
                     self.resetSilenceTimer()
                 }
                 if err != nil, self.state == .listening {
