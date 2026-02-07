@@ -15,6 +15,9 @@ struct ContentView: View {
         } detail: {
             VStack(spacing: 0) {
                 toolbarArea
+                if !viewModel.builtInToolService.activeAlarms.isEmpty {
+                    ActiveAlarmsBar()
+                }
                 Divider()
                 ConversationView()
                 Divider()
@@ -241,6 +244,56 @@ struct WakeWordIndicator: View {
             }
         }
         .onDisappear { pulse = false }
+    }
+}
+
+// MARK: - Active Alarms Bar
+
+struct ActiveAlarmsBar: View {
+    @EnvironmentObject var viewModel: DochiViewModel
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            HStack(spacing: 8) {
+                Image(systemName: "alarm.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+
+                ForEach(viewModel.builtInToolService.activeAlarms) { alarm in
+                    HStack(spacing: 4) {
+                        Text(alarm.label)
+                            .font(.caption)
+                            .lineLimit(1)
+                        Text(remainingText(alarm.fireDate))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.orange)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.orange.opacity(0.1), in: Capsule())
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 4)
+            .background(.bar)
+        }
+    }
+
+    private func remainingText(_ fireDate: Date) -> String {
+        let remaining = max(0, Int(fireDate.timeIntervalSinceNow))
+        if remaining >= 3600 {
+            let h = remaining / 3600
+            let m = (remaining % 3600) / 60
+            return "\(h):\(String(format: "%02d", m)):\(String(format: "%02d", remaining % 60))"
+        } else if remaining >= 60 {
+            let m = remaining / 60
+            let s = remaining % 60
+            return "\(m):\(String(format: "%02d", s))"
+        } else {
+            return "\(remaining)초"
+        }
     }
 }
 

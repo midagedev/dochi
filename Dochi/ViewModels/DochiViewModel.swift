@@ -45,6 +45,7 @@ final class DochiViewModel: ObservableObject {
     private var isAskingToEndSession: Bool = false
     private let sessionTimeoutSeconds: TimeInterval = 10.0
 
+
     var isConnected: Bool {
         supertonicService.state == .ready || state != .idle
     }
@@ -156,6 +157,23 @@ final class DochiViewModel: ObservableObject {
                     self.startWakeWordIfNeeded()
                 }
             }
+        }
+
+        // 알람 발동 → TTS로 알림
+        builtInToolService.onAlarmFired = { [weak self] message in
+            guard let self else { return }
+            print("[Dochi] 알람 발동: \(message), 현재 상태: \(self.state), TTS 상태: \(self.supertonicService.state)")
+            // speaking/listening 중이면 중단
+            if self.state == .speaking {
+                self.supertonicService.stopPlayback()
+            }
+            if self.state == .listening {
+                self.speechService.stopListening()
+            }
+            self.state = .speaking
+            self.supertonicService.speed = self.settings.ttsSpeed
+            self.supertonicService.diffusionSteps = self.settings.ttsDiffusionSteps
+            self.supertonicService.speak("알람이에요! \(message)", voice: self.settings.supertonicVoice)
         }
 
         // Supertonic 로드 완료 → 웨이크워드 시작
