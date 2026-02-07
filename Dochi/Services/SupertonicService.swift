@@ -76,7 +76,7 @@ final class SupertonicService: ObservableObject {
                 try await self?.loadModels(voice: voice)
                 self?.state = .ready
             } catch {
-                Log.tts.error("모델 로드 실패: \(error)")
+                Log.tts.error("모델 로드 실패: \(error, privacy: .public)")
                 self?.error = "모델 로드 실패: \(error.localizedDescription)"
                 self?.state = .unloaded
             }
@@ -173,7 +173,7 @@ final class SupertonicService: ObservableObject {
                 } catch is CancellationError {
                     break
                 } catch {
-                    Log.tts.error("음성 합성 실패: \(error)")
+                    Log.tts.error("음성 합성 실패: \(error, privacy: .public)")
                     self.error = "음성 합성 실패: \(error.localizedDescription)"
                     break
                 }

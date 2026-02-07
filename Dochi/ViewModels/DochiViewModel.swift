@@ -349,7 +349,7 @@ final class DochiViewModel: ObservableObject {
                         content: "Error: \(error.localizedDescription)",
                         isError: true
                     ))
-                    Log.tool.error("Tool \(toolCall.name) failed: \(error)")
+                    Log.tool.error("Tool \(toolCall.name, privacy: .public) failed: \(error, privacy: .public)")
                 }
             }
 
@@ -518,7 +518,7 @@ final class DochiViewModel: ObservableObject {
             }
             return variations.isEmpty ? [wakeWord] : variations
         } catch {
-            Log.stt.error("웨이크워드 변형 생성 실패: \(error.localizedDescription)")
+            Log.stt.error("웨이크워드 변형 생성 실패: \(error.localizedDescription, privacy: .public)")
             return [wakeWord]
         }
     }
@@ -835,7 +835,7 @@ final class DochiViewModel: ObservableObject {
                 }
             }
         } catch {
-            Log.app.error("컨텍스트 분석 실패: \(error.localizedDescription)")
+            Log.app.error("컨텍스트 분석 실패: \(error.localizedDescription, privacy: .public)")
             let defaultTitle = generateDefaultTitle(from: sessionMessages)
             await MainActor.run {
                 saveConversationWithTitle(defaultTitle, messages: sessionMessages)
@@ -920,7 +920,7 @@ final class DochiViewModel: ObservableObject {
                 Log.app.info("컨텍스트 압축 완료 (\(currentSize) → \(newSize) bytes)")
             }
         } catch {
-            Log.app.error("컨텍스트 압축 실패: \(error.localizedDescription)")
+            Log.app.error("컨텍스트 압축 실패: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

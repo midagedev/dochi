@@ -38,7 +38,7 @@ final class LLMService: ObservableObject {
         error = nil
         isStreaming = true
 
-        Log.llm.info("요청 시작: provider=\(provider.displayName), model=\(model), messages=\(messages.count)")
+        Log.llm.info("요청 시작: provider=\(provider.displayName, privacy: .public), model=\(model, privacy: .public), messages=\(messages.count)")
 
         streamTask = Task { [weak self] in
             do {
@@ -55,7 +55,7 @@ final class LLMService: ObservableObject {
             } catch is CancellationError {
                 Log.llm.debug("요청 취소됨")
             } catch {
-                Log.llm.error("요청 실패: \(error)")
+                Log.llm.error("요청 실패: \(error, privacy: .public)")
                 self?.error = error.localizedDescription
             }
             self?.isStreaming = false
@@ -275,7 +275,7 @@ final class LLMService: ObservableObject {
             for try await line in bytes.lines {
                 body += line
             }
-            Log.llm.error("HTTP 에러: status=\(httpResponse.statusCode), body=\(body.prefix(500))")
+            Log.llm.error("HTTP 에러: status=\(httpResponse.statusCode), body=\(body.prefix(500), privacy: .public)")
             throw LLMError.httpError(statusCode: httpResponse.statusCode, body: body)
         }
 

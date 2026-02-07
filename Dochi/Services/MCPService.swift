@@ -62,7 +62,7 @@ final class MCPService: ObservableObject, MCPServiceProtocol {
             connectedServers[config.id] = config.name
             error = nil
         } catch {
-            Log.mcp.error("연결 실패 \(config.name): \(error)")
+            Log.mcp.error("연결 실패 \(config.name, privacy: .public): \(error, privacy: .public)")
             self.error = "Failed to connect to \(config.name): \(error.localizedDescription)"
             throw error
         }

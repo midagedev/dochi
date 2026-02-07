@@ -29,7 +29,7 @@ final class KeychainService: KeychainServiceProtocol {
         do {
             try value.write(to: url, atomically: true, encoding: .utf8)
         } catch {
-            Log.storage.error("키 저장 실패 \(account): \(error)")
+            Log.storage.error("키 저장 실패 \(account, privacy: .public): \(error, privacy: .public)")
         }
     }
 
@@ -43,7 +43,7 @@ final class KeychainService: KeychainServiceProtocol {
         do {
             try fileManager.removeItem(at: url)
         } catch {
-            Log.storage.error("키 삭제 실패 \(account): \(error)")
+            Log.storage.error("키 삭제 실패 \(account, privacy: .public): \(error, privacy: .public)")
         }
     }
 }

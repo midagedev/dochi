@@ -64,7 +64,7 @@ final class ConversationService: ConversationServiceProtocol {
             let data = try encoder.encode(conversation)
             try data.write(to: url)
         } catch {
-            Log.storage.error("대화 저장 실패 \(conversation.id): \(error)")
+            Log.storage.error("대화 저장 실패 \(conversation.id): \(error, privacy: .public)")
         }
     }
 
@@ -74,7 +74,7 @@ final class ConversationService: ConversationServiceProtocol {
         do {
             try fileManager.removeItem(at: url)
         } catch {
-            Log.storage.error("대화 삭제 실패 \(id): \(error)")
+            Log.storage.error("대화 삭제 실패 \(id): \(error, privacy: .public)")
         }
     }
 }

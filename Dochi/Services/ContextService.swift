@@ -39,7 +39,7 @@ final class ContextService: ContextServiceProtocol {
         do {
             try content.write(to: systemFileURL, atomically: true, encoding: .utf8)
         } catch {
-            Log.storage.error("system.md 저장 실패: \(error)")
+            Log.storage.error("system.md 저장 실패: \(error, privacy: .public)")
         }
     }
 
@@ -57,7 +57,7 @@ final class ContextService: ContextServiceProtocol {
         do {
             try content.write(to: memoryFileURL, atomically: true, encoding: .utf8)
         } catch {
-            Log.storage.error("memory.md 저장 실패: \(error)")
+            Log.storage.error("memory.md 저장 실패: \(error, privacy: .public)")
         }
     }
 
@@ -90,7 +90,7 @@ final class ContextService: ContextServiceProtocol {
                 try fileManager.moveItem(at: oldContextURL, to: memoryFileURL)
                 Log.storage.info("context.md → memory.md 마이그레이션 완료")
             } catch {
-                Log.storage.error("context.md → memory.md 마이그레이션 실패: \(error)")
+                Log.storage.error("context.md → memory.md 마이그레이션 실패: \(error, privacy: .public)")
             }
         }
     }

@@ -213,7 +213,7 @@ final class SpeechService: ObservableObject {
             Log.stt.info("오디오 엔진 시작 성공")
         } catch {
             self.error = "오디오 엔진 시작 실패: \(error.localizedDescription)"
-            Log.stt.error("오디오 엔진 실패: \(error)")
+            Log.stt.error("오디오 엔진 실패: \(error, privacy: .public)")
             tearDownAudio()
             state = .idle
         }

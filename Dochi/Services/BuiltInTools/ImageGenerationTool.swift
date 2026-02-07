@@ -48,7 +48,7 @@ final class ImageGenerationTool: BuiltInTool {
 
         let imageSize = arguments["image_size"] as? String ?? "square_hd"
 
-        Log.tool.info("이미지 생성 요청: prompt=\(prompt.prefix(100)), size=\(imageSize)")
+        Log.tool.info("이미지 생성 요청: prompt=\(prompt.prefix(100), privacy: .public), size=\(imageSize, privacy: .public)")
 
         // fal.ai FLUX schnell API
         let url = URL(string: "https://fal.run/fal-ai/flux/schnell")!
@@ -70,7 +70,7 @@ final class ImageGenerationTool: BuiltInTool {
 
         if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
             let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-            Log.tool.error("Fal.ai API 에러: status=\(httpResponse.statusCode), body=\(errorBody)")
+            Log.tool.error("Fal.ai API 에러: status=\(httpResponse.statusCode), body=\(errorBody, privacy: .public)")
             throw BuiltInToolError.apiError("Fal.ai API error (\(httpResponse.statusCode)): \(errorBody)")
         }
 
