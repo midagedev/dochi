@@ -169,7 +169,7 @@ struct ContentView: View {
                         .foregroundStyle(viewModel.state == .listening ? .orange : .secondary)
                 }
                 .buttonStyle(.borderless)
-                .disabled(viewModel.state == .processing || viewModel.state == .speaking)
+                .disabled(viewModel.state == .processing)
             }
 
             TextField("메시지를 입력하세요...", text: $inputText, axis: .vertical)

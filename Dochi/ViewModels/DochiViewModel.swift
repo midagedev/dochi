@@ -115,6 +115,11 @@ final class DochiViewModel: ObservableObject {
         llmService.onSentenceReady = { [weak self] sentence in
             guard let self else { return }
             if self.supertonicService.state == .ready || self.supertonicService.state == .synthesizing || self.supertonicService.state == .playing {
+                if self.state != .speaking {
+                    // speaking 진입 시 STT 완전 해제 (에코 방지)
+                    self.speechService.stopListening()
+                    self.speechService.stopWakeWordDetection()
+                }
                 self.state = .speaking
                 self.supertonicService.speed = self.settings.ttsSpeed
                 self.supertonicService.diffusionSteps = self.settings.ttsDiffusionSteps
@@ -136,15 +141,20 @@ final class DochiViewModel: ObservableObject {
             }
         }
 
-        // TTS 재생 완료 → 연속 대화 또는 웨이크워드 대기
+        // TTS 재생 완료 → 에코 방지 딜레이 후 연속 대화 또는 웨이크워드 대기
         supertonicService.onSpeakingComplete = { [weak self] in
             guard let self else { return }
             self.state = .idle
 
-            if self.isSessionActive {
-                self.startContinuousListening()
-            } else {
-                self.startWakeWordIfNeeded()
+            Task {
+                try? await Task.sleep(for: .milliseconds(400))
+                guard self.state == .idle else { return }
+
+                if self.isSessionActive {
+                    self.startContinuousListening()
+                } else {
+                    self.startWakeWordIfNeeded()
+                }
             }
         }
 
@@ -483,6 +493,8 @@ final class DochiViewModel: ObservableObject {
 
     private func askToEndSession() {
         isAskingToEndSession = true
+        speechService.stopListening()
+        speechService.stopWakeWordDetection()
         state = .speaking
         supertonicService.speed = settings.ttsSpeed
         supertonicService.diffusionSteps = settings.ttsDiffusionSteps
@@ -514,6 +526,8 @@ final class DochiViewModel: ObservableObject {
     }
 
     private func confirmAndEndSession() {
+        speechService.stopListening()
+        speechService.stopWakeWordDetection()
         state = .speaking
         supertonicService.speed = settings.ttsSpeed
         supertonicService.diffusionSteps = settings.ttsDiffusionSteps
@@ -548,7 +562,13 @@ final class DochiViewModel: ObservableObject {
     // MARK: - Push-to-Talk
 
     func startListening() {
-        guard state == .idle else { return }
+        // speaking 중이면 TTS 중단 후 바로 listening 전환 (barge-in)
+        if state == .speaking {
+            supertonicService.stopPlayback()
+            llmService.cancel()
+        } else if state != .idle {
+            return
+        }
         stopWakeWord()
         isSessionActive = true
         state = .listening
