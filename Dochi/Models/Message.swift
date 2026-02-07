@@ -6,26 +6,29 @@ struct Message: Identifiable, Codable, Sendable {
     let content: String
     let timestamp: Date
     var toolCalls: [ToolCall]?
+    var toolCallId: String?
     var imageURLs: [URL]?
 
     enum Role: String, Codable, Sendable {
         case system
         case user
         case assistant
+        case tool
     }
 
-    init(role: Role, content: String, toolCalls: [ToolCall]? = nil, imageURLs: [URL]? = nil) {
+    init(role: Role, content: String, toolCalls: [ToolCall]? = nil, toolCallId: String? = nil, imageURLs: [URL]? = nil) {
         self.id = UUID()
         self.role = role
         self.content = content
         self.timestamp = Date()
         self.toolCalls = toolCalls
+        self.toolCallId = toolCallId
         self.imageURLs = imageURLs
     }
 
     // Custom Codable for toolCalls
     enum CodingKeys: String, CodingKey {
-        case id, role, content, timestamp, toolCalls, imageURLs
+        case id, role, content, timestamp, toolCalls, toolCallId, imageURLs
     }
 
     init(from decoder: Decoder) throws {
@@ -42,6 +45,7 @@ struct Message: Identifiable, Codable, Sendable {
             toolCalls = nil
         }
 
+        toolCallId = try container.decodeIfPresent(String.self, forKey: .toolCallId)
         imageURLs = try container.decodeIfPresent([URL].self, forKey: .imageURLs)
     }
 
@@ -57,6 +61,7 @@ struct Message: Identifiable, Codable, Sendable {
             try container.encode(codableToolCalls, forKey: .toolCalls)
         }
 
+        try container.encodeIfPresent(toolCallId, forKey: .toolCallId)
         try container.encodeIfPresent(imageURLs, forKey: .imageURLs)
     }
 }

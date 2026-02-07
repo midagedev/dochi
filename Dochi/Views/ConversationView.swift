@@ -14,7 +14,7 @@ struct ConversationView: View {
                             connectedEmptyState
                         }
 
-                        ForEach(viewModel.messages) { message in
+                        ForEach(viewModel.messages.filter { $0.role != .tool && $0.toolCalls == nil }) { message in
                             MessageBubbleView(message: message)
                                 .id(message.id)
                         }

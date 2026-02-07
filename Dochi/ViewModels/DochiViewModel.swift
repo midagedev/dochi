@@ -356,6 +356,15 @@ final class DochiViewModel: ObservableObject {
             currentToolExecution = nil
             state = .processing
 
+            // tool 결과를 메시지로 저장 (대화 히스토리 유지)
+            for result in results {
+                toolLoopMessages.append(Message(
+                    role: .tool,
+                    content: result.content,
+                    toolCallId: result.toolCallId
+                ))
+            }
+
             // tool 결과와 함께 LLM 재호출
             // continuation을 사용해서 다음 응답 대기
             let imageURLs = collectedImageURLs
@@ -381,7 +390,7 @@ final class DochiViewModel: ObservableObject {
                     continuation.resume(returning: [])
                 }
 
-                sendLLMRequest(messages: toolLoopMessages, toolResults: results)
+                sendLLMRequest(messages: toolLoopMessages, toolResults: nil)
             }
         }
 

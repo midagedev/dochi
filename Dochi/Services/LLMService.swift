@@ -129,32 +129,43 @@ final class LLMService: ObservableObject {
         }
 
         for msg in messages {
-            let role: String
             switch msg.role {
-            case .user: role = "user"
-            case .assistant: role = "assistant"
-            case .system: role = "system"
-            }
+            case .tool:
+                // Tool result 메시지
+                apiMessages.append([
+                    "role": "tool",
+                    "tool_call_id": msg.toolCallId ?? "",
+                    "content": msg.content
+                ])
+            case .user, .assistant, .system:
+                let role: String
+                switch msg.role {
+                case .user: role = "user"
+                case .assistant: role = "assistant"
+                case .system: role = "system"
+                default: continue
+                }
 
-            // tool_calls가 있는 assistant 메시지
-            if let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
-                var msgDict: [String: Any] = ["role": role]
-                if !msg.content.isEmpty {
-                    msgDict["content"] = msg.content
+                // tool_calls가 있는 assistant 메시지
+                if let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
+                    var msgDict: [String: Any] = ["role": role]
+                    if !msg.content.isEmpty {
+                        msgDict["content"] = msg.content
+                    }
+                    msgDict["tool_calls"] = toolCalls.map { tc in
+                        [
+                            "id": tc.id,
+                            "type": "function",
+                            "function": [
+                                "name": tc.name,
+                                "arguments": (try? String(data: JSONSerialization.data(withJSONObject: tc.arguments), encoding: .utf8)) ?? "{}"
+                            ]
+                        ] as [String: Any]
+                    }
+                    apiMessages.append(msgDict)
+                } else {
+                    apiMessages.append(["role": role, "content": msg.content])
                 }
-                msgDict["tool_calls"] = toolCalls.map { tc in
-                    [
-                        "id": tc.id,
-                        "type": "function",
-                        "function": [
-                            "name": tc.name,
-                            "arguments": (try? String(data: JSONSerialization.data(withJSONObject: tc.arguments), encoding: .utf8)) ?? "{}"
-                        ]
-                    ] as [String: Any]
-                }
-                apiMessages.append(msgDict)
-            } else {
-                apiMessages.append(["role": role, "content": msg.content])
             }
         }
 
@@ -195,7 +206,26 @@ final class LLMService: ObservableObject {
     ) -> [String: Any] {
         var apiMessages: [[String: Any]] = []
 
+        // Anthropic: tool result 메시지들을 연속된 user content 배열로 묶어야 함
+        var pendingToolResults: [[String: Any]] = []
+
         for msg in messages where msg.role != .system {
+            if msg.role == .tool {
+                // tool result를 모아두기 (다음 비-tool 메시지 전에 flush)
+                pendingToolResults.append([
+                    "type": "tool_result",
+                    "tool_use_id": msg.toolCallId ?? "",
+                    "content": msg.content
+                ])
+                continue
+            }
+
+            // 모인 tool result가 있으면 user 메시지로 flush
+            if !pendingToolResults.isEmpty {
+                apiMessages.append(["role": "user", "content": pendingToolResults])
+                pendingToolResults = []
+            }
+
             let role = msg.role == .user ? "user" : "assistant"
 
             // Anthropic은 content가 배열일 수 있음 (tool_use, tool_result)
@@ -216,6 +246,11 @@ final class LLMService: ObservableObject {
             } else {
                 apiMessages.append(["role": role, "content": msg.content])
             }
+        }
+
+        // 마지막에 남은 tool result flush
+        if !pendingToolResults.isEmpty {
+            apiMessages.append(["role": "user", "content": pendingToolResults])
         }
 
         // Tool 결과 추가 (user 메시지로)
