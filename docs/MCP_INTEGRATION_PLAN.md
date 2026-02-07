@@ -137,18 +137,29 @@ LLM 재호출 (반복)
 
 ---
 
-## Phase 7: MCP 서버 연동 테스트 📝 예정
+## Phase 7: 내장 웹검색 도구 ✅ 완료
 
-### 작업 내용
-- [ ] 테스트용 MCP 서버 선택
-- [ ] 연결 테스트
-- [ ] 도구 실행 E2E 테스트
+### 완료된 작업
+- [x] Tavily API 기반 웹검색 도구 내장
+- [x] `BuiltInToolService` 구현
+  - `web_search` 도구 제공
+  - Tavily API 호출 및 응답 포맷팅
+- [x] DochiViewModel에 BuiltInToolService 통합
+  - MCP 도구와 함께 LLM에 전달
+  - tool loop에서 내장/MCP 도구 구분 처리
+- [x] 설정에 Tavily API 키 추가
 
-### 후보 MCP 서버
-| 서버 | 기능 | 연결 방식 |
-|------|------|----------|
-| 자체 HTTP 서버 | 테스트용 | HTTP |
-| mcp-server-fetch | 웹 가져오기 | Stdio (미지원) |
+### 새 파일
+- `Dochi/Services/BuiltInToolService.swift`
+
+### 수정된 파일
+- `Dochi/Models/Settings.swift` - tavilyApiKey 추가
+- `Dochi/Views/SettingsView.swift` - Tavily API 키 입력 필드
+- `Dochi/ViewModels/DochiViewModel.swift` - BuiltInToolService 통합
+
+### 사용법
+1. 설정에서 Tavily API 키 입력 (https://tavily.com에서 무료 발급)
+2. LLM이 자동으로 웹검색 도구 사용 가능
 
 ---
 
@@ -180,7 +191,7 @@ LLM 재호출 (반복)
 | 4. LLMService | ✅ 완료 | tool calling 파싱 |
 | 5. Tool Loop | ✅ 완료 | ViewModel 통합 |
 | 6. 테스트 | ✅ 완료 | 48개 테스트 |
-| 7. 서버 연동 | 📝 예정 | E2E 테스트 |
+| 7. 내장 웹검색 | ✅ 완료 | Tavily API |
 | 8. 설정 UI | ✅ 완료 | 서버 관리 UI |
 
 ---

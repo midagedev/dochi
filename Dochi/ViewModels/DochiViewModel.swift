@@ -25,6 +25,7 @@ final class DochiViewModel: ObservableObject {
     let llmService: LLMService
     let supertonicService: SupertonicService
     let mcpService: MCPServiceProtocol
+    let builtInToolService: BuiltInToolService
 
     // Dependencies
     private let contextService: ContextServiceProtocol
@@ -63,6 +64,7 @@ final class DochiViewModel: ObservableObject {
         self.llmService = LLMService()
         self.supertonicService = SupertonicService()
         self.mcpService = mcpService ?? MCPService()
+        self.builtInToolService = BuiltInToolService()
 
         setupCallbacks()
         setupChangeForwarding()
@@ -222,10 +224,15 @@ final class DochiViewModel: ObservableObject {
         let apiKey = settings.apiKey(for: provider)
         let systemPrompt = settings.buildInstructions()
 
-        // MCP에서 사용 가능한 도구 목록
+        // 내장 도구 서비스 설정 업데이트
+        builtInToolService.configure(tavilyApiKey: settings.tavilyApiKey)
+
+        // MCP + 내장 도구 목록
         let tools: [[String: Any]]? = {
-            let mcpTools = mcpService.availableTools
-            return mcpTools.isEmpty ? nil : mcpTools.map { $0.asDictionary }
+            var allTools: [MCPToolInfo] = []
+            allTools.append(contentsOf: builtInToolService.availableTools)
+            allTools.append(contentsOf: mcpService.availableTools)
+            return allTools.isEmpty ? nil : allTools.map { $0.asDictionary }
         }()
 
         llmService.sendMessage(
@@ -265,14 +272,25 @@ final class DochiViewModel: ObservableObject {
                 print("[Dochi] Executing tool: \(toolCall.name)")
 
                 do {
-                    let mcpResult = try await mcpService.callTool(
-                        name: toolCall.name,
-                        arguments: toolCall.arguments
-                    )
+                    // 내장 도구인지 확인
+                    let isBuiltIn = builtInToolService.availableTools.contains { $0.name == toolCall.name }
+                    let toolResult: MCPToolResult
+
+                    if isBuiltIn {
+                        toolResult = try await builtInToolService.callTool(
+                            name: toolCall.name,
+                            arguments: toolCall.arguments
+                        )
+                    } else {
+                        toolResult = try await mcpService.callTool(
+                            name: toolCall.name,
+                            arguments: toolCall.arguments
+                        )
+                    }
                     results.append(ToolResult(
                         toolCallId: toolCall.id,
-                        content: mcpResult.content,
-                        isError: mcpResult.isError
+                        content: toolResult.content,
+                        isError: toolResult.isError
                     ))
                     print("[Dochi] Tool \(toolCall.name) completed")
                 } catch {

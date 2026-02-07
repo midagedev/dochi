@@ -150,6 +150,14 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    var tavilyApiKey: String {
+        get { keychainService.load(account: "tavily") ?? "" }
+        set {
+            keychainService.save(account: "tavily", value: newValue)
+            objectWillChange.send()
+        }
+    }
+
     func apiKey(for provider: LLMProvider) -> String {
         switch provider {
         case .openai: apiKey
