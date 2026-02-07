@@ -532,6 +532,7 @@ final class DochiViewModel: ObservableObject {
 
     private func startContinuousListening() {
         state = .listening
+        speechService.silenceTimeout = settings.sttSilenceTimeout
         speechService.startContinuousListening(timeout: sessionTimeoutSeconds)
         print("[Dochi] 연속 대화 STT 시작 (타임아웃: \(sessionTimeoutSeconds)초)")
     }
@@ -617,6 +618,7 @@ final class DochiViewModel: ObservableObject {
         stopWakeWord()
         isSessionActive = true
         state = .listening
+        speechService.silenceTimeout = settings.sttSilenceTimeout
         speechService.startListening()
     }
 

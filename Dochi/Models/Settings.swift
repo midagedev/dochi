@@ -34,6 +34,11 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(ttsDiffusionSteps, forKey: Keys.ttsDiffusionSteps) }
     }
 
+    // STT settings
+    @Published var sttSilenceTimeout: Double {
+        didSet { UserDefaults.standard.set(sttSilenceTimeout, forKey: Keys.sttSilenceTimeout) }
+    }
+
     // Memory compression
     @Published var contextAutoCompress: Bool {
         didSet { UserDefaults.standard.set(contextAutoCompress, forKey: Keys.contextAutoCompress) }
@@ -55,6 +60,7 @@ final class AppSettings: ObservableObject {
         static let supertonicVoice = "settings.supertonicVoice"
         static let ttsSpeed = "settings.ttsSpeed"
         static let ttsDiffusionSteps = "settings.ttsDiffusionSteps"
+        static let sttSilenceTimeout = "settings.sttSilenceTimeout"
         static let contextAutoCompress = "settings.contextAutoCompress"
         static let contextMaxSize = "settings.contextMaxSize"
         static let mcpServers = "settings.mcpServers"
@@ -90,6 +96,7 @@ final class AppSettings: ObservableObject {
         self.ttsSpeed = defaults.object(forKey: Keys.ttsSpeed) as? Float ?? 1.15
         self.ttsDiffusionSteps = defaults.object(forKey: Keys.ttsDiffusionSteps) as? Int ?? 10
 
+        self.sttSilenceTimeout = defaults.object(forKey: Keys.sttSilenceTimeout) as? Double ?? 1.0
         self.contextAutoCompress = defaults.object(forKey: Keys.contextAutoCompress) as? Bool ?? true
         self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? 15360
 

@@ -25,7 +25,7 @@ final class SpeechService: ObservableObject {
     private var speechRecognizer: SFSpeechRecognizer?
     private var wakeWordRestartTimer: Timer?
     private var silenceTimer: Timer?
-    private let silenceTimeout: TimeInterval = 1.0  // 1초 무음이면 자동 완료
+    var silenceTimeout: TimeInterval = 1.0  // 무음 후 자동 완료까지 대기 시간
     private var continuousListeningTimeout: TimeInterval = 10.0
     private var isContinuousMode: Bool = false
     private let soundService: SoundServiceProtocol
@@ -40,15 +40,10 @@ final class SpeechService: ObservableObject {
 
     /// 마이크 + 음성인식 권한을 한 번에 요청. 앱 시작 시 호출.
     func requestAuthorization() async -> Bool {
-        // 이미 권한 확인 완료
         if authorizationGranted { return true }
 
-        // 1) 음성인식 권한
-        let speechGranted = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status == .authorized)
-            }
-        }
+        // 1) 음성인식 권한 — nonisolated static으로 분리 (콜백이 백그라운드 스레드에서 옴)
+        let speechGranted = await Self.requestSpeechPermission()
 
         guard speechGranted else {
             error = "음성 인식 권한이 거부되었습니다."
@@ -56,12 +51,7 @@ final class SpeechService: ObservableObject {
         }
 
         // 2) 마이크 권한
-        let micGranted: Bool
-        if #available(macOS 14.0, *) {
-            micGranted = await AVAudioApplication.requestRecordPermission()
-        } else {
-            micGranted = true // macOS 14 미만에서는 별도 요청 불필요
-        }
+        let micGranted = await Self.requestMicPermission()
 
         guard micGranted else {
             error = "마이크 권한이 거부되었습니다."
@@ -69,6 +59,22 @@ final class SpeechService: ObservableObject {
         }
 
         authorizationGranted = true
+        return true
+    }
+
+    /// 백그라운드 스레드에서 콜백되므로 반드시 nonisolated
+    private nonisolated static func requestSpeechPermission() async -> Bool {
+        await withUnsafeContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    private nonisolated static func requestMicPermission() async -> Bool {
+        if #available(macOS 14.0, *) {
+            return await AVAudioApplication.requestRecordPermission()
+        }
         return true
     }
 

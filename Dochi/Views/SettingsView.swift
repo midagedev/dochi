@@ -72,6 +72,17 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: - STT
+                Section("STT") {
+                    HStack {
+                        Text("무음 대기")
+                        Slider(value: $viewModel.settings.sttSilenceTimeout, in: 0.5...3.0, step: 0.5)
+                        Text(String(format: "%.1f초", viewModel.settings.sttSilenceTimeout))
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 36)
+                    }
+                }
+
                 // MARK: - TTS
                 Section("TTS") {
                     Picker("음성", selection: $viewModel.settings.supertonicVoice) {
