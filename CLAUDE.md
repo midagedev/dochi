@@ -69,6 +69,13 @@ Dochi/
 │   │   ├── ConversationServiceProtocol.swift
 │   │   ├── KeychainServiceProtocol.swift
 │   │   └── SoundServiceProtocol.swift
+│   ├── BuiltInTools/         # Built-in tool modules
+│   │   ├── BuiltInToolProtocol.swift
+│   │   ├── WebSearchTool.swift
+│   │   ├── RemindersTool.swift
+│   │   ├── AlarmTool.swift
+│   │   └── ImageGenerationTool.swift
+│   ├── BuiltInToolService.swift  # Tool router
 │   ├── LLMService.swift
 │   ├── SpeechService.swift
 │   ├── SupertonicService.swift

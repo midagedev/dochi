@@ -253,7 +253,7 @@ final class DochiViewModel: ObservableObject {
         let systemPrompt = settings.buildInstructions()
 
         // 내장 도구 서비스 설정 업데이트
-        builtInToolService.configure(tavilyApiKey: settings.tavilyApiKey)
+        builtInToolService.configure(tavilyApiKey: settings.tavilyApiKey, falaiApiKey: settings.falaiApiKey)
 
         // MCP + 내장 도구 목록
         let tools: [[String: Any]]? = {
@@ -279,6 +279,7 @@ final class DochiViewModel: ObservableObject {
     private func executeToolLoop(toolCalls: [ToolCall]) async {
         var iteration = 0
         var currentToolCalls = toolCalls
+        var collectedImageURLs: [URL] = []
 
         while !currentToolCalls.isEmpty && iteration < maxToolIterations {
             iteration += 1
@@ -315,6 +316,10 @@ final class DochiViewModel: ObservableObject {
                             arguments: toolCall.arguments
                         )
                     }
+
+                    // 이미지 URL 수집 (![image](url) 패턴)
+                    collectedImageURLs.append(contentsOf: extractImageURLs(from: toolResult.content))
+
                     results.append(ToolResult(
                         toolCallId: toolCall.id,
                         content: toolResult.content,
@@ -336,23 +341,26 @@ final class DochiViewModel: ObservableObject {
 
             // tool 결과와 함께 LLM 재호출
             // continuation을 사용해서 다음 응답 대기
+            let imageURLs = collectedImageURLs
             currentToolCalls = await withCheckedContinuation { continuation in
-                var receivedToolCalls: [ToolCall]?
                 var completed = false
 
                 llmService.onToolCallsReceived = { [weak self] toolCalls in
-                    guard let self, !completed else { return }
+                    guard self != nil, !completed else { return }
                     completed = true
-                    receivedToolCalls = toolCalls
                     continuation.resume(returning: toolCalls)
                 }
 
                 llmService.onResponseComplete = { [weak self] response in
                     guard let self, !completed else { return }
                     completed = true
-                    // 최종 응답 - 메시지에 추가
+                    // 최종 응답 - 메시지에 추가 (이미지 URL 포함)
                     self.messages = self.toolLoopMessages
-                    self.messages.append(Message(role: .assistant, content: response))
+                    self.messages.append(Message(
+                        role: .assistant,
+                        content: response,
+                        imageURLs: imageURLs.isEmpty ? nil : imageURLs
+                    ))
                     continuation.resume(returning: [])
                 }
 
@@ -367,6 +375,17 @@ final class DochiViewModel: ObservableObject {
 
         // Tool loop 완료 후 콜백 복원
         setupLLMCallbacks()
+    }
+
+    private func extractImageURLs(from content: String) -> [URL] {
+        let pattern = #"!\[.*?\]\((.*?)\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(content.startIndex..., in: content)
+        let matches = regex.matches(in: content, range: range)
+        return matches.compactMap { match in
+            guard let urlRange = Range(match.range(at: 1), in: content) else { return nil }
+            return URL(string: String(content[urlRange]))
+        }
     }
 
     private func setupLLMCallbacks() {

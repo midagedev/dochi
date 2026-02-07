@@ -158,6 +158,14 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    var falaiApiKey: String {
+        get { keychainService.load(account: "falai") ?? "" }
+        set {
+            keychainService.save(account: "falai", value: newValue)
+            objectWillChange.send()
+        }
+    }
+
     func apiKey(for provider: LLMProvider) -> String {
         switch provider {
         case .openai: apiKey

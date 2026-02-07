@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var anthropicKey: String = ""
     @State private var zaiKey: String = ""
     @State private var tavilyKey: String = ""
+    @State private var falaiKey: String = ""
     @State private var showSystemEditor = false
     @State private var showMemoryEditor = false
     @State private var showChangelog = false
@@ -50,6 +51,10 @@ struct SettingsView: View {
                     SecureField("Tavily API 키 (웹검색)", text: $tavilyKey)
                         .onChange(of: tavilyKey) { _, newValue in
                             viewModel.settings.tavilyApiKey = newValue
+                        }
+                    SecureField("Fal.ai API 키 (이미지생성)", text: $falaiKey)
+                        .onChange(of: falaiKey) { _, newValue in
+                            viewModel.settings.falaiApiKey = newValue
                         }
                 }
 
@@ -253,6 +258,7 @@ struct SettingsView: View {
             anthropicKey = viewModel.settings.anthropicApiKey
             zaiKey = viewModel.settings.zaiApiKey
             tavilyKey = viewModel.settings.tavilyApiKey
+            falaiKey = viewModel.settings.falaiApiKey
         }
         .sheet(isPresented: $showSystemEditor) {
             SystemEditorView(contextService: contextService)

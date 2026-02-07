@@ -370,6 +370,35 @@ struct ThinkingDotsView: View {
 
 struct MessageBubbleView: View {
     let message: Message
+    @State private var expandedImageURL: URL?
+
+    // ![image](url) 패턴에서 URL 추출
+    private var imageURLsFromContent: [URL] {
+        let pattern = #"!\[.*?\]\((.*?)\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(message.content.startIndex..., in: message.content)
+        let matches = regex.matches(in: message.content, range: range)
+        return matches.compactMap { match in
+            guard let urlRange = Range(match.range(at: 1), in: message.content) else { return nil }
+            return URL(string: String(message.content[urlRange]))
+        }
+    }
+
+    // 마크다운 이미지 태그를 제거한 텍스트
+    private var textWithoutImages: String {
+        let pattern = #"\n*!\[.*?\]\(.*?\)\n*"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return message.content }
+        let range = NSRange(message.content.startIndex..., in: message.content)
+        return regex.stringByReplacingMatches(in: message.content, range: range, withTemplate: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var allImageURLs: [URL] {
+        var urls = message.imageURLs ?? []
+        urls.append(contentsOf: imageURLsFromContent)
+        return urls
+    }
+
     var body: some View {
         HStack(alignment: .top) {
             if message.role == .user { Spacer(minLength: 60) }
@@ -377,17 +406,137 @@ struct MessageBubbleView: View {
                 Text(message.role == .user ? "나" : "도치")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(message.content)
-                    .textSelection(.enabled)
-                    .padding(12)
-                    .background(
-                        message.role == .user
-                            ? Color.blue.opacity(0.15)
-                            : Color(.controlBackgroundColor)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    let displayText = allImageURLs.isEmpty ? message.content : textWithoutImages
+                    if !displayText.isEmpty {
+                        Text(displayText)
+                            .textSelection(.enabled)
+                    }
+
+                    ForEach(allImageURLs, id: \.absoluteString) { imageURL in
+                        GeneratedImageView(url: imageURL)
+                            .onTapGesture {
+                                expandedImageURL = imageURL
+                            }
+                    }
+                }
+                .padding(12)
+                .background(
+                    message.role == .user
+                        ? Color.blue.opacity(0.15)
+                        : Color(.controlBackgroundColor)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             if message.role == .assistant { Spacer(minLength: 60) }
+        }
+        .sheet(item: $expandedImageURL) { url in
+            ImagePreviewView(url: url)
+        }
+    }
+}
+
+// MARK: - Generated Image View
+
+struct GeneratedImageView: View {
+    let url: URL
+
+    var body: some View {
+        if url.isFileURL, let nsImage = NSImage(contentsOf: url) {
+            Image(nsImage: nsImage)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 300, maxHeight: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 300, maxHeight: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                case .failure:
+                    Label("이미지 로드 실패", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .empty:
+                    ProgressView()
+                        .frame(width: 100, height: 100)
+                @unknown default:
+                    ProgressView()
+                        .frame(width: 100, height: 100)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Image Preview
+
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
+
+struct ImagePreviewView: View {
+    @Environment(\.dismiss) private var dismiss
+    let url: URL
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button {
+                    saveImage()
+                } label: {
+                    Label("저장", systemImage: "square.and.arrow.down")
+                }
+                Button("닫기") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+
+            Divider()
+
+            if url.isFileURL, let nsImage = NSImage(contentsOf: url) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .scaledToFit()
+                    .padding()
+            } else {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .padding()
+                    case .failure:
+                        Label("이미지 로드 실패", systemImage: "exclamationmark.triangle")
+                            .padding()
+                    case .empty:
+                        ProgressView()
+                            .padding()
+                    @unknown default:
+                        ProgressView()
+                            .padding()
+                    }
+                }
+            }
+        }
+        .frame(minWidth: 400, minHeight: 400)
+    }
+
+    private func saveImage() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.jpeg, .png]
+        panel.nameFieldStringValue = url.lastPathComponent
+        panel.begin { result in
+            if result == .OK, let destURL = panel.url {
+                try? FileManager.default.copyItem(at: url, to: destURL)
+            }
         }
     }
 }
