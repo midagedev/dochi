@@ -1,5 +1,6 @@
 import Foundation
 import MCP
+import os
 
 /// MCP 서비스 - 여러 MCP 서버 관리 및 도구 실행
 /// 현재는 HTTP 기반 MCP 서버만 지원
@@ -34,7 +35,7 @@ final class MCPService: ObservableObject, MCPServiceProtocol {
 
         do {
             let result = try await client.connect(transport: transport)
-            print("[MCP] Connected to \(config.name)")
+            Log.mcp.info("Connected to \(config.name)")
 
             // 도구 목록 가져오기
             var tools: [MCPToolInfo] = []
@@ -48,7 +49,7 @@ final class MCPService: ObservableObject, MCPServiceProtocol {
                         inputSchema: convertValueToDict(tool.inputSchema)
                     )
                 }
-                print("[MCP] Available tools from \(config.name): \(tools.map { $0.name })")
+                Log.mcp.info("Available tools from \(config.name): \(tools.map { $0.name })")
             }
 
             let connection = MCPConnection(
@@ -61,6 +62,7 @@ final class MCPService: ObservableObject, MCPServiceProtocol {
             connectedServers[config.id] = config.name
             error = nil
         } catch {
+            Log.mcp.error("연결 실패 \(config.name): \(error)")
             self.error = "Failed to connect to \(config.name): \(error.localizedDescription)"
             throw error
         }
@@ -72,7 +74,7 @@ final class MCPService: ObservableObject, MCPServiceProtocol {
         await connection.client.disconnect()
         connections.removeValue(forKey: serverId)
         connectedServers.removeValue(forKey: serverId)
-        print("[MCP] Disconnected from \(connection.config.name)")
+        Log.mcp.info("Disconnected from \(connection.config.name)")
     }
 
     func disconnectAll() async {

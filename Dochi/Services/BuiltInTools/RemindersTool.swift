@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import EventKit
+import os
 
 /// Apple 미리알림 도구
 @MainActor
@@ -92,6 +93,7 @@ final class RemindersTool: BuiltInTool {
         if accessGranted { return }
         let granted = try await eventStore.requestFullAccessToReminders()
         guard granted else {
+            Log.tool.warning("미리알림 접근 권한 거부됨")
             throw BuiltInToolError.apiError("미리알림 접근 권한이 거부되었습니다. 시스템 설정에서 권한을 허용해주세요.")
         }
         accessGranted = true

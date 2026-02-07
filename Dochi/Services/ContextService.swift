@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// 프롬프트 파일 관리 서비스
 /// ~/Library/Application Support/Dochi/ 디렉토리의 md 파일들을 관리
@@ -35,7 +36,11 @@ final class ContextService: ContextServiceProtocol {
     }
 
     func saveSystem(_ content: String) {
-        try? content.write(to: systemFileURL, atomically: true, encoding: .utf8)
+        do {
+            try content.write(to: systemFileURL, atomically: true, encoding: .utf8)
+        } catch {
+            Log.storage.error("system.md 저장 실패: \(error)")
+        }
     }
 
     var systemPath: String {
@@ -49,7 +54,11 @@ final class ContextService: ContextServiceProtocol {
     }
 
     func saveMemory(_ content: String) {
-        try? content.write(to: memoryFileURL, atomically: true, encoding: .utf8)
+        do {
+            try content.write(to: memoryFileURL, atomically: true, encoding: .utf8)
+        } catch {
+            Log.storage.error("memory.md 저장 실패: \(error)")
+        }
     }
 
     func appendMemory(_ content: String) {
@@ -77,8 +86,12 @@ final class ContextService: ContextServiceProtocol {
 
         // 기존 context.md가 있고 memory.md가 없으면 이동
         if fileManager.fileExists(atPath: oldContextURL.path) && !fileManager.fileExists(atPath: memoryFileURL.path) {
-            try? fileManager.moveItem(at: oldContextURL, to: memoryFileURL)
-            print("[Dochi] context.md → memory.md 마이그레이션 완료")
+            do {
+                try fileManager.moveItem(at: oldContextURL, to: memoryFileURL)
+                Log.storage.info("context.md → memory.md 마이그레이션 완료")
+            } catch {
+                Log.storage.error("context.md → memory.md 마이그레이션 실패: \(error)")
+            }
         }
     }
 }

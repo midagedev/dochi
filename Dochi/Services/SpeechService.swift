@@ -1,6 +1,7 @@
 import Foundation
 @preconcurrency import Speech
 import AVFoundation
+import os
 
 @MainActor
 final class SpeechService: ObservableObject {
@@ -155,17 +156,17 @@ final class SpeechService: ObservableObject {
     private func doStartRecognition(mode: RecognitionMode) {
         guard authorizationGranted else {
             error = "마이크/음성인식 권한이 필요합니다. 시스템 설정에서 허용해주세요."
-            print("[Dochi] ERROR: 권한 미부여")
+            Log.stt.error("권한 미부여")
             return
         }
 
         let available = speechRecognizer?.isAvailable ?? false
         let onDevice = speechRecognizer?.supportsOnDeviceRecognition ?? false
-        print("[Dochi] 음성인식 시작 - available: \(available), onDevice: \(onDevice)")
+        Log.stt.info("음성인식 시작 - available: \(available), onDevice: \(onDevice)")
 
         guard available else {
             error = "음성 인식을 사용할 수 없습니다."
-            print("[Dochi] ERROR: 음성 인식 불가")
+            Log.stt.error("음성 인식 불가")
             return
         }
 
@@ -175,18 +176,18 @@ final class SpeechService: ObservableObject {
         // 온디바이스가 안 되면 서버 인식 사용
         if onDevice {
             request.requiresOnDeviceRecognition = true
-            print("[Dochi] 온디바이스 인식 사용")
+            Log.stt.info("온디바이스 인식 사용")
         } else {
-            print("[Dochi] 서버 인식 사용 (온디바이스 미지원)")
+            Log.stt.info("서버 인식 사용 (온디바이스 미지원)")
         }
 
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
-        print("[Dochi] 오디오 포맷 - sampleRate: \(format.sampleRate), channels: \(format.channelCount)")
+        Log.stt.debug("오디오 포맷 - sampleRate: \(format.sampleRate), channels: \(format.channelCount)")
 
         guard format.sampleRate > 0, format.channelCount > 0 else {
             error = "오디오 입력 장치를 찾을 수 없습니다."
-            print("[Dochi] ERROR: 오디오 포맷 무효")
+            Log.stt.error("오디오 포맷 무효")
             return
         }
 
@@ -202,17 +203,17 @@ final class SpeechService: ObservableObject {
             beginQueryRecognition(request: request)
         case .wakeWord(let phrases):
             state = .waitingForWakeWord
-            print("[Dochi] 웨이크워드 대기: \(phrases)")
+            Log.stt.info("웨이크워드 대기: \(phrases)")
             beginWakeWordRecognition(request: request, phrases: phrases)
         }
 
         engine.prepare()
         do {
             try engine.start()
-            print("[Dochi] 오디오 엔진 시작 성공")
+            Log.stt.info("오디오 엔진 시작 성공")
         } catch {
             self.error = "오디오 엔진 시작 실패: \(error.localizedDescription)"
-            print("[Dochi] ERROR: 오디오 엔진 실패 - \(error)")
+            Log.stt.error("오디오 엔진 실패: \(error)")
             tearDownAudio()
             state = .idle
         }
@@ -234,7 +235,7 @@ final class SpeechService: ObservableObject {
                     if !currentPartial.isEmpty && newText.count < currentPartial.count / 2 {
                         // 이전 텍스트 보존
                         self.preservedTranscript = self.transcript
-                        print("[STT] 인식기 리셋 감지, 보존: \(self.preservedTranscript)")
+                        Log.stt.debug("인식기 리셋 감지, 보존: \(self.preservedTranscript)")
                     }
 
                     if self.preservedTranscript.isEmpty {

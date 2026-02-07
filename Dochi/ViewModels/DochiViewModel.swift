@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import os
 
 @MainActor
 final class DochiViewModel: ObservableObject {
@@ -79,7 +80,7 @@ final class DochiViewModel: ObservableObject {
             guard let self else { return }
             self.isSessionActive = true
             self.state = .listening
-            print("[Dochi] 세션 시작")
+            Log.app.info("세션 시작")
         }
 
         // STT 완료 → 응답 처리
@@ -168,7 +169,7 @@ final class DochiViewModel: ObservableObject {
         // 알람 발동 → TTS로 알림
         builtInToolService.onAlarmFired = { [weak self] message in
             guard let self else { return }
-            print("[Dochi] 알람 발동: \(message), 현재 상태: \(self.state), TTS 상태: \(self.supertonicService.state)")
+            Log.app.info("알람 발동: \(message), 현재 상태: \(String(describing: self.state)), TTS 상태: \(String(describing: self.supertonicService.state))")
             // speaking/listening 중이면 중단
             if self.state == .speaking {
                 self.supertonicService.stopPlayback()
@@ -214,7 +215,7 @@ final class DochiViewModel: ObservableObject {
         Task {
             let granted = await speechService.requestAuthorization()
             if !granted {
-                print("[Dochi] 마이크/음성인식 권한 거부됨")
+                Log.app.warning("마이크/음성인식 권한 거부됨")
             }
         }
 
@@ -297,7 +298,7 @@ final class DochiViewModel: ObservableObject {
 
         while !currentToolCalls.isEmpty && iteration < maxToolIterations {
             iteration += 1
-            print("[Dochi] Tool loop iteration \(iteration), \(currentToolCalls.count) tools to execute")
+            Log.tool.info("Tool loop iteration \(iteration), \(currentToolCalls.count) tools to execute")
 
             // 현재 partial response를 assistant 메시지로 저장 (tool_calls 포함)
             let assistantMessage = Message(
@@ -312,7 +313,7 @@ final class DochiViewModel: ObservableObject {
             for toolCall in currentToolCalls {
                 currentToolExecution = toolCall.name
                 state = .executingTool(toolCall.name)
-                print("[Dochi] Executing tool: \(toolCall.name)")
+                Log.tool.info("Executing tool: \(toolCall.name)")
 
                 do {
                     // 내장 도구인지 확인
@@ -339,14 +340,14 @@ final class DochiViewModel: ObservableObject {
                         content: toolResult.content,
                         isError: toolResult.isError
                     ))
-                    print("[Dochi] Tool \(toolCall.name) completed")
+                    Log.tool.info("Tool \(toolCall.name) completed")
                 } catch {
                     results.append(ToolResult(
                         toolCallId: toolCall.id,
                         content: "Error: \(error.localizedDescription)",
                         isError: true
                     ))
-                    print("[Dochi] Tool \(toolCall.name) failed: \(error)")
+                    Log.tool.error("Tool \(toolCall.name) failed: \(error)")
                 }
             }
 
@@ -383,7 +384,7 @@ final class DochiViewModel: ObservableObject {
         }
 
         if iteration >= maxToolIterations {
-            print("[Dochi] Tool loop reached max iterations (\(maxToolIterations))")
+            Log.tool.error("Tool loop reached max iterations (\(self.maxToolIterations))")
             errorMessage = "도구 실행 횟수가 최대치(\(maxToolIterations))에 도달했습니다."
         }
 
@@ -436,7 +437,7 @@ final class DochiViewModel: ObservableObject {
             let variations = await generateWakeWordVariations(wakeWord)
             self.wakeWordVariations = variations
             self.lastGeneratedWakeWord = wakeWord
-            print("[Dochi] 웨이크워드 변형 (\(variations.count)개): \(variations)")
+            Log.stt.info("웨이크워드 변형 (\(variations.count)개): \(variations)")
 
             guard self.settings.wakeWordEnabled,
                   self.state == .idle,
@@ -477,7 +478,7 @@ final class DochiViewModel: ObservableObject {
             }
             return variations.isEmpty ? [wakeWord] : variations
         } catch {
-            print("[Dochi] 웨이크워드 변형 생성 실패: \(error.localizedDescription)")
+            Log.stt.error("웨이크워드 변형 생성 실패: \(error.localizedDescription)")
             return [wakeWord]
         }
     }
@@ -540,7 +541,7 @@ final class DochiViewModel: ObservableObject {
         state = .listening
         speechService.silenceTimeout = settings.sttSilenceTimeout
         speechService.startContinuousListening(timeout: sessionTimeoutSeconds)
-        print("[Dochi] 연속 대화 STT 시작 (타임아웃: \(sessionTimeoutSeconds)초)")
+        Log.app.info("연속 대화 STT 시작 (타임아웃: \(self.sessionTimeoutSeconds)초)")
     }
 
     private func askToEndSession() {
@@ -551,7 +552,7 @@ final class DochiViewModel: ObservableObject {
         supertonicService.speed = settings.ttsSpeed
         supertonicService.diffusionSteps = settings.ttsDiffusionSteps
         supertonicService.speak("대화를 종료할까요?", voice: settings.supertonicVoice)
-        print("[Dochi] 세션 종료 여부 질문")
+        Log.app.info("세션 종료 여부 질문")
     }
 
     private func handleEndSessionResponse(_ response: String) {
@@ -561,7 +562,7 @@ final class DochiViewModel: ObservableObject {
         if positiveKeywords.contains(where: { normalized.contains($0) }) {
             endSession()
         } else {
-            print("[Dochi] 세션 계속")
+            Log.app.info("세션 계속")
             handleQuery(response)
         }
     }
@@ -594,7 +595,7 @@ final class DochiViewModel: ObservableObject {
     }
 
     private func endSession() {
-        print("[Dochi] 세션 종료")
+        Log.app.info("세션 종료")
         isSessionActive = false
         isAskingToEndSession = false
 
@@ -782,7 +783,7 @@ final class DochiViewModel: ObservableObject {
                     let timestamp = ISO8601DateFormatter().string(from: Date())
                     let entry = "\n\n<!-- \(timestamp) -->\n\(memory)"
                     contextService.appendMemory(entry)
-                    print("[Dochi] 컨텍스트 추가됨: \(memory.prefix(50))...")
+                    Log.app.info("컨텍스트 추가됨: \(memory.prefix(50))...")
 
                     await compressContextIfNeeded()
                 }
@@ -794,7 +795,7 @@ final class DochiViewModel: ObservableObject {
                 }
             }
         } catch {
-            print("[Dochi] 컨텍스트 분석 실패: \(error.localizedDescription)")
+            Log.app.error("컨텍스트 분석 실패: \(error.localizedDescription)")
             let defaultTitle = generateDefaultTitle(from: sessionMessages)
             await MainActor.run {
                 saveConversationWithTitle(defaultTitle, messages: sessionMessages)
@@ -816,7 +817,7 @@ final class DochiViewModel: ObservableObject {
 
         conversationService.save(conversation)
         loadConversations()
-        print("[Dochi] 대화 저장됨: \(title)")
+        Log.app.info("대화 저장됨: \(title)")
     }
 
     private func generateDefaultTitle(from messages: [Message]) -> String {
@@ -841,11 +842,11 @@ final class DochiViewModel: ObservableObject {
         let maxSize = settings.contextMaxSize
         guard currentSize > maxSize else { return }
 
-        print("[Dochi] 컨텍스트 압축 시작 (현재: \(currentSize) bytes, 제한: \(maxSize) bytes)")
+        Log.app.info("컨텍스트 압축 시작 (현재: \(currentSize) bytes, 제한: \(maxSize) bytes)")
 
         let providers: [LLMProvider] = [.openai, .anthropic, .zai]
         guard let provider = providers.first(where: { !settings.apiKey(for: $0).isEmpty }) else {
-            print("[Dochi] 컨텍스트 압축 불가: API 키 없음")
+            Log.app.warning("컨텍스트 압축 불가: API 키 없음")
             return
         }
 
@@ -876,10 +877,10 @@ final class DochiViewModel: ObservableObject {
             if !compressed.isEmpty && compressed.count < currentContext.count {
                 contextService.saveMemory(compressed)
                 let newSize = contextService.memorySize
-                print("[Dochi] 컨텍스트 압축 완료 (\(currentSize) → \(newSize) bytes)")
+                Log.app.info("컨텍스트 압축 완료 (\(currentSize) → \(newSize) bytes)")
             }
         } catch {
-            print("[Dochi] 컨텍스트 압축 실패: \(error.localizedDescription)")
+            Log.app.error("컨텍스트 압축 실패: \(error.localizedDescription)")
         }
     }
 }

@@ -76,6 +76,7 @@ Dochi/
 │   │   ├── AlarmTool.swift
 │   │   └── ImageGenerationTool.swift
 │   ├── BuiltInToolService.swift  # Tool router
+│   ├── Log.swift               # os.Logger utility (Log.app, .llm, .stt, etc.)
 │   ├── LLMService.swift
 │   ├── SpeechService.swift
 │   ├── SupertonicService.swift
@@ -170,10 +171,35 @@ let settings = AppSettings(contextService: mockContext)
 | Anthropic | `x-api-key` + `anthropic-version` headers | `system` as top-level field, no system role in messages |
 | Z.AI | `Bearer` header | OpenAI-compatible; `"enable_thinking": false` to disable reasoning; model `glm-4.7` |
 
+### Logging
+
+All logging uses Apple `os.Logger` via the `Log` enum (`Services/Log.swift`). Subsystem: `com.dochi.app`.
+
+| Logger | Category | Used in |
+|--------|----------|---------|
+| `Log.app` | App | DochiViewModel (sessions, context) |
+| `Log.llm` | LLM | LLMService (requests, HTTP errors) |
+| `Log.stt` | STT | SpeechService (recognition, wake word) |
+| `Log.tts` | TTS | SupertonicService (download, synthesis) |
+| `Log.mcp` | MCP | MCPService (connections) |
+| `Log.tool` | Tool | BuiltInTools (API calls, alarms) |
+| `Log.storage` | Storage | Context/Conversation/KeychainService (I/O) |
+
+Log levels: `.debug` (details), `.info` (state changes), `.warning` (expected issues), `.error` (failures).
+
+```bash
+# View all logs
+log show --predicate 'subsystem == "com.dochi.app"' --last 5m --style compact
+
+# Filter by category
+log show --predicate 'subsystem == "com.dochi.app" AND category == "Tool"' --last 5m
+```
+
 ### Conventions
 
 - All ViewModels and Services use `@MainActor`
 - Swift concurrency with `async/await` and `Task` for background work; `Task.detached` for CPU-heavy ONNX inference
+- Logging via `Log.*` (os.Logger) — never use `print()` for diagnostics
 - UI language is Korean
 - XcodeGen (`project.yml`) generates the `.xcodeproj` — edit `project.yml`, not the Xcode project directly
 - External dependency: `microsoft/onnxruntime-swift-package-manager` v1.20.0, imported as `OnnxRuntimeBindings`

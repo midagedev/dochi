@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// 이미지 생성 도구 (fal.ai FLUX)
 @MainActor
@@ -47,6 +48,8 @@ final class ImageGenerationTool: BuiltInTool {
 
         let imageSize = arguments["image_size"] as? String ?? "square_hd"
 
+        Log.tool.info("이미지 생성 요청: prompt=\(prompt.prefix(100)), size=\(imageSize)")
+
         // fal.ai FLUX schnell API
         let url = URL(string: "https://fal.run/fal-ai/flux/schnell")!
         var request = URLRequest(url: url)
@@ -67,6 +70,7 @@ final class ImageGenerationTool: BuiltInTool {
 
         if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
             let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+            Log.tool.error("Fal.ai API 에러: status=\(httpResponse.statusCode), body=\(errorBody)")
             throw BuiltInToolError.apiError("Fal.ai API error (\(httpResponse.statusCode)): \(errorBody)")
         }
 
@@ -102,7 +106,7 @@ final class ImageGenerationTool: BuiltInTool {
         let localURL = imagesDir.appendingPathComponent(filename)
         try data.write(to: localURL)
 
-        print("[ImageGen] Saved image: \(localURL.path)")
+        Log.tool.info("Saved image: \(localURL.path)")
         return localURL
     }
 }

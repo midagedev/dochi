@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// API 키 저장소
 /// 개발 중에는 Application Support에 파일로 저장.
@@ -25,7 +26,11 @@ final class KeychainService: KeychainServiceProtocol {
 
     func save(account: String, value: String) {
         let url = fileURL(account: account)
-        try? value.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try value.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            Log.storage.error("키 저장 실패 \(account): \(error)")
+        }
     }
 
     func load(account: String) -> String? {
@@ -35,6 +40,10 @@ final class KeychainService: KeychainServiceProtocol {
 
     func delete(account: String) {
         let url = fileURL(account: account)
-        try? fileManager.removeItem(at: url)
+        do {
+            try fileManager.removeItem(at: url)
+        } catch {
+            Log.storage.error("키 삭제 실패 \(account): \(error)")
+        }
     }
 }

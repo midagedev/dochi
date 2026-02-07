@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// 음성 알람 도구
 @MainActor
@@ -87,7 +88,7 @@ final class AlarmTool: BuiltInTool {
             return MCPToolResult(content: "label is required", isError: true)
         }
 
-        print("[Alarm] setAlarm called: label=\(label), args=\(arguments)")
+        Log.tool.info("setAlarm called: label=\(label), args=\(arguments)")
 
         var fireDate: Date?
 
@@ -95,7 +96,7 @@ final class AlarmTool: BuiltInTool {
             let seconds = delay.doubleValue
             if seconds > 0 {
                 fireDate = Date().addingTimeInterval(seconds)
-                print("[Alarm] delay_seconds=\(seconds)")
+                Log.tool.debug("delay_seconds=\(seconds)")
             }
         }
 
@@ -109,11 +110,11 @@ final class AlarmTool: BuiltInTool {
                 df.locale = Locale(identifier: "en_US_POSIX")
                 fireDate = df.date(from: fireDateStr)
             }
-            print("[Alarm] fire_date parsed: \(String(describing: fireDate))")
+            Log.tool.debug("fire_date parsed: \(String(describing: fireDate))")
         }
 
         guard let fireDate, fireDate > Date() else {
-            print("[Alarm] Invalid fireDate: \(String(describing: fireDate))")
+            Log.tool.error("Invalid fireDate: \(String(describing: fireDate))")
             return MCPToolResult(content: "유효한 fire_date 또는 delay_seconds가 필요합니다.", isError: true)
         }
 
@@ -122,18 +123,18 @@ final class AlarmTool: BuiltInTool {
         activeAlarms.append(entry)
 
         let interval = fireDate.timeIntervalSinceNow
-        print("[Alarm] Scheduling timer: \(interval)s from now, id=\(alarmId)")
+        Log.tool.info("Scheduling alarm: \(interval)s from now, id=\(alarmId)")
 
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
-            print("[Alarm] Timer fired! label=\(label)")
+            Log.tool.info("Alarm fired: \(label)")
             Task { @MainActor [weak self] in
                 guard let self else {
-                    print("[Alarm] self is nil in timer callback")
+                    Log.tool.warning("AlarmTool deallocated before timer callback")
                     return
                 }
                 self.activeAlarms.removeAll { $0.id == alarmId }
                 self.alarmTimers.removeValue(forKey: alarmId)
-                print("[Alarm] Calling onAlarmFired, handler exists: \(self.onAlarmFired != nil)")
+                Log.tool.debug("Calling onAlarmFired, handler exists: \(self.onAlarmFired != nil)")
                 self.onAlarmFired?(label)
             }
         }

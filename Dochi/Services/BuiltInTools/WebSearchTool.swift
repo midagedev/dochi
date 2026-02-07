@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// 웹검색 도구 (Tavily API)
 @MainActor
@@ -41,6 +42,8 @@ final class WebSearchTool: BuiltInTool {
             throw BuiltInToolError.invalidArguments("query is required")
         }
 
+        Log.tool.info("웹검색 요청: query=\(query)")
+
         let url = URL(string: "https://api.tavily.com/search")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -61,6 +64,7 @@ final class WebSearchTool: BuiltInTool {
 
         if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
             let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+            Log.tool.error("Tavily API 에러: status=\(httpResponse.statusCode), body=\(errorBody)")
             throw BuiltInToolError.apiError("Tavily API error (\(httpResponse.statusCode)): \(errorBody)")
         }
 

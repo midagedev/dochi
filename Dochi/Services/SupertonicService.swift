@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 @preconcurrency import OnnxRuntimeBindings
+import os
 
 @MainActor
 final class SupertonicService: ObservableObject {
@@ -75,6 +76,7 @@ final class SupertonicService: ObservableObject {
                 try await self?.loadModels(voice: voice)
                 self?.state = .ready
             } catch {
+                Log.tts.error("모델 로드 실패: \(error)")
                 self?.error = "모델 로드 실패: \(error.localizedDescription)"
                 self?.state = .unloaded
             }
@@ -171,6 +173,7 @@ final class SupertonicService: ObservableObject {
                 } catch is CancellationError {
                     break
                 } catch {
+                    Log.tts.error("음성 합성 실패: \(error)")
                     self.error = "음성 합성 실패: \(error.localizedDescription)"
                     break
                 }
@@ -242,10 +245,10 @@ final class SupertonicService: ObservableObject {
             if fm.fileExists(atPath: localURL.path) { continue }
 
             let remoteURL = URL(string: Self.hfBaseURL + file)!
-            print("[Supertonic] Downloading \(file)...")
+            Log.tts.info("Downloading \(file)...")
             let (tempURL, _) = try await URLSession.shared.download(from: remoteURL)
             try fm.moveItem(at: tempURL, to: localURL)
-            print("[Supertonic] Downloaded \(file)")
+            Log.tts.info("Downloaded \(file)")
         }
     }
 
@@ -255,10 +258,10 @@ final class SupertonicService: ObservableObject {
         if FileManager.default.fileExists(atPath: localURL.path) { return }
 
         let remoteURL = URL(string: Self.hfVoiceBaseURL + fileName)!
-        print("[Supertonic] Downloading voice \(fileName)...")
+        Log.tts.info("Downloading voice \(fileName)...")
         let (tempURL, _) = try await URLSession.shared.download(from: remoteURL)
         try FileManager.default.moveItem(at: tempURL, to: localURL)
-        print("[Supertonic] Downloaded voice \(fileName)")
+        Log.tts.info("Downloaded voice \(fileName)")
     }
 
     // MARK: - Model Loading
@@ -284,6 +287,6 @@ final class SupertonicService: ObservableObject {
 
         self.currentStyle = style
         self.currentVoice = voice
-        print("[Supertonic] Models and voice \(voice.rawValue) loaded")
+        Log.tts.info("Models and voice \(voice.rawValue) loaded")
     }
 }

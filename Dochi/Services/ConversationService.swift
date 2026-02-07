@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// 대화 히스토리 저장 서비스
 /// ~/Library/Application Support/Dochi/conversations/ 디렉토리에 JSON 파일로 저장
@@ -59,13 +60,21 @@ final class ConversationService: ConversationServiceProtocol {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
-        guard let data = try? encoder.encode(conversation) else { return }
-        try? data.write(to: url)
+        do {
+            let data = try encoder.encode(conversation)
+            try data.write(to: url)
+        } catch {
+            Log.storage.error("대화 저장 실패 \(conversation.id): \(error)")
+        }
     }
 
     /// 대화 삭제
     func delete(id: UUID) {
         let url = fileURL(for: id)
-        try? fileManager.removeItem(at: url)
+        do {
+            try fileManager.removeItem(at: url)
+        } catch {
+            Log.storage.error("대화 삭제 실패 \(id): \(error)")
+        }
     }
 }
