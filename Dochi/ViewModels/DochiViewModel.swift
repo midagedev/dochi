@@ -486,7 +486,7 @@ final class DochiViewModel: ObservableObject {
         case .openai:
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             body = [
-                "model": "gpt-4o-mini",
+                "model": "gpt-4.1-nano",
                 "messages": [["role": "user", "content": prompt]],
                 "max_tokens": 300,
             ]
@@ -502,7 +502,7 @@ final class DochiViewModel: ObservableObject {
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
             body = [
-                "model": "claude-haiku-4-20250414",
+                "model": "claude-haiku-4-5-20251001",
                 "messages": [["role": "user", "content": prompt]],
                 "max_tokens": 300,
             ]

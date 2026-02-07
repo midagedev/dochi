@@ -17,8 +17,8 @@ enum LLMProvider: String, CaseIterable, Codable {
 
     var models: [String] {
         switch self {
-        case .openai: ["gpt-4o", "gpt-4o-mini"]
-        case .anthropic: ["claude-sonnet-4-20250514", "claude-haiku-4-20250414"]
+        case .openai: ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o4-mini", "gpt-4o", "gpt-4o-mini"]
+        case .anthropic: ["claude-opus-4-6", "claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001"]
         case .zai: ["glm-4.7"]
         }
     }
