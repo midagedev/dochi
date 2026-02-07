@@ -90,6 +90,23 @@ struct ContentView: View {
 
             Spacer()
 
+            // 자동종료 토글
+            if viewModel.isConnected {
+                Button {
+                    viewModel.autoEndSession.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: viewModel.autoEndSession ? "timer" : "timer.circle")
+                            .font(.caption)
+                        Text("자동종료")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(viewModel.autoEndSession ? .primary : .tertiary)
+                }
+                .buttonStyle(.borderless)
+                .help(viewModel.autoEndSession ? "자동종료 켜짐: 무응답 시 대화 종료" : "자동종료 꺼짐: 무응답 시 계속 듣기")
+            }
+
             // Voice indicator
             if isResponding {
                 HStack(spacing: 4) {

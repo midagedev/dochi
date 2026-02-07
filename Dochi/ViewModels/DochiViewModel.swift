@@ -42,6 +42,7 @@ final class DochiViewModel: ObservableObject {
 
     // 연속 대화 모드
     @Published var isSessionActive: Bool = false
+    @Published var autoEndSession: Bool = true
     private var isAskingToEndSession: Bool = false
     private let sessionTimeoutSeconds: TimeInterval = 10.0
 
@@ -109,7 +110,12 @@ final class DochiViewModel: ObservableObject {
                 return
             }
 
-            self.askToEndSession()
+            if self.autoEndSession {
+                self.askToEndSession()
+            } else {
+                // 자동종료 꺼져있으면 계속 듣기
+                self.startContinuousListening()
+            }
         }
 
         // LLM 문장 단위 → TTS 큐에 즉시 추가
