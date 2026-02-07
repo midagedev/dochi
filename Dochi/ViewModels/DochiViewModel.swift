@@ -131,7 +131,9 @@ final class DochiViewModel: ObservableObject {
                 self.state = .speaking
                 self.supertonicService.speed = self.settings.ttsSpeed
                 self.supertonicService.diffusionSteps = self.settings.ttsDiffusionSteps
-                self.supertonicService.enqueueSentence(sentence, voice: self.settings.supertonicVoice)
+                let cleaned = Self.sanitizeForTTS(sentence)
+                guard !cleaned.isEmpty else { return }
+                self.supertonicService.enqueueSentence(cleaned, voice: self.settings.supertonicVoice)
             }
         }
 
@@ -390,6 +392,44 @@ final class DochiViewModel: ObservableObject {
 
         // Tool loop 완료 후 콜백 복원
         setupLLMCallbacks()
+    }
+
+    /// 마크다운 서식 기호를 제거하여 TTS에 적합한 텍스트로 변환
+    static func sanitizeForTTS(_ text: String) -> String {
+        var s = text
+
+        // 코드블록 마커 줄은 스킵
+        if s.hasPrefix("```") { return "" }
+
+        // 마크다운 이미지 → 제거
+        s = s.replacingOccurrences(of: #"!\[[^\]]*\]\([^)]*\)"#, with: "", options: .regularExpression)
+        // 마크다운 링크 → 텍스트만
+        s = s.replacingOccurrences(of: #"\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+        // 인라인 코드 `text` → text
+        s = s.replacingOccurrences(of: #"`([^`]*)`"#, with: "$1", options: .regularExpression)
+
+        // 볼드/이탤릭: ***text*** → text, **text** → text, *text* → text
+        s = s.replacingOccurrences(of: #"\*{1,3}([^*]+)\*{1,3}"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"_{1,3}([^_]+)_{1,3}"#, with: "$1", options: .regularExpression)
+
+        // 헤더 마커 "## 제목" → "제목"
+        s = s.replacingOccurrences(of: #"^#{1,6}\s*"#, with: "", options: .regularExpression)
+        // 리스트 마커 "- item", "* item"
+        s = s.replacingOccurrences(of: #"^[-*+]\s+"#, with: "", options: .regularExpression)
+        // 블록인용 "> text"
+        s = s.replacingOccurrences(of: #"^>\s*"#, with: "", options: .regularExpression)
+        // 수평선
+        s = s.replacingOccurrences(of: #"^[-*_]{3,}$"#, with: "", options: .regularExpression)
+
+        // 남은 * 기호 제거 (볼드/이탤릭 잔여)
+        s = s.replacingOccurrences(of: "*", with: "")
+        // 콜론 → 쉼표 (자연스러운 읽기)
+        s = s.replacingOccurrences(of: ":", with: ",")
+
+        // 연속 공백 정리
+        s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func extractImageURLs(from content: String) -> [URL] {

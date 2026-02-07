@@ -225,6 +225,7 @@ final class SpeechService: ObservableObject {
                 guard let self else { return }
                 if let result {
                     let newText = result.bestTranscription.formattedString
+                    let previousTranscript = self.transcript
 
                     // 인식기가 앞문장을 날리는 현상 대응:
                     // 기존 텍스트(보존분 제외)의 절반 이상이 사라지면 리셋으로 간주
@@ -244,7 +245,10 @@ final class SpeechService: ObservableObject {
                         self.transcript = self.preservedTranscript + " " + newText
                     }
 
-                    self.resetSilenceTimer()
+                    // 텍스트가 실제로 변경된 경우에만 무음 타이머 리셋
+                    if self.transcript != previousTranscript {
+                        self.resetSilenceTimer()
+                    }
                 }
                 if err != nil, self.state == .listening {
                     self.stopListening()
