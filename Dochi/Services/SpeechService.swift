@@ -21,6 +21,7 @@ final class SpeechService: ObservableObject {
     var onQueryCaptured: ((String) -> Void)?
     var onWakeWordDetected: (() -> Void)?
     var onSilenceTimeout: (() -> Void)?
+    var onListeningCancelled: (() -> Void)?
 
     private nonisolated(unsafe) var audioEngine: AVAudioEngine?
     private nonisolated(unsafe) var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -117,6 +118,8 @@ final class SpeechService: ObservableObject {
         if !captured.isEmpty {
             soundService.playInputComplete()
             onQueryCaptured?(captured)
+        } else {
+            onListeningCancelled?()
         }
     }
 
@@ -157,6 +160,7 @@ final class SpeechService: ObservableObject {
         guard authorizationGranted else {
             error = "마이크/음성인식 권한이 필요합니다. 시스템 설정에서 허용해주세요."
             Log.stt.error("권한 미부여")
+            if case .query = mode { onListeningCancelled?() }
             return
         }
 
@@ -167,6 +171,7 @@ final class SpeechService: ObservableObject {
         guard available else {
             error = "음성 인식을 사용할 수 없습니다."
             Log.stt.error("음성 인식 불가")
+            if case .query = mode { onListeningCancelled?() }
             return
         }
 
@@ -188,6 +193,7 @@ final class SpeechService: ObservableObject {
         guard format.sampleRate > 0, format.channelCount > 0 else {
             error = "오디오 입력 장치를 찾을 수 없습니다."
             Log.stt.error("오디오 포맷 무효")
+            if case .query = mode { onListeningCancelled?() }
             return
         }
 
@@ -216,6 +222,7 @@ final class SpeechService: ObservableObject {
             Log.stt.error("오디오 엔진 실패: \(error, privacy: .public)")
             tearDownAudio()
             state = .idle
+            if case .query = mode { onListeningCancelled?() }
         }
     }
 

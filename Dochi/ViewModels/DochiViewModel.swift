@@ -101,6 +101,14 @@ final class DochiViewModel: ObservableObject {
             self.handleQuery(query)
         }
 
+        // STT 리스닝 실패/빈 결과로 종료
+        speechService.onListeningCancelled = { [weak self] in
+            guard let self, self.state == .listening else { return }
+            Log.app.info("리스닝 취소 — 상태 리셋")
+            self.state = .idle
+            self.startWakeWordIfNeeded()
+        }
+
         // STT 무음 타임아웃
         speechService.onSilenceTimeout = { [weak self] in
             guard let self, self.isSessionActive else { return }

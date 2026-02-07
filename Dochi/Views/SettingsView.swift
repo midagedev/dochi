@@ -72,6 +72,20 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: - Display
+                Section("표시") {
+                    HStack {
+                        Text("글자 크기")
+                        Slider(value: $viewModel.settings.chatFontSize, in: 12...28, step: 1)
+                        Text("\(Int(viewModel.settings.chatFontSize))pt")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 36)
+                    }
+                    Text("가나다라마바사 ABC 123")
+                        .font(.system(size: viewModel.settings.chatFontSize))
+                        .foregroundStyle(.secondary)
+                }
+
                 // MARK: - STT
                 Section("STT") {
                     HStack {

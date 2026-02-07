@@ -9,6 +9,7 @@ final class BuiltInToolService: ObservableObject {
     let remindersTool = RemindersTool()
     let alarmTool = AlarmTool()
     let imageGenerationTool = ImageGenerationTool()
+    let printImageTool = PrintImageTool()
 
     /// 활성 알람 (AlarmTool에서 포워딩)
     var activeAlarms: [AlarmTool.AlarmEntry] {
@@ -45,12 +46,15 @@ final class BuiltInToolService: ObservableObject {
             tools.append(contentsOf: imageGenerationTool.tools)
         }
 
+        // 이미지 프린트: 항상 사용 가능
+        tools.append(contentsOf: printImageTool.tools)
+
         return tools
     }
 
     func callTool(name: String, arguments: [String: Any]) async throws -> MCPToolResult {
         // 각 도구 모듈에 라우팅
-        let allModules: [any BuiltInTool] = [webSearchTool, remindersTool, alarmTool, imageGenerationTool]
+        let allModules: [any BuiltInTool] = [webSearchTool, remindersTool, alarmTool, imageGenerationTool, printImageTool]
 
         for module in allModules {
             if module.tools.contains(where: { $0.name == name }) {

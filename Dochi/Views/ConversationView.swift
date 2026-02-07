@@ -55,17 +55,22 @@ struct ConversationView: View {
                             )
                             .id("assistant-live")
                         }
+
+                        // 하단 여백 — 마지막 메시지가 충분히 위로 올라오도록
+                        Spacer()
+                            .frame(height: 120)
+                            .id("bottom")
                     }
                     .padding()
                 }
                 .onChange(of: viewModel.messages.count) {
                     withAnimation {
-                        proxy.scrollTo(viewModel.messages.last?.id, anchor: .bottom)
+                        proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
                 .onChange(of: assistantTranscript) {
                     withAnimation {
-                        proxy.scrollTo("assistant-live", anchor: .bottom)
+                        proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
             }
@@ -185,6 +190,7 @@ struct ConversationView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(text)
+                    .font(.system(size: viewModel.settings.chatFontSize))
                     .padding(12)
                     .background(color)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -389,6 +395,7 @@ private enum ToolDisplay {
         case "set_alarm": return "알람 설정"
         case "list_alarms": return "알람 조회"
         case "cancel_alarm": return "알람 취소"
+        case "print_image": return "이미지 출력"
         default: return name
         }
     }
@@ -399,6 +406,7 @@ private enum ToolDisplay {
         case "generate_image": return "photo.artframe"
         case "create_reminder", "list_reminders", "complete_reminder": return "checklist"
         case "set_alarm", "list_alarms", "cancel_alarm": return "alarm"
+        case "print_image": return "printer"
         default: return "wrench.and.screwdriver"
         }
     }
@@ -525,6 +533,7 @@ struct ExecutingToolBubbleView: View {
 
 struct MessageBubbleView: View {
     let message: Message
+    @EnvironmentObject var viewModel: DochiViewModel
     @State private var expandedImageURL: URL?
 
     // ![image](url) 패턴에서 URL 추출
@@ -566,6 +575,7 @@ struct MessageBubbleView: View {
                     let displayText = allImageURLs.isEmpty ? message.content : textWithoutImages
                     if !displayText.isEmpty {
                         Text(displayText)
+                            .font(.system(size: viewModel.settings.chatFontSize))
                             .textSelection(.enabled)
                     }
 

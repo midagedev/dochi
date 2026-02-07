@@ -34,6 +34,11 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(ttsDiffusionSteps, forKey: Keys.ttsDiffusionSteps) }
     }
 
+    // Display settings
+    @Published var chatFontSize: Double {
+        didSet { UserDefaults.standard.set(chatFontSize, forKey: Keys.chatFontSize) }
+    }
+
     // STT settings
     @Published var sttSilenceTimeout: Double {
         didSet { UserDefaults.standard.set(sttSilenceTimeout, forKey: Keys.sttSilenceTimeout) }
@@ -60,6 +65,7 @@ final class AppSettings: ObservableObject {
         static let supertonicVoice = "settings.supertonicVoice"
         static let ttsSpeed = "settings.ttsSpeed"
         static let ttsDiffusionSteps = "settings.ttsDiffusionSteps"
+        static let chatFontSize = "settings.chatFontSize"
         static let sttSilenceTimeout = "settings.sttSilenceTimeout"
         static let contextAutoCompress = "settings.contextAutoCompress"
         static let contextMaxSize = "settings.contextMaxSize"
@@ -96,6 +102,7 @@ final class AppSettings: ObservableObject {
         self.ttsSpeed = defaults.object(forKey: Keys.ttsSpeed) as? Float ?? 1.15
         self.ttsDiffusionSteps = defaults.object(forKey: Keys.ttsDiffusionSteps) as? Int ?? 10
 
+        self.chatFontSize = defaults.object(forKey: Keys.chatFontSize) as? Double ?? 14.0
         self.sttSilenceTimeout = defaults.object(forKey: Keys.sttSilenceTimeout) as? Double ?? 1.0
         self.contextAutoCompress = defaults.object(forKey: Keys.contextAutoCompress) as? Bool ?? true
         self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? 15360
