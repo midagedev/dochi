@@ -8,6 +8,7 @@ import os
 /// - family.md: 가족 공유 기억
 /// - memory/{userId}.md: 개인 기억
 /// - profiles.json: 사용자 프로필
+@MainActor
 final class ContextService: ContextServiceProtocol {
     private let fileManager: FileManager
     private let baseDir: URL
