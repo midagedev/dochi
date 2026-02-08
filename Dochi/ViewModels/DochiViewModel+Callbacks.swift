@@ -136,6 +136,12 @@ extension DochiViewModel {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+        if let supabase = supabaseService as? SupabaseService {
+            supabase.objectWillChange
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.objectWillChange.send() }
+                .store(in: &cancellables)
+        }
     }
 
     func setupProfileCallback() {

@@ -10,3 +10,7 @@ Package.resolved
 
 # macOS
 .DS_Store
+
+# Supabase config (contains keys)
+SupabaseConfig.plist
+Dochi/Resources/SupabaseConfig.plist

@@ -8,4 +8,5 @@ enum Log {
     static let mcp     = Logger(subsystem: "com.dochi.app", category: "MCP")
     static let tool    = Logger(subsystem: "com.dochi.app", category: "Tool")
     static let storage = Logger(subsystem: "com.dochi.app", category: "Storage")
+    static let cloud   = Logger(subsystem: "com.dochi.app", category: "Cloud")
 }
