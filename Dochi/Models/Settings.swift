@@ -102,22 +102,22 @@ final class AppSettings: ObservableObject {
         Self.migrateToFileBasedContext(defaults: defaults, contextService: contextService)
 
         self.wakeWordEnabled = defaults.bool(forKey: Keys.wakeWordEnabled)
-        self.wakeWord = defaults.string(forKey: Keys.wakeWord) ?? "도치야"
+        self.wakeWord = defaults.string(forKey: Keys.wakeWord) ?? Constants.Defaults.wakeWord
 
         let providerRaw = defaults.string(forKey: Keys.llmProvider) ?? LLMProvider.openai.rawValue
         let provider = LLMProvider(rawValue: providerRaw) ?? .openai
         self.llmProvider = provider
         self.llmModel = defaults.string(forKey: Keys.llmModel) ?? provider.models.first ?? ""
 
-        let voiceRaw = defaults.string(forKey: Keys.supertonicVoice) ?? SupertonicVoice.F1.rawValue
+        let voiceRaw = defaults.string(forKey: Keys.supertonicVoice) ?? Constants.Defaults.supertonicVoice
         self.supertonicVoice = SupertonicVoice(rawValue: voiceRaw) ?? .F1
-        self.ttsSpeed = defaults.object(forKey: Keys.ttsSpeed) as? Float ?? 1.15
-        self.ttsDiffusionSteps = defaults.object(forKey: Keys.ttsDiffusionSteps) as? Int ?? 10
+        self.ttsSpeed = defaults.object(forKey: Keys.ttsSpeed) as? Float ?? Constants.Defaults.ttsSpeed
+        self.ttsDiffusionSteps = defaults.object(forKey: Keys.ttsDiffusionSteps) as? Int ?? Constants.Defaults.ttsDiffusionSteps
 
-        self.chatFontSize = defaults.object(forKey: Keys.chatFontSize) as? Double ?? 14.0
-        self.sttSilenceTimeout = defaults.object(forKey: Keys.sttSilenceTimeout) as? Double ?? 1.0
+        self.chatFontSize = defaults.object(forKey: Keys.chatFontSize) as? Double ?? Constants.Defaults.chatFontSize
+        self.sttSilenceTimeout = defaults.object(forKey: Keys.sttSilenceTimeout) as? Double ?? Constants.Defaults.sttSilenceTimeout
         self.contextAutoCompress = defaults.object(forKey: Keys.contextAutoCompress) as? Bool ?? true
-        self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? 15360
+        self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? Constants.Defaults.contextMaxSize
 
         // MCP servers
         if let data = defaults.data(forKey: Keys.mcpServers),
