@@ -9,7 +9,8 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     @Published private(set) var authState: AuthState = .signedOut
     var onAuthStateChanged: ((AuthState) -> Void)?
 
-    private let client: SupabaseClient
+    /// Supabase 클라이언트 (CloudContextService 등에서 DB 접근용)
+    let client: SupabaseClient
     private let keychainService: KeychainServiceProtocol
     private let defaults: UserDefaults
 

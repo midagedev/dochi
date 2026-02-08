@@ -111,9 +111,12 @@ final class DochiViewModel: ObservableObject {
             connect()
         }
 
-        // Restore cloud session
+        // Restore cloud session and sync context
         Task {
             await supabaseService.restoreSession()
+            if let cloudContext = contextService as? CloudContextService {
+                await cloudContext.pullFromCloud()
+            }
         }
     }
 
