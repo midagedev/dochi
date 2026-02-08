@@ -111,7 +111,9 @@ final class DochiViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.deviceService.stopHeartbeat()
+            MainActor.assumeIsolated {
+                self?.deviceService.stopHeartbeat()
+            }
         }
     }
 
