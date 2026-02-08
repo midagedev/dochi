@@ -5,13 +5,18 @@ import os
 /// 클라우드 동기화 대화 히스토리 서비스
 /// - 로컬 ConversationService를 래핑하여 Supabase 동기화 제공
 /// - Write-through: 저장/삭제 시 로컬 + 클라우드 동시 처리
-/// - Pull-on-launch: 앱 시작 시 클라우드에서 대화 목록 동기화
+/// - Supabase Realtime으로 다른 디바이스 변경사항 즉시 반영
 /// - 소프트 딜리트: 클라우드에서는 deleted_at으로 표시
 @MainActor
 final class CloudConversationService: ConversationServiceProtocol {
     private let local: ConversationService
     private let supabaseService: SupabaseService
     private let deviceService: any DeviceServiceProtocol
+
+    /// 다른 디바이스에서 대화가 변경되었을 때 호출
+    var onConversationsChanged: (() -> Void)?
+
+    private var realtimeTask: Task<Void, Never>?
 
     init(
         local: ConversationService = ConversationService(),
@@ -98,6 +103,84 @@ final class CloudConversationService: ConversationServiceProtocol {
         }
     }
 
+    // MARK: - Realtime Subscriptions
+
+    /// Supabase Realtime 구독 시작 — 다른 디바이스의 대화 변경사항 즉시 반영
+    func subscribeToRealtimeChanges() {
+        guard let client = supabaseService.client,
+              case .signedIn = supabaseService.authState,
+              let wsId = supabaseService.selectedWorkspace?.id else { return }
+        unsubscribeFromRealtime()
+
+        realtimeTask = Task { [weak self] in
+            let channel = client.realtimeV2.channel("conversations-\(wsId.uuidString)")
+
+            let changes = channel.postgresChange(
+                AnyAction.self,
+                schema: "public",
+                table: "conversations",
+                filter: .eq("workspace_id", value: wsId)
+            )
+
+            do {
+                try await channel.subscribeWithError()
+                Log.cloud.info("대화 Realtime 구독 시작")
+            } catch {
+                Log.cloud.warning("대화 Realtime 구독 실패: \(error, privacy: .public)")
+                return
+            }
+
+            for await action in changes {
+                guard !Task.isCancelled else { break }
+                await self?.handleConversationRealtimeEvent(action)
+            }
+        }
+    }
+
+    /// Realtime 구독 해제
+    func unsubscribeFromRealtime() {
+        realtimeTask?.cancel()
+        realtimeTask = nil
+    }
+
+    private func handleConversationRealtimeEvent(_ action: AnyAction) {
+        let ownDeviceId = deviceService.currentDevice?.id
+        do {
+            switch action {
+            case .insert(let insert):
+                let row = try insert.decodeRecord(as: CloudConversationRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
+                // Skip own device's writes
+                if row.device_id == ownDeviceId { return }
+                if local.load(id: row.id) == nil {
+                    local.save(row.toConversation())
+                    onConversationsChanged?()
+                    Log.cloud.debug("Realtime 대화 추가: \(row.id, privacy: .public)")
+                }
+            case .update(let update):
+                let row = try update.decodeRecord(as: CloudConversationRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
+                // Skip own device's writes
+                if row.device_id == ownDeviceId { return }
+                // soft delete 감지
+                if row.deleted_at != nil {
+                    local.delete(id: row.id)
+                } else {
+                    local.save(row.toConversation())
+                }
+                onConversationsChanged?()
+                Log.cloud.debug("Realtime 대화 업데이트: \(row.id, privacy: .public)")
+            case .delete(let delete):
+                if let idString = delete.oldRecord["id"]?.stringValue,
+                   let id = UUID(uuidString: idString) {
+                    local.delete(id: id)
+                    onConversationsChanged?()
+                    Log.cloud.debug("Realtime 대화 삭제: \(id, privacy: .public)")
+                }
+            }
+        } catch {
+            Log.cloud.warning("대화 Realtime 이벤트 디코딩 실패: \(error, privacy: .public)")
+        }
+    }
+
     // MARK: - Push
 
     private func schedulePush(_ conversation: Conversation) {
@@ -167,9 +250,10 @@ private struct CloudConversationRow: Codable {
     let user_id: String?
     let created_at: Date
     let updated_at: Date
+    let deleted_at: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, workspace_id, device_id, title, messages, summary, user_id, created_at, updated_at
+        case id, workspace_id, device_id, title, messages, summary, user_id, created_at, updated_at, deleted_at
     }
 
     init(from decoder: Decoder) throws {
@@ -182,6 +266,7 @@ private struct CloudConversationRow: Codable {
         user_id = try container.decodeIfPresent(String.self, forKey: .user_id)
         created_at = try container.decode(Date.self, forKey: .created_at)
         updated_at = try container.decode(Date.self, forKey: .updated_at)
+        deleted_at = try container.decodeIfPresent(Date.self, forKey: .deleted_at)
 
         // Handle both JSONB array and legacy double-encoded string
         let rowId = id
