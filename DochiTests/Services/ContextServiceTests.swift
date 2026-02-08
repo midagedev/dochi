@@ -1,6 +1,7 @@
 import XCTest
 @testable import Dochi
 
+@MainActor
 final class ContextServiceTests: XCTestCase {
     var sut: ContextService!
     var tempDir: URL!
