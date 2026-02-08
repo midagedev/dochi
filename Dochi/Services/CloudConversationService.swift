@@ -106,13 +106,11 @@ final class CloudConversationService: ConversationServiceProtocol {
     // MARK: - Realtime Subscriptions
 
     /// Supabase Realtime 구독 시작 — 다른 디바이스의 대화 변경사항 즉시 반영
-    @MainActor
     func subscribeToRealtimeChanges() {
-        guard case .signedIn = supabaseService.authState,
+        guard let client = supabaseService.client,
+              case .signedIn = supabaseService.authState,
               let wsId = supabaseService.selectedWorkspace?.id else { return }
         unsubscribeFromRealtime()
-
-        let client = supabaseService.client
 
         realtimeTask = Task { [weak self] in
             let channel = client.realtimeV2.channel("conversations-\(wsId.uuidString)")
@@ -145,12 +143,14 @@ final class CloudConversationService: ConversationServiceProtocol {
         realtimeTask = nil
     }
 
-    @MainActor
     private func handleConversationRealtimeEvent(_ action: AnyAction) {
+        let ownDeviceId = deviceService.currentDevice?.id
         do {
             switch action {
             case .insert(let insert):
                 let row = try insert.decodeRecord(as: CloudConversationRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
+                // Skip own device's writes
+                if row.device_id == ownDeviceId { return }
                 if local.load(id: row.id) == nil {
                     local.save(row.toConversation())
                     onConversationsChanged?()
@@ -158,6 +158,8 @@ final class CloudConversationService: ConversationServiceProtocol {
                 }
             case .update(let update):
                 let row = try update.decodeRecord(as: CloudConversationRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
+                // Skip own device's writes
+                if row.device_id == ownDeviceId { return }
                 // soft delete 감지
                 if row.deleted_at != nil {
                     local.delete(id: row.id)
@@ -251,7 +253,7 @@ private struct CloudConversationRow: Codable {
     let deleted_at: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, workspace_id, device_id, title, messages, summary, user_id, created_at, updated_at
+        case id, workspace_id, device_id, title, messages, summary, user_id, created_at, updated_at, deleted_at
     }
 
     init(from decoder: Decoder) throws {
@@ -264,6 +266,7 @@ private struct CloudConversationRow: Codable {
         user_id = try container.decodeIfPresent(String.self, forKey: .user_id)
         created_at = try container.decode(Date.self, forKey: .created_at)
         updated_at = try container.decode(Date.self, forKey: .updated_at)
+        deleted_at = try container.decodeIfPresent(Date.self, forKey: .deleted_at)
 
         // Handle both JSONB array and legacy double-encoded string
         let rowId = id

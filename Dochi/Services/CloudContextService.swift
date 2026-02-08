@@ -207,12 +207,14 @@ final class CloudContextService: ContextServiceProtocol {
             switch action {
             case .insert(let insert):
                 let row = try insert.decodeRecord(as: ContextFileRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
-                applyCloudFile(row)
-                onContextChanged?()
+                if applyCloudFile(row) {
+                    onContextChanged?()
+                }
             case .update(let update):
                 let row = try update.decodeRecord(as: ContextFileRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
-                applyCloudFile(row)
-                onContextChanged?()
+                if applyCloudFile(row) {
+                    onContextChanged?()
+                }
             case .delete:
                 break // context_files are not deleted, only updated
             }
@@ -400,7 +402,8 @@ final class CloudContextService: ContextServiceProtocol {
         return rows.first
     }
 
-    private func applyCloudFile(_ file: ContextFileRow) {
+    @discardableResult
+    private func applyCloudFile(_ file: ContextFileRow) -> Bool {
         let localContent: String
         switch file.file_type {
         case "system":
@@ -413,30 +416,31 @@ final class CloudContextService: ContextServiceProtocol {
             if let uid = file.user_id {
                 localContent = local.loadUserMemory(userId: uid)
             } else {
-                return
+                return false
             }
         default:
-            return
+            return false
         }
 
         // Cloud-always-wins: cloud content overwrites local if different
-        if file.content != localContent {
-            switch file.file_type {
-            case "system":
-                local.saveSystem(file.content)
-            case "memory":
-                local.saveMemory(file.content)
-            case "family_memory":
-                local.saveFamilyMemory(file.content)
-            case "user_memory":
-                if let uid = file.user_id {
-                    local.saveUserMemory(userId: uid, content: file.content)
-                }
-            default:
-                break
+        guard file.content != localContent else { return false }
+
+        switch file.file_type {
+        case "system":
+            local.saveSystem(file.content)
+        case "memory":
+            local.saveMemory(file.content)
+        case "family_memory":
+            local.saveFamilyMemory(file.content)
+        case "user_memory":
+            if let uid = file.user_id {
+                local.saveUserMemory(userId: uid, content: file.content)
             }
-            Log.cloud.info("클라우드 → 로컬 동기화: \(file.file_type, privacy: .public)")
+        default:
+            break
         }
+        Log.cloud.info("클라우드 → 로컬 동기화: \(file.file_type, privacy: .public)")
+        return true
     }
 
     private func recordHistory(contextFileId: UUID, workspaceId: UUID, fileType: String, content: String, version: Int) async throws {

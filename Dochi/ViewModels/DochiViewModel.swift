@@ -146,30 +146,19 @@ final class DochiViewModel: ObservableObject {
         // Restore cloud session, sync context/conversations, register device, start Realtime
         Task {
             await supabaseService.restoreSession()
-            if let cloudContext = contextService as? CloudContextService {
-                await cloudContext.pullFromCloud()
-                cloudContext.onContextChanged = { [weak self] in
-                    // Context 변경 시 별도 처리 없이 다음 LLM 요청에 반영됨
-                    Log.app.info("Realtime: 컨텍스트 변경 감지")
-                    _ = self  // retain check
+            setupCloudServices()
+        }
+
+        // Cleanup Realtime on logout, re-setup on login
+        supabaseService.onAuthStateChanged = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .signedOut:
+                self.cleanupCloudServices()
+            case .signedIn:
+                Task {
+                    self.setupCloudServices()
                 }
-                cloudContext.subscribeToRealtimeChanges()
-            }
-            if let cloudConversation = conversationService as? CloudConversationService {
-                await cloudConversation.pullFromCloud()
-                conversationManager.loadAll()
-                cloudConversation.onConversationsChanged = { [weak self] in
-                    self?.conversationManager.loadAll()
-                }
-                cloudConversation.subscribeToRealtimeChanges()
-            }
-            if case .signedIn = supabaseService.authState {
-                do {
-                    try await deviceService.registerDevice()
-                } catch {
-                    Log.cloud.warning("디바이스 등록 실패: \(error, privacy: .public)")
-                }
-                deviceService.startHeartbeat()
             }
         }
     }
@@ -182,6 +171,51 @@ final class DochiViewModel: ObservableObject {
         } else if supertonicService.state == .unloaded {
             connect()
         }
+    }
+
+    private func setupCloudServices() {
+        if let cloudContext = contextService as? CloudContextService {
+            Task {
+                await cloudContext.pullFromCloud()
+            }
+            cloudContext.onContextChanged = {
+                Log.app.info("Realtime: 컨텍스트 변경 감지")
+            }
+            cloudContext.subscribeToRealtimeChanges()
+        }
+        if let cloudConversation = conversationService as? CloudConversationService {
+            Task {
+                await cloudConversation.pullFromCloud()
+                conversationManager.loadAll()
+            }
+            cloudConversation.onConversationsChanged = { [weak self] in
+                self?.conversationManager.loadAll()
+            }
+            cloudConversation.subscribeToRealtimeChanges()
+        }
+        if case .signedIn = supabaseService.authState {
+            Task {
+                do {
+                    try await deviceService.registerDevice()
+                } catch {
+                    Log.cloud.warning("디바이스 등록 실패: \(error, privacy: .public)")
+                }
+                deviceService.startHeartbeat()
+            }
+        }
+    }
+
+    private func cleanupCloudServices() {
+        if let cloudContext = contextService as? CloudContextService {
+            cloudContext.unsubscribeFromRealtime()
+            cloudContext.onContextChanged = nil
+        }
+        if let cloudConversation = conversationService as? CloudConversationService {
+            cloudConversation.unsubscribeFromRealtime()
+            cloudConversation.onConversationsChanged = nil
+        }
+        deviceService.stopHeartbeat()
+        Log.app.info("클라우드 서비스 정리 완료")
     }
 
     private func connect() {
