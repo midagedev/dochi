@@ -5,6 +5,11 @@ import Foundation
 final class MockSupabaseService: SupabaseServiceProtocol {
     var authState: AuthState = .signedOut
     var onAuthStateChanged: ((AuthState) -> Void)?
+    var selectedWorkspace: Workspace? { currentWorkspaceValue }
+
+    var isConfigured: Bool = true
+    var configuredURL: String?
+    var configuredAnonKey: String?
 
     var workspaces: [Workspace] = []
     var currentWorkspaceValue: Workspace?
@@ -13,6 +18,11 @@ final class MockSupabaseService: SupabaseServiceProtocol {
     var signInWithAppleCalled = false
     var signOutCalled = false
     var createWorkspaceName: String?
+
+    func configure(url: String, anonKey: String) {
+        configuredURL = url
+        configuredAnonKey = anonKey
+    }
 
     func signInWithApple() async throws {
         signInWithAppleCalled = true

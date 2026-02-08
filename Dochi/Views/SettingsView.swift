@@ -339,7 +339,9 @@ struct SettingsView: View {
                 }
 
                 // MARK: - Cloud
-                CloudSettingsView(supabaseService: viewModel.supabaseService)
+                if let supabase = viewModel.supabaseServiceForView {
+                    CloudSettingsView(supabaseService: supabase)
+                }
 
                 // MARK: - About
                 Section("정보") {

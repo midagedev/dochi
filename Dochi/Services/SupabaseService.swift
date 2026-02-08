@@ -9,8 +9,8 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     @Published private(set) var authState: AuthState = .signedOut
     var onAuthStateChanged: ((AuthState) -> Void)?
 
-    /// Supabase 클라이언트 (CloudContextService 등에서 DB 접근용)
-    let client: SupabaseClient
+    /// Supabase 클라이언트 (CloudContextService 등에서 DB 접근용). nil when config is missing.
+    let client: SupabaseClient?
     private let keychainService: KeychainServiceProtocol
     private let defaults: UserDefaults
 
@@ -34,15 +34,10 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
         let anonKey = keychainService.load(account: KeychainKeys.supabaseAnonKey)
             ?? SupabaseService.bundledAnonKey()
 
-        guard let supabaseURL = URL(string: url ?? "") else {
-            Log.cloud.error("Supabase URL이 설정되지 않았습니다")
-            self.client = SupabaseClient(supabaseURL: URL(string: "https://placeholder.supabase.co")!, supabaseKey: "placeholder")
-            return
-        }
-
-        guard let key = anonKey, !key.isEmpty else {
-            Log.cloud.error("Supabase anon key가 설정되지 않았습니다")
-            self.client = SupabaseClient(supabaseURL: supabaseURL, supabaseKey: "placeholder")
+        guard let supabaseURL = URL(string: url ?? ""),
+              let key = anonKey, !key.isEmpty else {
+            Log.cloud.warning("Supabase 설정이 없습니다 — 클라우드 기능 비활성")
+            self.client = nil
             return
         }
 
@@ -73,16 +68,13 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     var isConfigured: Bool {
-        let url = keychainService.load(account: KeychainKeys.supabaseURL)
-            ?? SupabaseService.bundledURL()
-        let key = keychainService.load(account: KeychainKeys.supabaseAnonKey)
-            ?? SupabaseService.bundledAnonKey()
-        return url != nil && key != nil && !(url?.isEmpty ?? true) && !(key?.isEmpty ?? true)
+        client != nil
     }
 
     // MARK: - Auth
 
     func restoreSession() async {
+        guard let client else { return }
         do {
             let session = try await client.auth.session
             let user = session.user
@@ -99,6 +91,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     func signInWithApple() async throws {
+        guard let client else { throw SupabaseError.configurationMissing }
         let helper = AppleSignInHelper()
         let credential = try await helper.performSignIn()
 
@@ -117,6 +110,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     func signInWithEmail(email: String, password: String) async throws {
+        guard let client else { throw SupabaseError.configurationMissing }
         let session = try await client.auth.signIn(email: email, password: password)
         let user = session.user
         authState = .signedIn(userId: user.id, email: user.email)
@@ -125,6 +119,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     func signUpWithEmail(email: String, password: String) async throws {
+        guard let client else { throw SupabaseError.configurationMissing }
         let result = try await client.auth.signUp(email: email, password: password)
         if let session = result.session {
             let user = session.user
@@ -137,6 +132,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     func signOut() async throws {
+        guard let client else { throw SupabaseError.configurationMissing }
         try await client.auth.signOut()
         authState = .signedOut
         selectedWorkspace = nil
@@ -148,6 +144,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     // MARK: - Workspaces
 
     func createWorkspace(name: String) async throws -> Workspace {
+        guard let client else { throw SupabaseError.configurationMissing }
         guard case .signedIn(let userId, _) = authState else {
             throw SupabaseError.notAuthenticated
         }
@@ -186,37 +183,27 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     func joinWorkspace(inviteCode: String) async throws -> Workspace {
-        guard case .signedIn(let userId, _) = authState else {
+        guard let client else { throw SupabaseError.configurationMissing }
+        guard case .signedIn = authState else {
             throw SupabaseError.notAuthenticated
+        }
+
+        // Use SECURITY DEFINER function to join without exposing workspace data via RLS
+        let wsIdString: String = try await client.rpc(
+            "join_workspace_by_invite",
+            params: ["code": inviteCode]
+        ).execute().value
+
+        guard let wsId = UUID(uuidString: wsIdString) else {
+            throw SupabaseError.invalidInviteCode
         }
 
         let workspace: Workspace = try await client.from("workspaces")
             .select()
-            .eq("invite_code", value: inviteCode)
+            .eq("id", value: wsId)
             .single()
             .execute()
             .value
-
-        // Check if already a member
-        struct MemberCheck: Decodable { let id: UUID }
-        let existing: [MemberCheck] = try await client.from("workspace_members")
-            .select("id")
-            .eq("workspace_id", value: workspace.id)
-            .eq("user_id", value: userId)
-            .execute()
-            .value
-
-        if existing.isEmpty {
-            struct InsertMember: Encodable {
-                let workspace_id: UUID
-                let user_id: UUID
-                let role: String
-            }
-
-            try await client.from("workspace_members")
-                .insert(InsertMember(workspace_id: workspace.id, user_id: userId, role: "member"))
-                .execute()
-        }
 
         setCurrentWorkspace(workspace)
         Log.cloud.info("워크스페이스 참가: \(workspace.name, privacy: .public)")
@@ -224,6 +211,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     func leaveWorkspace(id: UUID) async throws {
+        guard let client else { throw SupabaseError.configurationMissing }
         guard case .signedIn(let userId, _) = authState else {
             throw SupabaseError.notAuthenticated
         }
@@ -242,6 +230,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     func listWorkspaces() async throws -> [Workspace] {
+        guard let client else { throw SupabaseError.configurationMissing }
         guard case .signedIn(let userId, _) = authState else {
             throw SupabaseError.notAuthenticated
         }
@@ -284,6 +273,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     func regenerateInviteCode(workspaceId: UUID) async throws -> String {
+        guard let client else { throw SupabaseError.configurationMissing }
         let newCode = generateInviteCode()
 
         struct UpdateCode: Encodable {
@@ -311,7 +301,8 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
     }
 
     private func restoreCurrentWorkspace() async {
-        guard let idString = defaults.string(forKey: DefaultsKeys.currentWorkspaceId),
+        guard let client,
+              let idString = defaults.string(forKey: DefaultsKeys.currentWorkspaceId),
               let id = UUID(uuidString: idString) else { return }
 
         do {
