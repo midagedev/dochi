@@ -34,6 +34,11 @@ struct DeviceSettingsView: View {
                                 Text(device.platform)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if !device.capabilities.isEmpty {
+                                    Text(device.capabilities.joined(separator: ", "))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
                                 if !device.isOnline {
                                     Text("마지막: \(formatLastSeen(device.lastSeenAt))")
                                         .font(.caption)
