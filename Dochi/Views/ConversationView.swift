@@ -80,7 +80,7 @@ struct ConversationView: View {
                 VStack {
                     Spacer()
                     WakeWordMonitor(
-                        variations: viewModel.wakeWordVariations,
+                        wakeWord: viewModel.settings.wakeWord,
                         transcript: viewModel.speechService.wakeWordTranscript
                     )
                     .padding(.horizontal, 20)
@@ -193,8 +193,13 @@ struct ConversationView: View {
 // MARK: - Wake Word Monitor
 
 struct WakeWordMonitor: View {
-    let variations: [String]
+    let wakeWord: String
     let transcript: String
+
+    private var jamoMatch: (distance: Int, match: String)? {
+        guard !transcript.isEmpty else { return nil }
+        return JamoMatcher.findBestMatch(in: transcript, for: wakeWord)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -215,20 +220,19 @@ struct WakeWordMonitor: View {
                 Spacer()
             }
 
-            if !variations.isEmpty {
-                FlowLayout(spacing: 6) {
-                    ForEach(variations, id: \.self) { word in
-                        let matched = !transcript.isEmpty
-                            && transcript.replacingOccurrences(of: " ", with: "")
-                                .contains(word.replacingOccurrences(of: " ", with: ""))
-                        Text(word)
-                            .font(.caption2)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(matched ? Color.mint.opacity(0.3) : Color.secondary.opacity(0.1))
-                            .foregroundStyle(matched ? .mint : .secondary)
-                            .clipShape(Capsule())
-                    }
+            HStack(spacing: 8) {
+                Text(wakeWord)
+                    .font(.caption2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.mint.opacity(0.2))
+                    .foregroundStyle(.mint)
+                    .clipShape(Capsule())
+
+                if let match = jamoMatch {
+                    Text("거리: \(match.distance)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
         }

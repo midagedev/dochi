@@ -38,9 +38,6 @@ final class DochiViewModel: ObservableObject {
     private let maxToolIterations = 10
 
     private var cancellables = Set<AnyCancellable>()
-    @Published var wakeWordVariations: [String] = []
-    private var lastGeneratedWakeWord: String = ""
-
     // 연속 대화 모드
     @Published var isSessionActive: Bool = false
     @Published var autoEndSession: Bool = true
@@ -151,10 +148,11 @@ final class DochiViewModel: ObservableObject {
             }
         }
 
-        // LLM 응답 완료 → 메시지 히스토리에 추가
+        // LLM 응답 완료 → 메시지 히스토리에 추가 + TTS 미재생 시 상태 복구
         llmService.onResponseComplete = { [weak self] response in
             guard let self else { return }
             self.messages.append(Message(role: .assistant, content: response))
+            self.recoverIfTTSDidNotPlay()
         }
 
         // LLM이 tool 호출 요청 → tool 실행 후 재호출
@@ -245,8 +243,10 @@ final class DochiViewModel: ObservableObject {
 
         let normalized = transcript.replacingOccurrences(of: " ", with: "").lowercased()
 
-        // 프로필 이름 매칭
-        if let matched = profiles.first(where: { normalized.contains($0.name.lowercased()) }) {
+        // 프로필 이름/별칭 매칭
+        if let matched = profiles.first(where: { profile in
+            profile.allNames.contains { normalized.contains($0.lowercased()) }
+        }) {
             currentUserId = matched.id
             currentUserName = matched.name
             Log.app.info("웨이크워드에서 사용자 식별: \(matched.name)")
@@ -298,7 +298,10 @@ final class DochiViewModel: ObservableObject {
         // 앱 시작 시 마이크/음성인식 권한을 한 번만 요청
         Task {
             let granted = await speechService.requestAuthorization()
-            if !granted {
+            if granted {
+                // 권한 획득 즉시 웨이크워드 시작 (TTS 로드 완료 안 기다림)
+                self.startWakeWordIfNeeded()
+            } else {
                 Log.app.warning("마이크/음성인식 권한 거부됨")
             }
         }
@@ -336,6 +339,9 @@ final class DochiViewModel: ObservableObject {
     }
 
     private func handleQuery(_ query: String) {
+        // 텍스트 처리 중 웨이크워드 충돌 방지
+        speechService.stopWakeWordDetection()
+
         messages.append(Message(role: .user, content: query))
         state = .processing
 
@@ -553,6 +559,7 @@ final class DochiViewModel: ObservableObject {
         llmService.onResponseComplete = { [weak self] response in
             guard let self else { return }
             self.messages.append(Message(role: .assistant, content: response))
+            self.recoverIfTTSDidNotPlay()
         }
 
         llmService.onToolCallsReceived = { [weak self] toolCalls in
@@ -560,6 +567,21 @@ final class DochiViewModel: ObservableObject {
             Task {
                 await self.executeToolLoop(toolCalls: toolCalls)
             }
+        }
+    }
+
+    /// TTS가 재생되지 않았을 때 상태 복구 (텍스트 전용 응답 등)
+    private func recoverIfTTSDidNotPlay() {
+        // TTS가 재생 중이면 onSpeakingComplete에서 처리하므로 여기선 무시
+        guard state == .processing else { return }
+
+        state = .idle
+        Log.app.info("TTS 미재생 — 상태 복구")
+
+        if isSessionActive {
+            startContinuousListening()
+        } else {
+            startWakeWordIfNeeded()
         }
     }
 
@@ -572,61 +594,12 @@ final class DochiViewModel: ObservableObject {
               !settings.wakeWord.isEmpty
         else { return }
 
-        let wakeWord = settings.wakeWord
-
-        if wakeWord == lastGeneratedWakeWord, !wakeWordVariations.isEmpty {
-            speechService.startWakeWordDetection(phrases: wakeWordVariations)
-            return
-        }
-
-        Task {
-            let variations = await generateWakeWordVariations(wakeWord)
-            self.wakeWordVariations = variations
-            self.lastGeneratedWakeWord = wakeWord
-            Log.stt.info("웨이크워드 변형 (\(variations.count)개): \(variations)")
-
-            guard self.settings.wakeWordEnabled,
-                  self.state == .idle,
-                  self.speechService.state == .idle
-            else { return }
-            self.speechService.startWakeWordDetection(phrases: variations)
-        }
+        Log.stt.info("웨이크워드 자모 매칭 시작: \(self.settings.wakeWord)")
+        speechService.startWakeWordDetection(wakeWord: settings.wakeWord)
     }
 
     func stopWakeWord() {
         speechService.stopWakeWordDetection()
-    }
-
-    private func generateWakeWordVariations(_ wakeWord: String) async -> [String] {
-        let providers: [LLMProvider] = [.openai, .anthropic, .zai]
-        guard let provider = providers.first(where: { !settings.apiKey(for: $0).isEmpty }) else {
-            return [wakeWord]
-        }
-
-        let apiKey = settings.apiKey(for: provider)
-        let prompt = """
-        다음 단어와 발음이 비슷하여 한국어 음성인식(STT)에서 이 단어 대신 인식될 수 있는 표현들을 나열해줘.
-        원래 단어 포함해서 총 15개. 각 줄에 하나씩만, 번호나 설명 없이 단어만: \(wakeWord)
-        """
-
-        do {
-            let response = try await callLLMSimple(provider: provider, apiKey: apiKey, prompt: prompt)
-            var variations = response
-                .split(separator: "\n")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .replacingOccurrences(of: #"^[\d]+[.\)]\s*"#, with: "", options: .regularExpression)
-                    .replacingOccurrences(of: "- ", with: "")
-                }
-                .filter { !$0.isEmpty && $0.count <= 10 }
-
-            if !variations.contains(wakeWord) {
-                variations.insert(wakeWord, at: 0)
-            }
-            return variations.isEmpty ? [wakeWord] : variations
-        } catch {
-            Log.stt.error("웨이크워드 변형 생성 실패: \(error.localizedDescription, privacy: .public)")
-            return [wakeWord]
-        }
     }
 
     private func callLLMSimple(provider: LLMProvider, apiKey: String, prompt: String) async throws -> String {

@@ -125,10 +125,10 @@ final class SpeechService: ObservableObject {
 
     // MARK: - Wake Word
 
-    func startWakeWordDetection(phrases: [String]) {
-        guard state == .idle, !phrases.isEmpty else { return }
+    func startWakeWordDetection(wakeWord: String) {
+        guard state == .idle, !wakeWord.isEmpty else { return }
         wakeWordTranscript = ""
-        doStartRecognition(mode: .wakeWord(phrases: phrases))
+        doStartRecognition(mode: .wakeWord(wakeWord: wakeWord))
     }
 
     func stopWakeWordDetection() {
@@ -142,7 +142,7 @@ final class SpeechService: ObservableObject {
 
     private enum RecognitionMode {
         case query
-        case wakeWord(phrases: [String])
+        case wakeWord(wakeWord: String)
     }
 
     /// 오디오 탭을 nonisolated 컨텍스트에서 설치 (Swift 6 concurrency 호환)
@@ -207,10 +207,10 @@ final class SpeechService: ObservableObject {
         case .query:
             state = .listening
             beginQueryRecognition(request: request)
-        case .wakeWord(let phrases):
+        case .wakeWord(let wakeWord):
             state = .waitingForWakeWord
-            Log.stt.info("웨이크워드 대기: \(phrases)")
-            beginWakeWordRecognition(request: request, phrases: phrases)
+            Log.stt.info("웨이크워드 대기: \(wakeWord)")
+            beginWakeWordRecognition(request: request, wakeWord: wakeWord)
         }
 
         engine.prepare()
@@ -301,10 +301,7 @@ final class SpeechService: ObservableObject {
         }
     }
 
-    private func beginWakeWordRecognition(request: SFSpeechAudioBufferRecognitionRequest, phrases: [String]) {
-        // 공백 제거한 웨이크워드들로 매칭 (인식 결과에 공백이 다르게 들어올 수 있음)
-        let normalizedPhrases = phrases.map { $0.replacingOccurrences(of: " ", with: "") }
-
+    private func beginWakeWordRecognition(request: SFSpeechAudioBufferRecognitionRequest, wakeWord: String) {
         recognitionTask = speechRecognizer?.recognitionTask(with: request) { [weak self] result, err in
             DispatchQueue.main.async {
                 guard let self, self.state == .waitingForWakeWord else { return }
@@ -313,9 +310,9 @@ final class SpeechService: ObservableObject {
                     let text = result.bestTranscription.formattedString
                     self.wakeWordTranscript = text
 
-                    // 공백 무시하고 변형 중 하나라도 매칭되면 트리거
-                    let normalized = text.replacingOccurrences(of: " ", with: "")
-                    if normalizedPhrases.contains(where: { normalized.contains($0) }) {
+                    // 자모 유사도 기반 매칭
+                    if JamoMatcher.isMatch(transcript: text, wakeWord: wakeWord) {
+                        Log.stt.info("웨이크워드 자모 매칭 성공: \"\(text)\" ≈ \"\(wakeWord)\"")
                         self.soundService.playWakeWordDetected()
                         let detectedTranscript = text
                         self.stopWakeWordDetection()
@@ -336,7 +333,7 @@ final class SpeechService: ObservableObject {
                         DispatchQueue.main.async {
                             guard let self else { return }
                             self.state = .idle
-                            self.startWakeWordDetection(phrases: phrases)
+                            self.startWakeWordDetection(wakeWord: wakeWord)
                         }
                     }
                 }
