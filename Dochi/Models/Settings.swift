@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import os
 
 @MainActor
 final class AppSettings: ObservableObject {
@@ -120,9 +121,13 @@ final class AppSettings: ObservableObject {
         self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? Constants.Defaults.contextMaxSize
 
         // MCP servers
-        if let data = defaults.data(forKey: Keys.mcpServers),
-           let servers = try? JSONDecoder().decode([MCPServerConfig].self, from: data) {
-            self.mcpServers = servers
+        if let data = defaults.data(forKey: Keys.mcpServers) {
+            do {
+                self.mcpServers = try JSONDecoder().decode([MCPServerConfig].self, from: data)
+            } catch {
+                Log.storage.warning("MCP 서버 설정 파싱 실패: \(error, privacy: .public)")
+                self.mcpServers = []
+            }
         } else {
             self.mcpServers = []
         }
@@ -139,8 +144,11 @@ final class AppSettings: ObservableObject {
     // MARK: - MCP Servers
 
     private func saveMCPServers() {
-        if let data = try? JSONEncoder().encode(mcpServers) {
+        do {
+            let data = try JSONEncoder().encode(mcpServers)
             UserDefaults.standard.set(data, forKey: Keys.mcpServers)
+        } catch {
+            Log.storage.error("MCP 서버 설정 저장 실패: \(error, privacy: .public)")
         }
     }
 

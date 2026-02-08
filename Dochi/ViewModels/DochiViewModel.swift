@@ -169,6 +169,7 @@ final class DochiViewModel: ObservableObject {
             self.state = .idle
 
             Task {
+                // Task 취소 시 에코 방지 딜레이 스킵은 의도된 동작
                 try? await Task.sleep(for: .milliseconds(Constants.Timing.echoPreventionDelayMs))
                 guard self.state == .idle else { return }
 
@@ -546,7 +547,10 @@ final class DochiViewModel: ObservableObject {
 
     private func extractImageURLs(from content: String) -> [URL] {
         let pattern = #"!\[.*?\]\((.*?)\)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            Log.app.error("이미지 URL 정규식 컴파일 실패")
+            return []
+        }
         let range = NSRange(content.startIndex..., in: content)
         let matches = regex.matches(in: content, range: range)
         return matches.compactMap { match in
@@ -702,6 +706,7 @@ final class DochiViewModel: ObservableObject {
 
         Task {
             while supertonicService.state == .playing || supertonicService.state == .synthesizing {
+                // 폴링 대기 — 취소 시 즉시 종료 처리됨
                 try? await Task.sleep(for: .milliseconds(Constants.Timing.ttsCompletionPollMs))
             }
             endSession()

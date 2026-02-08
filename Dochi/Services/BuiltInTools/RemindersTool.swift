@@ -261,8 +261,12 @@ final class RemindersTool: BuiltInTool {
                 for r in reminders {
                     if let rTitle = r.title, rTitle.localizedCaseInsensitiveContains(title) {
                         r.isCompleted = true
-                        try? self.eventStore.save(r, commit: true)
-                        count += 1
+                        do {
+                            try self.eventStore.save(r, commit: true)
+                            count += 1
+                        } catch {
+                            Log.tool.error("리마인더 완료 처리 실패 '\(rTitle, privacy: .public)': \(error, privacy: .public)")
+                        }
                     }
                 }
                 continuation.resume(returning: count)

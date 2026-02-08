@@ -17,7 +17,11 @@ final class KeychainService: KeychainServiceProtocol {
                 .appendingPathComponent("Dochi", isDirectory: true)
             self.storageDir = dir
         }
-        try? fileManager.createDirectory(at: storageDir, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: storageDir, withIntermediateDirectories: true)
+        } catch {
+            Log.storage.error("키 저장소 디렉토리 생성 실패: \(error, privacy: .public)")
+        }
     }
 
     private func fileURL(account: String) -> URL {
@@ -35,7 +39,12 @@ final class KeychainService: KeychainServiceProtocol {
 
     func load(account: String) -> String? {
         let url = fileURL(account: account)
-        return try? String(contentsOf: url, encoding: .utf8)
+        do {
+            return try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            // 키가 아직 저장되지 않은 경우 정상 (파일 없음)
+            return nil
+        }
     }
 
     func delete(account: String) {

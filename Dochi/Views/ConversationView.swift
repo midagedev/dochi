@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 struct ConversationView: View {
     @EnvironmentObject var viewModel: DochiViewModel
@@ -649,7 +650,11 @@ struct ImagePreviewView: View {
         panel.nameFieldStringValue = url.lastPathComponent
         panel.begin { result in
             if result == .OK, let destURL = panel.url {
-                try? FileManager.default.copyItem(at: url, to: destURL)
+                do {
+                    try FileManager.default.copyItem(at: url, to: destURL)
+                } catch {
+                    Log.storage.error("이미지 저장 실패: \(error, privacy: .public)")
+                }
             }
         }
     }
