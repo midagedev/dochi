@@ -5,52 +5,52 @@ import os
 @MainActor
 final class AppSettings: ObservableObject {
     @Published var wakeWordEnabled: Bool {
-        didSet { UserDefaults.standard.set(wakeWordEnabled, forKey: Keys.wakeWordEnabled) }
+        didSet { defaults.set(wakeWordEnabled, forKey: Keys.wakeWordEnabled) }
     }
     @Published var wakeWord: String {
-        didSet { UserDefaults.standard.set(wakeWord, forKey: Keys.wakeWord) }
+        didSet { defaults.set(wakeWord, forKey: Keys.wakeWord) }
     }
 
     // LLM settings
     @Published var llmProvider: LLMProvider {
         didSet {
-            UserDefaults.standard.set(llmProvider.rawValue, forKey: Keys.llmProvider)
+            defaults.set(llmProvider.rawValue, forKey: Keys.llmProvider)
             if !llmProvider.models.contains(llmModel) {
                 llmModel = llmProvider.models.first ?? ""
             }
         }
     }
     @Published var llmModel: String {
-        didSet { UserDefaults.standard.set(llmModel, forKey: Keys.llmModel) }
+        didSet { defaults.set(llmModel, forKey: Keys.llmModel) }
     }
 
     // TTS settings
     @Published var supertonicVoice: SupertonicVoice {
-        didSet { UserDefaults.standard.set(supertonicVoice.rawValue, forKey: Keys.supertonicVoice) }
+        didSet { defaults.set(supertonicVoice.rawValue, forKey: Keys.supertonicVoice) }
     }
     @Published var ttsSpeed: Float {
-        didSet { UserDefaults.standard.set(ttsSpeed, forKey: Keys.ttsSpeed) }
+        didSet { defaults.set(ttsSpeed, forKey: Keys.ttsSpeed) }
     }
     @Published var ttsDiffusionSteps: Int {
-        didSet { UserDefaults.standard.set(ttsDiffusionSteps, forKey: Keys.ttsDiffusionSteps) }
+        didSet { defaults.set(ttsDiffusionSteps, forKey: Keys.ttsDiffusionSteps) }
     }
 
     // Display settings
     @Published var chatFontSize: Double {
-        didSet { UserDefaults.standard.set(chatFontSize, forKey: Keys.chatFontSize) }
+        didSet { defaults.set(chatFontSize, forKey: Keys.chatFontSize) }
     }
 
     // STT settings
     @Published var sttSilenceTimeout: Double {
-        didSet { UserDefaults.standard.set(sttSilenceTimeout, forKey: Keys.sttSilenceTimeout) }
+        didSet { defaults.set(sttSilenceTimeout, forKey: Keys.sttSilenceTimeout) }
     }
 
     // Memory compression
     @Published var contextAutoCompress: Bool {
-        didSet { UserDefaults.standard.set(contextAutoCompress, forKey: Keys.contextAutoCompress) }
+        didSet { defaults.set(contextAutoCompress, forKey: Keys.contextAutoCompress) }
     }
     @Published var contextMaxSize: Int {
-        didSet { UserDefaults.standard.set(contextMaxSize, forKey: Keys.contextMaxSize) }
+        didSet { defaults.set(contextMaxSize, forKey: Keys.contextMaxSize) }
     }
 
     // MCP servers
@@ -62,9 +62,9 @@ final class AppSettings: ObservableObject {
     @Published var defaultUserId: UUID? {
         didSet {
             if let id = defaultUserId {
-                UserDefaults.standard.set(id.uuidString, forKey: Keys.defaultUserId)
+                defaults.set(id.uuidString, forKey: Keys.defaultUserId)
             } else {
-                UserDefaults.standard.removeObject(forKey: Keys.defaultUserId)
+                defaults.removeObject(forKey: Keys.defaultUserId)
             }
         }
     }
@@ -89,15 +89,16 @@ final class AppSettings: ObservableObject {
 
     private let keychainService: KeychainServiceProtocol
     let contextService: ContextServiceProtocol
+    private let defaults: UserDefaults
 
     init(
         keychainService: KeychainServiceProtocol = KeychainService(),
-        contextService: ContextServiceProtocol = ContextService()
+        contextService: ContextServiceProtocol = ContextService(),
+        defaults: UserDefaults = .standard
     ) {
         self.keychainService = keychainService
         self.contextService = contextService
-
-        let defaults = UserDefaults.standard
+        self.defaults = defaults
 
         // 마이그레이션
         Self.migrateToFileBasedContext(defaults: defaults, contextService: contextService)
@@ -146,7 +147,7 @@ final class AppSettings: ObservableObject {
     private func saveMCPServers() {
         do {
             let data = try JSONEncoder().encode(mcpServers)
-            UserDefaults.standard.set(data, forKey: Keys.mcpServers)
+            defaults.set(data, forKey: Keys.mcpServers)
         } catch {
             Log.storage.error("MCP 서버 설정 저장 실패: \(error, privacy: .public)")
         }

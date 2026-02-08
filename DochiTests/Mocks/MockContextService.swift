@@ -1,7 +1,7 @@
 import Foundation
 @testable import Dochi
 
-final class MockContextService: ContextServiceProtocol {
+final class MockContextService: ContextServiceProtocol, @unchecked Sendable {
     var systemContent: String = ""
     var memoryContent: String = ""
     var familyMemoryContent: String = ""
