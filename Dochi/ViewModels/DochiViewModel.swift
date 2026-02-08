@@ -30,7 +30,7 @@ final class DochiViewModel: ObservableObject {
 
     // Dependencies
     let contextService: ContextServiceProtocol
-    let supabaseService: SupabaseService
+    let supabaseService: any SupabaseServiceProtocol
 
     // Tool loop 관련
     @Published var currentToolExecution: String?
@@ -56,6 +56,11 @@ final class DochiViewModel: ObservableObject {
 
     private let conversationService: ConversationServiceProtocol
 
+    /// Concrete accessor for views that need @ObservedObject
+    var supabaseServiceForView: SupabaseService? {
+        supabaseService as? SupabaseService
+    }
+
     var isConnected: Bool {
         supertonicService.state == .ready || state != .idle
     }
@@ -67,7 +72,7 @@ final class DochiViewModel: ObservableObject {
         contextService: ContextServiceProtocol = ContextService(),
         conversationService: ConversationServiceProtocol = ConversationService(),
         mcpService: MCPServiceProtocol? = nil,
-        supabaseService: SupabaseService? = nil
+        supabaseService: (any SupabaseServiceProtocol)? = nil
     ) {
         self.settings = settings
         self.contextService = contextService

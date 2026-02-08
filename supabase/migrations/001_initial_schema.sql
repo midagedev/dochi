@@ -70,10 +70,35 @@ create policy "workspace_select" on workspaces for select using (
     id in (select workspace_id from workspace_members where user_id = auth.uid())
 );
 
--- Workspaces: anyone can read by invite_code (for joining)
-create policy "workspace_select_by_invite" on workspaces for select using (
-    invite_code is not null
-);
+-- Function: join workspace by invite code (SECURITY DEFINER bypasses RLS)
+create or replace function join_workspace_by_invite(code text)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    ws_id uuid;
+    caller_id uuid;
+begin
+    caller_id := auth.uid();
+    if caller_id is null then
+        raise exception 'Not authenticated';
+    end if;
+
+    select id into ws_id from workspaces where invite_code = code;
+    if ws_id is null then
+        raise exception 'Invalid invite code';
+    end if;
+
+    -- Idempotent: skip if already a member
+    insert into workspace_members (workspace_id, user_id, role)
+    values (ws_id, caller_id, 'member')
+    on conflict (workspace_id, user_id) do nothing;
+
+    return ws_id;
+end;
+$$;
 
 -- Workspaces: owner can insert
 create policy "workspace_insert" on workspaces for insert with check (
