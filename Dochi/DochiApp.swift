@@ -2,13 +2,20 @@ import SwiftUI
 
 @main
 struct DochiApp: App {
-    @StateObject private var settings = AppSettings()
+    @StateObject private var settings: AppSettings
     @StateObject private var viewModel: DochiViewModel
 
     init() {
-        let settings = AppSettings()
+        let keychainService = KeychainService()
+        let supabaseService = SupabaseService(keychainService: keychainService)
+        let cloudContext = CloudContextService(supabaseService: supabaseService)
+        let settings = AppSettings(keychainService: keychainService, contextService: cloudContext)
         _settings = StateObject(wrappedValue: settings)
-        _viewModel = StateObject(wrappedValue: DochiViewModel(settings: settings))
+        _viewModel = StateObject(wrappedValue: DochiViewModel(
+            settings: settings,
+            contextService: cloudContext,
+            supabaseService: supabaseService
+        ))
     }
 
     var body: some Scene {
