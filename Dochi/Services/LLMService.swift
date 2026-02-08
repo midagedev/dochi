@@ -100,7 +100,7 @@ final class LLMService: ObservableObject {
 
         case .anthropic:
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            request.setValue(Constants.LLM.anthropicAPIVersion, forHTTPHeaderField: "anthropic-version")
             let body = buildAnthropicBody(
                 messages: messages,
                 systemPrompt: systemPrompt,
@@ -271,7 +271,7 @@ final class LLMService: ObservableObject {
             "model": model,
             "messages": apiMessages,
             "stream": true,
-            "max_tokens": 4096,
+            "max_tokens": Constants.LLM.anthropicMaxTokens,
         ]
 
         if !systemPrompt.isEmpty {

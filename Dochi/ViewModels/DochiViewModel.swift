@@ -83,7 +83,7 @@ final class DochiViewModel: ObservableObject {
             self.isSessionActive = true
             self.state = .listening
             self.identifyUserFromTranscript(transcript)
-            Log.app.info("세션 시작 (사용자: \(self.currentUserName ?? "미확인"))")
+            Log.app.info("세션 시작 (사용자: \(self.currentUserName ?? Constants.Session.unknownUserLabel))")
         }
 
         // STT 완료 → 응답 처리
@@ -169,7 +169,7 @@ final class DochiViewModel: ObservableObject {
             self.state = .idle
 
             Task {
-                try? await Task.sleep(for: .milliseconds(400))
+                try? await Task.sleep(for: .milliseconds(Constants.Timing.echoPreventionDelayMs))
                 guard self.state == .idle else { return }
 
                 if self.isSessionActive {
@@ -612,25 +612,25 @@ final class DochiViewModel: ObservableObject {
         case .openai:
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             body = [
-                "model": "gpt-4.1-nano",
+                "model": Constants.LLM.openaiSimpleModel,
                 "messages": [["role": "user", "content": prompt]],
-                "max_tokens": 300,
+                "max_tokens": Constants.LLM.simpleAnalysisMaxTokens,
             ]
         case .zai:
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             body = [
-                "model": "glm-4.7",
+                "model": Constants.LLM.zaiSimpleModel,
                 "messages": [["role": "user", "content": prompt]],
-                "max_tokens": 300,
+                "max_tokens": Constants.LLM.simpleAnalysisMaxTokens,
                 "enable_thinking": false,
             ] as [String: Any]
         case .anthropic:
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            request.setValue(Constants.LLM.anthropicAPIVersion, forHTTPHeaderField: "anthropic-version")
             body = [
-                "model": "claude-haiku-4-5-20251001",
+                "model": Constants.LLM.simpleAnalysisModel,
                 "messages": [["role": "user", "content": prompt]],
-                "max_tokens": 300,
+                "max_tokens": Constants.LLM.simpleAnalysisMaxTokens,
             ]
         }
 
@@ -670,13 +670,13 @@ final class DochiViewModel: ObservableObject {
         state = .speaking
         supertonicService.speed = settings.ttsSpeed
         supertonicService.diffusionSteps = settings.ttsDiffusionSteps
-        supertonicService.speak("대화를 종료할까요?", voice: settings.supertonicVoice)
+        supertonicService.speak(Constants.Session.askEndMessage, voice: settings.supertonicVoice)
         Log.app.info("세션 종료 여부 질문")
     }
 
     private func handleEndSessionResponse(_ response: String) {
         let normalized = response.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let positiveKeywords = ["응", "어", "예", "네", "그래", "종료", "끝", "됐어", "괜찮아", "ㅇㅇ", "웅", "yes", "yeah", "ok", "okay"]
+        let positiveKeywords = Constants.Session.endKeywords
 
         if positiveKeywords.contains(where: { normalized.contains($0) }) {
             endSession()
@@ -688,12 +688,7 @@ final class DochiViewModel: ObservableObject {
 
     private func isEndSessionRequest(_ query: String) -> Bool {
         let normalized = query.lowercased().replacingOccurrences(of: " ", with: "")
-        let endKeywords = [
-            "대화종료", "대화끝", "세션종료", "세션끝",
-            "그만할게", "그만하자", "이만할게", "이만하자",
-            "끝내자", "끝낼게", "종료해", "종료할게",
-            "잘가", "잘있어", "바이바이", "bye", "goodbye"
-        ]
+        let endKeywords = Constants.Session.endTriggers
         return endKeywords.contains(where: { normalized.contains($0) })
     }
 
@@ -703,11 +698,11 @@ final class DochiViewModel: ObservableObject {
         state = .speaking
         supertonicService.speed = settings.ttsSpeed
         supertonicService.diffusionSteps = settings.ttsDiffusionSteps
-        supertonicService.speak("네, 대화를 종료할게요. 다음에 또 불러주세요!", voice: settings.supertonicVoice)
+        supertonicService.speak(Constants.Session.endConfirmMessage, voice: settings.supertonicVoice)
 
         Task {
             while supertonicService.state == .playing || supertonicService.state == .synthesizing {
-                try? await Task.sleep(for: .milliseconds(100))
+                try? await Task.sleep(for: .milliseconds(Constants.Timing.ttsCompletionPollMs))
             }
             endSession()
         }
