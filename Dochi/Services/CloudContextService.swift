@@ -4,16 +4,24 @@ import os
 
 /// 클라우드 동기화 컨텍스트 서비스
 /// - 로컬 ContextService를 래핑하여 write-through 클라우드 동기화 제공
+/// - Supabase Realtime으로 다른 디바이스 변경사항 즉시 반영
 /// - 오프라인 시 로컬만 사용, 온라인 복귀 시 동기화
 /// - Cloud-always-wins on pull: 풀 시 클라우드 내용이 로컬을 덮어씁니다
 @MainActor
 final class CloudContextService: ContextServiceProtocol {
     private let local: ContextService
     private let supabaseService: SupabaseService
+    private let deviceService: (any DeviceServiceProtocol)?
 
-    init(local: ContextService = ContextService(), supabaseService: SupabaseService) {
+    /// 다른 디바이스에서 컨텍스트가 변경되었을 때 호출
+    var onContextChanged: (() -> Void)?
+
+    private var realtimeTask: Task<Void, Never>?
+
+    init(local: ContextService = ContextService(), supabaseService: SupabaseService, deviceService: (any DeviceServiceProtocol)? = nil) {
         self.local = local
         self.supabaseService = supabaseService
+        self.deviceService = deviceService
     }
 
     // MARK: - Cloud Sync State
@@ -139,9 +147,99 @@ final class CloudContextService: ContextServiceProtocol {
         }
     }
 
+    // MARK: - Realtime Subscriptions
+
+    /// Supabase Realtime 구독 시작 — 다른 디바이스의 변경사항 즉시 반영
+    func subscribeToRealtimeChanges() {
+        guard let client = supabaseService.client,
+              let wsId = resolveWorkspaceId() else { return }
+        unsubscribeFromRealtime()
+
+        realtimeTask = Task { [weak self] in
+            let channel = client.realtimeV2.channel("context-\(wsId.uuidString)")
+
+            let contextChanges = channel.postgresChange(
+                AnyAction.self,
+                schema: "public",
+                table: "context_files",
+                filter: .eq("workspace_id", value: wsId)
+            )
+
+            let profileChanges = channel.postgresChange(
+                AnyAction.self,
+                schema: "public",
+                table: "profiles",
+                filter: .eq("workspace_id", value: wsId)
+            )
+
+            do {
+                try await channel.subscribeWithError()
+                Log.cloud.info("컨텍스트 Realtime 구독 시작")
+            } catch {
+                Log.cloud.warning("컨텍스트 Realtime 구독 실패: \(error, privacy: .public)")
+                return
+            }
+
+            // Listen for context_files changes
+            Task { [weak self] in
+                for await action in contextChanges {
+                    guard !Task.isCancelled else { break }
+                    await self?.handleContextRealtimeEvent(action)
+                }
+            }
+
+            // Listen for profiles changes
+            Task { [weak self] in
+                for await action in profileChanges {
+                    guard !Task.isCancelled else { break }
+                    await self?.handleProfileRealtimeEvent(action, workspaceId: wsId)
+                }
+            }
+        }
+    }
+
+    /// Realtime 구독 해제
+    func unsubscribeFromRealtime() {
+        realtimeTask?.cancel()
+        realtimeTask = nil
+    }
+
+    private func handleContextRealtimeEvent(_ action: AnyAction) {
+        do {
+            switch action {
+            case .insert(let insert):
+                let row = try insert.decodeRecord(as: ContextFileRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
+                if applyCloudFile(row) {
+                    onContextChanged?()
+                }
+            case .update(let update):
+                let row = try update.decodeRecord(as: ContextFileRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
+                if applyCloudFile(row) {
+                    onContextChanged?()
+                }
+            case .delete:
+                break // context_files are not deleted, only updated
+            }
+        } catch {
+            Log.cloud.warning("컨텍스트 Realtime 이벤트 디코딩 실패: \(error, privacy: .public)")
+        }
+    }
+
+    private func handleProfileRealtimeEvent(_ action: AnyAction, workspaceId: UUID) {
+        // On any profile change, re-pull all profiles for simplicity
+        switch action {
+        case .insert, .update, .delete:
+            Task {
+                await self.pullProfilesFromCloud(workspaceId: workspaceId)
+                self.onContextChanged?()
+            }
+        }
+    }
+
     /// 로컬 변경 → 클라우드 동기화 (write-through, 비동기 fire-and-forget)
     private func scheduleCloudPush(fileType: String, content: String, userId: UUID? = nil) {
         let svc = supabaseService
+        let currentDeviceId = deviceService?.currentDevice?.id
         Task {
             guard let client = svc.client,
                   let wsId = svc.selectedWorkspace?.id else { return }
@@ -159,7 +257,8 @@ final class CloudContextService: ContextServiceProtocol {
                             content: content,
                             version: newVersion,
                             updated_at: Date(),
-                            updated_by: authUserId
+                            updated_by: authUserId,
+                            device_id: currentDeviceId
                         ))
                         .eq("id", value: existing.id)
                         .execute()
@@ -179,7 +278,8 @@ final class CloudContextService: ContextServiceProtocol {
                             file_type: fileType,
                             user_id: userId,
                             content: content,
-                            updated_by: authUserId
+                            updated_by: authUserId,
+                            device_id: currentDeviceId
                         ))
                         .select()
                         .single()
@@ -307,7 +407,8 @@ final class CloudContextService: ContextServiceProtocol {
         return rows.first
     }
 
-    private func applyCloudFile(_ file: ContextFileRow) {
+    @discardableResult
+    private func applyCloudFile(_ file: ContextFileRow) -> Bool {
         let localContent: String
         switch file.file_type {
         case "system":
@@ -320,30 +421,31 @@ final class CloudContextService: ContextServiceProtocol {
             if let uid = file.user_id {
                 localContent = local.loadUserMemory(userId: uid)
             } else {
-                return
+                return false
             }
         default:
-            return
+            return false
         }
 
         // Cloud-always-wins: cloud content overwrites local if different
-        if file.content != localContent {
-            switch file.file_type {
-            case "system":
-                local.saveSystem(file.content)
-            case "memory":
-                local.saveMemory(file.content)
-            case "family_memory":
-                local.saveFamilyMemory(file.content)
-            case "user_memory":
-                if let uid = file.user_id {
-                    local.saveUserMemory(userId: uid, content: file.content)
-                }
-            default:
-                break
+        guard file.content != localContent else { return false }
+
+        switch file.file_type {
+        case "system":
+            local.saveSystem(file.content)
+        case "memory":
+            local.saveMemory(file.content)
+        case "family_memory":
+            local.saveFamilyMemory(file.content)
+        case "user_memory":
+            if let uid = file.user_id {
+                local.saveUserMemory(userId: uid, content: file.content)
             }
-            Log.cloud.info("클라우드 → 로컬 동기화: \(file.file_type, privacy: .public)")
+        default:
+            break
         }
+        Log.cloud.info("클라우드 → 로컬 동기화: \(file.file_type, privacy: .public)")
+        return true
     }
 
     private func recordHistory(contextFileId: UUID, workspaceId: UUID, fileType: String, content: String, version: Int) async throws {
@@ -373,6 +475,7 @@ private struct ContextFileRow: Codable {
     let version: Int
     let updated_at: Date
     let updated_by: UUID?
+    let device_id: UUID?
 }
 
 private struct ContextFileInsert: Encodable {
@@ -381,6 +484,7 @@ private struct ContextFileInsert: Encodable {
     let user_id: UUID?
     let content: String
     let updated_by: UUID?
+    let device_id: UUID?
 }
 
 private struct ContextFileUpdate: Encodable {
@@ -388,6 +492,7 @@ private struct ContextFileUpdate: Encodable {
     let version: Int
     let updated_at: Date
     let updated_by: UUID?
+    let device_id: UUID?
 }
 
 private struct ContextHistoryInsert: Encodable {

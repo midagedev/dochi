@@ -1,6 +1,7 @@
 import Foundation
 @testable import Dochi
 
+@MainActor
 final class MockConversationService: ConversationServiceProtocol {
     var conversations: [UUID: Conversation] = [:]
 

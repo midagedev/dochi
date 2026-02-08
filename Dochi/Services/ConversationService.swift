@@ -3,6 +3,7 @@ import os
 
 /// 대화 히스토리 저장 서비스
 /// ~/Library/Application Support/Dochi/conversations/ 디렉토리에 JSON 파일로 저장
+@MainActor
 final class ConversationService: ConversationServiceProtocol {
     private let fileManager: FileManager
     private let conversationsDir: URL
