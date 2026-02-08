@@ -47,6 +47,10 @@ final class DochiViewModel: ObservableObject {
     private var isAskingToEndSession: Bool = false
     private let sessionTimeoutSeconds: TimeInterval = 10.0
 
+    // 다중 사용자
+    @Published var currentUserId: UUID?
+    @Published var currentUserName: String?
+
 
     var isConnected: Bool {
         supertonicService.state == .ready || state != .idle
@@ -71,16 +75,18 @@ final class DochiViewModel: ObservableObject {
 
         setupCallbacks()
         setupChangeForwarding()
+        setupProfileCallback()
         loadConversations()
     }
 
     private func setupCallbacks() {
-        // 웨이크워드 감지 → 세션 시작
-        speechService.onWakeWordDetected = { [weak self] in
+        // 웨이크워드 감지 → 세션 시작 + 사용자 식별
+        speechService.onWakeWordDetected = { [weak self] transcript in
             guard let self else { return }
             self.isSessionActive = true
             self.state = .listening
-            Log.app.info("세션 시작")
+            self.identifyUserFromTranscript(transcript)
+            Log.app.info("세션 시작 (사용자: \(self.currentUserName ?? "미확인"))")
         }
 
         // STT 완료 → 응답 처리
@@ -218,6 +224,74 @@ final class DochiViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    private func setupProfileCallback() {
+        builtInToolService.profileTool.onUserIdentified = { [weak self] profile in
+            guard let self else { return }
+            self.currentUserId = profile.id
+            self.currentUserName = profile.name
+            Log.app.info("사용자 설정됨 (tool): \(profile.name)")
+        }
+    }
+
+    /// 웨이크워드 transcript에서 프로필 이름 매칭
+    private func identifyUserFromTranscript(_ transcript: String) {
+        let profiles = contextService.loadProfiles()
+        guard !profiles.isEmpty else {
+            // 프로필 없으면 레거시 모드
+            currentUserId = nil
+            currentUserName = nil
+            return
+        }
+
+        let normalized = transcript.replacingOccurrences(of: " ", with: "").lowercased()
+
+        // 프로필 이름 매칭
+        if let matched = profiles.first(where: { normalized.contains($0.name.lowercased()) }) {
+            currentUserId = matched.id
+            currentUserName = matched.name
+            Log.app.info("웨이크워드에서 사용자 식별: \(matched.name)")
+            return
+        }
+
+        // 매칭 실패 → 기본 사용자
+        if let defaultId = settings.defaultUserId,
+           let defaultProfile = profiles.first(where: { $0.id == defaultId }) {
+            currentUserId = defaultProfile.id
+            currentUserName = defaultProfile.name
+            Log.app.info("기본 사용자 할당: \(defaultProfile.name)")
+            return
+        }
+
+        // 둘 다 실패 → nil (시스템 프롬프트에서 "미확인" 처리)
+        currentUserId = nil
+        currentUserName = nil
+    }
+
+    /// 사용자별 최근 대화 요약 (최근 N개)
+    private func buildRecentSummaries(for userId: UUID?, limit: Int) -> String? {
+        let allConversations = conversationService.list()
+        let userIdString = userId?.uuidString
+
+        let relevant: [Conversation]
+        if let userIdString {
+            relevant = allConversations.filter { $0.userId == userIdString && $0.summary != nil }
+        } else {
+            relevant = allConversations.filter { $0.summary != nil }
+        }
+
+        let recent = relevant.prefix(limit)
+        guard !recent.isEmpty else { return nil }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "M/d"
+
+        return recent.map { conv in
+            let date = formatter.string(from: conv.updatedAt)
+            return "- [\(date)] \(conv.summary ?? conv.title)"
+        }.joined(separator: "\n")
+    }
+
     // MARK: - Connection
 
     func connectOnLaunch() {
@@ -275,7 +349,22 @@ final class DochiViewModel: ObservableObject {
         let provider = settings.llmProvider
         let model = settings.llmModel
         let apiKey = settings.apiKey(for: provider)
-        let systemPrompt = settings.buildInstructions()
+
+        // 사용자 컨텍스트 설정 (프로필 존재 시에만 기억/프로필 툴 활성)
+        let hasProfiles = !contextService.loadProfiles().isEmpty
+        builtInToolService.configureUserContext(
+            contextService: hasProfiles ? contextService : nil,
+            currentUserId: currentUserId
+        )
+
+        // 최근 대화 요약
+        let recentSummaries = buildRecentSummaries(for: currentUserId, limit: 5)
+
+        let systemPrompt = settings.buildInstructions(
+            currentUserName: currentUserName,
+            currentUserId: currentUserId,
+            recentSummaries: recentSummaries
+        )
 
         // 내장 도구 서비스 설정 업데이트
         builtInToolService.configure(tavilyApiKey: settings.tavilyApiKey, falaiApiKey: settings.falaiApiKey)
@@ -658,12 +747,17 @@ final class DochiViewModel: ObservableObject {
 
         if !messages.isEmpty {
             let sessionMessages = messages
+            let sessionUserId = currentUserId
             Task {
-                await saveAndAnalyzeConversation(sessionMessages)
+                await saveAndAnalyzeConversation(sessionMessages, userId: sessionUserId)
             }
         }
         messages.removeAll()
         currentConversationId = nil
+
+        // 사용자 상태 리셋
+        currentUserId = nil
+        currentUserName = nil
 
         state = .idle
         startWakeWordIfNeeded()
@@ -688,6 +782,18 @@ final class DochiViewModel: ObservableObject {
         }
         stopWakeWord()
         isSessionActive = true
+
+        // Push-to-talk: 기본 사용자 할당 (프로필 있을 때)
+        if currentUserId == nil {
+            let profiles = contextService.loadProfiles()
+            if !profiles.isEmpty, let defaultId = settings.defaultUserId,
+               let defaultProfile = profiles.first(where: { $0.id == defaultId }) {
+                currentUserId = defaultProfile.id
+                currentUserName = defaultProfile.name
+                Log.app.info("PTT 기본 사용자 할당: \(defaultProfile.name)")
+            }
+        }
+
         state = .listening
         speechService.silenceTimeout = settings.sttSilenceTimeout
         speechService.startListening()
@@ -718,8 +824,9 @@ final class DochiViewModel: ObservableObject {
     func clearConversation() {
         if !messages.isEmpty {
             let sessionMessages = messages
+            let sessionUserId = currentUserId
             Task {
-                await saveAndAnalyzeConversation(sessionMessages)
+                await saveAndAnalyzeConversation(sessionMessages, userId: sessionUserId)
             }
         }
         messages.removeAll()
@@ -736,8 +843,9 @@ final class DochiViewModel: ObservableObject {
         // 현재 대화가 있으면 먼저 저장
         if !messages.isEmpty {
             let sessionMessages = messages
+            let sessionUserId = currentUserId
             Task {
-                await saveAndAnalyzeConversation(sessionMessages)
+                await saveAndAnalyzeConversation(sessionMessages, userId: sessionUserId)
             }
         }
 
@@ -756,111 +864,147 @@ final class DochiViewModel: ObservableObject {
     }
 
     private func saveCurrentConversation(title: String) {
-        let id = currentConversationId ?? UUID()
-        let now = Date()
-
-        let conversation = Conversation(
-            id: id,
-            title: title,
-            messages: messages,
-            createdAt: conversations.first(where: { $0.id == id })?.createdAt ?? now,
-            updatedAt: now
-        )
-
-        conversationService.save(conversation)
-        loadConversations()
+        saveConversationWithTitle(title, summary: nil, userId: currentUserId, messages: messages)
     }
 
     // MARK: - Session Context Analysis
 
-    private func saveAndAnalyzeConversation(_ sessionMessages: [Message]) async {
+    private func saveAndAnalyzeConversation(_ sessionMessages: [Message], userId: UUID? = nil) async {
         guard sessionMessages.count >= 2 else { return }
 
+        let hasProfiles = !contextService.loadProfiles().isEmpty
         let providers: [LLMProvider] = [.openai, .anthropic, .zai]
         guard let provider = providers.first(where: { !settings.apiKey(for: $0).isEmpty }) else {
-            // API 키 없으면 기본 제목으로 저장
             let defaultTitle = generateDefaultTitle(from: sessionMessages)
             await MainActor.run {
-                saveConversationWithTitle(defaultTitle, messages: sessionMessages)
+                saveConversationWithTitle(defaultTitle, summary: nil, userId: userId, messages: sessionMessages)
             }
             return
         }
 
         let apiKey = settings.apiKey(for: provider)
-        let currentContext = contextService.loadMemory()
 
-        let conversationText = sessionMessages.map { msg in
+        let conversationText = sessionMessages.compactMap { msg -> String? in
+            guard msg.role == .user || msg.role == .assistant else { return nil }
             let role = msg.role == .user ? "사용자" : "어시스턴트"
             return "[\(role)] \(msg.content)"
         }.joined(separator: "\n")
 
-        let prompt = """
-        다음은 방금 끝난 대화입니다:
+        let prompt: String
+        if hasProfiles {
+            // 다중 사용자 모드: 경량 보완 분석
+            let familyMemory = contextService.loadFamilyMemory()
+            let personalMemory = userId.map { contextService.loadUserMemory(userId: $0) } ?? ""
 
-        \(conversationText)
+            prompt = """
+            다음은 방금 끝난 대화입니다:
 
-        ---
+            \(conversationText)
 
-        현재 저장된 사용자 컨텍스트:
-        \(currentContext.isEmpty ? "(없음)" : currentContext)
+            ---
 
-        ---
+            현재 가족 공유 기억:
+            \(familyMemory.isEmpty ? "(없음)" : familyMemory)
 
-        두 가지를 JSON 형식으로 출력해주세요:
-        1. "title": 이 대화를 3~10자로 요약한 제목 (한글)
-        2. "memory": 이 대화에서 새로 알게 된 사실을 모두 추출. 예시:
-           - 인물 정보 (나이, 생일, 직업, 성격, 관계 등)
-           - 선호도 (좋아하는 것, 싫어하는 것)
-           - 관심사, 취미, 최근 이슈
-           - 일상 (일정, 계획, 고민, 경험)
-           - 기존 컨텍스트에 이미 있는 내용은 제외
-           - 새로 알게 된 사실이 전혀 없을 때만 null
+            현재 개인 기억:
+            \(personalMemory.isEmpty ? "(없음)" : personalMemory)
 
-        반드시 아래 형식만 출력 (다른 텍스트 없이):
-        {"title": "...", "memory": "- 항목1\n- 항목2" 또는 null}
-        """
+            ---
+
+            JSON으로 출력해주세요:
+            1. "title": 대화를 3~10자로 요약한 제목 (한글)
+            2. "summary": 대화 내용 1~2문장 요약
+            3. "memory": 대화 중 save_memory 도구로 저장되지 않았을 수 있는 보완 기억
+               - "family": 가족 전체에 해당하는 새 정보 (없으면 null)
+               - "personal": 개인에 해당하는 새 정보 (없으면 null)
+               - 이미 기억에 있는 내용이나 대화 중 save_memory로 저장된 내용은 제외
+
+            반드시 아래 형식만 출력:
+            {"title": "...", "summary": "...", "memory": {"family": "- 항목" 또는 null, "personal": "- 항목" 또는 null}}
+            """
+        } else {
+            // 레거시 단일 사용자 모드
+            let currentContext = contextService.loadMemory()
+
+            prompt = """
+            다음은 방금 끝난 대화입니다:
+
+            \(conversationText)
+
+            ---
+
+            현재 저장된 사용자 컨텍스트:
+            \(currentContext.isEmpty ? "(없음)" : currentContext)
+
+            ---
+
+            JSON으로 출력해주세요:
+            1. "title": 이 대화를 3~10자로 요약한 제목 (한글)
+            2. "summary": 대화 내용 1~2문장 요약
+            3. "memory": 이 대화에서 새로 알게 된 사실 추출
+               - 기존 컨텍스트에 이미 있는 내용은 제외
+               - 새로 알게 된 사실이 전혀 없으면 null
+
+            반드시 아래 형식만 출력:
+            {"title": "...", "summary": "...", "memory": "- 항목1\\n- 항목2" 또는 null}
+            """
+        }
 
         do {
             let response = try await callLLMSimple(provider: provider, apiKey: apiKey, prompt: prompt)
             let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // JSON 파싱
             if let jsonData = trimmed.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
 
                 let title = json["title"] as? String ?? generateDefaultTitle(from: sessionMessages)
+                let summary = json["summary"] as? String
 
-                // 대화 저장
                 await MainActor.run {
-                    saveConversationWithTitle(title, messages: sessionMessages)
+                    saveConversationWithTitle(title, summary: summary, userId: userId, messages: sessionMessages)
                 }
 
-                // 메모리 업데이트
-                if let memory = json["memory"] as? String, !memory.isEmpty {
-                    let timestamp = ISO8601DateFormatter().string(from: Date())
-                    let entry = "\n\n<!-- \(timestamp) -->\n\(memory)"
-                    contextService.appendMemory(entry)
-                    Log.app.info("컨텍스트 추가됨: \(memory.prefix(50))...")
+                if hasProfiles {
+                    // 다중 사용자 모드: 보완 기억
+                    if let memoryObj = json["memory"] as? [String: Any] {
+                        if let familyMemory = memoryObj["family"] as? String, !familyMemory.isEmpty {
+                            let timestamp = ISO8601DateFormatter().string(from: Date())
+                            contextService.appendFamilyMemory("\n<!-- \(timestamp) -->\n\(familyMemory)")
+                            Log.app.info("가족 기억 보완: \(familyMemory.prefix(50))...")
+                        }
+                        if let personalMemory = memoryObj["personal"] as? String, !personalMemory.isEmpty, let uid = userId {
+                            let timestamp = ISO8601DateFormatter().string(from: Date())
+                            contextService.appendUserMemory(userId: uid, content: "\n<!-- \(timestamp) -->\n\(personalMemory)")
+                            Log.app.info("개인 기억 보완: \(personalMemory.prefix(50))...")
+                        }
+                    }
+                } else {
+                    // 레거시 모드
+                    if let memory = json["memory"] as? String, !memory.isEmpty {
+                        let timestamp = ISO8601DateFormatter().string(from: Date())
+                        let entry = "\n\n<!-- \(timestamp) -->\n\(memory)"
+                        contextService.appendMemory(entry)
+                        Log.app.info("컨텍스트 추가됨: \(memory.prefix(50))...")
 
-                    await compressContextIfNeeded()
+                        await compressContextIfNeeded()
+                    }
                 }
             } else {
-                // JSON 파싱 실패 시 기본 제목으로 저장
                 let defaultTitle = generateDefaultTitle(from: sessionMessages)
                 await MainActor.run {
-                    saveConversationWithTitle(defaultTitle, messages: sessionMessages)
+                    saveConversationWithTitle(defaultTitle, summary: nil, userId: userId, messages: sessionMessages)
                 }
             }
         } catch {
             Log.app.error("컨텍스트 분석 실패: \(error.localizedDescription, privacy: .public)")
             let defaultTitle = generateDefaultTitle(from: sessionMessages)
             await MainActor.run {
-                saveConversationWithTitle(defaultTitle, messages: sessionMessages)
+                saveConversationWithTitle(defaultTitle, summary: nil, userId: userId, messages: sessionMessages)
             }
         }
     }
 
-    private func saveConversationWithTitle(_ title: String, messages: [Message]) {
+    private func saveConversationWithTitle(_ title: String, summary: String?, userId: UUID?, messages: [Message]) {
         let id = currentConversationId ?? UUID()
         let now = Date()
 
@@ -869,7 +1013,9 @@ final class DochiViewModel: ObservableObject {
             title: title,
             messages: messages,
             createdAt: conversations.first(where: { $0.id == id })?.createdAt ?? now,
-            updatedAt: now
+            updatedAt: now,
+            userId: userId?.uuidString,
+            summary: summary
         )
 
         conversationService.save(conversation)

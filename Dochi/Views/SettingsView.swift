@@ -13,6 +13,9 @@ struct SettingsView: View {
     @State private var showMemoryEditor = false
     @State private var showChangelog = false
     @State private var showAddMCPServer = false
+    @State private var showAddProfile = false
+    @State private var showFamilyMemoryEditor = false
+    @State private var editingUserMemoryProfile: UserProfile?
 
     private let changelogService = ChangelogService()
 
@@ -181,6 +184,78 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: - Family Profiles
+                Section("가족 구성원") {
+                    let profiles = contextService.loadProfiles()
+                    if profiles.isEmpty {
+                        Text("가족 구성원을 추가하면 사용자별 기억이 분리됩니다.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        ForEach(profiles) { profile in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(profile.name)
+                                            .font(.body)
+                                        if viewModel.settings.defaultUserId == profile.id {
+                                            Text("기본")
+                                                .font(.caption2)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(.blue.opacity(0.15), in: Capsule())
+                                                .foregroundStyle(.blue)
+                                        }
+                                    }
+                                    if !profile.description.isEmpty {
+                                        Text(profile.description)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Button {
+                                    editingUserMemoryProfile = profile
+                                } label: {
+                                    Image(systemName: "brain")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("개인 기억 편집")
+                                Button(role: .destructive) {
+                                    deleteProfile(profile)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+
+                        Picker("기본 사용자", selection: defaultUserBinding) {
+                            Text("없음").tag(nil as UUID?)
+                            ForEach(profiles) { profile in
+                                Text(profile.name).tag(profile.id as UUID?)
+                            }
+                        }
+
+                        Button {
+                            showFamilyMemoryEditor = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "house")
+                                Text("가족 공유 기억 편집")
+                            }
+                        }
+                    }
+
+                    Button {
+                        showAddProfile = true
+                    } label: {
+                        Label("구성원 추가", systemImage: "plus.circle")
+                    }
+                }
+
                 // MARK: - MCP Servers
                 Section("MCP 서버") {
                     if viewModel.settings.mcpServers.isEmpty {
@@ -304,6 +379,15 @@ struct SettingsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showAddProfile) {
+            AddProfileView(contextService: contextService)
+        }
+        .sheet(isPresented: $showFamilyMemoryEditor) {
+            FamilyMemoryEditorView(contextService: contextService)
+        }
+        .sheet(item: $editingUserMemoryProfile) { profile in
+            UserMemoryEditorView(contextService: contextService, profile: profile)
+        }
     }
 
     private var diffusionStepsBinding: Binding<Double> {
@@ -318,6 +402,22 @@ struct SettingsView: View {
             get: { Double(viewModel.settings.contextMaxSize) / 1024.0 },
             set: { viewModel.settings.contextMaxSize = Int($0 * 1024) }
         )
+    }
+
+    private var defaultUserBinding: Binding<UUID?> {
+        Binding(
+            get: { viewModel.settings.defaultUserId },
+            set: { viewModel.settings.defaultUserId = $0 }
+        )
+    }
+
+    private func deleteProfile(_ profile: UserProfile) {
+        var profiles = contextService.loadProfiles()
+        profiles.removeAll { $0.id == profile.id }
+        contextService.saveProfiles(profiles)
+        if viewModel.settings.defaultUserId == profile.id {
+            viewModel.settings.defaultUserId = nil
+        }
     }
 
     private var wakeWordBinding: Binding<Bool> {
@@ -532,5 +632,131 @@ struct AddMCPServerView: View {
     private var isValidURL: Bool {
         guard let url = URL(string: url) else { return false }
         return url.scheme == "http" || url.scheme == "https"
+    }
+}
+
+// MARK: - Add Profile View
+
+struct AddProfileView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String = ""
+    @State private var description: String = ""
+    let contextService: ContextServiceProtocol
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("가족 구성원 추가")
+                    .font(.headline)
+                Spacer()
+                Button("추가") {
+                    let profile = UserProfile(name: name, description: description)
+                    var profiles = contextService.loadProfiles()
+                    profiles.append(profile)
+                    contextService.saveProfiles(profiles)
+                    dismiss()
+                }
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("취소") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+
+            Divider()
+
+            Form {
+                TextField("이름", text: $name, prompt: Text("예: 엄마, 아빠, 민수"))
+                TextField("설명", text: $description, prompt: Text("예: 가족 중 어머니"))
+            }
+            .formStyle(.grouped)
+            .padding()
+        }
+        .frame(width: 400, height: 220)
+    }
+}
+
+// MARK: - Family Memory Editor View
+
+struct FamilyMemoryEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var content: String = ""
+    let contextService: ContextServiceProtocol
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("가족 공유 기억 편집")
+                    .font(.headline)
+                Spacer()
+                Button("저장") {
+                    contextService.saveFamilyMemory(content)
+                    dismiss()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("취소") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+            Divider()
+            TextEditor(text: $content)
+                .font(.system(.body, design: .monospaced))
+                .padding(8)
+            Divider()
+            HStack {
+                Text("가족 전체에 해당하는 공유 기억입니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(8)
+        }
+        .frame(width: 600, height: 500)
+        .onAppear {
+            content = contextService.loadFamilyMemory()
+        }
+    }
+}
+
+// MARK: - User Memory Editor View
+
+struct UserMemoryEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var content: String = ""
+    let contextService: ContextServiceProtocol
+    let profile: UserProfile
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("\(profile.name)의 개인 기억 편집")
+                    .font(.headline)
+                Spacer()
+                Button("저장") {
+                    contextService.saveUserMemory(userId: profile.id, content: content)
+                    dismiss()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("취소") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+            Divider()
+            TextEditor(text: $content)
+                .font(.system(.body, design: .monospaced))
+                .padding(8)
+            Divider()
+            HStack {
+                Text("\(profile.name)에 대해 기억하고 있는 개인 정보입니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(8)
+        }
+        .frame(width: 600, height: 500)
+        .onAppear {
+            content = contextService.loadUserMemory(userId: profile.id)
+        }
     }
 }

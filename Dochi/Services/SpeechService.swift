@@ -19,7 +19,7 @@ final class SpeechService: ObservableObject {
     @Published var error: String?
 
     var onQueryCaptured: ((String) -> Void)?
-    var onWakeWordDetected: (() -> Void)?
+    var onWakeWordDetected: ((String) -> Void)?  // transcript 전달
     var onSilenceTimeout: (() -> Void)?
     var onListeningCancelled: (() -> Void)?
 
@@ -317,8 +317,9 @@ final class SpeechService: ObservableObject {
                     let normalized = text.replacingOccurrences(of: " ", with: "")
                     if normalizedPhrases.contains(where: { normalized.contains($0) }) {
                         self.soundService.playWakeWordDetected()
+                        let detectedTranscript = text
                         self.stopWakeWordDetection()
-                        self.onWakeWordDetected?()
+                        self.onWakeWordDetected?(detectedTranscript)
                         self.startListening()
                         return
                     }

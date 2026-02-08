@@ -57,6 +57,17 @@ final class AppSettings: ObservableObject {
         didSet { saveMCPServers() }
     }
 
+    // User profiles
+    @Published var defaultUserId: UUID? {
+        didSet {
+            if let id = defaultUserId {
+                UserDefaults.standard.set(id.uuidString, forKey: Keys.defaultUserId)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.defaultUserId)
+            }
+        }
+    }
+
     private enum Keys {
         static let wakeWordEnabled = "settings.wakeWordEnabled"
         static let wakeWord = "settings.wakeWord"
@@ -70,6 +81,7 @@ final class AppSettings: ObservableObject {
         static let contextAutoCompress = "settings.contextAutoCompress"
         static let contextMaxSize = "settings.contextMaxSize"
         static let mcpServers = "settings.mcpServers"
+        static let defaultUserId = "settings.defaultUserId"
     }
 
     // MARK: - Dependencies
@@ -113,6 +125,14 @@ final class AppSettings: ObservableObject {
             self.mcpServers = servers
         } else {
             self.mcpServers = []
+        }
+
+        // Default user
+        if let idString = defaults.string(forKey: Keys.defaultUserId),
+           let id = UUID(uuidString: idString) {
+            self.defaultUserId = id
+        } else {
+            self.defaultUserId = nil
         }
     }
 
@@ -191,8 +211,16 @@ final class AppSettings: ObservableObject {
     // MARK: - Build Instructions
 
     func buildInstructions() -> String {
+        buildInstructions(currentUserName: nil, currentUserId: nil, recentSummaries: nil)
+    }
+
+    func buildInstructions(currentUserName: String?, currentUserId: UUID?, recentSummaries: String?) -> String {
+        let profiles = contextService.loadProfiles()
+        let hasProfiles = !profiles.isEmpty
+
         var parts: [String] = []
 
+        // 1) system.md — 공유 페르소나
         let systemPrompt = contextService.loadSystem()
         if !systemPrompt.isEmpty {
             parts.append(systemPrompt)
@@ -204,9 +232,44 @@ final class AppSettings: ObservableObject {
         formatter.dateFormat = "yyyy년 M월 d일 EEEE a h시 m분"
         parts.append("현재 시각: \(formatter.string(from: Date()))")
 
-        let userMemory = contextService.loadMemory()
-        if !userMemory.isEmpty {
-            parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(userMemory)")
+        if hasProfiles {
+            // 다중 사용자 모드
+
+            // 사용자 식별 정보
+            if let userName = currentUserName {
+                parts.append("현재 대화 상대: \(userName)")
+            } else {
+                let profileNames = profiles.map { $0.name }.joined(separator: ", ")
+                parts.append("현재 대화 상대가 확인되지 않았습니다. 등록된 가족 구성원: \(profileNames). 대화 초반에 자연스럽게 누구인지 파악하고 set_current_user를 호출해주세요.")
+            }
+
+            // 2) family.md — 가족 공유 기억
+            let familyMemory = contextService.loadFamilyMemory()
+            if !familyMemory.isEmpty {
+                parts.append("가족 공유 기억:\n\n\(familyMemory)")
+            }
+
+            // 3) memory/{userId}.md — 개인 기억
+            if let userId = currentUserId {
+                let userMemory = contextService.loadUserMemory(userId: userId)
+                if !userMemory.isEmpty {
+                    parts.append("\(currentUserName ?? "사용자")의 개인 기억:\n\n\(userMemory)")
+                }
+            }
+
+            // 기억 관리 안내
+            parts.append("대화 중 중요한 정보를 알게 되면 save_memory 도구로 즉시 저장하세요. 기존 기억을 수정하거나 삭제할 때는 update_memory를 사용하세요. 가족 전체에 해당하는 정보는 scope='family', 개인 정보는 scope='personal'로 저장하세요.")
+        } else {
+            // 레거시 단일 사용자 모드 (프로필 없음)
+            let userMemory = contextService.loadMemory()
+            if !userMemory.isEmpty {
+                parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(userMemory)")
+            }
+        }
+
+        // 4) 최근 대화 요약
+        if let summaries = recentSummaries, !summaries.isEmpty {
+            parts.append("최근 대화 요약:\n\n\(summaries)")
         }
 
         return parts.isEmpty ? "You are a helpful assistant. Respond in Korean." : parts.joined(separator: "\n\n")

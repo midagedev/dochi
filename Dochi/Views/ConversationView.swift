@@ -557,7 +557,7 @@ struct GeneratedImageView: View {
             Image(nsImage: nsImage)
                 .resizable()
                 .scaledToFit()
-                .frame(maxWidth: 300, maxHeight: 300)
+                .frame(maxWidth: 640, maxHeight: 640)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         } else {
             AsyncImage(url: url) { phase in
@@ -566,7 +566,7 @@ struct GeneratedImageView: View {
                     image
                         .resizable()
                         .scaledToFit()
-                        .frame(maxWidth: 300, maxHeight: 300)
+                        .frame(maxWidth: 640, maxHeight: 640)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 case .failure:
                     Label("이미지 로드 실패", systemImage: "exclamationmark.triangle")

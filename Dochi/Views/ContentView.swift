@@ -409,6 +409,8 @@ struct SidebarView: View {
     @Binding var showSettings: Bool
     @State private var showSystemEditor = false
     @State private var showMemoryEditor = false
+    @State private var showFamilyMemoryEditor = false
+    @State private var editingUserMemoryProfile: UserProfile?
 
     private var contextService: ContextServiceProtocol {
         viewModel.settings.contextService
@@ -437,24 +439,81 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
             }
 
-            Section("사용자 기억") {
-                Button {
-                    showMemoryEditor = true
-                } label: {
-                    HStack {
-                        Image(systemName: "brain")
-                            .foregroundStyle(.purple)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("memory.md")
-                                .font(.body)
-                            let memory = contextService.loadMemory()
-                            Text(memory.isEmpty ? "비어 있음" : "\(memory.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+            let profiles = contextService.loadProfiles()
+            if profiles.isEmpty {
+                // 레거시 모드: 단일 사용자 기억
+                Section("사용자 기억") {
+                    Button {
+                        showMemoryEditor = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "brain")
+                                .foregroundStyle(.purple)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("memory.md")
+                                    .font(.body)
+                                let memory = contextService.loadMemory()
+                                Text(memory.isEmpty ? "비어 있음" : "\(memory.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+            } else {
+                // 다중 사용자 모드: 가족 기억 + 개인 기억
+                Section("기억") {
+                    Button {
+                        showFamilyMemoryEditor = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "house")
+                                .foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("가족 공유")
+                                    .font(.body)
+                                let family = contextService.loadFamilyMemory()
+                                Text(family.isEmpty ? "비어 있음" : "\(family.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    ForEach(profiles) { profile in
+                        Button {
+                            editingUserMemoryProfile = profile
+                        } label: {
+                            HStack {
+                                Image(systemName: "brain")
+                                    .foregroundStyle(.purple)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(profile.name)
+                                        .font(.body)
+                                    let userMem = contextService.loadUserMemory(userId: profile.id)
+                                    Text(userMem.isEmpty ? "비어 있음" : "\(userMem.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            // 현재 사용자 표시
+            if let userName = viewModel.currentUserName {
+                Section("현재 사용자") {
+                    HStack {
+                        Image(systemName: "person.circle.fill")
+                            .foregroundStyle(.green)
+                        Text(userName)
+                            .font(.body)
+                    }
+                }
             }
 
             Section("대화") {
@@ -522,6 +581,12 @@ struct SidebarView: View {
         }
         .sheet(isPresented: $showMemoryEditor) {
             MemoryEditorView(contextService: contextService)
+        }
+        .sheet(isPresented: $showFamilyMemoryEditor) {
+            FamilyMemoryEditorView(contextService: contextService)
+        }
+        .sheet(item: $editingUserMemoryProfile) { profile in
+            UserMemoryEditorView(contextService: contextService, profile: profile)
         }
         .safeAreaInset(edge: .bottom) {
             Button {

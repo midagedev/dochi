@@ -10,6 +10,8 @@ final class BuiltInToolService: ObservableObject {
     let alarmTool = AlarmTool()
     let imageGenerationTool = ImageGenerationTool()
     let printImageTool = PrintImageTool()
+    let memoryTool = MemoryTool()
+    let profileTool = ProfileTool()
 
     /// 활성 알람 (AlarmTool에서 포워딩)
     var activeAlarms: [AlarmTool.AlarmEntry] {
@@ -25,6 +27,13 @@ final class BuiltInToolService: ObservableObject {
     func configure(tavilyApiKey: String, falaiApiKey: String) {
         webSearchTool.apiKey = tavilyApiKey
         imageGenerationTool.apiKey = falaiApiKey
+    }
+
+    /// 사용자 컨텍스트 설정 (MemoryTool, ProfileTool에 contextService와 현재 사용자 전달)
+    func configureUserContext(contextService: (any ContextServiceProtocol)?, currentUserId: UUID?) {
+        memoryTool.contextService = contextService
+        memoryTool.currentUserId = currentUserId
+        profileTool.contextService = contextService
     }
 
     var availableTools: [MCPToolInfo] {
@@ -49,12 +58,22 @@ final class BuiltInToolService: ObservableObject {
         // 이미지 프린트: 항상 사용 가능
         tools.append(contentsOf: printImageTool.tools)
 
+        // 기억 관리: 프로필이 있을 때만
+        if memoryTool.contextService != nil {
+            tools.append(contentsOf: memoryTool.tools)
+        }
+
+        // 사용자 식별: 프로필이 있을 때만
+        if profileTool.contextService != nil {
+            tools.append(contentsOf: profileTool.tools)
+        }
+
         return tools
     }
 
     func callTool(name: String, arguments: [String: Any]) async throws -> MCPToolResult {
         // 각 도구 모듈에 라우팅
-        let allModules: [any BuiltInTool] = [webSearchTool, remindersTool, alarmTool, imageGenerationTool, printImageTool]
+        let allModules: [any BuiltInTool] = [webSearchTool, remindersTool, alarmTool, imageGenerationTool, printImageTool, memoryTool, profileTool]
 
         for module in allModules {
             if module.tools.contains(where: { $0.name == name }) {
