@@ -6,10 +6,15 @@ import os
 final class DeviceService: ObservableObject, DeviceServiceProtocol {
     @Published private(set) var currentDevice: DeviceInfo?
     @Published private(set) var workspaceDevices: [DeviceInfo] = []
+    @Published private(set) var onlinePeers: [DeviceInfo] = []
+
+    /// 피어 상태가 변경되었을 때 호출 (온라인/오프라인)
+    var onPeerStatusChanged: (([DeviceInfo]) -> Void)?
 
     private let supabaseService: SupabaseService
     private let keychainService: KeychainServiceProtocol
     private var heartbeatTask: Task<Void, Never>?
+    private var peerDiscoveryTask: Task<Void, Never>?
 
     private enum KeychainKeys {
         static let deviceId = "device_id"
@@ -150,6 +155,103 @@ final class DeviceService: ObservableObject, DeviceServiceProtocol {
 
         workspaceDevices = devices
         return devices
+    }
+
+    // MARK: - Peer Discovery
+
+    /// 같은 워크스페이스의 온라인 피어 목록 조회 (자신 제외)
+    func fetchOnlinePeers() async throws -> [DeviceInfo] {
+        guard let client = supabaseService.client,
+              let workspaceId = supabaseService.selectedWorkspace?.id,
+              let selfId = currentDevice?.id else {
+            return []
+        }
+
+        let peers: [DeviceInfo] = try await client
+            .from("devices")
+            .select()
+            .eq("workspace_id", value: workspaceId)
+            .eq("is_online", value: true)
+            .neq("id", value: selfId)
+            .order("last_seen_at", ascending: false)
+            .execute()
+            .value
+
+        onlinePeers = peers
+        return peers
+    }
+
+    /// 특정 기능을 가진 온라인 피어 필터링
+    func findPeers(withCapability capability: DeviceCapability) -> [DeviceInfo] {
+        onlinePeers.filter { $0.capabilities.contains(capability.rawValue) }
+    }
+
+    /// Realtime으로 피어 온라인/오프라인 상태 변경 감지
+    func subscribeToPeerChanges() {
+        guard let client = supabaseService.client,
+              let workspaceId = supabaseService.selectedWorkspace?.id else { return }
+        unsubscribeFromPeerChanges()
+
+        peerDiscoveryTask = Task { [weak self] in
+            let channel = client.realtimeV2.channel("peers-\(workspaceId.uuidString)")
+
+            let changes = channel.postgresChange(
+                UpdateAction.self,
+                schema: "public",
+                table: "devices",
+                filter: .eq("workspace_id", value: workspaceId)
+            )
+
+            do {
+                try await channel.subscribeWithError()
+                Log.cloud.info("피어 상태 Realtime 구독 시작")
+            } catch {
+                Log.cloud.warning("피어 상태 Realtime 구독 실패: \(error, privacy: .public)")
+                return
+            }
+
+            for await update in changes {
+                guard !Task.isCancelled else { break }
+                await self?.handlePeerStatusUpdate(update)
+            }
+        }
+    }
+
+    func unsubscribeFromPeerChanges() {
+        peerDiscoveryTask?.cancel()
+        peerDiscoveryTask = nil
+    }
+
+    private func handlePeerStatusUpdate(_ update: UpdateAction) {
+        do {
+            let device = try update.decodeRecord(as: DeviceInfo.self, decoder: PostgrestClient.Configuration.jsonDecoder)
+            // 자기 자신은 무시
+            guard device.id != currentDevice?.id else { return }
+
+            // 온라인 피어 목록 업데이트
+            if device.isOnline {
+                if let index = onlinePeers.firstIndex(where: { $0.id == device.id }) {
+                    onlinePeers[index] = device
+                } else {
+                    onlinePeers.append(device)
+                    Log.cloud.info("피어 온라인: \(device.deviceName, privacy: .public)")
+                }
+            } else {
+                if onlinePeers.contains(where: { $0.id == device.id }) {
+                    onlinePeers.removeAll { $0.id == device.id }
+                    Log.cloud.info("피어 오프라인: \(device.deviceName, privacy: .public)")
+                }
+            }
+
+            // 워크스페이스 디바이스 목록도 업데이트
+            if let index = workspaceDevices.firstIndex(where: { $0.id == device.id }) {
+                workspaceDevices[index] = device
+            }
+
+            onPeerStatusChanged?(onlinePeers)
+        } catch {
+            Log.cloud.warning("피어 상태 디코딩 실패: \(error, privacy: .public)")
+        }
     }
 
     // MARK: - Device Management

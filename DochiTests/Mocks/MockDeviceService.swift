@@ -5,6 +5,7 @@ import Foundation
 final class MockDeviceService: DeviceServiceProtocol {
     var currentDevice: DeviceInfo?
     var workspaceDevices: [DeviceInfo] = []
+    var onlinePeers: [DeviceInfo] = []
     var registerCalled = false
     var heartbeatStarted = false
 
@@ -34,6 +35,13 @@ final class MockDeviceService: DeviceServiceProtocol {
     func fetchWorkspaceDevices() async throws -> [DeviceInfo] {
         workspaceDevices
     }
+
+    func fetchOnlinePeers() async throws -> [DeviceInfo] {
+        onlinePeers
+    }
+
+    func subscribeToPeerChanges() {}
+    func unsubscribeFromPeerChanges() {}
 
     func updateDeviceName(_ name: String) async throws {
         currentDevice?.deviceName = name

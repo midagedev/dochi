@@ -32,6 +32,7 @@ final class DochiViewModel: ObservableObject {
     let contextService: ContextServiceProtocol
     let supabaseService: any SupabaseServiceProtocol
     let deviceService: any DeviceServiceProtocol
+    let peerService: PeerService
 
     // Tool loop 관련
     @Published var currentToolExecution: String?
@@ -78,7 +79,8 @@ final class DochiViewModel: ObservableObject {
         conversationService: ConversationServiceProtocol = ConversationService(),
         mcpService: MCPServiceProtocol? = nil,
         supabaseService: (any SupabaseServiceProtocol)? = nil,
-        deviceService: (any DeviceServiceProtocol)? = nil
+        deviceService: (any DeviceServiceProtocol)? = nil,
+        peerService: PeerService? = nil
     ) {
         self.settings = settings
         self.contextService = contextService
@@ -96,6 +98,15 @@ final class DochiViewModel: ObservableObject {
             self.deviceService = DeviceService(supabaseService: concreteSupa, keychainService: settings.keychainServiceRef)
         } else {
             self.deviceService = DeviceService(supabaseService: SupabaseService(keychainService: settings.keychainServiceRef), keychainService: settings.keychainServiceRef)
+        }
+        if let peerService {
+            self.peerService = peerService
+        } else if let concreteSupa = supa as? SupabaseService,
+                  let concreteDev = self.deviceService as? DeviceService {
+            self.peerService = PeerService(supabaseService: concreteSupa, deviceService: concreteDev)
+        } else {
+            let fallbackSupa = SupabaseService(keychainService: settings.keychainServiceRef)
+            self.peerService = PeerService(supabaseService: fallbackSupa, deviceService: DeviceService(supabaseService: fallbackSupa, keychainService: settings.keychainServiceRef))
         }
 
         setupCallbacks()
@@ -201,6 +212,13 @@ final class DochiViewModel: ObservableObject {
                     Log.cloud.warning("디바이스 등록 실패: \(error, privacy: .public)")
                 }
                 deviceService.startHeartbeat()
+                do {
+                    _ = try await deviceService.fetchOnlinePeers()
+                } catch {
+                    Log.cloud.warning("온라인 피어 조회 실패: \(error, privacy: .public)")
+                }
+                deviceService.subscribeToPeerChanges()
+                peerService.subscribeToMessages()
             }
         }
     }
@@ -215,6 +233,8 @@ final class DochiViewModel: ObservableObject {
             cloudConversation.onConversationsChanged = nil
         }
         deviceService.stopHeartbeat()
+        deviceService.unsubscribeFromPeerChanges()
+        peerService.unsubscribeFromMessages()
         Log.app.info("클라우드 서비스 정리 완료")
     }
 

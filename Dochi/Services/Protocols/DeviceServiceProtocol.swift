@@ -63,11 +63,15 @@ enum DeviceCapability: String, CaseIterable {
 protocol DeviceServiceProtocol: AnyObject {
     var currentDevice: DeviceInfo? { get }
     var workspaceDevices: [DeviceInfo] { get }
+    var onlinePeers: [DeviceInfo] { get }
 
     func registerDevice() async throws
     func startHeartbeat()
     func stopHeartbeat()
     func fetchWorkspaceDevices() async throws -> [DeviceInfo]
+    func fetchOnlinePeers() async throws -> [DeviceInfo]
+    func subscribeToPeerChanges()
+    func unsubscribeFromPeerChanges()
     func updateDeviceName(_ name: String) async throws
     func removeDevice(id: UUID) async throws
 }

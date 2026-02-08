@@ -148,6 +148,10 @@ extension DochiViewModel {
                 .sink { [weak self] _ in self?.objectWillChange.send() }
                 .store(in: &cancellables)
         }
+        peerService.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
 
     func setupProfileCallback() {
