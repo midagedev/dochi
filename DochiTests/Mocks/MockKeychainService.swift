@@ -1,7 +1,7 @@
 import Foundation
 @testable import Dochi
 
-final class MockKeychainService: KeychainServiceProtocol {
+final class MockKeychainService: KeychainServiceProtocol, @unchecked Sendable {
     var storage: [String: String] = [:]
 
     func save(account: String, value: String) {
