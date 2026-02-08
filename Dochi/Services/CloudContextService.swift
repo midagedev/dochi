@@ -5,8 +5,9 @@ import os
 /// 클라우드 동기화 컨텍스트 서비스
 /// - 로컬 ContextService를 래핑하여 write-through 클라우드 동기화 제공
 /// - 오프라인 시 로컬만 사용, 온라인 복귀 시 동기화
-/// - Last-write-wins 충돌 해결 (타임스탬프 기반)
-final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
+/// - Cloud-always-wins on pull: 풀 시 클라우드 내용이 로컬을 덮어씁니다
+@MainActor
+final class CloudContextService: ContextServiceProtocol {
     private let local: ContextService
     private let supabaseService: SupabaseService
 
@@ -110,15 +111,15 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
     // MARK: - Sync Operations
 
     /// 앱 시작 시 클라우드에서 최신 버전 가져오기 (Pull-on-launch)
-    @MainActor
     func pullFromCloud() async {
-        guard let wsId = resolveWorkspaceId() else { return }
+        guard let client = supabaseService.client,
+              let wsId = resolveWorkspaceId() else { return }
         guard !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
 
         do {
-            let files: [ContextFileRow] = try await supabaseService.client
+            let files: [ContextFileRow] = try await client
                 .from("context_files")
                 .select()
                 .eq("workspace_id", value: wsId)
@@ -141,8 +142,9 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
     /// 로컬 변경 → 클라우드 동기화 (write-through, 비동기 fire-and-forget)
     private func scheduleCloudPush(fileType: String, content: String, userId: UUID? = nil) {
         let svc = supabaseService
-        Task { @MainActor in
-            guard let wsId = svc.selectedWorkspace?.id else { return }
+        Task {
+            guard let client = svc.client,
+                  let wsId = svc.selectedWorkspace?.id else { return }
             guard case .signedIn = svc.authState else { return }
             let authUserId = self.resolveAuthUserId()
 
@@ -151,7 +153,7 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
 
                 if let existing {
                     let newVersion = existing.version + 1
-                    try await svc.client
+                    try await client
                         .from("context_files")
                         .update(ContextFileUpdate(
                             content: content,
@@ -170,7 +172,7 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
                         version: newVersion
                     )
                 } else {
-                    let inserted: ContextFileRow = try await svc.client
+                    let inserted: ContextFileRow = try await client
                         .from("context_files")
                         .insert(ContextFileInsert(
                             workspace_id: wsId,
@@ -202,18 +204,19 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
 
     private func scheduleProfilesPush(_ profiles: [UserProfile]) {
         let svc = supabaseService
-        Task { @MainActor in
-            guard let wsId = svc.selectedWorkspace?.id else { return }
+        Task {
+            guard let client = svc.client,
+                  let wsId = svc.selectedWorkspace?.id else { return }
             guard case .signedIn = svc.authState else { return }
 
             do {
-                try await svc.client
-                    .from("profiles")
-                    .delete()
-                    .eq("workspace_id", value: wsId)
-                    .execute()
-
-                if !profiles.isEmpty {
+                if profiles.isEmpty {
+                    try await client
+                        .from("profiles")
+                        .delete()
+                        .eq("workspace_id", value: wsId)
+                        .execute()
+                } else {
                     let rows = profiles.map { profile in
                         ProfileRow(
                             id: profile.id,
@@ -223,9 +226,18 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
                             description: profile.description
                         )
                     }
-                    try await svc.client
+                    try await client
                         .from("profiles")
-                        .insert(rows)
+                        .upsert(rows)
+                        .execute()
+
+                    // Remove profiles no longer in the list
+                    let currentIds = profiles.map(\.id)
+                    try await client
+                        .from("profiles")
+                        .delete()
+                        .eq("workspace_id", value: wsId)
+                        .not("id", operator: .in, value: currentIds)
                         .execute()
                 }
 
@@ -236,10 +248,10 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
         }
     }
 
-    @MainActor
     private func pullProfilesFromCloud(workspaceId: UUID) async {
+        guard let client = supabaseService.client else { return }
         do {
-            let rows: [ProfileRow] = try await supabaseService.client
+            let rows: [ProfileRow] = try await client
                 .from("profiles")
                 .select()
                 .eq("workspace_id", value: workspaceId)
@@ -265,13 +277,11 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
 
     // MARK: - Helpers
 
-    @MainActor
     private func resolveWorkspaceId() -> UUID? {
         guard case .signedIn = supabaseService.authState else { return nil }
         return supabaseService.selectedWorkspace?.id
     }
 
-    @MainActor
     private func resolveAuthUserId() -> UUID? {
         if case .signedIn(let id, _) = supabaseService.authState {
             return id
@@ -279,9 +289,9 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
         return nil
     }
 
-    @MainActor
     private func fetchContextFile(workspaceId: UUID, fileType: String, userId: UUID? = nil) async throws -> ContextFileRow? {
-        var query = supabaseService.client
+        guard let client = supabaseService.client else { return nil }
+        var query = client
             .from("context_files")
             .select()
             .eq("workspace_id", value: workspaceId)
@@ -316,7 +326,7 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
             return
         }
 
-        // Last-write-wins: cloud content overwrites local if different
+        // Cloud-always-wins: cloud content overwrites local if different
         if file.content != localContent {
             switch file.file_type {
             case "system":
@@ -336,9 +346,9 @@ final class CloudContextService: ContextServiceProtocol, @unchecked Sendable {
         }
     }
 
-    @MainActor
     private func recordHistory(contextFileId: UUID, workspaceId: UUID, fileType: String, content: String, version: Int) async throws {
-        try await supabaseService.client
+        guard let client = supabaseService.client else { return }
+        try await client
             .from("context_history")
             .insert(ContextHistoryInsert(
                 context_file_id: contextFileId,

@@ -6,6 +6,7 @@ import Foundation
 /// - family.md: 가족 공유 기억
 /// - memory/{userId}.md: 개인 기억
 /// - profiles.json: 사용자 프로필
+@MainActor
 protocol ContextServiceProtocol {
     // MARK: - System (페르소나 + 행동 지침)
     func loadSystem() -> String

@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct DochiApp: App {
-    @StateObject private var settings = AppSettings()
+    @StateObject private var settings: AppSettings
     @StateObject private var viewModel: DochiViewModel
 
     init() {
