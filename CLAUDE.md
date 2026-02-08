@@ -93,6 +93,7 @@ Dochi/
 │   ├── SupabaseService.swift
 │   ├── CloudContextService.swift
 │   ├── DeviceService.swift
+│   ├── CloudConversationService.swift
 │   └── Supertonic/           # TTS helpers
 └── Resources/
     └── CHANGELOG.md
