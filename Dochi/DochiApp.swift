@@ -8,8 +8,8 @@ struct DochiApp: App {
     init() {
         let keychainService = KeychainService()
         let supabaseService = SupabaseService(keychainService: keychainService)
-        let cloudContext = CloudContextService(supabaseService: supabaseService)
         let deviceService = DeviceService(supabaseService: supabaseService, keychainService: keychainService)
+        let cloudContext = CloudContextService(supabaseService: supabaseService, deviceService: deviceService)
         let cloudConversation = CloudConversationService(supabaseService: supabaseService, deviceService: deviceService)
         let settings = AppSettings(keychainService: keychainService, contextService: cloudContext)
         _settings = StateObject(wrappedValue: settings)

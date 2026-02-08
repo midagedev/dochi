@@ -11,15 +11,17 @@ import os
 final class CloudContextService: ContextServiceProtocol {
     private let local: ContextService
     private let supabaseService: SupabaseService
+    private let deviceService: (any DeviceServiceProtocol)?
 
     /// 다른 디바이스에서 컨텍스트가 변경되었을 때 호출
     var onContextChanged: (() -> Void)?
 
     private var realtimeTask: Task<Void, Never>?
 
-    init(local: ContextService = ContextService(), supabaseService: SupabaseService) {
+    init(local: ContextService = ContextService(), supabaseService: SupabaseService, deviceService: (any DeviceServiceProtocol)? = nil) {
         self.local = local
         self.supabaseService = supabaseService
+        self.deviceService = deviceService
     }
 
     // MARK: - Cloud Sync State
@@ -237,6 +239,7 @@ final class CloudContextService: ContextServiceProtocol {
     /// 로컬 변경 → 클라우드 동기화 (write-through, 비동기 fire-and-forget)
     private func scheduleCloudPush(fileType: String, content: String, userId: UUID? = nil) {
         let svc = supabaseService
+        let currentDeviceId = deviceService?.currentDevice?.id
         Task {
             guard let client = svc.client,
                   let wsId = svc.selectedWorkspace?.id else { return }
@@ -254,7 +257,8 @@ final class CloudContextService: ContextServiceProtocol {
                             content: content,
                             version: newVersion,
                             updated_at: Date(),
-                            updated_by: authUserId
+                            updated_by: authUserId,
+                            device_id: currentDeviceId
                         ))
                         .eq("id", value: existing.id)
                         .execute()
@@ -274,7 +278,8 @@ final class CloudContextService: ContextServiceProtocol {
                             file_type: fileType,
                             user_id: userId,
                             content: content,
-                            updated_by: authUserId
+                            updated_by: authUserId,
+                            device_id: currentDeviceId
                         ))
                         .select()
                         .single()
@@ -470,6 +475,7 @@ private struct ContextFileRow: Codable {
     let version: Int
     let updated_at: Date
     let updated_by: UUID?
+    let device_id: UUID?
 }
 
 private struct ContextFileInsert: Encodable {
@@ -478,6 +484,7 @@ private struct ContextFileInsert: Encodable {
     let user_id: UUID?
     let content: String
     let updated_by: UUID?
+    let device_id: UUID?
 }
 
 private struct ContextFileUpdate: Encodable {
@@ -485,6 +492,7 @@ private struct ContextFileUpdate: Encodable {
     let version: Int
     let updated_at: Date
     let updated_by: UUID?
+    let device_id: UUID?
 }
 
 private struct ContextHistoryInsert: Encodable {

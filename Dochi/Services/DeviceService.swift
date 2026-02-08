@@ -33,6 +33,7 @@ final class DeviceService: ObservableObject, DeviceServiceProtocol {
 
         let deviceId = getOrCreateDeviceId()
         let deviceName = Host.current().localizedName ?? "Mac"
+        let caps = detectCapabilities()
 
         // Check if already registered
         let existing: [DeviceInfo] = try await client
@@ -47,9 +48,10 @@ final class DeviceService: ObservableObject, DeviceServiceProtocol {
             // Update existing device
             let updated: DeviceInfo = try await client
                 .from("devices")
-                .update(DeviceUpdate(
+                .update(DeviceRegistrationUpdate(
                     is_online: true,
-                    last_seen_at: Date()
+                    last_seen_at: Date(),
+                    capabilities: caps
                 ))
                 .eq("id", value: deviceId)
                 .select()
@@ -57,7 +59,7 @@ final class DeviceService: ObservableObject, DeviceServiceProtocol {
                 .execute()
                 .value
             currentDevice = updated
-            Log.cloud.info("디바이스 재등록: \(device.deviceName, privacy: .public)")
+            Log.cloud.info("디바이스 재등록: \(device.deviceName, privacy: .public) [\(caps.joined(separator: ", "), privacy: .public)]")
         } else {
             // Insert new device
             let device: DeviceInfo = try await client
@@ -69,14 +71,15 @@ final class DeviceService: ObservableObject, DeviceServiceProtocol {
                     device_name: deviceName,
                     platform: "macOS",
                     is_online: true,
-                    last_seen_at: Date()
+                    last_seen_at: Date(),
+                    capabilities: caps
                 ))
                 .select()
                 .single()
                 .execute()
                 .value
             currentDevice = device
-            Log.cloud.info("디바이스 등록: \(deviceName, privacy: .public)")
+            Log.cloud.info("디바이스 등록: \(deviceName, privacy: .public) [\(caps.joined(separator: ", "), privacy: .public)]")
         }
     }
 
@@ -196,6 +199,20 @@ final class DeviceService: ObservableObject, DeviceServiceProtocol {
         keychainService.save(account: KeychainKeys.deviceId, value: newId.uuidString)
         return newId
     }
+
+    /// macOS 디바이스의 기능 목록 감지
+    // TODO: iOS/watchOS 클라이언트 추가 시 런타임 기능 탐지로 전환 필요
+    private func detectCapabilities() -> [String] {
+        var caps: [String] = []
+        // macOS는 기본적으로 모든 기능 지원
+        caps.append(DeviceCapability.screen.rawValue)
+        caps.append(DeviceCapability.tts.rawValue)
+        caps.append(DeviceCapability.stt.rawValue)
+        caps.append(DeviceCapability.mcp.rawValue)
+        caps.append(DeviceCapability.speaker.rawValue)
+        caps.append(DeviceCapability.mic.rawValue)
+        return caps
+    }
 }
 
 // MARK: - DTOs
@@ -208,9 +225,16 @@ private struct DeviceInsert: Encodable {
     let platform: String
     let is_online: Bool
     let last_seen_at: Date
+    let capabilities: [String]
 }
 
 private struct DeviceUpdate: Encodable {
     let is_online: Bool
     let last_seen_at: Date
+}
+
+private struct DeviceRegistrationUpdate: Encodable {
+    let is_online: Bool
+    let last_seen_at: Date
+    let capabilities: [String]
 }

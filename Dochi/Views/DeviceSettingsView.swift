@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 struct DeviceSettingsView: View {
     @ObservedObject var deviceService: DeviceService
@@ -34,6 +35,11 @@ struct DeviceSettingsView: View {
                                 Text(device.platform)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if !device.capabilities.isEmpty {
+                                    Text(device.capabilities.joined(separator: ", "))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
                                 if !device.isOnline {
                                     Text("마지막: \(formatLastSeen(device.lastSeenAt))")
                                         .font(.caption)
@@ -69,7 +75,11 @@ struct DeviceSettingsView: View {
             TextField("이름", text: $newName)
             Button("변경") {
                 Task {
-                    try? await deviceService.updateDeviceName(newName)
+                    do {
+                        try await deviceService.updateDeviceName(newName)
+                    } catch {
+                        Log.cloud.warning("디바이스 이름 변경 실패: \(error, privacy: .public)")
+                    }
                     loadDevices()
                 }
             }
@@ -79,13 +89,21 @@ struct DeviceSettingsView: View {
 
     private func loadDevices() {
         Task {
-            devices = (try? await deviceService.fetchWorkspaceDevices()) ?? []
+            do {
+                devices = try await deviceService.fetchWorkspaceDevices()
+            } catch {
+                Log.cloud.warning("디바이스 목록 로드 실패: \(error, privacy: .public)")
+            }
         }
     }
 
     private func removeDevice(_ device: DeviceInfo) {
         Task {
-            try? await deviceService.removeDevice(id: device.id)
+            do {
+                try await deviceService.removeDevice(id: device.id)
+            } catch {
+                Log.cloud.warning("디바이스 제거 실패: \(error, privacy: .public)")
+            }
             loadDevices()
         }
     }

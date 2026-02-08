@@ -18,7 +18,8 @@ final class MockDeviceService: DeviceServiceProtocol {
             platform: "macOS",
             isOnline: true,
             lastSeenAt: Date(),
-            createdAt: Date()
+            createdAt: Date(),
+            capabilities: ["tts", "stt", "mcp", "screen", "speaker", "mic"]
         )
     }
 
