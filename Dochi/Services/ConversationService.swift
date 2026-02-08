@@ -17,7 +17,11 @@ final class ConversationService: ConversationServiceProtocol {
                 .appendingPathComponent("conversations", isDirectory: true)
             self.conversationsDir = dir
         }
-        try? fileManager.createDirectory(at: conversationsDir, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: conversationsDir, withIntermediateDirectories: true)
+        } catch {
+            Log.storage.error("대화 디렉토리 생성 실패: \(error, privacy: .public)")
+        }
     }
 
     private func fileURL(for id: UUID) -> URL {
@@ -26,7 +30,11 @@ final class ConversationService: ConversationServiceProtocol {
 
     /// 전체 대화 목록 반환 (updatedAt 내림차순)
     func list() -> [Conversation] {
-        guard let files = try? fileManager.contentsOfDirectory(at: conversationsDir, includingPropertiesForKeys: nil) else {
+        let files: [URL]
+        do {
+            files = try fileManager.contentsOfDirectory(at: conversationsDir, includingPropertiesForKeys: nil)
+        } catch {
+            Log.storage.warning("대화 디렉토리 읽기 실패: \(error, privacy: .public)")
             return []
         }
 
@@ -36,8 +44,13 @@ final class ConversationService: ConversationServiceProtocol {
         return files
             .filter { $0.pathExtension == "json" }
             .compactMap { url -> Conversation? in
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                return try? decoder.decode(Conversation.self, from: data)
+                do {
+                    let data = try Data(contentsOf: url)
+                    return try decoder.decode(Conversation.self, from: data)
+                } catch {
+                    Log.storage.warning("대화 파일 파싱 실패 \(url.lastPathComponent, privacy: .public): \(error, privacy: .public)")
+                    return nil
+                }
             }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
@@ -45,11 +58,15 @@ final class ConversationService: ConversationServiceProtocol {
     /// 단일 대화 로드
     func load(id: UUID) -> Conversation? {
         let url = fileURL(for: id)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(Conversation.self, from: data)
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(Conversation.self, from: data)
+        } catch {
+            Log.storage.warning("대화 로드 실패 \(id): \(error, privacy: .public)")
+            return nil
+        }
     }
 
     /// 대화 저장

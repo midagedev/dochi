@@ -34,7 +34,11 @@ final class SupertonicService: ObservableObject {
     private static let modelDir: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Dochi/supertonic", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            Log.tts.error("TTS 모델 디렉토리 생성 실패: \(error, privacy: .public)")
+        }
         return dir
     }()
 
@@ -149,6 +153,7 @@ final class SupertonicService: ObservableObject {
                 // 큐에서 다음 문장 꺼내기
                 guard !self.sentenceQueue.isEmpty else {
                     // 큐 비었으면 대기 후 재확인 (LLM이 아직 스트리밍 중일 수 있음)
+                    // Task.sleep 취소는 정상 흐름 (stopPlayback 등)
                     try? await Task.sleep(for: .milliseconds(100))
 
                     // 다시 확인 — 여전히 비었고 LLM 스트리밍도 끝났으면 종료

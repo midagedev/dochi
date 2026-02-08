@@ -21,8 +21,16 @@ final class ContextService: ContextServiceProtocol {
                 .appendingPathComponent("Dochi", isDirectory: true)
             self.baseDir = dir
         }
-        try? fileManager.createDirectory(at: baseDir, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(at: memoryDir, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: baseDir, withIntermediateDirectories: true)
+        } catch {
+            Log.storage.error("기본 디렉토리 생성 실패: \(error, privacy: .public)")
+        }
+        do {
+            try fileManager.createDirectory(at: memoryDir, withIntermediateDirectories: true)
+        } catch {
+            Log.storage.error("메모리 디렉토리 생성 실패: \(error, privacy: .public)")
+        }
     }
 
     private var systemFileURL: URL {
@@ -52,7 +60,12 @@ final class ContextService: ContextServiceProtocol {
     // MARK: - System (페르소나 + 행동 지침)
 
     func loadSystem() -> String {
-        (try? String(contentsOf: systemFileURL, encoding: .utf8)) ?? ""
+        do {
+            return try String(contentsOf: systemFileURL, encoding: .utf8)
+        } catch {
+            Log.storage.debug("system.md 로드 실패 (파일 없을 수 있음): \(error, privacy: .public)")
+            return ""
+        }
     }
 
     func saveSystem(_ content: String) {
@@ -70,7 +83,12 @@ final class ContextService: ContextServiceProtocol {
     // MARK: - Memory (레거시 사용자 기억)
 
     func loadMemory() -> String {
-        (try? String(contentsOf: memoryFileURL, encoding: .utf8)) ?? ""
+        do {
+            return try String(contentsOf: memoryFileURL, encoding: .utf8)
+        } catch {
+            Log.storage.debug("memory.md 로드 실패 (파일 없을 수 있음): \(error, privacy: .public)")
+            return ""
+        }
     }
 
     func saveMemory(_ content: String) {
@@ -95,13 +113,24 @@ final class ContextService: ContextServiceProtocol {
     }
 
     var memorySize: Int {
-        (try? fileManager.attributesOfItem(atPath: memoryFileURL.path)[.size] as? Int) ?? 0
+        do {
+            let attrs = try fileManager.attributesOfItem(atPath: memoryFileURL.path)
+            return attrs[.size] as? Int ?? 0
+        } catch {
+            Log.storage.debug("memory.md 크기 조회 실패: \(error, privacy: .public)")
+            return 0
+        }
     }
 
     // MARK: - Family Memory (가족 공유 기억)
 
     func loadFamilyMemory() -> String {
-        (try? String(contentsOf: familyFileURL, encoding: .utf8)) ?? ""
+        do {
+            return try String(contentsOf: familyFileURL, encoding: .utf8)
+        } catch {
+            Log.storage.debug("family.md 로드 실패 (파일 없을 수 있음): \(error, privacy: .public)")
+            return ""
+        }
     }
 
     func saveFamilyMemory(_ content: String) {
@@ -124,7 +153,12 @@ final class ContextService: ContextServiceProtocol {
     // MARK: - User Memory (개인 기억)
 
     func loadUserMemory(userId: UUID) -> String {
-        (try? String(contentsOf: userMemoryFileURL(userId: userId), encoding: .utf8)) ?? ""
+        do {
+            return try String(contentsOf: userMemoryFileURL(userId: userId), encoding: .utf8)
+        } catch {
+            Log.storage.debug("사용자 메모리 로드 실패 \(userId) (파일 없을 수 있음): \(error, privacy: .public)")
+            return ""
+        }
     }
 
     func saveUserMemory(userId: UUID, content: String) {
@@ -147,7 +181,10 @@ final class ContextService: ContextServiceProtocol {
     // MARK: - Profiles (사용자 프로필)
 
     func loadProfiles() -> [UserProfile] {
-        guard let data = try? Data(contentsOf: profilesFileURL) else { return [] }
+        guard let data = try? Data(contentsOf: profilesFileURL) else {
+            // 파일 없으면 프로필 미설정 상태 (정상)
+            return []
+        }
         do {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
