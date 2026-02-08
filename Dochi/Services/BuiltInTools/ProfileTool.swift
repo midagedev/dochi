@@ -44,8 +44,10 @@ final class ProfileTool: BuiltInTool {
 
         var profiles = contextService.loadProfiles()
 
-        // 기존 프로필에서 이름 매칭 (case-insensitive, contains)
-        if let existing = profiles.first(where: { $0.name.localizedCaseInsensitiveContains(name) || name.localizedCaseInsensitiveContains($0.name) }) {
+        // 기존 프로필에서 이름/별칭 매칭 (case-insensitive, contains)
+        if let existing = profiles.first(where: { profile in
+            profile.allNames.contains { $0.localizedCaseInsensitiveContains(name) || name.localizedCaseInsensitiveContains($0) }
+        }) {
             onUserIdentified?(existing)
             Log.tool.info("사용자 식별: \(existing.name) (기존 프로필)")
             return MCPToolResult(content: "사용자를 \(existing.name)(으)로 식별했습니다.", isError: false)

@@ -207,6 +207,11 @@ struct SettingsView: View {
                                                 .foregroundStyle(.blue)
                                         }
                                     }
+                                    if !profile.aliases.isEmpty {
+                                        Text("별칭: \(profile.aliases.joined(separator: ", "))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                     if !profile.description.isEmpty {
                                         Text(profile.description)
                                             .font(.caption)
@@ -640,6 +645,7 @@ struct AddMCPServerView: View {
 struct AddProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String = ""
+    @State private var aliasesText: String = ""
     @State private var description: String = ""
     let contextService: ContextServiceProtocol
 
@@ -650,7 +656,11 @@ struct AddProfileView: View {
                     .font(.headline)
                 Spacer()
                 Button("추가") {
-                    let profile = UserProfile(name: name, description: description)
+                    let aliases = aliasesText
+                        .split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    let profile = UserProfile(name: name, aliases: aliases, description: description)
                     var profiles = contextService.loadProfiles()
                     profiles.append(profile)
                     contextService.saveProfiles(profiles)
@@ -667,12 +677,13 @@ struct AddProfileView: View {
 
             Form {
                 TextField("이름", text: $name, prompt: Text("예: 엄마, 아빠, 민수"))
+                TextField("별칭", text: $aliasesText, prompt: Text("현철, 아빠"))
                 TextField("설명", text: $description, prompt: Text("예: 가족 중 어머니"))
             }
             .formStyle(.grouped)
             .padding()
         }
-        .frame(width: 400, height: 220)
+        .frame(width: 400, height: 250)
     }
 }
 
