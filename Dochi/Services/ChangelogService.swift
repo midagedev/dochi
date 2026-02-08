@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// 버전 변경 감지 및 changelog 관리 서비스
 final class ChangelogService {
@@ -50,11 +51,15 @@ final class ChangelogService {
 
     /// Changelog 내용 로드
     func loadChangelog() -> String {
-        guard let url = bundle.url(forResource: "CHANGELOG", withExtension: "md"),
-              let content = try? String(contentsOf: url, encoding: .utf8) else {
+        guard let url = bundle.url(forResource: "CHANGELOG", withExtension: "md") else {
             return "Changelog를 불러올 수 없습니다."
         }
-        return content
+        do {
+            return try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            Log.storage.warning("CHANGELOG.md 읽기 실패: \(error, privacy: .public)")
+            return "Changelog를 불러올 수 없습니다."
+        }
     }
 
     /// 현재 버전의 변경사항만 추출

@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 struct SettingsView: View {
     @EnvironmentObject var viewModel: DochiViewModel
@@ -277,7 +278,11 @@ struct SettingsView: View {
                                     viewModel.settings.updateMCPServer(updated)
                                     if enabled {
                                         Task {
-                                            try? await viewModel.mcpService.connect(config: updated)
+                                            do {
+                                                try await viewModel.mcpService.connect(config: updated)
+                                            } catch {
+                                                Log.mcp.error("MCP 서버 연결 실패 (\(updated.name, privacy: .public)): \(error, privacy: .public)")
+                                            }
                                         }
                                     } else {
                                         Task {
@@ -379,7 +384,11 @@ struct SettingsView: View {
                 viewModel.settings.addMCPServer(config)
                 if config.isEnabled {
                     Task {
-                        try? await viewModel.mcpService.connect(config: config)
+                        do {
+                            try await viewModel.mcpService.connect(config: config)
+                        } catch {
+                            Log.mcp.error("MCP 서버 연결 실패 (\(config.name, privacy: .public)): \(error, privacy: .public)")
+                        }
                     }
                 }
             }

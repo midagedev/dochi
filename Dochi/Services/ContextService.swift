@@ -181,8 +181,12 @@ final class ContextService: ContextServiceProtocol {
     // MARK: - Profiles (사용자 프로필)
 
     func loadProfiles() -> [UserProfile] {
-        guard let data = try? Data(contentsOf: profilesFileURL) else {
+        let data: Data
+        do {
+            data = try Data(contentsOf: profilesFileURL)
+        } catch {
             // 파일 없으면 프로필 미설정 상태 (정상)
+            Log.storage.debug("profiles.json 없음 (미설정 상태): \(error, privacy: .public)")
             return []
         }
         do {

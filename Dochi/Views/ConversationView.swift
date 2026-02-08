@@ -489,6 +489,7 @@ struct MessageBubbleView: View {
     // ![image](url) 패턴에서 URL 추출
     private var imageURLsFromContent: [URL] {
         let pattern = #"!\[.*?\]\((.*?)\)"#
+        // 컴파일 타임 상수 패턴 — 실패 불가
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let range = NSRange(message.content.startIndex..., in: message.content)
         let matches = regex.matches(in: message.content, range: range)
@@ -501,6 +502,7 @@ struct MessageBubbleView: View {
     // 마크다운 이미지 태그를 제거한 텍스트
     private var textWithoutImages: String {
         let pattern = #"\n*!\[.*?\]\(.*?\)\n*"#
+        // 컴파일 타임 상수 패턴 — 실패 불가
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return message.content }
         let range = NSRange(message.content.startIndex..., in: message.content)
         return regex.stringByReplacingMatches(in: message.content, range: range, withTemplate: "")
