@@ -338,6 +338,9 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: - Cloud
+                CloudSettingsView(supabaseService: viewModel.supabaseService)
+
                 // MARK: - About
                 Section("정보") {
                     HStack {

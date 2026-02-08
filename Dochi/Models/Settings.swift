@@ -91,6 +91,9 @@ final class AppSettings: ObservableObject {
     let contextService: ContextServiceProtocol
     private let defaults: UserDefaults
 
+    /// KeychainService 참조 (SupabaseService 등 외부에서 공유)
+    var keychainServiceRef: KeychainServiceProtocol { keychainService }
+
     init(
         keychainService: KeychainServiceProtocol = KeychainService(),
         contextService: ContextServiceProtocol = ContextService(),

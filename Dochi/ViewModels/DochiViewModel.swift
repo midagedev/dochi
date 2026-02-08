@@ -30,6 +30,7 @@ final class DochiViewModel: ObservableObject {
 
     // Dependencies
     let contextService: ContextServiceProtocol
+    let supabaseService: SupabaseService
 
     // Tool loop 관련
     @Published var currentToolExecution: String?
@@ -65,7 +66,8 @@ final class DochiViewModel: ObservableObject {
         settings: AppSettings,
         contextService: ContextServiceProtocol = ContextService(),
         conversationService: ConversationServiceProtocol = ConversationService(),
-        mcpService: MCPServiceProtocol? = nil
+        mcpService: MCPServiceProtocol? = nil,
+        supabaseService: SupabaseService? = nil
     ) {
         self.settings = settings
         self.contextService = contextService
@@ -75,6 +77,7 @@ final class DochiViewModel: ObservableObject {
         self.supertonicService = SupertonicService()
         self.mcpService = mcpService ?? MCPService()
         self.builtInToolService = BuiltInToolService()
+        self.supabaseService = supabaseService ?? SupabaseService(keychainService: settings.keychainServiceRef)
 
         setupCallbacks()
         setupChangeForwarding()
@@ -106,6 +109,11 @@ final class DochiViewModel: ObservableObject {
 
         if supertonicService.state == .unloaded {
             connect()
+        }
+
+        // Restore cloud session
+        Task {
+            await supabaseService.restoreSession()
         }
     }
 

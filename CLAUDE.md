@@ -55,20 +55,23 @@ Dochi/
 │   ├── Settings.swift        # AppSettings with DI
 │   ├── Conversation.swift
 │   ├── Message.swift
-│   └── Enums.swift           # LLMProvider, SupertonicVoice
+│   ├── Enums.swift           # LLMProvider, SupertonicVoice
+│   └── Workspace.swift      # Workspace, WorkspaceMember
 ├── ViewModels/
 │   └── DochiViewModel.swift  # Central orchestrator
 ├── Views/
 │   ├── ContentView.swift
 │   ├── SettingsView.swift
 │   ├── ConversationView.swift
-│   └── ChangelogView.swift
+│   ├── ChangelogView.swift
+│   └── CloudSettingsView.swift
 ├── Services/
 │   ├── Protocols/            # Service protocols for DI
 │   │   ├── ContextServiceProtocol.swift
 │   │   ├── ConversationServiceProtocol.swift
 │   │   ├── KeychainServiceProtocol.swift
-│   │   └── SoundServiceProtocol.swift
+│   │   ├── SoundServiceProtocol.swift
+│   │   └── SupabaseServiceProtocol.swift
 │   ├── BuiltInTools/         # Built-in tool modules
 │   │   ├── BuiltInToolProtocol.swift
 │   │   ├── WebSearchTool.swift
@@ -85,6 +88,7 @@ Dochi/
 │   ├── KeychainService.swift
 │   ├── SoundService.swift
 │   ├── ChangelogService.swift
+│   ├── SupabaseService.swift
 │   └── Supertonic/           # TTS helpers
 └── Resources/
     └── CHANGELOG.md
@@ -94,7 +98,8 @@ DochiTests/
 │   ├── MockContextService.swift
 │   ├── MockConversationService.swift
 │   ├── MockKeychainService.swift
-│   └── MockSoundService.swift
+│   ├── MockSoundService.swift
+│   └── MockSupabaseService.swift
 └── Services/
     ├── ContextServiceTests.swift
     └── ConversationServiceTests.swift
@@ -116,6 +121,7 @@ DochiTests/
 | KeychainService | KeychainServiceProtocol | API key storage |
 | SoundService | SoundServiceProtocol | UI sound effects |
 | ChangelogService | - | Version tracking and changelog |
+| SupabaseService | SupabaseServiceProtocol | Cloud auth, workspace CRUD |
 
 **Callbacks in SpeechService:**
 - `onQueryCaptured` — STT result ready
@@ -184,6 +190,7 @@ All logging uses Apple `os.Logger` via the `Log` enum (`Services/Log.swift`). Su
 | `Log.mcp` | MCP | MCPService (connections) |
 | `Log.tool` | Tool | BuiltInTools (API calls, alarms) |
 | `Log.storage` | Storage | Context/Conversation/KeychainService (I/O) |
+| `Log.cloud` | Cloud | SupabaseService (auth, sync) |
 
 Log levels: `.debug` (details), `.info` (state changes), `.warning` (expected issues), `.error` (failures).
 
@@ -202,7 +209,7 @@ log show --predicate 'subsystem == "com.dochi.app" AND category == "Tool"' --las
 - Logging via `Log.*` (os.Logger) — never use `print()` for diagnostics
 - UI language is Korean
 - XcodeGen (`project.yml`) generates the `.xcodeproj` — edit `project.yml`, not the Xcode project directly
-- External dependency: `microsoft/onnxruntime-swift-package-manager` v1.20.0, imported as `OnnxRuntimeBindings`
+- External dependencies: `microsoft/onnxruntime-swift-package-manager` v1.20.0 (`OnnxRuntimeBindings`), `supabase/supabase-swift` v2.0.0+ (`Supabase`)
 - Supertonic helpers (`SupertonicHelpers.swift`) prefix all types with `Supertonic` to avoid namespace collisions
 - Wake word variations generated via LLM to improve STT matching accuracy
 - Protocol-based services enable easy mocking for unit tests

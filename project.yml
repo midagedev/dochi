@@ -12,6 +12,9 @@ packages:
   mcp-swift-sdk:
     url: https://github.com/modelcontextprotocol/swift-sdk.git
     from: "0.10.2"
+  supabase-swift:
+    url: https://github.com/supabase/supabase-swift.git
+    from: "2.0.0"
 
 targets:
   Dochi:
@@ -41,6 +44,8 @@ targets:
         product: onnxruntime
       - package: mcp-swift-sdk
         product: MCP
+      - package: supabase-swift
+        product: Supabase
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi
