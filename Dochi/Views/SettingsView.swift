@@ -343,6 +343,11 @@ struct SettingsView: View {
                     CloudSettingsView(supabaseService: supabase)
                 }
 
+                if case .signedIn = viewModel.supabaseService.authState,
+                   let device = viewModel.deviceServiceForView {
+                    DeviceSettingsView(deviceService: device)
+                }
+
                 // MARK: - About
                 Section("정보") {
                     HStack {

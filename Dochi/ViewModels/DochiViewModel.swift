@@ -31,6 +31,7 @@ final class DochiViewModel: ObservableObject {
     // Dependencies
     let contextService: ContextServiceProtocol
     let supabaseService: any SupabaseServiceProtocol
+    let deviceService: any DeviceServiceProtocol
 
     // Tool loop 관련
     @Published var currentToolExecution: String?
@@ -56,9 +57,13 @@ final class DochiViewModel: ObservableObject {
 
     private let conversationService: ConversationServiceProtocol
 
-    /// Concrete accessor for views that need @ObservedObject
+    /// Concrete accessors for views that need @ObservedObject
     var supabaseServiceForView: SupabaseService? {
         supabaseService as? SupabaseService
+    }
+
+    var deviceServiceForView: DeviceService? {
+        deviceService as? DeviceService
     }
 
     var isConnected: Bool {
@@ -72,7 +77,8 @@ final class DochiViewModel: ObservableObject {
         contextService: ContextServiceProtocol = ContextService(),
         conversationService: ConversationServiceProtocol = ConversationService(),
         mcpService: MCPServiceProtocol? = nil,
-        supabaseService: (any SupabaseServiceProtocol)? = nil
+        supabaseService: (any SupabaseServiceProtocol)? = nil,
+        deviceService: (any DeviceServiceProtocol)? = nil
     ) {
         self.settings = settings
         self.contextService = contextService
@@ -82,12 +88,31 @@ final class DochiViewModel: ObservableObject {
         self.supertonicService = SupertonicService()
         self.mcpService = mcpService ?? MCPService()
         self.builtInToolService = BuiltInToolService()
-        self.supabaseService = supabaseService ?? SupabaseService(keychainService: settings.keychainServiceRef)
+        let supa = supabaseService ?? SupabaseService(keychainService: settings.keychainServiceRef)
+        self.supabaseService = supa
+        if let deviceService {
+            self.deviceService = deviceService
+        } else if let concreteSupa = supa as? SupabaseService {
+            self.deviceService = DeviceService(supabaseService: concreteSupa, keychainService: settings.keychainServiceRef)
+        } else {
+            self.deviceService = DeviceService(supabaseService: SupabaseService(keychainService: settings.keychainServiceRef), keychainService: settings.keychainServiceRef)
+        }
 
         setupCallbacks()
         setupChangeForwarding()
         setupProfileCallback()
+        setupTerminationHandler()
         conversationManager.loadAll()
+    }
+
+    private func setupTerminationHandler() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.deviceService.stopHeartbeat()
+        }
     }
 
     // MARK: - Wake Word (forwarding to SessionManager)
@@ -116,11 +141,19 @@ final class DochiViewModel: ObservableObject {
             connect()
         }
 
-        // Restore cloud session and sync context
+        // Restore cloud session, sync context, register device
         Task {
             await supabaseService.restoreSession()
             if let cloudContext = contextService as? CloudContextService {
                 await cloudContext.pullFromCloud()
+            }
+            if case .signedIn = supabaseService.authState {
+                do {
+                    try await deviceService.registerDevice()
+                } catch {
+                    Log.cloud.warning("디바이스 등록 실패: \(error, privacy: .public)")
+                }
+                deviceService.startHeartbeat()
             }
         }
     }
