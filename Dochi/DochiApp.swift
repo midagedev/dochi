@@ -9,12 +9,14 @@ struct DochiApp: App {
         let keychainService = KeychainService()
         let supabaseService = SupabaseService(keychainService: keychainService)
         let cloudContext = CloudContextService(supabaseService: supabaseService)
+        let deviceService = DeviceService(supabaseService: supabaseService, keychainService: keychainService)
         let settings = AppSettings(keychainService: keychainService, contextService: cloudContext)
         _settings = StateObject(wrappedValue: settings)
         _viewModel = StateObject(wrappedValue: DochiViewModel(
             settings: settings,
             contextService: cloudContext,
-            supabaseService: supabaseService
+            supabaseService: supabaseService,
+            deviceService: deviceService
         ))
     }
 

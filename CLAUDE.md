@@ -64,14 +64,16 @@ Dochi/
 │   ├── SettingsView.swift
 │   ├── ConversationView.swift
 │   ├── ChangelogView.swift
-│   └── CloudSettingsView.swift
+│   ├── CloudSettingsView.swift
+│   └── DeviceSettingsView.swift
 ├── Services/
 │   ├── Protocols/            # Service protocols for DI
 │   │   ├── ContextServiceProtocol.swift
 │   │   ├── ConversationServiceProtocol.swift
 │   │   ├── KeychainServiceProtocol.swift
 │   │   ├── SoundServiceProtocol.swift
-│   │   └── SupabaseServiceProtocol.swift
+│   │   ├── SupabaseServiceProtocol.swift
+│   │   └── DeviceServiceProtocol.swift
 │   ├── BuiltInTools/         # Built-in tool modules
 │   │   ├── BuiltInToolProtocol.swift
 │   │   ├── WebSearchTool.swift
@@ -90,6 +92,7 @@ Dochi/
 │   ├── ChangelogService.swift
 │   ├── SupabaseService.swift
 │   ├── CloudContextService.swift
+│   ├── DeviceService.swift
 │   └── Supertonic/           # TTS helpers
 └── Resources/
     └── CHANGELOG.md
@@ -100,7 +103,8 @@ DochiTests/
 │   ├── MockConversationService.swift
 │   ├── MockKeychainService.swift
 │   ├── MockSoundService.swift
-│   └── MockSupabaseService.swift
+│   ├── MockSupabaseService.swift
+│   └── MockDeviceService.swift
 └── Services/
     ├── ContextServiceTests.swift
     └── ConversationServiceTests.swift
@@ -123,6 +127,7 @@ DochiTests/
 | SoundService | SoundServiceProtocol | UI sound effects |
 | ChangelogService | - | Version tracking and changelog |
 | SupabaseService | SupabaseServiceProtocol | Cloud auth, workspace CRUD |
+| DeviceService | DeviceServiceProtocol | Device registration, heartbeat |
 
 **Callbacks in SpeechService:**
 - `onQueryCaptured` — STT result ready
