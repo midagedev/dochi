@@ -96,6 +96,7 @@ final class ContextAnalyzer {
             let response = try await callLLMSimple(provider: provider, apiKey: apiKey, prompt: prompt)
             let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
 
+            // LLM 응답이 JSON이 아닐 수 있음 — 파싱 실패 시 기본 제목 사용
             if let jsonData = trimmed.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
 

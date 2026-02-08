@@ -13,12 +13,14 @@ struct ToolCall: Identifiable, @unchecked Sendable {
         self.id = id
         self.name = name
         self.arguments = arguments
+        // arguments는 이미 유효한 딕셔너리 — 직렬화 실패는 사실상 불가
         self.argumentsData = (try? JSONSerialization.data(withJSONObject: arguments)) ?? Data()
     }
 
     init(id: String, name: String, argumentsJSON: String) {
         self.id = id
         self.name = name
+        // 외부에서 받은 JSON 문자열 파싱 — 잘못된 형식이면 빈 딕셔너리로 폴백
         if let data = argumentsJSON.data(using: .utf8),
            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             self.arguments = parsed

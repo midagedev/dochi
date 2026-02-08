@@ -75,6 +75,7 @@ private struct CodableToolCall: Codable {
     init(from toolCall: ToolCall) {
         self.id = toolCall.id
         self.name = toolCall.name
+        // arguments는 이미 유효한 딕셔너리 — 직렬화 실패 시 빈 객체로 폴백
         self.argumentsJSON = (try? String(data: JSONSerialization.data(withJSONObject: toolCall.arguments), encoding: .utf8)) ?? "{}"
     }
 

@@ -158,6 +158,7 @@ final class LLMService: ObservableObject {
                             "type": "function",
                             "function": [
                                 "name": tc.name,
+                                // JSON 직렬화 실패 시 빈 객체로 폴백 — arguments는 이미 유효한 딕셔너리
                                 "arguments": (try? String(data: JSONSerialization.data(withJSONObject: tc.arguments), encoding: .utf8)) ?? "{}"
                             ]
                         ] as [String: Any]
@@ -324,6 +325,7 @@ final class LLMService: ObservableObject {
 
             if payload == "[DONE]" { break }
 
+            // SSE 스트림의 개별 줄 파싱 실패는 무시하고 다음 줄 처리
             guard let data = payload.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { continue }
