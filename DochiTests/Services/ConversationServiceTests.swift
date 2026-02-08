@@ -1,6 +1,7 @@
 import XCTest
 @testable import Dochi
 
+@MainActor
 final class ConversationServiceTests: XCTestCase {
     var sut: ConversationService!
     var tempDir: URL!

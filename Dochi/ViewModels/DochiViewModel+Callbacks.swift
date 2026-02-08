@@ -142,6 +142,12 @@ extension DochiViewModel {
                 .sink { [weak self] _ in self?.objectWillChange.send() }
                 .store(in: &cancellables)
         }
+        if let device = deviceService as? DeviceService {
+            device.objectWillChange
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.objectWillChange.send() }
+                .store(in: &cancellables)
+        }
     }
 
     func setupProfileCallback() {
