@@ -115,9 +115,11 @@ create policy "member_select" on workspace_members for select using (
     workspace_id in (select workspace_id from workspace_members where user_id = auth.uid())
 );
 
--- Workspace Members: authenticated users can insert (join)
+-- Workspace Members: only workspace owners can directly insert members
+-- (regular users join via join_workspace_by_invite SECURITY DEFINER function)
 create policy "member_insert" on workspace_members for insert with check (
     user_id = auth.uid()
+    and workspace_id in (select id from workspaces where owner_id = auth.uid())
 );
 
 -- Workspace Members: users can delete their own membership
