@@ -201,6 +201,7 @@ final class DeviceService: ObservableObject, DeviceServiceProtocol {
     }
 
     /// macOS 디바이스의 기능 목록 감지
+    // TODO: iOS/watchOS 클라이언트 추가 시 런타임 기능 탐지로 전환 필요
     private func detectCapabilities() -> [String] {
         var caps: [String] = []
         // macOS는 기본적으로 모든 기능 지원

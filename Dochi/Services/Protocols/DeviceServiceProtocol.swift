@@ -22,6 +22,31 @@ struct DeviceInfo: Identifiable, Codable {
         case createdAt = "created_at"
         case capabilities
     }
+
+    init(id: UUID, workspaceId: UUID, userId: UUID, deviceName: String, platform: String, isOnline: Bool, lastSeenAt: Date, createdAt: Date, capabilities: [String] = []) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.userId = userId
+        self.deviceName = deviceName
+        self.platform = platform
+        self.isOnline = isOnline
+        self.lastSeenAt = lastSeenAt
+        self.createdAt = createdAt
+        self.capabilities = capabilities
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        workspaceId = try container.decode(UUID.self, forKey: .workspaceId)
+        userId = try container.decode(UUID.self, forKey: .userId)
+        deviceName = try container.decode(String.self, forKey: .deviceName)
+        platform = try container.decode(String.self, forKey: .platform)
+        isOnline = try container.decode(Bool.self, forKey: .isOnline)
+        lastSeenAt = try container.decode(Date.self, forKey: .lastSeenAt)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        capabilities = try container.decodeIfPresent([String].self, forKey: .capabilities) ?? []
+    }
 }
 
 /// 디바이스가 지원하는 기능
