@@ -143,15 +143,25 @@ final class DochiViewModel: ObservableObject {
             connect()
         }
 
-        // Restore cloud session, sync context/conversations, register device
+        // Restore cloud session, sync context/conversations, register device, start Realtime
         Task {
             await supabaseService.restoreSession()
             if let cloudContext = contextService as? CloudContextService {
                 await cloudContext.pullFromCloud()
+                cloudContext.onContextChanged = { [weak self] in
+                    // Context 변경 시 별도 처리 없이 다음 LLM 요청에 반영됨
+                    Log.app.info("Realtime: 컨텍스트 변경 감지")
+                    _ = self  // retain check
+                }
+                cloudContext.subscribeToRealtimeChanges()
             }
             if let cloudConversation = conversationService as? CloudConversationService {
                 await cloudConversation.pullFromCloud()
                 conversationManager.loadAll()
+                cloudConversation.onConversationsChanged = { [weak self] in
+                    self?.conversationManager.loadAll()
+                }
+                cloudConversation.subscribeToRealtimeChanges()
             }
             if case .signedIn = supabaseService.authState {
                 do {

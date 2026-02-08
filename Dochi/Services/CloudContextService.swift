@@ -4,12 +4,18 @@ import os
 
 /// 클라우드 동기화 컨텍스트 서비스
 /// - 로컬 ContextService를 래핑하여 write-through 클라우드 동기화 제공
+/// - Supabase Realtime으로 다른 디바이스 변경사항 즉시 반영
 /// - 오프라인 시 로컬만 사용, 온라인 복귀 시 동기화
 /// - Cloud-always-wins on pull: 풀 시 클라우드 내용이 로컬을 덮어씁니다
 @MainActor
 final class CloudContextService: ContextServiceProtocol {
     private let local: ContextService
     private let supabaseService: SupabaseService
+
+    /// 다른 디바이스에서 컨텍스트가 변경되었을 때 호출
+    var onContextChanged: (() -> Void)?
+
+    private var realtimeTask: Task<Void, Never>?
 
     init(local: ContextService = ContextService(), supabaseService: SupabaseService) {
         self.local = local
@@ -136,6 +142,93 @@ final class CloudContextService: ContextServiceProtocol {
             Log.cloud.info("클라우드 컨텍스트 동기화 완료: \(files.count)개 파일")
         } catch {
             Log.cloud.warning("클라우드 컨텍스트 풀 실패: \(error, privacy: .public)")
+        }
+    }
+
+    // MARK: - Realtime Subscriptions
+
+    /// Supabase Realtime 구독 시작 — 다른 디바이스의 변경사항 즉시 반영
+    func subscribeToRealtimeChanges() {
+        guard let client = supabaseService.client,
+              let wsId = resolveWorkspaceId() else { return }
+        unsubscribeFromRealtime()
+
+        realtimeTask = Task { [weak self] in
+            let channel = client.realtimeV2.channel("context-\(wsId.uuidString)")
+
+            let contextChanges = channel.postgresChange(
+                AnyAction.self,
+                schema: "public",
+                table: "context_files",
+                filter: .eq("workspace_id", value: wsId)
+            )
+
+            let profileChanges = channel.postgresChange(
+                AnyAction.self,
+                schema: "public",
+                table: "profiles",
+                filter: .eq("workspace_id", value: wsId)
+            )
+
+            do {
+                try await channel.subscribeWithError()
+                Log.cloud.info("컨텍스트 Realtime 구독 시작")
+            } catch {
+                Log.cloud.warning("컨텍스트 Realtime 구독 실패: \(error, privacy: .public)")
+                return
+            }
+
+            // Listen for context_files changes
+            Task { [weak self] in
+                for await action in contextChanges {
+                    guard !Task.isCancelled else { break }
+                    await self?.handleContextRealtimeEvent(action)
+                }
+            }
+
+            // Listen for profiles changes
+            Task { [weak self] in
+                for await action in profileChanges {
+                    guard !Task.isCancelled else { break }
+                    await self?.handleProfileRealtimeEvent(action, workspaceId: wsId)
+                }
+            }
+        }
+    }
+
+    /// Realtime 구독 해제
+    func unsubscribeFromRealtime() {
+        realtimeTask?.cancel()
+        realtimeTask = nil
+    }
+
+    private func handleContextRealtimeEvent(_ action: AnyAction) {
+        do {
+            switch action {
+            case .insert(let insert):
+                let row = try insert.decodeRecord(as: ContextFileRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
+                applyCloudFile(row)
+                onContextChanged?()
+            case .update(let update):
+                let row = try update.decodeRecord(as: ContextFileRow.self, decoder: PostgrestClient.Configuration.jsonDecoder)
+                applyCloudFile(row)
+                onContextChanged?()
+            case .delete:
+                break // context_files are not deleted, only updated
+            }
+        } catch {
+            Log.cloud.warning("컨텍스트 Realtime 이벤트 디코딩 실패: \(error, privacy: .public)")
+        }
+    }
+
+    private func handleProfileRealtimeEvent(_ action: AnyAction, workspaceId: UUID) {
+        // On any profile change, re-pull all profiles for simplicity
+        switch action {
+        case .insert, .update, .delete:
+            Task {
+                await self.pullProfilesFromCloud(workspaceId: workspaceId)
+                self.onContextChanged?()
+            }
         }
     }
 
