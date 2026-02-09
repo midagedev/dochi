@@ -9,6 +9,7 @@ macOS에서 bash 실행, 앱 제어, 파일 관리까지 — AI에게 손과 발
 ## 특징
 
 - **로컬 디바이스 제어** — bash 실행, 앱 열기, 파일 관리, AppleScript, Shortcuts
+- **코딩 에이전트 연동** — Claude Code, OpenCode를 실행·중계·세션 관리
 - **멀티 에이전트** — 에이전트마다 고유한 페르소나, 웨이크워드, 권한
 - **멀티 LLM** — OpenAI, Anthropic, Z.AI 중 선택
 - **텍스트 + 음성** — 텍스트 입력 기본, 웨이크워드로 음성 모드 전환
@@ -21,24 +22,25 @@ macOS에서 bash 실행, 앱 제어, 파일 관리까지 — AI에게 손과 발
 | 에이전트 | 페르소나 | 웨이크워드 | 주요 능력 |
 |---------|---------|-----------|----------|
 | 도치 | 범용 비서 | "도치야" | 일정, 미리알림, 앱 제어, FaceTime |
-| 코디 | 시니어 개발자 | "코디야" | bash, git, Claude Code, 빌드 |
+| 코디 | 시니어 개발자 | "코디야" | Claude Code/OpenCode 연동, bash, git, 빌드 |
 | 키키 | 아이 대화 친구 | "키키야" | 이야기, 교육, 제한된 권한 |
 | (커스텀) | system.md로 정의 | 자유 설정 | 에이전트별 권한 설정 |
 
 ## 로컬 디바이스 능력
 
 ```
-"프로젝트 빌드해줘"       → $ npm run build
-"엄마한테 FaceTime 걸어줘" → FaceTime 앱 실행 → 통화 시작
-"Claude Code 열어줘"      → claude CLI 실행
-"내일 일정 알려줘"         → 캘린더 조회 → 음성으로 안내
-"스크린샷 찍어줘"          → screencapture 실행
+"프로젝트 빌드해줘"            → $ npm run build
+"로그인 API에 rate limit 추가해줘" → Claude Code 세션 → 코드 수정 → 결과 요약
+"아까 작업 이어서 해줘"         → 기존 코딩 세션 재개
+"엄마한테 FaceTime 걸어줘"      → FaceTime 앱 실행 → 통화 시작
+"내일 일정 알려줘"              → 캘린더 조회 → 음성으로 안내
 ```
 
 | 능력 | 방법 |
 |------|------|
 | Shell 실행 | bash/zsh 명령어 직접 실행 |
-| 앱 열기/제어 | open, AppleScript (FaceTime, Keynote, Claude Code 등) |
+| 코딩 에이전트 | Claude Code, OpenCode 실행·중계·세션 관리 |
+| 앱 열기/제어 | open, AppleScript (FaceTime, Keynote 등) |
 | 파일 관리 | 파일 읽기/쓰기/검색/정리 |
 | Apple Shortcuts | 사용자 정의 자동화 실행 |
 | 미리알림/캘린더 | EventKit으로 일정·할 일 관리 |
@@ -86,6 +88,7 @@ open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.ap
 | 도구 | API 키 | 기능 |
 |------|--------|------|
 | Shell 실행 | - | bash/zsh 명령어 실행 |
+| 코딩 에이전트 | - | Claude Code/OpenCode 세션 실행, 태스크 위임, 결과 중계 |
 | 앱 제어 | - | macOS 앱 열기/조작 (AppleScript) |
 | 웹검색 | Tavily | 실시간 웹 검색 |
 | 미리알림 | - | Apple 미리알림 생성/조회/완료 |
