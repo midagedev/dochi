@@ -40,8 +40,10 @@ struct ContentView: View {
             OnboardingView()
         }
         .onAppear {
-            viewModel.connectOnLaunch()
-            checkForNewVersion()
+            if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+                viewModel.connectOnLaunch()
+                checkForNewVersion()
+            }
         }
     }
 

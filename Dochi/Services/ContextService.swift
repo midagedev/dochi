@@ -624,24 +624,35 @@ final class ContextService: ContextServiceProtocol {
             }
         }
         
-        // 3. 기존 family.md (또는 memory.md) 이동
-        // family.md -> workspaces/{id}/memory.md
+        // 3. 기존 memory 파일들을 workspace memory로 이동
+        // family.md 우선, 없으면 memory.md 사용
+        let legacyMemory: String
         if fileManager.fileExists(atPath: familyFileURL.path) {
-            do {
-                try fileManager.moveItem(at: familyFileURL, to: workspaceMemoryURL(id: defaultWorkspaceId))
-                Log.storage.info("family.md 이동 완료")
-            } catch {
-                Log.storage.error("family.md 이동 실패: \(error, privacy: .public)")
+            legacyMemory = (try? String(contentsOf: familyFileURL, encoding: .utf8)) ?? ""
+            try? fileManager.removeItem(at: familyFileURL)
+        } else if fileManager.fileExists(atPath: memoryFileURL.path) {
+            legacyMemory = (try? String(contentsOf: memoryFileURL, encoding: .utf8)) ?? ""
+            try? fileManager.removeItem(at: memoryFileURL)
+        } else {
+            legacyMemory = ""
+        }
+        
+        if !legacyMemory.isEmpty {
+            saveWorkspaceMemory(workspaceId: defaultWorkspaceId, content: legacyMemory)
+            Log.storage.info("레거시 메모리를 워크스페이스 메모리로 이동 완료")
+        }
+        
+        // 4. system.md가 있으면 기본 에이전트의 persona로 마이그레이션
+        if fileManager.fileExists(atPath: systemFileURL.path) {
+            let systemContent = (try? String(contentsOf: systemFileURL, encoding: .utf8)) ?? ""
+            if !systemContent.isEmpty {
+                let defaultAgentName = Constants.Agent.defaultName
+                saveAgentPersona(workspaceId: defaultWorkspaceId, agentName: defaultAgentName, content: systemContent)
+                Log.storage.info("system.md를 에이전트 페르소나로 이동 완료")
             }
         }
         
-        // 4. 기본 설정에 defaultWorkspaceId 저장 (UserDefaults 등 - 이것은 호출하는 쪽에서 처리하거나 여기서?)
-        // ContextService는 UserDefaults를 직접 모르므로, 로그만 남기고 호출자가 처리하도록?
-        // 하지만 여기선 파일 구조 변경만 담당
         Log.storage.info("워크스페이스 마이그레이션 파일 작업 완료. ID: \(defaultWorkspaceId)")
-        
-        // Note: 이 메서드는 마이그레이션된 워크스페이스 ID를 반환하지 못하므로, 
-        // 호출하는 쪽에서 listWorkspaces().first?.id 를 찾아야 함.
     }
 
     private func ensureAgentDir(name: String) {
