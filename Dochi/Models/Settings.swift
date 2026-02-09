@@ -62,6 +62,15 @@ final class AppSettings: ObservableObject {
     @Published var telegramEnabled: Bool {
         didSet { defaults.set(telegramEnabled, forKey: Keys.telegramEnabled) }
     }
+    @Published var telegramLastChatId: Int64? {
+        didSet {
+            if let id = telegramLastChatId {
+                defaults.set(String(id), forKey: Keys.telegramLastChatId)
+            } else {
+                defaults.removeObject(forKey: Keys.telegramLastChatId)
+            }
+        }
+    }
 
     // MCP servers
     @Published var mcpServers: [MCPServerConfig] {
@@ -108,6 +117,7 @@ final class AppSettings: ObservableObject {
         static let currentWorkspaceId = "settings.currentWorkspaceId"
         static let migratedToWorkspaceStructure = "settings.migratedToWorkspaceStructure"
         static let telegramEnabled = "settings.telegramEnabled"
+        static let telegramLastChatId = "settings.telegramLastChatId"
     }
 
     // MARK: - Dependencies
@@ -151,6 +161,11 @@ final class AppSettings: ObservableObject {
 
         self.activeAgentName = defaults.string(forKey: Keys.activeAgentName) ?? Constants.Agent.defaultName
         self.telegramEnabled = defaults.bool(forKey: Keys.telegramEnabled)
+        if let idString = defaults.string(forKey: Keys.telegramLastChatId), let id = Int64(idString) {
+            self.telegramLastChatId = id
+        } else {
+            self.telegramLastChatId = nil
+        }
 
         // MCP servers
         if let data = defaults.data(forKey: Keys.mcpServers) {

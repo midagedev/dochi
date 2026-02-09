@@ -57,6 +57,8 @@ final class DochiViewModel: ObservableObject {
 
     private let conversationService: ConversationServiceProtocol
     private var telegramService: TelegramService?
+    private var lastTelegramApplied: (enabled: Bool, token: String)?
+    private var telegramTypingTask: Task<Void, Never>?
 
     /// Concrete accessors for views that need @ObservedObject
     var supabaseServiceForView: SupabaseService? {
@@ -251,6 +253,12 @@ final class DochiViewModel: ObservableObject {
         guard let telegramService else { return }
         let enabled = settings.telegramEnabled
         let token = settings.telegramBotToken
+        // Skip if unchanged
+        if let last = lastTelegramApplied, last.enabled == enabled, last.token == token {
+            return
+        }
+        lastTelegramApplied = (enabled, token)
+
         if enabled && !token.isEmpty {
             telegramService.start(token: token)
         } else {
@@ -299,6 +307,8 @@ final class DochiViewModel: ObservableObject {
     }
 
     func processTelegramDM(chatId: Int64, username: String?, text: String) async {
+        // Remember last chat for quick test send
+        settings.telegramLastChatId = chatId
         // Ensure Supabase mapping for this Telegram user (best-effort)
         if let supa = supabaseService as? SupabaseService, case .signedIn = supabaseService.authState {
             await supa.ensureTelegramMapping(telegramUserId: chatId, username: username)
@@ -318,6 +328,15 @@ final class DochiViewModel: ObservableObject {
 
         let systemPrompt = buildSystemPromptForTelegram()
 
+        // Show typing indicator until completion
+        telegramTypingTask?.cancel()
+        telegramTypingTask = Task { [weak self] in
+            while let self, !Task.isCancelled {
+                await self.telegramService?.sendChatAction(chatId: chatId, action: "typing")
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
+
         // Local LLMService instance to avoid interfering with UI state
         let llm = LLMService()
         // Configure built-in tools and user context
@@ -333,20 +352,25 @@ final class DochiViewModel: ObservableObject {
         var lastEditTime = Date.distantPast
         let editInterval: TimeInterval = 0.4
         var replyMessageId: Int?
+        var creatingInitial = false
+        var initialAttempted = false
 
         llm.onSentenceReady = { [weak self] sentence in
-            guard let self else { return }
-            streamedText += sentence
-            let now = Date()
-            if replyMessageId == nil {
-                Task { @MainActor in
-                    replyMessageId = await self.streamReply(to: chatId, initialText: self.sanitizeForTelegram(streamedText))
-                }
-                lastEditTime = now
-            } else if now.timeIntervalSince(lastEditTime) >= editInterval, let msgId = replyMessageId {
-                lastEditTime = now
-                Task { [weak self] in
-                    await self?.updateReply(chatId: chatId, messageId: msgId, text: self?.sanitizeForTelegram(streamedText) ?? streamedText)
+            Task { @MainActor in
+                guard let self else { return }
+                streamedText += sentence
+                let now = Date()
+                if replyMessageId == nil {
+                    // Ensure only one initial message is created
+                    if !creatingInitial {
+                        creatingInitial = true
+                        initialAttempted = true
+                        replyMessageId = await self.streamReply(to: chatId, initialText: self.sanitizeForTelegram(streamedText))
+                        lastEditTime = now
+                    }
+                } else if now.timeIntervalSince(lastEditTime) >= editInterval, let msgId = replyMessageId {
+                    lastEditTime = now
+                    await self.updateReply(chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
                 }
             }
         }
@@ -361,11 +385,7 @@ final class DochiViewModel: ObservableObject {
 
                 var results: [ToolResult] = []
                 for toolCall in toolCalls {
-                    var argsDict: [String: Any] = [:]
-                    if let data = toolCall.arguments.data(using: .utf8),
-                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        argsDict = obj
-                    }
+                    let argsDict: [String: Any] = toolCall.arguments
                     do {
                         let isBuiltIn = self.builtInToolService.availableTools.contains { $0.name == toolCall.name }
                         let toolResult: MCPToolResult
@@ -378,6 +398,11 @@ final class DochiViewModel: ObservableObject {
                             let snippet = String(toolResult.content.prefix(400))
                             streamedText += "\n\n🔧 \(toolCall.name): \(snippet)"
                             await self.updateReply(chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
+                        }
+                        // If image URLs detected in tool result, send to Telegram as photos
+                        let imageURLs = ToolExecutor.extractImageURLs(from: toolResult.content)
+                        for url in imageURLs.prefix(2) { // limit to 2 images per call
+                            await self.telegramService?.sendPhoto(chatId: chatId, url: url)
                         }
                         results.append(ToolResult(toolCallId: toolCall.id, content: toolResult.content, isError: toolResult.isError))
                     } catch {
@@ -409,12 +434,13 @@ final class DochiViewModel: ObservableObject {
 
         llm.onResponseComplete = { [weak self] finalText in
             guard let self else { return }
+            self.telegramTypingTask?.cancel()
             let clean = self.sanitizeForTelegram(finalText.isEmpty ? streamedText : finalText)
             if let msgId = replyMessageId, !clean.isEmpty {
                 Task { [weak self] in
                     await self?.updateReply(chatId: chatId, messageId: msgId, text: clean)
                 }
-            } else if replyMessageId == nil {
+            } else if !initialAttempted {
                 Task { [weak self] in
                     _ = await self?.streamReply(to: chatId, initialText: clean)
                 }
@@ -437,6 +463,14 @@ final class DochiViewModel: ObservableObject {
             tools: toolSpecs.isEmpty ? nil : toolSpecs,
             toolResults: nil
         )
+    }
+
+    // MARK: - Telegram test send
+    func sendTelegramTestMessage() async {
+        guard settings.telegramEnabled,
+              let chatId = settings.telegramLastChatId,
+              let telegramService else { return }
+        _ = await telegramService.sendMessage(chatId: chatId, text: "테스트 메시지입니다.")
     }
 
     private func connect() {
