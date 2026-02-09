@@ -8,6 +8,8 @@ This document tracks the MVP for the in-app Telegram bot integration.
 - Configure Bot Token in Settings; enable/disable toggle; getMe test
 - Persist conversations locally
 - Stream LLM replies back to Telegram by editing a placeholder message
+- Execute tools during streaming and append progress snippets to Telegram
+- Best-effort Supabase mapping: link Telegram user to the current workspace
 
 ## Scope
 
@@ -22,7 +24,6 @@ This document tracks the MVP for the in-app Telegram bot integration.
 
 ## Next
 
-- Supabase auth mapping: Telegram `user_id` ↔ workspace membership
-- Route user text to Dochi pipeline (streaming edits via message update)
-- Persist conversation history to Supabase
-- Add peer messaging and tool execution
+- Refine Supabase mapping (multi-workspace selection and explicit binding UI)
+- Cloud conversation sync enhancements (attachments, images)
+- Peer routing to specific devices with status streamed to Telegram

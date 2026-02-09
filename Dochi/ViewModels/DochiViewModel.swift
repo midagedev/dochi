@@ -299,6 +299,11 @@ final class DochiViewModel: ObservableObject {
     }
 
     func processTelegramDM(chatId: Int64, username: String?, text: String) async {
+        // Ensure Supabase mapping for this Telegram user (best-effort)
+        if let supa = supabaseService as? SupabaseService, case .signedIn = supabaseService.authState {
+            await supa.ensureTelegramMapping(telegramUserId: chatId, username: username)
+        }
+
         var conversation = loadOrCreateTelegramConversation(chatId: chatId, username: username)
         appendAndSave(&conversation, message: Message(role: .user, content: text))
 
@@ -315,6 +320,15 @@ final class DochiViewModel: ObservableObject {
 
         // Local LLMService instance to avoid interfering with UI state
         let llm = LLMService()
+        // Configure built-in tools and user context
+        builtInToolService.configure(tavilyApiKey: settings.tavilyApiKey, falaiApiKey: settings.falaiApiKey)
+        let hasProfiles = !contextService.loadProfiles().isEmpty
+        builtInToolService.configureUserContext(contextService: hasProfiles ? contextService : nil, currentUserId: nil)
+
+        // Tool specifications (built-in + MCP)
+        let builtInSpecs = builtInToolService.availableTools.map { $0.asDictionary }
+        let mcpSpecs = mcpService.availableTools.map { $0.asDictionary }
+        let toolSpecs = builtInSpecs + mcpSpecs
         var streamedText = ""
         var lastEditTime = Date.distantPast
         let editInterval: TimeInterval = 0.4
@@ -334,6 +348,62 @@ final class DochiViewModel: ObservableObject {
                 Task { [weak self] in
                     await self?.updateReply(chatId: chatId, messageId: msgId, text: self?.sanitizeForTelegram(streamedText) ?? streamedText)
                 }
+            }
+        }
+
+        var loopMessages = conversation.messages
+
+        llm.onToolCallsReceived = { [weak self] toolCalls in
+            guard let self else { return }
+            Task { @MainActor in
+                // Record assistant tool call message (with partial content)
+                loopMessages.append(Message(role: .assistant, content: llm.partialResponse, toolCalls: toolCalls))
+
+                var results: [ToolResult] = []
+                for toolCall in toolCalls {
+                    var argsDict: [String: Any] = [:]
+                    if let data = toolCall.arguments.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        argsDict = obj
+                    }
+                    do {
+                        let isBuiltIn = self.builtInToolService.availableTools.contains { $0.name == toolCall.name }
+                        let toolResult: MCPToolResult
+                        if isBuiltIn {
+                            toolResult = try await self.builtInToolService.callTool(name: toolCall.name, arguments: argsDict)
+                        } else {
+                            toolResult = try await self.mcpService.callTool(name: toolCall.name, arguments: argsDict)
+                        }
+                        if let msgId = replyMessageId {
+                            let snippet = String(toolResult.content.prefix(400))
+                            streamedText += "\n\n🔧 \(toolCall.name): \(snippet)"
+                            await self.updateReply(chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
+                        }
+                        results.append(ToolResult(toolCallId: toolCall.id, content: toolResult.content, isError: toolResult.isError))
+                    } catch {
+                        let err = "Error: \(error.localizedDescription)"
+                        if let msgId = replyMessageId {
+                            streamedText += "\n\n🔧 \(toolCall.name): \(err)"
+                            await self.updateReply(chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
+                        }
+                        results.append(ToolResult(toolCallId: toolCall.id, content: err, isError: true))
+                    }
+                }
+
+                // Append tool result messages and continue LLM
+                for result in results {
+                    loopMessages.append(Message(role: .tool, content: result.content, toolCallId: result.toolCallId))
+                }
+
+                llm.sendMessage(
+                    messages: loopMessages,
+                    systemPrompt: systemPrompt,
+                    provider: provider,
+                    model: model,
+                    apiKey: apiKey,
+                    tools: toolSpecs.isEmpty ? nil : toolSpecs,
+                    toolResults: nil
+                )
             }
         }
 
@@ -359,12 +429,12 @@ final class DochiViewModel: ObservableObject {
 
         // Send request
         llm.sendMessage(
-            messages: conversation.messages,
+            messages: loopMessages,
             systemPrompt: systemPrompt,
             provider: provider,
             model: model,
             apiKey: apiKey,
-            tools: nil,
+            tools: toolSpecs.isEmpty ? nil : toolSpecs,
             toolResults: nil
         )
     }

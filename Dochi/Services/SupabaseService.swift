@@ -327,6 +327,75 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
             defaults.removeObject(forKey: DefaultsKeys.currentWorkspaceId)
         }
     }
+
+    // MARK: - Telegram Mapping
+
+    /// 현재 로그인 사용자/워크스페이스 기준으로 텔레그램 사용자 매핑을 보장
+    /// - Creates a row in `telegram_accounts` if not exists: (user_id, workspace_id, telegram_user_id, username)
+    func ensureTelegramMapping(telegramUserId: Int64, username: String?) async {
+        guard let client else { return }
+        guard case .signedIn(let userId, _) = authState, let wsId = selectedWorkspace?.id else { return }
+
+        struct Row: Codable {
+            let user_id: UUID
+            let workspace_id: UUID
+            let telegram_user_id: Int64
+            let username: String?
+            let created_at: Date?
+            let updated_at: Date?
+        }
+
+        do {
+            // Exists?
+            let existing: [Row] = try await client
+                .from("telegram_accounts")
+                .select()
+                .eq("telegram_user_id", value: telegramUserId)
+                .eq("workspace_id", value: wsId)
+                .limit(1)
+                .execute()
+                .value
+
+            if existing.isEmpty {
+                struct Insert: Encodable { let user_id: UUID; let workspace_id: UUID; let telegram_user_id: Int64; let username: String? }
+                try await client
+                    .from("telegram_accounts")
+                    .insert(Insert(user_id: userId, workspace_id: wsId, telegram_user_id: telegramUserId, username: username))
+                    .execute()
+                Log.cloud.info("텔레그램 매핑 추가: tg=\(telegramUserId), ws=\(wsId.uuidString, privacy: .public)")
+            } else if existing.first?.username != username, let username {
+                struct Update: Encodable { let username: String }
+                try await client
+                    .from("telegram_accounts")
+                    .update(Update(username: username))
+                    .eq("telegram_user_id", value: telegramUserId)
+                    .eq("workspace_id", value: wsId)
+                    .execute()
+            }
+        } catch {
+            Log.cloud.warning("텔레그램 매핑 처리 실패: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// 텔레그램 사용자에 매핑된 워크스페이스 조회 (여러 개일 경우 최근 업데이트 우선)
+    func resolveWorkspaceForTelegramUser(telegramUserId: Int64) async -> UUID? {
+        guard let client else { return nil }
+        do {
+            struct Row: Decodable { let workspace_id: UUID; let updated_at: Date? }
+            let rows: [Row] = try await client
+                .from("telegram_accounts")
+                .select("workspace_id, updated_at")
+                .eq("telegram_user_id", value: telegramUserId)
+                .order("updated_at", ascending: false)
+                .limit(1)
+                .execute()
+                .value
+            return rows.first?.workspace_id
+        } catch {
+            Log.cloud.warning("텔레그램 매핑 조회 실패: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
 }
 
 // MARK: - Errors
