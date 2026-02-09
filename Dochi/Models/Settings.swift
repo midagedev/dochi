@@ -53,6 +53,11 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(contextMaxSize, forKey: Keys.contextMaxSize) }
     }
 
+    // Agent
+    @Published var activeAgentName: String {
+        didSet { defaults.set(activeAgentName, forKey: Keys.activeAgentName) }
+    }
+
     // MCP servers
     @Published var mcpServers: [MCPServerConfig] {
         didSet { saveMCPServers() }
@@ -83,6 +88,8 @@ final class AppSettings: ObservableObject {
         static let contextMaxSize = "settings.contextMaxSize"
         static let mcpServers = "settings.mcpServers"
         static let defaultUserId = "settings.defaultUserId"
+        static let activeAgentName = "settings.activeAgentName"
+        static let migratedToAgentStructure = "settings.migratedToAgentStructure"
     }
 
     // MARK: - Dependencies
@@ -123,6 +130,8 @@ final class AppSettings: ObservableObject {
         self.sttSilenceTimeout = defaults.object(forKey: Keys.sttSilenceTimeout) as? Double ?? Constants.Defaults.sttSilenceTimeout
         self.contextAutoCompress = defaults.object(forKey: Keys.contextAutoCompress) as? Bool ?? true
         self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? Constants.Defaults.contextMaxSize
+
+        self.activeAgentName = defaults.string(forKey: Keys.activeAgentName) ?? Constants.Agent.defaultName
 
         // MCP servers
         if let data = defaults.data(forKey: Keys.mcpServers) {
@@ -229,16 +238,31 @@ final class AppSettings: ObservableObject {
     func buildInstructions(currentUserName: String?, currentUserId: UUID?, recentSummaries: String?) -> String {
         let profiles = contextService.loadProfiles()
         let hasProfiles = !profiles.isEmpty
+        let agentName = activeAgentName
 
         var parts: [String] = []
 
-        // 1) system.md — 공유 페르소나
-        let systemPrompt = contextService.loadSystem()
-        if !systemPrompt.isEmpty {
-            parts.append(systemPrompt)
+        // 1) system_prompt.md — 앱 레벨 기본 규칙
+        let basePrompt = contextService.loadBaseSystemPrompt()
+        if !basePrompt.isEmpty {
+            parts.append(basePrompt)
         }
 
-        // 현재 날짜/시각 정보
+        // 2) agents/{name}/persona.md — 에이전트 페르소나
+        let persona = contextService.loadAgentPersona(agentName: agentName)
+        if !persona.isEmpty {
+            parts.append(persona)
+        }
+
+        // 폴백: agent 파일 없으면 기존 system.md 사용
+        if basePrompt.isEmpty && persona.isEmpty {
+            let systemPrompt = contextService.loadSystem()
+            if !systemPrompt.isEmpty {
+                parts.append(systemPrompt)
+            }
+        }
+
+        // 3) 현재 날짜/시각 정보
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
         formatter.dateFormat = "yyyy년 M월 d일 EEEE a h시 m분"
@@ -247,7 +271,7 @@ final class AppSettings: ObservableObject {
         if hasProfiles {
             // 다중 사용자 모드
 
-            // 사용자 식별 정보
+            // 4) 사용자 식별 정보
             if let userName = currentUserName {
                 parts.append("현재 대화 상대: \(userName)")
             } else {
@@ -255,13 +279,19 @@ final class AppSettings: ObservableObject {
                 parts.append("현재 대화 상대가 확인되지 않았습니다. 등록된 가족 구성원: \(profileNames). 대화 초반에 자연스럽게 누구인지 파악하고 set_current_user를 호출해주세요.")
             }
 
-            // 2) family.md — 가족 공유 기억
+            // 5) family.md — 가족 공유 기억
             let familyMemory = contextService.loadFamilyMemory()
             if !familyMemory.isEmpty {
                 parts.append("가족 공유 기억:\n\n\(familyMemory)")
             }
 
-            // 3) memory/{userId}.md — 개인 기억
+            // 6) agents/{name}/memory.md — 에이전트 기억
+            let agentMemory = contextService.loadAgentMemory(agentName: agentName)
+            if !agentMemory.isEmpty {
+                parts.append("에이전트 기억:\n\n\(agentMemory)")
+            }
+
+            // 7) memory/{userId}.md — 개인 기억
             if let userId = currentUserId {
                 let userMemory = contextService.loadUserMemory(userId: userId)
                 if !userMemory.isEmpty {
@@ -272,14 +302,22 @@ final class AppSettings: ObservableObject {
             // 기억 관리 안내
             parts.append("대화 중 중요한 정보를 알게 되면 save_memory 도구로 즉시 저장하세요. 기존 기억을 수정하거나 삭제할 때는 update_memory를 사용하세요. 가족 전체에 해당하는 정보는 scope='family', 개인 정보는 scope='personal'로 저장하세요.")
         } else {
-            // 레거시 단일 사용자 모드 (프로필 없음)
+            // 레거시/단일 사용자 모드
+
+            // 에이전트 기억
+            let agentMemory = contextService.loadAgentMemory(agentName: agentName)
+            if !agentMemory.isEmpty {
+                parts.append("에이전트 기억:\n\n\(agentMemory)")
+            }
+
+            // 레거시 기억 (폴백)
             let userMemory = contextService.loadMemory()
             if !userMemory.isEmpty {
                 parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(userMemory)")
             }
         }
 
-        // 4) 최근 대화 요약
+        // 8) 최근 대화 요약
         if let summaries = recentSummaries, !summaries.isEmpty {
             parts.append("최근 대화 요약:\n\n\(summaries)")
         }
@@ -300,5 +338,12 @@ final class AppSettings: ObservableObject {
             defaults.set(true, forKey: migrationKey)
         }
         contextService.migrateIfNeeded()
+
+        // 에이전트 구조 마이그레이션
+        if !defaults.bool(forKey: Keys.migratedToAgentStructure) {
+            let currentWakeWord = defaults.string(forKey: Keys.wakeWord) ?? Constants.Defaults.wakeWord
+            contextService.migrateToAgentStructure(currentWakeWord: currentWakeWord)
+            defaults.set(true, forKey: Keys.migratedToAgentStructure)
+        }
     }
 }

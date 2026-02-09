@@ -790,3 +790,135 @@ struct UserMemoryEditorView: View {
         }
     }
 }
+
+// MARK: - Base Prompt Editor View
+
+struct BasePromptEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var content: String = ""
+    let contextService: ContextServiceProtocol
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("기본 규칙 편집")
+                    .font(.headline)
+                Spacer()
+                Button("저장") {
+                    contextService.saveBaseSystemPrompt(content)
+                    dismiss()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("취소") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+            Divider()
+            TextEditor(text: $content)
+                .font(.system(.body, design: .monospaced))
+                .padding(8)
+            Divider()
+            HStack {
+                Text("모든 에이전트에 공통으로 적용되는 앱 레벨 기본 규칙입니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(contextService.baseSystemPromptPath)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+            }
+            .padding(8)
+        }
+        .frame(width: 600, height: 500)
+        .onAppear {
+            content = contextService.loadBaseSystemPrompt()
+        }
+    }
+}
+
+// MARK: - Agent Persona Editor View
+
+struct AgentPersonaEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var content: String = ""
+    let contextService: ContextServiceProtocol
+    let agentName: String
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("\(agentName) 페르소나 편집")
+                    .font(.headline)
+                Spacer()
+                Button("저장") {
+                    contextService.saveAgentPersona(agentName: agentName, content: content)
+                    dismiss()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("취소") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+            Divider()
+            TextEditor(text: $content)
+                .font(.system(.body, design: .monospaced))
+                .padding(8)
+            Divider()
+            HStack {
+                Text("에이전트의 성격, 말투, 행동 방식을 정의합니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(8)
+        }
+        .frame(width: 600, height: 500)
+        .onAppear {
+            content = contextService.loadAgentPersona(agentName: agentName)
+        }
+    }
+}
+
+// MARK: - Agent Memory Editor View
+
+struct AgentMemoryEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var content: String = ""
+    let contextService: ContextServiceProtocol
+    let agentName: String
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("\(agentName) 에이전트 기억 편집")
+                    .font(.headline)
+                Spacer()
+                Button("저장") {
+                    contextService.saveAgentMemory(agentName: agentName, content: content)
+                    dismiss()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("취소") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+            Divider()
+            TextEditor(text: $content)
+                .font(.system(.body, design: .monospaced))
+                .padding(8)
+            Divider()
+            HStack {
+                Text("에이전트가 기억하고 있는 정보입니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(8)
+        }
+        .frame(width: 600, height: 500)
+        .onAppear {
+            content = contextService.loadAgentMemory(agentName: agentName)
+        }
+    }
+}
