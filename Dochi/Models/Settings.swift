@@ -254,13 +254,7 @@ final class AppSettings: ObservableObject {
             parts.append(persona)
         }
 
-        // 폴백: agent 파일 없으면 기존 system.md 사용
-        if basePrompt.isEmpty && persona.isEmpty {
-            let systemPrompt = contextService.loadSystem()
-            if !systemPrompt.isEmpty {
-                parts.append(systemPrompt)
-            }
-        }
+
 
         // 3) 현재 날짜/시각 정보
         let formatter = DateFormatter()
@@ -309,12 +303,6 @@ final class AppSettings: ObservableObject {
             if !agentMemory.isEmpty {
                 parts.append("에이전트 기억:\n\n\(agentMemory)")
             }
-
-            // 레거시 기억 (폴백)
-            let userMemory = contextService.loadMemory()
-            if !userMemory.isEmpty {
-                parts.append("다음은 사용자에 대해 기억하고 있는 정보입니다:\n\n\(userMemory)")
-            }
         }
 
         // 8) 최근 대화 요약
@@ -339,11 +327,6 @@ final class AppSettings: ObservableObject {
         }
         contextService.migrateIfNeeded()
 
-        // 에이전트 구조 마이그레이션
-        if !defaults.bool(forKey: Keys.migratedToAgentStructure) {
-            let currentWakeWord = defaults.string(forKey: Keys.wakeWord) ?? Constants.Defaults.wakeWord
-            contextService.migrateToAgentStructure(currentWakeWord: currentWakeWord)
-            defaults.set(true, forKey: Keys.migratedToAgentStructure)
-        }
+
     }
 }

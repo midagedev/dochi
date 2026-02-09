@@ -392,36 +392,7 @@ final class ContextService: ContextServiceProtocol {
 
     /// system.md → agents/도치 구조로 마이그레이션
     func migrateToAgentStructure(currentWakeWord: String) {
-        let defaultAgentName = Constants.Agent.defaultName
-
-        // agents/ 디렉토리가 이미 있으면 마이그레이션 불필요
-        guard !fileManager.fileExists(atPath: agentDir(name: defaultAgentName).path) else {
-            return
-        }
-
-        // 1) 기본 system_prompt.md 생성 (없는 경우)
-        if loadBaseSystemPrompt().isEmpty {
-            saveBaseSystemPrompt(Constants.Agent.defaultBaseSystemPrompt)
-            Log.storage.info("system_prompt.md 기본값 생성")
-        }
-
-        // 2) 기존 system.md → agents/도치/persona.md 복사
-        let existingSystem = loadSystem()
-        let persona = existingSystem.isEmpty ? Constants.Agent.defaultPersona : existingSystem
-
-        createAgent(
-            name: defaultAgentName,
-            wakeWord: currentWakeWord.isEmpty ? Constants.Agent.defaultWakeWord : currentWakeWord,
-            description: Constants.Agent.defaultDescription
-        )
-        saveAgentPersona(agentName: defaultAgentName, content: persona)
-
-        // 3) 기존 memory.md → agents/도치/memory.md 복사
-        let existingMemory = loadMemory()
-        if !existingMemory.isEmpty {
-            saveAgentMemory(agentName: defaultAgentName, content: existingMemory)
-        }
-
-        Log.storage.info("에이전트 구조 마이그레이션 완료: \(defaultAgentName, privacy: .public)")
+        // 자동 마이그레이션 제거됨 (수동 마이그레이션 권장)
+        Log.storage.info("자동 마이그레이션이 비활성화되었습니다. 수동으로 파일을 이동해주세요.")
     }
 }
