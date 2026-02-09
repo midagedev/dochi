@@ -41,7 +41,15 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
             return
         }
 
-        self.client = SupabaseClient(supabaseURL: supabaseURL, supabaseKey: key)
+        // Use keychain with proper access control to avoid password prompts
+        let sessionStorage = KeychainSessionStorage()
+        self.client = SupabaseClient(
+            supabaseURL: supabaseURL,
+            supabaseKey: key,
+            options: .init(
+                auth: .init(storage: sessionStorage)
+            )
+        )
         Log.cloud.info("Supabase 클라이언트 초기화 완료")
     }
 
