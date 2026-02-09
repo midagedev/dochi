@@ -144,4 +144,4 @@ macOS 앱에서 시작하여 텔레그램, 슬랙, CLI로 인터페이스를 넓
 
 ## 영감
 
-로컬 디바이스 제어 아이디어는 [Claude Code](https://claude.ai/code)와 [OpenClaw](https://github.com/openclaw/openclaw)에서 영향을 받았습니다. 거기에 macOS 네이티브, 워크스페이스 기반 맥락 관리, 홈 어시스턴트 등 개인적으로 필요한 것들을 중심으로 만들고 있습니다.
+로컬 디바이스 제어 아이디어는 [Claude Code](https://claude.com/product/claude-code)와 [OpenClaw](https://github.com/openclaw/openclaw)에서 영향을 받았습니다. 거기에 macOS 네이티브, 워크스페이스 기반 맥락 관리, 홈 어시스턴트 등 개인적으로 필요한 것들을 중심으로 만들고 있습니다.
