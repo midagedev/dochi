@@ -3,7 +3,7 @@ import Foundation
 struct Workspace: Identifiable, Codable {
     let id: UUID
     var name: String
-    var inviteCode: String?
+    var inviteCode: String? = nil
     let ownerId: UUID
     let createdAt: Date
 

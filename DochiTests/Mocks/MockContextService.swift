@@ -176,4 +176,92 @@ final class MockContextService: ContextServiceProtocol {
     func migrateToAgentStructure(currentWakeWord: String) {
         migrateToAgentStructureCalled = true
     }
+    
+    // MARK: - Workspace
+    
+    var migrateToWorkspaceStructureCalled = false
+    var workspaces: [Workspace] = []
+    
+    func migrateToWorkspaceStructure() {
+        migrateToWorkspaceStructureCalled = true
+        // Create mock workspace for simple testing
+        workspaces = [
+            Workspace(id: UUID(), name: "Mock Workspace", inviteCode: nil, ownerId: UUID(), createdAt: Date())
+        ]
+    }
+    
+    func listWorkspaces() -> [Workspace] {
+        workspaces
+    }
+    
+    func loadWorkspaceConfig(id: UUID) -> Workspace? {
+        workspaces.first(where: { $0.id == id })
+    }
+    
+    func saveWorkspaceConfig(_ workspace: Workspace) {
+        if let index = workspaces.firstIndex(where: { $0.id == workspace.id }) {
+            workspaces[index] = workspace
+        } else {
+            workspaces.append(workspace)
+        }
+    }
+    
+    // Memory
+    
+    var workspaceMemories: [UUID: String] = [:]
+    
+    func loadWorkspaceMemory(workspaceId: UUID) -> String {
+        workspaceMemories[workspaceId] ?? ""
+    }
+    
+    func saveWorkspaceMemory(workspaceId: UUID, content: String) {
+        workspaceMemories[workspaceId] = content
+    }
+    
+    func appendWorkspaceMemory(workspaceId: UUID, content: String) {
+        var current = workspaceMemories[workspaceId] ?? ""
+        if !current.isEmpty {
+            current += "\n"
+        }
+        current += content
+        workspaceMemories[workspaceId] = current
+    }
+    
+    // Agent
+    
+    func loadAgentPersona(workspaceId: UUID, agentName: String) -> String {
+        agentPersonas[agentName] ?? ""
+    }
+    
+    func saveAgentPersona(workspaceId: UUID, agentName: String, content: String) {
+        agentPersonas[agentName] = content
+    }
+    
+    func loadAgentMemory(workspaceId: UUID, agentName: String) -> String {
+        agentMemories[agentName] ?? ""
+    }
+    
+    func saveAgentMemory(workspaceId: UUID, agentName: String, content: String) {
+        agentMemories[agentName] = content
+    }
+    
+    func appendAgentMemory(workspaceId: UUID, agentName: String, content: String) {
+        appendAgentMemory(agentName: agentName, content: content)
+    }
+    
+    func loadAgentConfig(workspaceId: UUID, agentName: String) -> AgentConfig? {
+        agentConfigs[agentName]
+    }
+    
+    func saveAgentConfig(workspaceId: UUID, config: AgentConfig) {
+        agentConfigs[config.name] = config
+    }
+    
+    func listAgents(workspaceId: UUID) -> [String] {
+        listAgents()
+    }
+    
+    func createAgent(workspaceId: UUID, name: String, wakeWord: String, description: String) {
+        createAgent(name: name, wakeWord: wakeWord, description: description)
+    }
 }

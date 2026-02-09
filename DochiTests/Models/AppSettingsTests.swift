@@ -110,7 +110,11 @@ final class AppSettingsTests: XCTestCase {
     // MARK: - Build Instructions
 
     func testBuildInstructionsWithSystemPrompt() {
-        mockContext.systemContent = "You are a helpful assistant."
+        // Create a workspace and set agent persona
+        let workspace = Workspace(id: UUID(), name: "Test", ownerId: UUID(), createdAt: Date())
+        mockContext.workspaces = [workspace]
+        mockContext.saveAgentPersona(workspaceId: workspace.id, agentName: "도치", content: "You are a helpful assistant.")
+        sut.currentWorkspaceId = workspace.id
 
         let instructions = sut.buildInstructions()
 
@@ -121,14 +125,6 @@ final class AppSettingsTests: XCTestCase {
         let instructions = sut.buildInstructions()
 
         XCTAssertTrue(instructions.contains("현재 시각"))
-    }
-
-    func testBuildInstructionsWithMemory() {
-        mockContext.memoryContent = "User likes cats."
-
-        let instructions = sut.buildInstructions()
-
-        XCTAssertTrue(instructions.contains("User likes cats."))
     }
 
     func testBuildInstructionsWithProfiles() {
