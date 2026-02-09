@@ -5,6 +5,7 @@ struct ContentView: View {
 
     @State private var showSettings = false
     @State private var showChangelog = false
+    @State private var showOnboarding = false
     @State private var inputText = ""
     @State private var glowPulse = false
     @State private var glowFlash = false
@@ -35,6 +36,9 @@ struct ContentView: View {
         .sheet(isPresented: $showChangelog) {
             ChangelogView(changelogService: changelogService, showFullChangelog: false)
         }
+        .sheet(isPresented: $showOnboarding) {
+            OnboardingView()
+        }
         .onAppear {
             viewModel.connectOnLaunch()
             checkForNewVersion()
@@ -48,8 +52,11 @@ struct ContentView: View {
                 showChangelog = true
             }
         } else if changelogService.isFirstLaunch {
-            // 첫 실행 시에는 버전만 기록
             changelogService.markCurrentVersionAsSeen()
+            // 첫 실행 시 온보딩 표시
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                showOnboarding = true
+            }
         }
     }
 
@@ -408,8 +415,11 @@ struct SidebarView: View {
     @EnvironmentObject var viewModel: DochiViewModel
     @Binding var showSettings: Bool
     @State private var showSystemEditor = false
+    @State private var showBasePromptEditor = false
+    @State private var showAgentPersonaEditor = false
     @State private var showMemoryEditor = false
     @State private var showFamilyMemoryEditor = false
+    @State private var showAgentMemoryEditor = false
     @State private var editingUserMemoryProfile: UserProfile?
 
     private var contextService: ContextServiceProtocol {
@@ -418,18 +428,20 @@ struct SidebarView: View {
 
     var body: some View {
         List {
-            Section("시스템 프롬프트") {
+            Section("에이전트") {
+                // 에이전트 페르소나
                 Button {
-                    showSystemEditor = true
+                    showAgentPersonaEditor = true
                 } label: {
                     HStack {
                         Image(systemName: "person.fill")
                             .foregroundStyle(.blue)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("system.md")
+                            let agentName = viewModel.settings.activeAgentName
+                            Text(agentName)
                                 .font(.body)
-                            let system = contextService.loadSystem()
-                            Text(system.isEmpty ? "설정되지 않음" : system)
+                            let persona = contextService.loadAgentPersona(agentName: agentName)
+                            Text(persona.isEmpty ? "페르소나 미설정" : persona)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -437,6 +449,69 @@ struct SidebarView: View {
                     }
                 }
                 .buttonStyle(.plain)
+
+                // 에이전트 기억
+                Button {
+                    showAgentMemoryEditor = true
+                } label: {
+                    HStack {
+                        Image(systemName: "brain")
+                            .foregroundStyle(.mint)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("에이전트 기억")
+                                .font(.body)
+                            let agentMemory = contextService.loadAgentMemory(agentName: viewModel.settings.activeAgentName)
+                            Text(agentMemory.isEmpty ? "비어 있음" : "\(agentMemory.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            Section("시스템 프롬프트") {
+                // 앱 레벨 기본 규칙
+                Button {
+                    showBasePromptEditor = true
+                } label: {
+                    HStack {
+                        Image(systemName: "doc.text")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("기본 규칙")
+                                .font(.body)
+                            let basePrompt = contextService.loadBaseSystemPrompt()
+                            Text(basePrompt.isEmpty ? "설정되지 않음" : basePrompt)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+
+                // 레거시 system.md (존재하는 경우만 표시)
+                let legacySystem = contextService.loadSystem()
+                if !legacySystem.isEmpty {
+                    Button {
+                        showSystemEditor = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.text.fill")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("system.md (레거시)")
+                                    .font(.body)
+                                Text(legacySystem)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
             let profiles = contextService.loadProfiles()
@@ -578,6 +653,15 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .sheet(isPresented: $showSystemEditor) {
             SystemEditorView(contextService: contextService)
+        }
+        .sheet(isPresented: $showBasePromptEditor) {
+            BasePromptEditorView(contextService: contextService)
+        }
+        .sheet(isPresented: $showAgentPersonaEditor) {
+            AgentPersonaEditorView(contextService: contextService, agentName: viewModel.settings.activeAgentName)
+        }
+        .sheet(isPresented: $showAgentMemoryEditor) {
+            AgentMemoryEditorView(contextService: contextService, agentName: viewModel.settings.activeAgentName)
         }
         .sheet(isPresented: $showMemoryEditor) {
             MemoryEditorView(contextService: contextService)

@@ -91,7 +91,89 @@ final class MockContextService: ContextServiceProtocol {
         profiles = newProfiles
     }
 
+    // MARK: - Base System Prompt
+
+    var baseSystemPromptContent: String = ""
+
+    func loadBaseSystemPrompt() -> String {
+        baseSystemPromptContent
+    }
+
+    func saveBaseSystemPrompt(_ content: String) {
+        baseSystemPromptContent = content
+    }
+
+    var baseSystemPromptPath: String {
+        "/mock/system_prompt.md"
+    }
+
+    // MARK: - Agent Persona
+
+    var agentPersonas: [String: String] = [:]
+
+    func loadAgentPersona(agentName: String) -> String {
+        agentPersonas[agentName] ?? ""
+    }
+
+    func saveAgentPersona(agentName: String, content: String) {
+        agentPersonas[agentName] = content
+    }
+
+    // MARK: - Agent Memory
+
+    var agentMemories: [String: String] = [:]
+
+    func loadAgentMemory(agentName: String) -> String {
+        agentMemories[agentName] ?? ""
+    }
+
+    func saveAgentMemory(agentName: String, content: String) {
+        agentMemories[agentName] = content
+    }
+
+    func appendAgentMemory(agentName: String, content: String) {
+        var current = agentMemories[agentName] ?? ""
+        if !current.isEmpty && !current.hasSuffix("\n") {
+            current += "\n"
+        }
+        current += content
+        agentMemories[agentName] = current
+    }
+
+    // MARK: - Agent Config
+
+    var agentConfigs: [String: AgentConfig] = [:]
+
+    func loadAgentConfig(agentName: String) -> AgentConfig? {
+        agentConfigs[agentName]
+    }
+
+    func saveAgentConfig(_ config: AgentConfig) {
+        agentConfigs[config.name] = config
+    }
+
+    // MARK: - Agent Management
+
+    func listAgents() -> [String] {
+        Array(agentConfigs.keys).sorted()
+    }
+
+    func createAgent(name: String, wakeWord: String, description: String) {
+        agentConfigs[name] = AgentConfig(name: name, wakeWord: wakeWord, description: description)
+        if agentPersonas[name] == nil {
+            agentPersonas[name] = Constants.Agent.defaultPersona
+        }
+    }
+
+    // MARK: - Migration
+
+    var migrateToAgentStructureCalled = false
+
     func migrateIfNeeded() {
         migrateIfNeededCalled = true
+    }
+
+    func migrateToAgentStructure(currentWakeWord: String) {
+        migrateToAgentStructureCalled = true
     }
 }

@@ -54,6 +54,30 @@ final class ContextService: ContextServiceProtocol {
         baseDir.appendingPathComponent("memory", isDirectory: true)
     }
 
+    private var agentsDir: URL {
+        baseDir.appendingPathComponent("agents", isDirectory: true)
+    }
+
+    private var baseSystemPromptURL: URL {
+        baseDir.appendingPathComponent("system_prompt.md")
+    }
+
+    private func agentDir(name: String) -> URL {
+        agentsDir.appendingPathComponent(name, isDirectory: true)
+    }
+
+    private func agentPersonaURL(name: String) -> URL {
+        agentDir(name: name).appendingPathComponent("persona.md")
+    }
+
+    private func agentMemoryURL(name: String) -> URL {
+        agentDir(name: name).appendingPathComponent("memory.md")
+    }
+
+    private func agentConfigURL(name: String) -> URL {
+        agentDir(name: name).appendingPathComponent("config.json")
+    }
+
     private func userMemoryFileURL(userId: UUID) -> URL {
         memoryDir.appendingPathComponent("\(userId.uuidString).md")
     }
@@ -212,6 +236,143 @@ final class ContextService: ContextServiceProtocol {
         }
     }
 
+    // MARK: - Base System Prompt (앱 레벨 기본 규칙)
+
+    func loadBaseSystemPrompt() -> String {
+        do {
+            return try String(contentsOf: baseSystemPromptURL, encoding: .utf8)
+        } catch {
+            Log.storage.debug("system_prompt.md 로드 실패 (파일 없을 수 있음): \(error, privacy: .public)")
+            return ""
+        }
+    }
+
+    func saveBaseSystemPrompt(_ content: String) {
+        do {
+            try content.write(to: baseSystemPromptURL, atomically: true, encoding: .utf8)
+        } catch {
+            Log.storage.error("system_prompt.md 저장 실패: \(error, privacy: .public)")
+        }
+    }
+
+    var baseSystemPromptPath: String {
+        baseSystemPromptURL.path
+    }
+
+    // MARK: - Agent Persona
+
+    func loadAgentPersona(agentName: String) -> String {
+        do {
+            return try String(contentsOf: agentPersonaURL(name: agentName), encoding: .utf8)
+        } catch {
+            Log.storage.debug("에이전트 페르소나 로드 실패 \(agentName, privacy: .public): \(error, privacy: .public)")
+            return ""
+        }
+    }
+
+    func saveAgentPersona(agentName: String, content: String) {
+        ensureAgentDir(name: agentName)
+        do {
+            try content.write(to: agentPersonaURL(name: agentName), atomically: true, encoding: .utf8)
+        } catch {
+            Log.storage.error("에이전트 페르소나 저장 실패 \(agentName, privacy: .public): \(error, privacy: .public)")
+        }
+    }
+
+    // MARK: - Agent Memory
+
+    func loadAgentMemory(agentName: String) -> String {
+        do {
+            return try String(contentsOf: agentMemoryURL(name: agentName), encoding: .utf8)
+        } catch {
+            Log.storage.debug("에이전트 메모리 로드 실패 \(agentName, privacy: .public): \(error, privacy: .public)")
+            return ""
+        }
+    }
+
+    func saveAgentMemory(agentName: String, content: String) {
+        ensureAgentDir(name: agentName)
+        do {
+            try content.write(to: agentMemoryURL(name: agentName), atomically: true, encoding: .utf8)
+        } catch {
+            Log.storage.error("에이전트 메모리 저장 실패 \(agentName, privacy: .public): \(error, privacy: .public)")
+        }
+    }
+
+    func appendAgentMemory(agentName: String, content: String) {
+        var current = loadAgentMemory(agentName: agentName)
+        if !current.isEmpty && !current.hasSuffix("\n") {
+            current += "\n"
+        }
+        current += content
+        saveAgentMemory(agentName: agentName, content: current)
+    }
+
+    // MARK: - Agent Config
+
+    func loadAgentConfig(agentName: String) -> AgentConfig? {
+        let url = agentConfigURL(name: agentName)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        do {
+            return try JSONDecoder().decode(AgentConfig.self, from: data)
+        } catch {
+            Log.storage.error("에이전트 설정 로드 실패 \(agentName, privacy: .public): \(error, privacy: .public)")
+            return nil
+        }
+    }
+
+    func saveAgentConfig(_ config: AgentConfig) {
+        ensureAgentDir(name: config.name)
+        do {
+            let data = try JSONEncoder().encode(config)
+            try data.write(to: agentConfigURL(name: config.name))
+        } catch {
+            Log.storage.error("에이전트 설정 저장 실패 \(config.name, privacy: .public): \(error, privacy: .public)")
+        }
+    }
+
+    // MARK: - Agent Management
+
+    func listAgents() -> [String] {
+        guard fileManager.fileExists(atPath: agentsDir.path) else { return [] }
+        do {
+            let contents = try fileManager.contentsOfDirectory(atPath: agentsDir.path)
+            return contents.filter { name in
+                var isDir: ObjCBool = false
+                let path = agentsDir.appendingPathComponent(name).path
+                return fileManager.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+            }.sorted()
+        } catch {
+            Log.storage.error("에이전트 목록 조회 실패: \(error, privacy: .public)")
+            return []
+        }
+    }
+
+    func createAgent(name: String, wakeWord: String, description: String) {
+        ensureAgentDir(name: name)
+
+        let config = AgentConfig(name: name, wakeWord: wakeWord, description: description)
+        saveAgentConfig(config)
+
+        // 기본 페르소나 생성 (없는 경우)
+        if loadAgentPersona(agentName: name).isEmpty {
+            saveAgentPersona(agentName: name, content: Constants.Agent.defaultPersona)
+        }
+
+        Log.storage.info("에이전트 생성: \(name, privacy: .public)")
+    }
+
+    private func ensureAgentDir(name: String) {
+        let dir = agentDir(name: name)
+        if !fileManager.fileExists(atPath: dir.path) {
+            do {
+                try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+            } catch {
+                Log.storage.error("에이전트 디렉토리 생성 실패 \(name, privacy: .public): \(error, privacy: .public)")
+            }
+        }
+    }
+
     // MARK: - Legacy (마이그레이션용)
 
     /// 기존 context.md → memory.md 마이그레이션
@@ -227,5 +388,11 @@ final class ContextService: ContextServiceProtocol {
                 Log.storage.error("context.md → memory.md 마이그레이션 실패: \(error, privacy: .public)")
             }
         }
+    }
+
+    /// system.md → agents/도치 구조로 마이그레이션
+    func migrateToAgentStructure(currentWakeWord: String) {
+        // 자동 마이그레이션 제거됨 (수동 마이그레이션 권장)
+        Log.storage.info("자동 마이그레이션이 비활성화되었습니다. 수동으로 파일을 이동해주세요.")
     }
 }

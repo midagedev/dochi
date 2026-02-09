@@ -110,10 +110,79 @@ final class CloudContextService: ContextServiceProtocol {
         scheduleProfilesPush(profiles)
     }
 
+    // MARK: - Base System Prompt
+
+    func loadBaseSystemPrompt() -> String {
+        local.loadBaseSystemPrompt()
+    }
+
+    func saveBaseSystemPrompt(_ content: String) {
+        local.saveBaseSystemPrompt(content)
+        scheduleCloudPush(fileType: "base_system_prompt", content: content)
+    }
+
+    var baseSystemPromptPath: String {
+        local.baseSystemPromptPath
+    }
+
+    // MARK: - Agent Persona
+
+    func loadAgentPersona(agentName: String) -> String {
+        local.loadAgentPersona(agentName: agentName)
+    }
+
+    func saveAgentPersona(agentName: String, content: String) {
+        local.saveAgentPersona(agentName: agentName, content: content)
+        scheduleCloudPush(fileType: "agent_persona:\(agentName)", content: content)
+    }
+
+    // MARK: - Agent Memory
+
+    func loadAgentMemory(agentName: String) -> String {
+        local.loadAgentMemory(agentName: agentName)
+    }
+
+    func saveAgentMemory(agentName: String, content: String) {
+        local.saveAgentMemory(agentName: agentName, content: content)
+        scheduleCloudPush(fileType: "agent_memory:\(agentName)", content: content)
+    }
+
+    func appendAgentMemory(agentName: String, content: String) {
+        local.appendAgentMemory(agentName: agentName, content: content)
+        scheduleCloudPush(fileType: "agent_memory:\(agentName)", content: local.loadAgentMemory(agentName: agentName))
+    }
+
+    // MARK: - Agent Config
+
+    func loadAgentConfig(agentName: String) -> AgentConfig? {
+        local.loadAgentConfig(agentName: agentName)
+    }
+
+    func saveAgentConfig(_ config: AgentConfig) {
+        local.saveAgentConfig(config)
+        if let data = try? JSONEncoder().encode(config), let content = String(data: data, encoding: .utf8) {
+            scheduleCloudPush(fileType: "agent_config:\(config.name)", content: content)
+        }
+    }
+
+    // MARK: - Agent Management
+
+    func listAgents() -> [String] {
+        local.listAgents()
+    }
+
+    func createAgent(name: String, wakeWord: String, description: String) {
+        local.createAgent(name: name, wakeWord: wakeWord, description: description)
+    }
+
     // MARK: - Migration
 
     func migrateIfNeeded() {
         local.migrateIfNeeded()
+    }
+
+    func migrateToAgentStructure(currentWakeWord: String) {
+        local.migrateToAgentStructure(currentWakeWord: currentWakeWord)
     }
 
     // MARK: - Sync Operations
@@ -410,7 +479,9 @@ final class CloudContextService: ContextServiceProtocol {
     @discardableResult
     private func applyCloudFile(_ file: ContextFileRow) -> Bool {
         let localContent: String
-        switch file.file_type {
+        let fileType = file.file_type
+
+        switch fileType {
         case "system":
             localContent = local.loadSystem()
         case "memory":
@@ -423,14 +494,32 @@ final class CloudContextService: ContextServiceProtocol {
             } else {
                 return false
             }
+        case "base_system_prompt":
+            localContent = local.loadBaseSystemPrompt()
         default:
-            return false
+            if fileType.hasPrefix("agent_persona:") {
+                let name = String(fileType.dropFirst("agent_persona:".count))
+                localContent = local.loadAgentPersona(agentName: name)
+            } else if fileType.hasPrefix("agent_memory:") {
+                let name = String(fileType.dropFirst("agent_memory:".count))
+                localContent = local.loadAgentMemory(agentName: name)
+            } else if fileType.hasPrefix("agent_config:") {
+                let name = String(fileType.dropFirst("agent_config:".count))
+                if let config = local.loadAgentConfig(agentName: name),
+                   let data = try? JSONEncoder().encode(config) {
+                    localContent = String(data: data, encoding: .utf8) ?? ""
+                } else {
+                    localContent = ""
+                }
+            } else {
+                return false
+            }
         }
 
         // Cloud-always-wins: cloud content overwrites local if different
         guard file.content != localContent else { return false }
 
-        switch file.file_type {
+        switch fileType {
         case "system":
             local.saveSystem(file.content)
         case "memory":
@@ -441,10 +530,24 @@ final class CloudContextService: ContextServiceProtocol {
             if let uid = file.user_id {
                 local.saveUserMemory(userId: uid, content: file.content)
             }
+        case "base_system_prompt":
+            local.saveBaseSystemPrompt(file.content)
         default:
-            break
+            if fileType.hasPrefix("agent_persona:") {
+                let name = String(fileType.dropFirst("agent_persona:".count))
+                local.saveAgentPersona(agentName: name, content: file.content)
+            } else if fileType.hasPrefix("agent_memory:") {
+                let name = String(fileType.dropFirst("agent_memory:".count))
+                local.saveAgentMemory(agentName: name, content: file.content)
+            } else if fileType.hasPrefix("agent_config:") {
+                let name = String(fileType.dropFirst("agent_config:".count))
+                if let data = file.content.data(using: .utf8),
+                   let config = try? JSONDecoder().decode(AgentConfig.self, from: data) {
+                    local.saveAgentConfig(config)
+                }
+            }
         }
-        Log.cloud.info("클라우드 → 로컬 동기화: \(file.file_type, privacy: .public)")
+        Log.cloud.info("클라우드 → 로컬 동기화: \(fileType, privacy: .public)")
         return true
     }
 

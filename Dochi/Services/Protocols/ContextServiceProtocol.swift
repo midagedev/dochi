@@ -34,6 +34,29 @@ protocol ContextServiceProtocol {
     func loadProfiles() -> [UserProfile]
     func saveProfiles(_ profiles: [UserProfile])
 
+    // MARK: - Base System Prompt (앱 레벨 기본 규칙)
+    func loadBaseSystemPrompt() -> String
+    func saveBaseSystemPrompt(_ content: String)
+    var baseSystemPromptPath: String { get }
+
+    // MARK: - Agent Persona (에이전트별 페르소나)
+    func loadAgentPersona(agentName: String) -> String
+    func saveAgentPersona(agentName: String, content: String)
+
+    // MARK: - Agent Memory (에이전트별 기억)
+    func loadAgentMemory(agentName: String) -> String
+    func saveAgentMemory(agentName: String, content: String)
+    func appendAgentMemory(agentName: String, content: String)
+
+    // MARK: - Agent Config (에이전트 설정)
+    func loadAgentConfig(agentName: String) -> AgentConfig?
+    func saveAgentConfig(_ config: AgentConfig)
+
+    // MARK: - Agent Management
+    func listAgents() -> [String]
+    func createAgent(name: String, wakeWord: String, description: String)
+
     // MARK: - Migration
     func migrateIfNeeded()
+    func migrateToAgentStructure(currentWakeWord: String)
 }
