@@ -348,6 +348,34 @@ struct SettingsView: View {
                     DeviceSettingsView(deviceService: device)
                 }
 
+                // MARK: - Messenger
+                Section("메신저") {
+                    Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
+                    SecureField("Telegram Bot Token", text: Binding(
+                        get: { viewModel.settings.telegramBotToken },
+                        set: { viewModel.settings.telegramBotToken = $0 }
+                    ))
+                    HStack {
+                        Button("연결 테스트") {
+                            Task {
+                                if viewModel.settings.telegramBotToken.isEmpty { return }
+                                let svc = TelegramService(conversationService: ConversationService())
+                                do {
+                                    let name = try await svc.getMe(token: viewModel.settings.telegramBotToken)
+                                    Log.telegram.info("봇 확인: @\(name)")
+                                } catch {
+                                    Log.telegram.error("봇 확인 실패: \(error.localizedDescription, privacy: .public)")
+                                }
+                            }
+                        }
+                        .disabled(viewModel.settings.telegramBotToken.isEmpty)
+                        Spacer()
+                        Text(viewModel.settings.telegramEnabled ? "수신 대기 중" : "비활성")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 // MARK: - About
                 Section("정보") {
                     HStack {

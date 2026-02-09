@@ -56,6 +56,7 @@ final class DochiViewModel: ObservableObject {
     )
 
     private let conversationService: ConversationServiceProtocol
+    private var telegramService: TelegramService?
 
     /// Concrete accessors for views that need @ObservedObject
     var supabaseServiceForView: SupabaseService? {
@@ -103,6 +104,15 @@ final class DochiViewModel: ObservableObject {
         setupProfileCallback()
         setupTerminationHandler()
         conversationManager.loadAll()
+
+        // Initialize Telegram service
+        self.telegramService = TelegramService(
+            conversationService: conversationService,
+            onConversationsChanged: { [weak self] in
+                self?.conversationManager.loadAll()
+            }
+        )
+        setupTelegramBindings()
     }
 
     private func setupTerminationHandler() {
@@ -216,6 +226,29 @@ final class DochiViewModel: ObservableObject {
         }
         deviceService.stopHeartbeat()
         Log.app.info("클라우드 서비스 정리 완료")
+    }
+
+    private func setupTelegramBindings() {
+        // Start/stop on settings changes
+        settings.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateTelegramService()
+            }
+            .store(in: &cancellables)
+        // Initial
+        updateTelegramService()
+    }
+
+    private func updateTelegramService() {
+        guard let telegramService else { return }
+        let enabled = settings.telegramEnabled
+        let token = settings.telegramBotToken
+        if enabled && !token.isEmpty {
+            telegramService.start(token: token)
+        } else {
+            telegramService.stop()
+        }
     }
 
     private func connect() {
