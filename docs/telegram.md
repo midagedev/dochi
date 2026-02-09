@@ -1,31 +1,23 @@
 # Telegram Bot (MVP)
 
-This document tracks the MVP for the multi-interface Telegram bot.
+This document tracks the MVP for the in-app Telegram bot integration.
 
 ## Goals (MVP)
 
-- DM conversation entrypoint to Dochi (echo prototype initially)
-- Same workspace context (wire-up in subsequent PRs)
-- No tools or peer routing yet (future phases)
+- Receive Telegram DMs while the macOS app is running
+- Configure Bot Token in Settings; enable/disable toggle; getMe test
+- Persist conversations locally; simple ACK reply to confirm connectivity
 
 ## Scope
 
-- Swift CLI target `TelegramBot` compiled via SwiftPM
-- Environment-based configuration:
-  - `TELEGRAM_BOT_TOKEN`: Telegram Bot API token
-- Commands:
-  - `--check`: print basic configuration sanity
-- Implementation plan:
-  1. `getMe` call to verify bot identity
-  2. Long polling `getUpdates` with in-memory offset
-  3. Echo DM back to sender as functional MVP
+- In-app `TelegramService` with long polling (`getUpdates`) and `sendMessage`
+- Settings UI for token storage and enable toggle
+- Conversation logging via `ConversationService` (userId = `tg:<chat_id>`)
 
-## Run
+## Test
 
-```
-export TELEGRAM_BOT_TOKEN=xxxxxxxx:yyyyyyyy
-swift run TelegramBot --check
-```
+- Settings → 메신저: 토큰 입력 → 연결 테스트( getMe )
+- 토글을 켜면 수신 대기 시작; 개인 DM으로 메시지를 보내면 앱이 ACK로 응답하고 기록됨
 
 ## Next
 
@@ -33,4 +25,3 @@ swift run TelegramBot --check
 - Route user text to Dochi pipeline (streaming edits via message update)
 - Persist conversation history to Supabase
 - Add peer messaging and tool execution
-
