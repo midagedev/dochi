@@ -39,24 +39,46 @@ protocol ContextServiceProtocol {
     func saveBaseSystemPrompt(_ content: String)
     var baseSystemPromptPath: String { get }
 
-    // MARK: - Agent Persona (에이전트별 페르소나)
+    // MARK: - Workspace
+    func listWorkspaces() -> [Workspace]
+    func loadWorkspaceConfig(id: UUID) -> Workspace?
+    func saveWorkspaceConfig(_ workspace: Workspace)
+    
+    // MARK: - Workspace Memory (워크스페이스 공유 기억)
+    func loadWorkspaceMemory(workspaceId: UUID) -> String
+    func saveWorkspaceMemory(workspaceId: UUID, content: String)
+    func appendWorkspaceMemory(workspaceId: UUID, content: String)
+
+    // MARK: - Agent Persona (에이전트별 페르소나 - 워크스페이스 종속)
+    func loadAgentPersona(workspaceId: UUID, agentName: String) -> String
+    func saveAgentPersona(workspaceId: UUID, agentName: String, content: String)
+
+    // MARK: - Agent Memory (에이전트별 기억 - 워크스페이스 종속)
+    func loadAgentMemory(workspaceId: UUID, agentName: String) -> String
+    func saveAgentMemory(workspaceId: UUID, agentName: String, content: String)
+    func appendAgentMemory(workspaceId: UUID, agentName: String, content: String)
+
+    // MARK: - Agent Config (에이전트 설정 - 워크스페이스 종속)
+    func loadAgentConfig(workspaceId: UUID, agentName: String) -> AgentConfig?
+    func saveAgentConfig(workspaceId: UUID, config: AgentConfig)
+
+    // MARK: - Agent Management
+    func listAgents(workspaceId: UUID) -> [String]
+    func createAgent(workspaceId: UUID, name: String, wakeWord: String, description: String)
+    
+    // MARK: - Migration
+    func migrateToWorkspaceStructure()
+    
+    // Deprecated methods (temporarily kept for build compatibility during refactoring)
     func loadAgentPersona(agentName: String) -> String
     func saveAgentPersona(agentName: String, content: String)
-
-    // MARK: - Agent Memory (에이전트별 기억)
     func loadAgentMemory(agentName: String) -> String
     func saveAgentMemory(agentName: String, content: String)
     func appendAgentMemory(agentName: String, content: String)
-
-    // MARK: - Agent Config (에이전트 설정)
     func loadAgentConfig(agentName: String) -> AgentConfig?
     func saveAgentConfig(_ config: AgentConfig)
-
-    // MARK: - Agent Management
     func listAgents() -> [String]
     func createAgent(name: String, wakeWord: String, description: String)
-
-    // MARK: - Migration
     func migrateIfNeeded()
     func migrateToAgentStructure(currentWakeWord: String)
 }

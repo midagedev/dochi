@@ -63,6 +63,17 @@ final class AppSettings: ObservableObject {
         didSet { saveMCPServers() }
     }
 
+    // Workspace
+    @Published var currentWorkspaceId: UUID? {
+        didSet {
+            if let id = currentWorkspaceId {
+                defaults.set(id.uuidString, forKey: Keys.currentWorkspaceId)
+            } else {
+                defaults.removeObject(forKey: Keys.currentWorkspaceId)
+            }
+        }
+    }
+
     // User profiles
     @Published var defaultUserId: UUID? {
         didSet {
@@ -89,7 +100,8 @@ final class AppSettings: ObservableObject {
         static let mcpServers = "settings.mcpServers"
         static let defaultUserId = "settings.defaultUserId"
         static let activeAgentName = "settings.activeAgentName"
-        static let migratedToAgentStructure = "settings.migratedToAgentStructure"
+        static let currentWorkspaceId = "settings.currentWorkspaceId"
+        static let migratedToWorkspaceStructure = "settings.migratedToWorkspaceStructure"
     }
 
     // MARK: - Dependencies
@@ -145,12 +157,15 @@ final class AppSettings: ObservableObject {
             self.mcpServers = []
         }
 
-        // Default user
-        if let idString = defaults.string(forKey: Keys.defaultUserId),
+
+
+        // Workspace
+        if let idString = defaults.string(forKey: Keys.currentWorkspaceId),
            let id = UUID(uuidString: idString) {
-            self.defaultUserId = id
+            self.currentWorkspaceId = id
         } else {
-            self.defaultUserId = nil
+            // 없으면 첫 번째 워크스페이스 사용하거나 nil
+            self.currentWorkspaceId = contextService.listWorkspaces().first?.id
         }
     }
 
@@ -249,9 +264,18 @@ final class AppSettings: ObservableObject {
         }
 
         // 2) agents/{name}/persona.md — 에이전트 페르소나
-        let persona = contextService.loadAgentPersona(agentName: agentName)
-        if !persona.isEmpty {
-            parts.append(persona)
+        // 2) agents/{name}/persona.md — 에이전트 페르소나
+        if let workspaceId = currentWorkspaceId {
+            let persona = contextService.loadAgentPersona(workspaceId: workspaceId, agentName: agentName)
+            if !persona.isEmpty {
+                parts.append(persona)
+            }
+        } else {
+            // 워크스페이스 없는 경우 (fallback)
+            let persona = contextService.loadAgentPersona(agentName: agentName)
+            if !persona.isEmpty {
+                parts.append(persona)
+            }
         }
 
 
@@ -273,18 +297,32 @@ final class AppSettings: ObservableObject {
                 parts.append("현재 대화 상대가 확인되지 않았습니다. 등록된 가족 구성원: \(profileNames). 대화 초반에 자연스럽게 누구인지 파악하고 set_current_user를 호출해주세요.")
             }
 
-            // 5) family.md — 가족 공유 기억
-            let familyMemory = contextService.loadFamilyMemory()
-            if !familyMemory.isEmpty {
-                parts.append("가족 공유 기억:\n\n\(familyMemory)")
+            // 5) family.md -> workspace memory (공유 기억)
+            if let workspaceId = currentWorkspaceId {
+                let workspaceMemory = contextService.loadWorkspaceMemory(workspaceId: workspaceId)
+                if !workspaceMemory.isEmpty {
+                    parts.append("워크스페이스 공유 기억:\n\n\(workspaceMemory)")
+                }
+            } else {
+                let familyMemory = contextService.loadFamilyMemory()
+                if !familyMemory.isEmpty {
+                    parts.append("가족 공유 기억:\n\n\(familyMemory)")
+                }
             }
 
             // 6) agents/{name}/memory.md — 에이전트 기억
-            let agentMemory = contextService.loadAgentMemory(agentName: agentName)
-            if !agentMemory.isEmpty {
-                parts.append("에이전트 기억:\n\n\(agentMemory)")
+            if let workspaceId = currentWorkspaceId {
+                let agentMemory = contextService.loadAgentMemory(workspaceId: workspaceId, agentName: agentName)
+                if !agentMemory.isEmpty {
+                    parts.append("에이전트 기억:\n\n\(agentMemory)")
+                }
+            } else {
+                let agentMemory = contextService.loadAgentMemory(agentName: agentName)
+                if !agentMemory.isEmpty {
+                    parts.append("에이전트 기억:\n\n\(agentMemory)")
+                }
             }
-
+            
             // 7) memory/{userId}.md — 개인 기억
             if let userId = currentUserId {
                 let userMemory = contextService.loadUserMemory(userId: userId)
@@ -294,14 +332,21 @@ final class AppSettings: ObservableObject {
             }
 
             // 기억 관리 안내
-            parts.append("대화 중 중요한 정보를 알게 되면 save_memory 도구로 즉시 저장하세요. 기존 기억을 수정하거나 삭제할 때는 update_memory를 사용하세요. 가족 전체에 해당하는 정보는 scope='family', 개인 정보는 scope='personal'로 저장하세요.")
+            parts.append("대화 중 중요한 정보를 알게 되면 save_memory 도구로 즉시 저장하세요. 기존 기억을 수정하거나 삭제할 때는 update_memory를 사용하세요. 가족 전체에 해당하는 정보는 scope='workspace', 개인 정보는 scope='personal'로 저장하세요.")
         } else {
-            // 레거시/단일 사용자 모드
-
+            // 레거시/단일 사용자 모드 (임시)
+            
             // 에이전트 기억
-            let agentMemory = contextService.loadAgentMemory(agentName: agentName)
-            if !agentMemory.isEmpty {
-                parts.append("에이전트 기억:\n\n\(agentMemory)")
+            if let workspaceId = currentWorkspaceId {
+                let agentMemory = contextService.loadAgentMemory(workspaceId: workspaceId, agentName: agentName)
+                if !agentMemory.isEmpty {
+                    parts.append("에이전트 기억:\n\n\(agentMemory)")
+                }
+            } else {
+                let agentMemory = contextService.loadAgentMemory(agentName: agentName)
+                if !agentMemory.isEmpty {
+                    parts.append("에이전트 기억:\n\n\(agentMemory)")
+                }
             }
         }
 
@@ -327,6 +372,10 @@ final class AppSettings: ObservableObject {
         }
         contextService.migrateIfNeeded()
 
-
+        // 워크스페이스 마이그레이션
+        if !defaults.bool(forKey: Keys.migratedToWorkspaceStructure) {
+            contextService.migrateToWorkspaceStructure()
+            defaults.set(true, forKey: Keys.migratedToWorkspaceStructure)
+        }
     }
 }

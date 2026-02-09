@@ -185,6 +185,87 @@ final class CloudContextService: ContextServiceProtocol {
         local.migrateToAgentStructure(currentWakeWord: currentWakeWord)
     }
 
+    func migrateToWorkspaceStructure() {
+        local.migrateToWorkspaceStructure()
+    }
+
+    // MARK: - Workspace
+    
+    func listWorkspaces() -> [Workspace] {
+        local.listWorkspaces()
+    }
+    
+    func loadWorkspaceConfig(id: UUID) -> Workspace? {
+        local.loadWorkspaceConfig(id: id)
+    }
+    
+    func saveWorkspaceConfig(_ workspace: Workspace) {
+        local.saveWorkspaceConfig(workspace)
+        // TODO: Workspace config cloud sync
+    }
+    
+    // MARK: - Workspace Memory (워크스페이스 공유 기억)
+    
+    func loadWorkspaceMemory(workspaceId: UUID) -> String {
+        local.loadWorkspaceMemory(workspaceId: workspaceId)
+    }
+    
+    func saveWorkspaceMemory(workspaceId: UUID, content: String) {
+        local.saveWorkspaceMemory(workspaceId: workspaceId, content: content)
+        scheduleCloudPush(fileType: "workspace_memory", content: content)
+    }
+    
+    func appendWorkspaceMemory(workspaceId: UUID, content: String) {
+        local.appendWorkspaceMemory(workspaceId: workspaceId, content: content)
+        scheduleCloudPush(fileType: "workspace_memory", content: local.loadWorkspaceMemory(workspaceId: workspaceId))
+    }
+
+    // MARK: - Agent Persona (에이전트별 페르소나 - 워크스페이스 종속)
+    
+    func loadAgentPersona(workspaceId: UUID, agentName: String) -> String {
+        local.loadAgentPersona(workspaceId: workspaceId, agentName: agentName)
+    }
+    
+    func saveAgentPersona(workspaceId: UUID, agentName: String, content: String) {
+        local.saveAgentPersona(workspaceId: workspaceId, agentName: agentName, content: content)
+        // TODO: Cloud sync with workspace ID support in file_type or dedicated column
+        // Currently utilizing file_type string hack, need to update schema for true multi-workspace-agent support
+    }
+
+    // MARK: - Agent Memory (에이전트별 기억 - 워크스페이스 종속)
+    
+    func loadAgentMemory(workspaceId: UUID, agentName: String) -> String {
+        local.loadAgentMemory(workspaceId: workspaceId, agentName: agentName)
+    }
+    
+    func saveAgentMemory(workspaceId: UUID, agentName: String, content: String) {
+        local.saveAgentMemory(workspaceId: workspaceId, agentName: agentName, content: content)
+    }
+    
+    func appendAgentMemory(workspaceId: UUID, agentName: String, content: String) {
+        local.appendAgentMemory(workspaceId: workspaceId, agentName: agentName, content: content)
+    }
+
+    // MARK: - Agent Config (에이전트 설정 - 워크스페이스 종속)
+    
+    func loadAgentConfig(workspaceId: UUID, agentName: String) -> AgentConfig? {
+        local.loadAgentConfig(workspaceId: workspaceId, agentName: agentName)
+    }
+    
+    func saveAgentConfig(workspaceId: UUID, config: AgentConfig) {
+        local.saveAgentConfig(workspaceId: workspaceId, config: config)
+    }
+
+    // MARK: - Agent Management
+    
+    func listAgents(workspaceId: UUID) -> [String] {
+        local.listAgents(workspaceId: workspaceId)
+    }
+    
+    func createAgent(workspaceId: UUID, name: String, wakeWord: String, description: String) {
+        local.createAgent(workspaceId: workspaceId, name: name, wakeWord: wakeWord, description: description)
+    }
+
     // MARK: - Sync Operations
 
     /// 앱 시작 시 클라우드에서 최신 버전 가져오기 (Pull-on-launch)
