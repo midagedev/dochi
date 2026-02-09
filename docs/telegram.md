@@ -2,11 +2,12 @@
 
 This document tracks the MVP for the in-app Telegram bot integration.
 
-## Goals (MVP)
+## Goals (Enhanced MVP)
 
 - Receive Telegram DMs while the macOS app is running
 - Configure Bot Token in Settings; enable/disable toggle; getMe test
-- Persist conversations locally; simple ACK reply to confirm connectivity
+- Persist conversations locally
+- Stream LLM replies back to Telegram by editing a placeholder message
 
 ## Scope
 
@@ -17,7 +18,7 @@ This document tracks the MVP for the in-app Telegram bot integration.
 ## Test
 
 - Settings → 메신저: 토큰 입력 → 연결 테스트( getMe )
-- 토글을 켜면 수신 대기 시작; 개인 DM으로 메시지를 보내면 앱이 ACK로 응답하고 기록됨
+- 토글을 켜면 수신 대기 시작; 개인 DM으로 메시지를 보내면 앱이 스트리밍으로 응답하고 기록됨
 
 ## Next
 

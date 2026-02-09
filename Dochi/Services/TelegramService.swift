@@ -10,6 +10,16 @@ final class TelegramService {
     private let conversationService: ConversationServiceProtocol
     private let onConversationsChanged: (() -> Void)?
 
+    struct DMEvent {
+        let chatId: Int64
+        let username: String?
+        let text: String
+    }
+
+    // If set, DM events are delegated to the app layer (ViewModel)
+    // Otherwise, the service falls back to simple ACK + local logging.
+    var onDM: ((DMEvent) -> Void)?
+
     private var token: String = ""
     private var isRunning = false
     private var pollingTask: Task<Void, Never>?
@@ -77,7 +87,11 @@ final class TelegramService {
                     for update in updates.result {
                         lastUpdateId = max(lastUpdateId, update.update_id)
                         if let msg = update.message, msg.chat.type == "private", let text = msg.text {
-                            await handleIncomingDM(chatId: msg.chat.id, username: msg.from?.username, text: text)
+                            if let onDM {
+                                onDM(DMEvent(chatId: msg.chat.id, username: msg.from?.username, text: text))
+                            } else {
+                                await handleIncomingDM(chatId: msg.chat.id, username: msg.from?.username, text: text)
+                            }
                         }
                     }
                 }
@@ -113,20 +127,46 @@ final class TelegramService {
         }
     }
 
-    private func sendMessage(chatId: Int64, text: String) async {
+    @discardableResult
+    func sendMessage(chatId: Int64, text: String) async -> Int? {
         var request = URLRequest(url: baseURL("sendMessage"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String: Any] = ["chat_id": chatId, "text": text]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         do {
-            let (_, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 Log.telegram.warning("sendMessage HTTP 실패")
-                return
+                return nil
+            }
+            if let res = try? JSONDecoder().decode(SendMessageResponse.self, from: data), res.ok {
+                return res.result.message_id
             }
         } catch {
             Log.telegram.warning("sendMessage 실패: \(error.localizedDescription, privacy: .public)")
+        }
+        return nil
+    }
+
+    func editMessageText(chatId: Int64, messageId: Int, text: String) async {
+        var request = URLRequest(url: baseURL("editMessageText"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "chat_id": chatId,
+            "message_id": messageId,
+            "text": text
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                Log.telegram.warning("editMessageText HTTP 실패")
+                return
+            }
+        } catch {
+            Log.telegram.warning("editMessageText 실패: \(error.localizedDescription, privacy: .public)")
         }
     }
 }
@@ -167,3 +207,7 @@ private struct TGChat: Decodable {
     let type: String
 }
 
+private struct SendMessageResponse: Decodable {
+    let ok: Bool
+    let result: TGMessage
+}

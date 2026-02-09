@@ -238,6 +238,13 @@ final class DochiViewModel: ObservableObject {
             .store(in: &cancellables)
         // Initial
         updateTelegramService()
+
+        // DM handling via LLM with streaming edits
+        telegramService?.onDM = { [weak self] event in
+            Task { @MainActor in
+                await self?.processTelegramDM(chatId: event.chatId, username: event.username, text: event.text)
+            }
+        }
     }
 
     private func updateTelegramService() {
@@ -249,6 +256,117 @@ final class DochiViewModel: ObservableObject {
         } else {
             telegramService.stop()
         }
+    }
+
+    // MARK: - Telegram processing
+
+    private func loadOrCreateTelegramConversation(chatId: Int64, username: String?) -> Conversation {
+        let userKey = "tg:\(chatId)"
+        if let existing = conversationService.list().first(where: { $0.userId == userKey }) {
+            return existing
+        }
+        return Conversation(title: "Telegram DM \(username ?? String(chatId))", messages: [], userId: userKey)
+    }
+
+    private func buildSystemPromptForTelegram() -> String {
+        let recent = conversationManager.buildRecentSummaries(for: nil, limit: 5)
+        return settings.buildInstructions(currentUserName: nil, currentUserId: nil, recentSummaries: recent)
+    }
+
+    private func llmApiKey() -> String { settings.apiKey(for: settings.llmProvider) }
+
+    private func llmModels() -> (provider: LLMProvider, model: String) { (settings.llmProvider, settings.llmModel) }
+
+    private func appendAndSave(_ conv: inout Conversation, message: Message) {
+        conv.messages.append(message)
+        conv.updatedAt = Date()
+        conversationService.save(conv)
+        conversationManager.loadAll()
+    }
+
+    private func sanitizeForTelegram(_ text: String) -> String {
+        // Telegram supports Markdown/HTML but we'll send plain text for safety in MVP
+        text.replacingOccurrences(of: "\u{0000}", with: "")
+    }
+
+    private func streamReply(to chatId: Int64, initialText: String) async -> Int? {
+        guard let telegramService else { return nil }
+        return await telegramService.sendMessage(chatId: chatId, text: initialText)
+    }
+
+    private func updateReply(chatId: Int64, messageId: Int, text: String) async {
+        await telegramService?.editMessageText(chatId: chatId, messageId: messageId, text: text)
+    }
+
+    func processTelegramDM(chatId: Int64, username: String?, text: String) async {
+        var conversation = loadOrCreateTelegramConversation(chatId: chatId, username: username)
+        appendAndSave(&conversation, message: Message(role: .user, content: text))
+
+        let (provider, model) = llmModels()
+        let apiKey = llmApiKey()
+        guard !apiKey.isEmpty else {
+            // If no API key, notify user
+            let warning = "LLM API 키가 설정되지 않았습니다. 설정에서 키를 추가해주세요."
+            _ = await streamReply(to: chatId, initialText: warning)
+            return
+        }
+
+        let systemPrompt = buildSystemPromptForTelegram()
+
+        // Local LLMService instance to avoid interfering with UI state
+        let llm = LLMService()
+        var streamedText = ""
+        var lastEditTime = Date.distantPast
+        let editInterval: TimeInterval = 0.4
+        var replyMessageId: Int?
+
+        llm.onSentenceReady = { [weak self] sentence in
+            guard let self else { return }
+            streamedText += sentence
+            let now = Date()
+            if replyMessageId == nil {
+                Task { @MainActor in
+                    replyMessageId = await self.streamReply(to: chatId, initialText: self.sanitizeForTelegram(streamedText))
+                }
+                lastEditTime = now
+            } else if now.timeIntervalSince(lastEditTime) >= editInterval, let msgId = replyMessageId {
+                lastEditTime = now
+                Task { [weak self] in
+                    await self?.updateReply(chatId: chatId, messageId: msgId, text: self?.sanitizeForTelegram(streamedText) ?? streamedText)
+                }
+            }
+        }
+
+        llm.onResponseComplete = { [weak self] finalText in
+            guard let self else { return }
+            let clean = self.sanitizeForTelegram(finalText.isEmpty ? streamedText : finalText)
+            if let msgId = replyMessageId, !clean.isEmpty {
+                Task { [weak self] in
+                    await self?.updateReply(chatId: chatId, messageId: msgId, text: clean)
+                }
+            } else if replyMessageId == nil {
+                Task { [weak self] in
+                    _ = await self?.streamReply(to: chatId, initialText: clean)
+                }
+            }
+
+            var conv = conversation
+            conv.messages.append(Message(role: .assistant, content: clean))
+            conv.updatedAt = Date()
+            self.conversationService.save(conv)
+            self.conversationManager.loadAll()
+        }
+
+        // Send request
+        llm.sendMessage(
+            messages: conversation.messages,
+            systemPrompt: systemPrompt,
+            provider: provider,
+            model: model,
+            apiKey: apiKey,
+            tools: nil,
+            toolResults: nil
+        )
     }
 
     private func connect() {
