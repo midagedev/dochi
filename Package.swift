@@ -8,6 +8,10 @@ let package = Package(
         .executableTarget(
             name: "Dochi",
             path: "Dochi"
+        ),
+        .executableTarget(
+            name: "TelegramBot",
+            path: "Bots/TelegramBot"
         )
     ]
 )

@@ -56,6 +56,7 @@ final class DochiViewModel: ObservableObject {
     )
 
     private let conversationService: ConversationServiceProtocol
+    private var telegramService: TelegramService?
 
     /// Concrete accessors for views that need @ObservedObject
     var supabaseServiceForView: SupabaseService? {
@@ -103,6 +104,15 @@ final class DochiViewModel: ObservableObject {
         setupProfileCallback()
         setupTerminationHandler()
         conversationManager.loadAll()
+
+        // Initialize Telegram service
+        self.telegramService = TelegramService(
+            conversationService: conversationService,
+            onConversationsChanged: { [weak self] in
+                self?.conversationManager.loadAll()
+            }
+        )
+        setupTelegramBindings()
     }
 
     private func setupTerminationHandler() {
@@ -216,6 +226,217 @@ final class DochiViewModel: ObservableObject {
         }
         deviceService.stopHeartbeat()
         Log.app.info("클라우드 서비스 정리 완료")
+    }
+
+    private func setupTelegramBindings() {
+        // Start/stop on settings changes
+        settings.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateTelegramService()
+            }
+            .store(in: &cancellables)
+        // Initial
+        updateTelegramService()
+
+        // DM handling via LLM with streaming edits
+        telegramService?.onDM = { [weak self] event in
+            Task { @MainActor in
+                await self?.processTelegramDM(chatId: event.chatId, username: event.username, text: event.text)
+            }
+        }
+    }
+
+    private func updateTelegramService() {
+        guard let telegramService else { return }
+        let enabled = settings.telegramEnabled
+        let token = settings.telegramBotToken
+        if enabled && !token.isEmpty {
+            telegramService.start(token: token)
+        } else {
+            telegramService.stop()
+        }
+    }
+
+    // MARK: - Telegram processing
+
+    private func loadOrCreateTelegramConversation(chatId: Int64, username: String?) -> Conversation {
+        let userKey = "tg:\(chatId)"
+        if let existing = conversationService.list().first(where: { $0.userId == userKey }) {
+            return existing
+        }
+        return Conversation(title: "Telegram DM \(username ?? String(chatId))", messages: [], userId: userKey)
+    }
+
+    private func buildSystemPromptForTelegram() -> String {
+        let recent = conversationManager.buildRecentSummaries(for: nil, limit: 5)
+        return settings.buildInstructions(currentUserName: nil, currentUserId: nil, recentSummaries: recent)
+    }
+
+    private func llmApiKey() -> String { settings.apiKey(for: settings.llmProvider) }
+
+    private func llmModels() -> (provider: LLMProvider, model: String) { (settings.llmProvider, settings.llmModel) }
+
+    private func appendAndSave(_ conv: inout Conversation, message: Message) {
+        conv.messages.append(message)
+        conv.updatedAt = Date()
+        conversationService.save(conv)
+        conversationManager.loadAll()
+    }
+
+    private func sanitizeForTelegram(_ text: String) -> String {
+        // Telegram supports Markdown/HTML but we'll send plain text for safety in MVP
+        text.replacingOccurrences(of: "\u{0000}", with: "")
+    }
+
+    private func streamReply(to chatId: Int64, initialText: String) async -> Int? {
+        guard let telegramService else { return nil }
+        return await telegramService.sendMessage(chatId: chatId, text: initialText)
+    }
+
+    private func updateReply(chatId: Int64, messageId: Int, text: String) async {
+        await telegramService?.editMessageText(chatId: chatId, messageId: messageId, text: text)
+    }
+
+    func processTelegramDM(chatId: Int64, username: String?, text: String) async {
+        // Ensure Supabase mapping for this Telegram user (best-effort)
+        if let supa = supabaseService as? SupabaseService, case .signedIn = supabaseService.authState {
+            await supa.ensureTelegramMapping(telegramUserId: chatId, username: username)
+        }
+
+        var conversation = loadOrCreateTelegramConversation(chatId: chatId, username: username)
+        appendAndSave(&conversation, message: Message(role: .user, content: text))
+
+        let (provider, model) = llmModels()
+        let apiKey = llmApiKey()
+        guard !apiKey.isEmpty else {
+            // If no API key, notify user
+            let warning = "LLM API 키가 설정되지 않았습니다. 설정에서 키를 추가해주세요."
+            _ = await streamReply(to: chatId, initialText: warning)
+            return
+        }
+
+        let systemPrompt = buildSystemPromptForTelegram()
+
+        // Local LLMService instance to avoid interfering with UI state
+        let llm = LLMService()
+        // Configure built-in tools and user context
+        builtInToolService.configure(tavilyApiKey: settings.tavilyApiKey, falaiApiKey: settings.falaiApiKey)
+        let hasProfiles = !contextService.loadProfiles().isEmpty
+        builtInToolService.configureUserContext(contextService: hasProfiles ? contextService : nil, currentUserId: nil)
+
+        // Tool specifications (built-in + MCP)
+        let builtInSpecs = builtInToolService.availableTools.map { $0.asDictionary }
+        let mcpSpecs = mcpService.availableTools.map { $0.asDictionary }
+        let toolSpecs = builtInSpecs + mcpSpecs
+        var streamedText = ""
+        var lastEditTime = Date.distantPast
+        let editInterval: TimeInterval = 0.4
+        var replyMessageId: Int?
+
+        llm.onSentenceReady = { [weak self] sentence in
+            guard let self else { return }
+            streamedText += sentence
+            let now = Date()
+            if replyMessageId == nil {
+                Task { @MainActor in
+                    replyMessageId = await self.streamReply(to: chatId, initialText: self.sanitizeForTelegram(streamedText))
+                }
+                lastEditTime = now
+            } else if now.timeIntervalSince(lastEditTime) >= editInterval, let msgId = replyMessageId {
+                lastEditTime = now
+                Task { [weak self] in
+                    await self?.updateReply(chatId: chatId, messageId: msgId, text: self?.sanitizeForTelegram(streamedText) ?? streamedText)
+                }
+            }
+        }
+
+        var loopMessages = conversation.messages
+
+        llm.onToolCallsReceived = { [weak self] toolCalls in
+            guard let self else { return }
+            Task { @MainActor in
+                // Record assistant tool call message (with partial content)
+                loopMessages.append(Message(role: .assistant, content: llm.partialResponse, toolCalls: toolCalls))
+
+                var results: [ToolResult] = []
+                for toolCall in toolCalls {
+                    var argsDict: [String: Any] = [:]
+                    if let data = toolCall.arguments.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        argsDict = obj
+                    }
+                    do {
+                        let isBuiltIn = self.builtInToolService.availableTools.contains { $0.name == toolCall.name }
+                        let toolResult: MCPToolResult
+                        if isBuiltIn {
+                            toolResult = try await self.builtInToolService.callTool(name: toolCall.name, arguments: argsDict)
+                        } else {
+                            toolResult = try await self.mcpService.callTool(name: toolCall.name, arguments: argsDict)
+                        }
+                        if let msgId = replyMessageId {
+                            let snippet = String(toolResult.content.prefix(400))
+                            streamedText += "\n\n🔧 \(toolCall.name): \(snippet)"
+                            await self.updateReply(chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
+                        }
+                        results.append(ToolResult(toolCallId: toolCall.id, content: toolResult.content, isError: toolResult.isError))
+                    } catch {
+                        let err = "Error: \(error.localizedDescription)"
+                        if let msgId = replyMessageId {
+                            streamedText += "\n\n🔧 \(toolCall.name): \(err)"
+                            await self.updateReply(chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
+                        }
+                        results.append(ToolResult(toolCallId: toolCall.id, content: err, isError: true))
+                    }
+                }
+
+                // Append tool result messages and continue LLM
+                for result in results {
+                    loopMessages.append(Message(role: .tool, content: result.content, toolCallId: result.toolCallId))
+                }
+
+                llm.sendMessage(
+                    messages: loopMessages,
+                    systemPrompt: systemPrompt,
+                    provider: provider,
+                    model: model,
+                    apiKey: apiKey,
+                    tools: toolSpecs.isEmpty ? nil : toolSpecs,
+                    toolResults: nil
+                )
+            }
+        }
+
+        llm.onResponseComplete = { [weak self] finalText in
+            guard let self else { return }
+            let clean = self.sanitizeForTelegram(finalText.isEmpty ? streamedText : finalText)
+            if let msgId = replyMessageId, !clean.isEmpty {
+                Task { [weak self] in
+                    await self?.updateReply(chatId: chatId, messageId: msgId, text: clean)
+                }
+            } else if replyMessageId == nil {
+                Task { [weak self] in
+                    _ = await self?.streamReply(to: chatId, initialText: clean)
+                }
+            }
+
+            var conv = conversation
+            conv.messages.append(Message(role: .assistant, content: clean))
+            conv.updatedAt = Date()
+            self.conversationService.save(conv)
+            self.conversationManager.loadAll()
+        }
+
+        // Send request
+        llm.sendMessage(
+            messages: loopMessages,
+            systemPrompt: systemPrompt,
+            provider: provider,
+            model: model,
+            apiKey: apiKey,
+            tools: toolSpecs.isEmpty ? nil : toolSpecs,
+            toolResults: nil
+        )
     }
 
     private func connect() {

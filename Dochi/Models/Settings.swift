@@ -58,6 +58,11 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(activeAgentName, forKey: Keys.activeAgentName) }
     }
 
+    // Telegram bot
+    @Published var telegramEnabled: Bool {
+        didSet { defaults.set(telegramEnabled, forKey: Keys.telegramEnabled) }
+    }
+
     // MCP servers
     @Published var mcpServers: [MCPServerConfig] {
         didSet { saveMCPServers() }
@@ -102,6 +107,7 @@ final class AppSettings: ObservableObject {
         static let activeAgentName = "settings.activeAgentName"
         static let currentWorkspaceId = "settings.currentWorkspaceId"
         static let migratedToWorkspaceStructure = "settings.migratedToWorkspaceStructure"
+        static let telegramEnabled = "settings.telegramEnabled"
     }
 
     // MARK: - Dependencies
@@ -144,6 +150,7 @@ final class AppSettings: ObservableObject {
         self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? Constants.Defaults.contextMaxSize
 
         self.activeAgentName = defaults.string(forKey: Keys.activeAgentName) ?? Constants.Agent.defaultName
+        self.telegramEnabled = defaults.bool(forKey: Keys.telegramEnabled)
 
         // MCP servers
         if let data = defaults.data(forKey: Keys.mcpServers) {
@@ -241,6 +248,16 @@ final class AppSettings: ObservableObject {
         case .openai: apiKey
         case .anthropic: anthropicApiKey
         case .zai: zaiApiKey
+        }
+    }
+
+    // MARK: - Telegram
+
+    var telegramBotToken: String {
+        get { keychainService.load(account: "telegram_bot_token") ?? "" }
+        set {
+            keychainService.save(account: "telegram_bot_token", value: newValue)
+            objectWillChange.send()
         }
     }
 
