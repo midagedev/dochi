@@ -370,12 +370,5 @@ final class AppSettings: ObservableObject {
             }
             defaults.set(true, forKey: migrationKey)
         }
-        contextService.migrateIfNeeded()
-
-        // 워크스페이스 마이그레이션
-        if !defaults.bool(forKey: Keys.migratedToWorkspaceStructure) {
-            contextService.migrateToWorkspaceStructure()
-            defaults.set(true, forKey: Keys.migratedToWorkspaceStructure)
-        }
     }
 }

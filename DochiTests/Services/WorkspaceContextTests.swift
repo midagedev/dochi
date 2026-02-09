@@ -24,43 +24,25 @@ final class WorkspaceContextTests: XCTestCase {
     func testListWorkspacesEmpty() {
         XCTAssertEqual(sut.listWorkspaces().count, 0)
     }
-
-    func testMigrateToWorkspaceStructureCreatesDefaultWorkspace() {
+    
+    func testCreateAndLoadWorkspace() {
         // Given
-        sut.saveSystem("Legacy System")
-        sut.saveMemory("Legacy Memory")
-
+        let workspace = Workspace(id: UUID(), name: "Test Workspace", ownerId: UUID(), createdAt: Date())
+        
         // When
-        sut.migrateToWorkspaceStructure()
-
+        sut.saveWorkspaceConfig(workspace)
+        
         // Then
-        let workspaces = sut.listWorkspaces()
-        XCTAssertEqual(workspaces.count, 1)
-        
-        guard let defaultWorkspace = workspaces.first else {
-            XCTFail("Default workspace not created")
-            return
-        }
-        
-        XCTAssertEqual(defaultWorkspace.name, "기본 워크스페이스")
-        
-        // Memory moved
-        let wsMemory = sut.loadWorkspaceMemory(workspaceId: defaultWorkspace.id)
-        XCTAssertEqual(wsMemory, "Legacy Memory") // or whatever logic you had for moving memory
-        
-        // Agent Persona moved
-        // Assuming default agent name is "도치"
-        let persona = sut.loadAgentPersona(workspaceId: defaultWorkspace.id, agentName: "도치")
-        XCTAssertFalse(persona.isEmpty)
-        XCTAssertTrue(persona.contains("Legacy System"))
+        let loaded = sut.loadWorkspaceConfig(id: workspace.id)
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.name, "Test Workspace")
     }
     
     // MARK: - Workspace Memory
     
     func testWorkspaceMemory() {
         // Given
-        sut.migrateToWorkspaceStructure()
-        let wsId = sut.listWorkspaces().first!.id
+        let wsId = UUID()
         
         // When
         sut.saveWorkspaceMemory(workspaceId: wsId, content: "Shared Memory")
@@ -71,8 +53,7 @@ final class WorkspaceContextTests: XCTestCase {
     
     func testAppendWorkspaceMemory() {
         // Given
-        sut.migrateToWorkspaceStructure()
-        let wsId = sut.listWorkspaces().first!.id
+        let wsId = UUID()
         sut.saveWorkspaceMemory(workspaceId: wsId, content: "Line 1")
         
         // When
@@ -88,8 +69,7 @@ final class WorkspaceContextTests: XCTestCase {
     
     func testAgentInWorkspace() {
         // Given
-        sut.migrateToWorkspaceStructure()
-        let wsId = sut.listWorkspaces().first!.id
+        let wsId = UUID()
         let agentName = "TestAgent"
         
         // When
@@ -114,15 +94,19 @@ final class WorkspaceContextTests: XCTestCase {
     
     func testAgentIsolationBetweenWorkspaces() {
         // Given two workspaces
-        sut.migrateToWorkspaceStructure()
-        let ws1 = sut.listWorkspaces().first!
+        let ws1Id = UUID()
+        let ws2Id = UUID()
+        let agentName = "Agent"
         
-        // Manually create second workspace for test (helper needed or just use logic)
-        // Since createWorkspace is private/internal logic in migrate, let's just simulate by using migration or if there is a createWorkspace exposed?
-        // Checking protocol for createWorkspace... it's not exposed in protocol yet, but maybe we can just verify file structure isolation
+        // When
+        sut.createAgent(workspaceId: ws1Id, name: agentName, wakeWord: "Hey", description: "Desc")
+        sut.saveAgentMemory(workspaceId: ws1Id, agentName: agentName, content: "WS1 Memory")
         
-        // Let's rely on what we have. If we can't create another workspace easily via public API, 
-        // we might need to expose `createWorkspace` or just test within one workspace.
-        // For now, let's assume we can only test one workspace effectively without `createWorkspace` API.
+        sut.createAgent(workspaceId: ws2Id, name: agentName, wakeWord: "Hi", description: "Desc")
+        sut.saveAgentMemory(workspaceId: ws2Id, agentName: agentName, content: "WS2 Memory")
+        
+        // Then
+        XCTAssertEqual(sut.loadAgentMemory(workspaceId: ws1Id, agentName: agentName), "WS1 Memory")
+        XCTAssertEqual(sut.loadAgentMemory(workspaceId: ws2Id, agentName: agentName), "WS2 Memory")
     }
 }

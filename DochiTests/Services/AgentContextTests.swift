@@ -116,55 +116,8 @@ final class AgentContextTests: XCTestCase {
         XCTAssertTrue(agents.contains("에이전트B"))
     }
 
-    // MARK: - Migration
-
-    func testMigrateToAgentStructure() {
-        // 기존 system.md 설정
-        sut.saveSystem("기존 페르소나")
-        sut.saveMemory("기존 기억")
-
-        sut.migrateToAgentStructure(currentWakeWord: "도치야")
-
-        // 에이전트가 생성됨
-        XCTAssertTrue(sut.listAgents().contains("도치"))
-
-        // 페르소나에 기존 system.md 내용이 복사됨
-        let persona = sut.loadAgentPersona(agentName: "도치")
-        XCTAssertEqual(persona, "기존 페르소나")
-
-        // 기존 memory.md 내용이 에이전트 메모리로 복사됨
-        let agentMemory = sut.loadAgentMemory(agentName: "도치")
-        XCTAssertEqual(agentMemory, "기존 기억")
-
-        // system_prompt.md 기본값 생성됨
-        let basePrompt = sut.loadBaseSystemPrompt()
-        XCTAssertFalse(basePrompt.isEmpty)
-
-        // config에 웨이크워드 반영됨
-        let config = sut.loadAgentConfig(agentName: "도치")
-        XCTAssertEqual(config?.wakeWord, "도치야")
-    }
-
-    func testMigrateToAgentStructureSkipsIfAlreadyDone() {
-        // 먼저 마이그레이션
-        sut.saveSystem("기존 페르소나")
-        sut.migrateToAgentStructure(currentWakeWord: "도치야")
-
-        // 페르소나 변경
-        sut.saveAgentPersona(agentName: "도치", content: "변경된 페르소나")
-
-        // 재실행 → 덮어쓰지 않음
-        sut.migrateToAgentStructure(currentWakeWord: "도치야")
-        XCTAssertEqual(sut.loadAgentPersona(agentName: "도치"), "변경된 페르소나")
-    }
-
-    func testMigrateWithEmptySystemUsesDefault() {
-        // system.md 없이 마이그레이션
-        sut.migrateToAgentStructure(currentWakeWord: "도치야")
-
-        let persona = sut.loadAgentPersona(agentName: "도치")
-        XCTAssertEqual(persona, Constants.Agent.defaultPersona)
-    }
+    // MARK: - Legacy Methods (Deprecated)
+    // Migration tests removed - migration should be done manually via local files
 
     // MARK: - buildInstructions Integration
 
@@ -186,17 +139,4 @@ final class AgentContextTests: XCTestCase {
         XCTAssertTrue(instructions.contains("도치 기억"))
     }
 
-    func testBuildInstructionsFallsBackToLegacySystem() {
-        // agent 파일 없이 기존 system.md만 있음
-        sut.saveSystem("레거시 시스템 프롬프트")
-
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        defaults.set("도치", forKey: "settings.activeAgentName")
-        defaults.set(true, forKey: "settings.migratedToAgentStructure")
-
-        let settings = AppSettings(contextService: sut, defaults: defaults)
-        let instructions = settings.buildInstructions()
-
-        XCTAssertTrue(instructions.contains("레거시 시스템 프롬프트"))
-    }
 }
