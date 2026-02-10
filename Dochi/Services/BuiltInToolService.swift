@@ -22,12 +22,14 @@ final class BuiltInToolService: ObservableObject {
     let toolsRegistryTool = ToolsRegistryTool()
 
     // Optional shared services for tools that need them
-    private(set) weak var conversationService: ConversationServiceProtocol?
-    private(set) weak var supabaseService: (any SupabaseServiceProtocol)?
-    private(set) weak var telegramService: TelegramService?
+    private(set) var conversationService: (any ConversationServiceProtocol)?
+    private(set) var supabaseService: (any SupabaseServiceProtocol)?
+    private(set) var telegramService: TelegramService?
 
     // Registry-based enablement: if set, only these names (plus baseline) are exposed
     private var enabledToolNames: Set<String>? = nil
+    private var enabledSince: Date? = nil
+    private var registryTTLMinutes: Int = 10
 
     // Baseline tools always included to serve common conversational needs
     private let baselineAllowlist: Set<String> = [
@@ -101,6 +103,12 @@ final class BuiltInToolService: ObservableObject {
     }
 
     var availableTools: [MCPToolInfo] {
+        // Expire enabled list if TTL passed
+        if let since = enabledSince, Date().timeIntervalSince(since) > TimeInterval(registryTTLMinutes * 60) {
+            enabledToolNames = nil
+            enabledSince = nil
+        }
+
         var tools: [MCPToolInfo] = []
 
         // 웹검색: API 키 있을 때만
@@ -212,11 +220,21 @@ final class BuiltInToolService: ObservableObject {
 
 extension BuiltInToolService {
     func setEnabledToolNames(_ names: [String]?) {
-        if let names { self.enabledToolNames = Set(names) } else { self.enabledToolNames = nil }
+        if let names {
+            self.enabledToolNames = Set(names)
+            self.enabledSince = Date()
+        } else {
+            self.enabledToolNames = nil
+            self.enabledSince = nil
+        }
     }
 
     func getEnabledToolNames() -> [String]? {
         enabledToolNames.map { Array($0) }
+    }
+
+    func setRegistryTTL(minutes: Int) {
+        registryTTLMinutes = max(1, minutes)
     }
 
     func toolCatalogByCategory() -> [String: [String]] {

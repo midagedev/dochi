@@ -13,7 +13,7 @@ final class LLMService: ObservableObject {
     var onToolCallsReceived: (([ToolCall]) -> Void)?
 
     private var streamTask: Task<Void, Never>?
-    private var sentenceBuffer: String = ""
+    private let sentenceChunker = SentenceChunker()
     private var pendingToolCalls: [ToolCall] = []
 
     // MARK: - Public
@@ -33,7 +33,7 @@ final class LLMService: ObservableObject {
         }
         cancel()
         partialResponse = ""
-        sentenceBuffer = ""
+        sentenceChunker.reset()
         pendingToolCalls = []
         error = nil
         isStreaming = true
@@ -66,7 +66,7 @@ final class LLMService: ObservableObject {
         streamTask?.cancel()
         streamTask = nil
         isStreaming = false
-        sentenceBuffer = ""
+        sentenceChunker.reset()
         pendingToolCalls = []
     }
 
@@ -88,218 +88,19 @@ final class LLMService: ObservableObject {
         switch provider {
         case .openai, .zai:
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            let body = buildOpenAIBody(
-                messages: messages,
-                systemPrompt: systemPrompt,
-                model: model,
-                provider: provider,
-                tools: tools,
-                toolResults: toolResults
-            )
+            let body = OpenAIProviderHelper.buildBody(messages: messages, systemPrompt: systemPrompt, model: model, tools: tools, toolResults: toolResults, providerIsZAI: provider == .zai)
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         case .anthropic:
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
             request.setValue(Constants.LLM.anthropicAPIVersion, forHTTPHeaderField: "anthropic-version")
-            let body = buildAnthropicBody(
-                messages: messages,
-                systemPrompt: systemPrompt,
-                model: model,
-                tools: tools,
-                toolResults: toolResults
-            )
+            let body = AnthropicProviderHelper.buildBody(messages: messages, systemPrompt: systemPrompt, model: model, tools: tools, toolResults: toolResults, maxTokens: Constants.LLM.anthropicMaxTokens)
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
         return request
     }
 
-    private static func buildOpenAIBody(
-        messages: [Message],
-        systemPrompt: String,
-        model: String,
-        provider: LLMProvider,
-        tools: [[String: Any]]?,
-        toolResults: [ToolResult]?
-    ) -> [String: Any] {
-        var apiMessages: [[String: Any]] = []
-
-        if !systemPrompt.isEmpty {
-            apiMessages.append(["role": "system", "content": systemPrompt])
-        }
-
-        for msg in messages {
-            switch msg.role {
-            case .tool:
-                // Tool result 메시지
-                apiMessages.append([
-                    "role": "tool",
-                    "tool_call_id": msg.toolCallId ?? "",
-                    "content": msg.content
-                ])
-            case .user, .assistant, .system:
-                let role: String
-                switch msg.role {
-                case .user: role = "user"
-                case .assistant: role = "assistant"
-                case .system: role = "system"
-                default: continue
-                }
-
-                // tool_calls가 있는 assistant 메시지
-                if let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
-                    var msgDict: [String: Any] = ["role": role]
-                    if !msg.content.isEmpty {
-                        msgDict["content"] = msg.content
-                    }
-                    msgDict["tool_calls"] = toolCalls.map { tc in
-                        [
-                            "id": tc.id,
-                            "type": "function",
-                            "function": [
-                                "name": tc.name,
-                                // JSON 직렬화 실패 시 빈 객체로 폴백 — arguments는 이미 유효한 딕셔너리
-                                "arguments": (try? String(data: JSONSerialization.data(withJSONObject: tc.arguments), encoding: .utf8)) ?? "{}"
-                            ]
-                        ] as [String: Any]
-                    }
-                    apiMessages.append(msgDict)
-                } else {
-                    apiMessages.append(["role": role, "content": msg.content])
-                }
-            }
-        }
-
-        // Tool 결과 추가
-        if let results = toolResults {
-            for result in results {
-                apiMessages.append([
-                    "role": "tool",
-                    "tool_call_id": result.toolCallId,
-                    "content": result.content
-                ])
-            }
-        }
-
-        var body: [String: Any] = [
-            "model": model,
-            "messages": apiMessages,
-            "stream": true,
-        ]
-
-        if provider == .zai {
-            body["enable_thinking"] = false
-        }
-
-        if let tools = tools, !tools.isEmpty {
-            body["tools"] = tools
-        }
-
-        return body
-    }
-
-    private static func buildAnthropicBody(
-        messages: [Message],
-        systemPrompt: String,
-        model: String,
-        tools: [[String: Any]]?,
-        toolResults: [ToolResult]?
-    ) -> [String: Any] {
-        var apiMessages: [[String: Any]] = []
-
-        // Anthropic: tool result 메시지들을 연속된 user content 배열로 묶어야 함
-        var pendingToolResults: [[String: Any]] = []
-
-        for msg in messages where msg.role != .system {
-            if msg.role == .tool {
-                // tool result를 모아두기 (다음 비-tool 메시지 전에 flush)
-                pendingToolResults.append([
-                    "type": "tool_result",
-                    "tool_use_id": msg.toolCallId ?? "",
-                    "content": msg.content
-                ])
-                continue
-            }
-
-            // 모인 tool result가 있으면 user 메시지로 flush
-            if !pendingToolResults.isEmpty {
-                apiMessages.append(["role": "user", "content": pendingToolResults])
-                pendingToolResults = []
-            }
-
-            let role = msg.role == .user ? "user" : "assistant"
-
-            // Anthropic은 content가 배열일 수 있음 (tool_use, tool_result)
-            if let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
-                var content: [[String: Any]] = []
-                if !msg.content.isEmpty {
-                    content.append(["type": "text", "text": msg.content])
-                }
-                for tc in toolCalls {
-                    content.append([
-                        "type": "tool_use",
-                        "id": tc.id,
-                        "name": tc.name,
-                        "input": tc.arguments
-                    ])
-                }
-                apiMessages.append(["role": role, "content": content])
-            } else {
-                apiMessages.append(["role": role, "content": msg.content])
-            }
-        }
-
-        // 마지막에 남은 tool result flush
-        if !pendingToolResults.isEmpty {
-            apiMessages.append(["role": "user", "content": pendingToolResults])
-        }
-
-        // Tool 결과 추가 (user 메시지로)
-        if let results = toolResults, !results.isEmpty {
-            var content: [[String: Any]] = []
-            for result in results {
-                content.append([
-                    "type": "tool_result",
-                    "tool_use_id": result.toolCallId,
-                    "content": result.content,
-                    "is_error": result.isError
-                ])
-            }
-            apiMessages.append(["role": "user", "content": content])
-        }
-
-        var body: [String: Any] = [
-            "model": model,
-            "messages": apiMessages,
-            "stream": true,
-            "max_tokens": Constants.LLM.anthropicMaxTokens,
-        ]
-
-        if !systemPrompt.isEmpty {
-            body["system"] = systemPrompt
-        }
-
-        if let tools = tools, !tools.isEmpty {
-            // Anthropic 형식으로 변환
-            let anthropicTools = tools.compactMap { tool -> [String: Any]? in
-                guard let function = tool["function"] as? [String: Any],
-                      let name = function["name"] as? String else { return nil }
-                var anthropicTool: [String: Any] = ["name": name]
-                if let desc = function["description"] as? String {
-                    anthropicTool["description"] = desc
-                }
-                if let params = function["parameters"] as? [String: Any] {
-                    anthropicTool["input_schema"] = params
-                } else {
-                    anthropicTool["input_schema"] = ["type": "object", "properties": [:]]
-                }
-                return anthropicTool
-            }
-            body["tools"] = anthropicTools
-        }
-
-        return body
-    }
 
     // MARK: - SSE Streaming
 
@@ -332,14 +133,14 @@ final class LLMService: ObservableObject {
 
             switch provider {
             case .openai, .zai:
-                if let (text, toolCallDelta) = Self.parseOpenAIDelta(json) {
-                    if let text = text {
+                if let parsed = OpenAIProviderHelper.parseDelta(json) {
+                    if let text = parsed.text {
                         partialResponse += text
-                        feedSentenceBuffer(text)
+                        for sentence in sentenceChunker.process(text) { self.onSentenceReady?(sentence) }
                     }
-                    if let delta = toolCallDelta {
+                    if let tc = parsed.toolCall {
                         // Tool call 조립
-                        if let id = delta.id {
+                        if let id = tc.id {
                             // 새 tool call 시작
                             if let current = currentToolCall {
                                 pendingToolCalls.append(ToolCall(
@@ -348,20 +149,20 @@ final class LLMService: ObservableObject {
                                     argumentsJSON: current.arguments
                                 ))
                             }
-                            currentToolCall = (id, delta.name ?? "", delta.arguments ?? "")
+                            currentToolCall = (id, tc.name ?? "", tc.arguments ?? "")
                         } else if currentToolCall != nil {
                             // 기존 tool call에 arguments 추가
-                            currentToolCall?.arguments += delta.arguments ?? ""
+                            currentToolCall?.arguments += tc.arguments ?? ""
                         }
                     }
                 }
 
             case .anthropic:
-                if let result = Self.parseAnthropicDelta(json) {
+                if let result = AnthropicProviderHelper.parseDelta(json) {
                     switch result {
                     case .text(let text):
                         partialResponse += text
-                        feedSentenceBuffer(text)
+                        for sentence in sentenceChunker.process(text) { self.onSentenceReady?(sentence) }
                     case .toolUseStart(let id, let name):
                         if let current = currentToolCall {
                             pendingToolCalls.append(ToolCall(
@@ -388,7 +189,7 @@ final class LLMService: ObservableObject {
         }
 
         // 남은 버퍼 flush
-        flushSentenceBuffer()
+        if let last = sentenceChunker.flush() { onSentenceReady?(last) }
 
         // Tool calls가 있으면 콜백
         if !pendingToolCalls.isEmpty {
@@ -401,119 +202,8 @@ final class LLMService: ObservableObject {
         }
     }
 
-    // MARK: - Sentence Detection
-
-    private static let punctuationTerminators: Set<Character> = [".", "?", "!", "。"]
-
-    private func feedSentenceBuffer(_ text: String) {
-        sentenceBuffer += text
-
-        while let splitIndex = findSentenceBoundary() {
-            let sentence = String(sentenceBuffer[sentenceBuffer.startIndex...splitIndex])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            sentenceBuffer = String(sentenceBuffer[sentenceBuffer.index(after: splitIndex)...])
-            if !sentence.isEmpty {
-                onSentenceReady?(sentence)
-            }
-        }
-    }
-
-    /// 줄바꿈이면 즉시 분할, 구두점은 뒤에 공백이 있을 때만 분할
-    private func findSentenceBoundary() -> String.Index? {
-        var i = sentenceBuffer.startIndex
-        while i < sentenceBuffer.endIndex {
-            let ch = sentenceBuffer[i]
-            if ch == "\n" {
-                return i
-            }
-            if Self.punctuationTerminators.contains(ch) {
-                let next = sentenceBuffer.index(after: i)
-                if next < sentenceBuffer.endIndex && sentenceBuffer[next].isWhitespace {
-                    return i
-                }
-                // 구두점 뒤에 아직 문자가 안 왔으면 대기
-                if next == sentenceBuffer.endIndex {
-                    return nil
-                }
-            }
-            i = sentenceBuffer.index(after: i)
-        }
-        return nil
-    }
-
-    private func flushSentenceBuffer() {
-        let remaining = sentenceBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        sentenceBuffer = ""
-        if !remaining.isEmpty {
-            onSentenceReady?(remaining)
-        }
-    }
-
-    // MARK: - Delta Parsing
-
-    private struct ToolCallDelta {
-        var id: String?
-        var name: String?
-        var arguments: String?
-    }
-
-    private static func parseOpenAIDelta(_ json: [String: Any]) -> (text: String?, toolCall: ToolCallDelta?)? {
-        guard let choices = json["choices"] as? [[String: Any]],
-              let first = choices.first,
-              let delta = first["delta"] as? [String: Any]
-        else { return nil }
-
-        let text = delta["content"] as? String
-
-        var toolCallDelta: ToolCallDelta?
-        if let toolCalls = delta["tool_calls"] as? [[String: Any]],
-           let tc = toolCalls.first {
-            toolCallDelta = ToolCallDelta()
-            toolCallDelta?.id = tc["id"] as? String
-            if let function = tc["function"] as? [String: Any] {
-                toolCallDelta?.name = function["name"] as? String
-                toolCallDelta?.arguments = function["arguments"] as? String
-            }
-        }
-
-        if text == nil && toolCallDelta == nil { return nil }
-        return (text, toolCallDelta)
-    }
-
-    private enum AnthropicDeltaResult {
-        case text(String)
-        case toolUseStart(id: String, name: String)
-        case toolUseInput(String)
-    }
-
-    private static func parseAnthropicDelta(_ json: [String: Any]) -> AnthropicDeltaResult? {
-        guard let type = json["type"] as? String else { return nil }
-
-        switch type {
-        case "content_block_delta":
-            if let delta = json["delta"] as? [String: Any] {
-                if let text = delta["text"] as? String {
-                    return .text(text)
-                }
-                if let input = delta["partial_json"] as? String {
-                    return .toolUseInput(input)
-                }
-            }
-
-        case "content_block_start":
-            if let contentBlock = json["content_block"] as? [String: Any],
-               contentBlock["type"] as? String == "tool_use",
-               let id = contentBlock["id"] as? String,
-               let name = contentBlock["name"] as? String {
-                return .toolUseStart(id: id, name: name)
-            }
-
-        default:
-            break
-        }
-
-        return nil
-    }
+    // Sentence chunking and provider-specific parsing are delegated to
+    // SentenceChunker and Providers/* helpers respectively.
 }
 
 // MARK: - Error

@@ -5,7 +5,7 @@ import os
 @MainActor
 final class AgentEditorTool: BuiltInTool {
     var contextService: (any ContextServiceProtocol)?
-    weak var settings: AppSettings?
+    var settings: AppSettings?
 
     nonisolated var tools: [MCPToolInfo] {
         [
@@ -194,7 +194,8 @@ final class AgentEditorTool: BuiltInTool {
                 matches.append(["index": idx, "line": line])
             }
             let data = try? JSONSerialization.data(withJSONObject: matches, options: [.prettyPrinted])
-            return MCPToolResult(content: String(data: data ?? Data()) , isError: false)
+            let str = String(data: data ?? Data(), encoding: .utf8) ?? "{}"
+            return MCPToolResult(content: str, isError: false)
 
         case "agent.persona_replace":
             let (agentName, wsId) = resolveAgentNameAndWorkspace(settings: settings, args: arguments)
@@ -204,7 +205,18 @@ final class AgentEditorTool: BuiltInTool {
             let text = wsId != nil
                 ? contextService.loadAgentPersona(workspaceId: wsId!, agentName: agentName)
                 : contextService.loadAgentPersona(agentName: agentName)
-            let replaced = text.replacingOccurrences(of: find, with: replace, options: [.caseInsensitive])
+            // Count occurrences (line-based for robustness)
+            let (replaced, count) = replaceAll(text, find: find, with: replace)
+
+            if (arguments["preview"] as? Bool) == true {
+                let info: [String: Any] = ["matches": count, "size_before": text.count, "size_after": replaced.count]
+                let data = try? JSONSerialization.data(withJSONObject: info, options: [.prettyPrinted])
+                let str = String(data: data ?? Data(), encoding: .utf8) ?? "{}"
+                return MCPToolResult(content: str, isError: false)
+            }
+            if count > 5 && (arguments["confirm"] as? Bool) != true {
+                return MCPToolResult(content: "This will modify \(count) places. Re-run with confirm=true or preview first.", isError: true)
+            }
             if let wsId {
                 contextService.saveAgentPersona(workspaceId: wsId, agentName: agentName, content: replaced)
             } else {
@@ -222,12 +234,21 @@ final class AgentEditorTool: BuiltInTool {
                 : contextService.loadAgentPersona(agentName: agentName)
             let lines = text.components(separatedBy: "\n")
             let filtered = lines.filter { !$0.localizedCaseInsensitiveContains(contains) }
+            let removed = lines.count - filtered.count
+            if (arguments["preview"] as? Bool) == true {
+                let info: [String: Any] = ["deleted": removed, "total_before": lines.count, "total_after": filtered.count]
+                let data = try? JSONSerialization.data(withJSONObject: info, options: [.prettyPrinted])
+                let str = String(data: data ?? Data(), encoding: .utf8) ?? "{}"
+                return MCPToolResult(content: str, isError: false)
+            }
+            if removed > 5 && (arguments["confirm"] as? Bool) != true {
+                return MCPToolResult(content: "This will delete \(removed) lines. Re-run with confirm=true or preview first.", isError: true)
+            }
             if let wsId {
                 contextService.saveAgentPersona(workspaceId: wsId, agentName: agentName, content: filtered.joined(separator: "\n"))
             } else {
                 contextService.saveAgentPersona(agentName: agentName, content: filtered.joined(separator: "\n"))
             }
-            let removed = lines.count - filtered.count
             return MCPToolResult(content: "Deleted \(removed) lines", isError: false)
 
         case "agent.memory_get":
@@ -271,7 +292,7 @@ final class AgentEditorTool: BuiltInTool {
                 ? contextService.loadAgentMemory(workspaceId: wsId!, agentName: agentName)
                 : contextService.loadAgentMemory(agentName: agentName)
             var lines = text.components(separatedBy: "\n")
-            if let idx = lines.firstIndex(where: { $0.localizedCaseInsensitiveContains(find) }) {
+            if let idx = lines.firstIndex(where: { $0.range(of: find, options: [.caseInsensitive]) != nil }) {
                 if replace.isEmpty {
                     lines.remove(at: idx)
                 } else {
@@ -331,5 +352,15 @@ final class AgentEditorTool: BuiltInTool {
         let name = (args["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let agentName = (name?.isEmpty ?? true) ? settings.activeAgentName : name!
         return (agentName, settings.currentWorkspaceId)
+    }
+
+    private func replaceAll(_ text: String, find: String, with replacement: String) -> (String, Int) {
+        // Count by lines to avoid overlapping/locale quirks
+        let lineMatches = text.components(separatedBy: "\n").filter { line in
+            line.range(of: find, options: [.caseInsensitive]) != nil
+        }
+        let count = lineMatches.count
+        let replaced = text.replacingOccurrences(of: find, with: replacement, options: [.caseInsensitive], range: nil)
+        return (replaced, count)
     }
 }

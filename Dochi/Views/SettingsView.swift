@@ -359,10 +359,12 @@ struct SettingsView: View {
                 // MARK: - Messenger
                 Section("메신저") {
                     Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
+                        .accessibilityIdentifier("integrations.telegram.toggle")
                     SecureField("Telegram Bot Token", text: Binding(
                         get: { viewModel.settings.telegramBotToken },
                         set: { viewModel.settings.telegramBotToken = $0 }
                     ))
+                    .accessibilityIdentifier("integrations.telegram.token")
                     HStack {
                         Button("연결 테스트") {
                             Task {
@@ -381,6 +383,7 @@ struct SettingsView: View {
                         Text(viewModel.settings.telegramEnabled ? "수신 대기 중" : "비활성")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("integrations.telegram.status")
                 }
                 }
 
