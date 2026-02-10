@@ -46,6 +46,9 @@ final class DochiViewModel: ObservableObject {
     // 다중 사용자
     @Published var currentUserId: UUID?
     @Published var currentUserName: String?
+    // UI overlays
+    @Published var showCommandPalette: Bool = false
+    @Published var showSettingsSheet: Bool = false
 
     // Modules
     private(set) lazy var sessionManager = SessionManager(viewModel: self)

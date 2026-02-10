@@ -3,7 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var viewModel: DochiViewModel
 
-    @State private var showSettings = false
+    // Settings moved to ViewModel toggle for command palette access
     @State private var showChangelog = false
     @State private var showOnboarding = false
     @State private var inputText = ""
@@ -15,8 +15,8 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(showSettings: $showSettings)
-        } detail: {
+            SidebarView(showSettings: $viewModel.showSettingsSheet)
+        } content: {
             VStack(spacing: 0) {
                 toolbarArea
                 if !viewModel.builtInToolService.activeAlarms.isEmpty {
@@ -27,10 +27,12 @@ struct ContentView: View {
                 Divider()
                 inputArea
             }
+        } detail: {
+            InspectorView()
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 300)
         .frame(minWidth: 700, minHeight: 500)
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $viewModel.showSettingsSheet) {
             SettingsView()
         }
         .sheet(isPresented: $showChangelog) {
@@ -43,6 +45,13 @@ struct ContentView: View {
             if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
                 viewModel.connectOnLaunch()
                 checkForNewVersion()
+            }
+        }
+        .overlay(alignment: .center) {
+            if viewModel.showCommandPalette {
+                CommandPaletteView()
+                    .environmentObject(viewModel)
+                    .padding(.top, 40)
             }
         }
     }
@@ -428,8 +437,18 @@ struct SidebarView: View {
         viewModel.settings.contextService
     }
 
+    @State private var query: String = ""
+
     var body: some View {
         List {
+            SectionHeader("검색", compact: true)
+            HStack(spacing: AppSpacing.s) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("대화 검색...", text: $query)
+            }
+            .padding(.horizontal, AppSpacing.s)
+            .padding(.vertical, AppSpacing.xs)
+
             Section("에이전트") {
                 // 에이전트 페르소나
                 Button {
@@ -619,7 +638,7 @@ struct SidebarView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(viewModel.conversations) { conv in
+                    ForEach(viewModel.conversations.filter { query.isEmpty ? true : $0.title.lowercased().contains(query.lowercased()) }) { conv in
                         Button {
                             viewModel.loadConversation(conv)
                         } label: {

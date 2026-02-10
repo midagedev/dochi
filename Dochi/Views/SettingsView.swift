@@ -38,6 +38,7 @@ struct SettingsView: View {
             Divider()
 
             Form {
+                SectionHeader("General")
                 // MARK: - API Keys
                 Section("API 키") {
                     SecureField("OpenAI API 키", text: $openaiKey)
@@ -63,6 +64,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - LLM
+                SectionHeader("Models")
                 Section("LLM") {
                     Picker("제공자", selection: $viewModel.settings.llmProvider) {
                         ForEach(LLMProvider.allCases, id: \.self) { provider in
@@ -77,6 +79,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - Display
+                SectionHeader("Display")
                 Section("표시") {
                     HStack {
                         Text("글자 크기")
@@ -91,6 +94,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - STT
+                SectionHeader("STT")
                 Section("STT") {
                     HStack {
                         Text("무음 대기")
@@ -102,6 +106,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - TTS
+                SectionHeader("TTS")
                 Section("TTS") {
                     Picker("음성", selection: $viewModel.settings.supertonicVoice) {
                         ForEach(SupertonicVoice.allCases, id: \.self) { voice in
@@ -125,6 +130,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - System Prompt
+                SectionHeader("Context & Memory")
                 Section("시스템 프롬프트") {
                     VStack(alignment: .leading) {
                         let system = contextService.loadSystem()
@@ -186,6 +192,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - Family Profiles
+                SectionHeader("Profiles")
                 Section("가족 구성원") {
                     let profiles = contextService.loadProfiles()
                     if profiles.isEmpty {
@@ -263,6 +270,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - MCP Servers
+                SectionHeader("Tools & MCP")
                 Section("MCP 서버") {
                     if viewModel.settings.mcpServers.isEmpty {
                         Text("등록된 MCP 서버가 없습니다.")
@@ -348,44 +356,44 @@ struct SettingsView: View {
                     DeviceSettingsView(deviceService: device)
                 }
 
-                // MARK: - Messenger
-                Section("메신저") {
-                    Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
-                    SecureField("Telegram Bot Token", text: Binding(
-                        get: { viewModel.settings.telegramBotToken },
-                        set: { viewModel.settings.telegramBotToken = $0 }
-                    ))
-                    HStack {
-                        Text("상태")
-                        Spacer()
-                        if viewModel.settings.telegramEnabled {
-                            Text("수신 대기 중")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("비활성")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    if let lastId = viewModel.settings.telegramLastChatId, viewModel.settings.telegramEnabled {
-                        HStack {
-                            Text("최근 DM 대상: \(String(lastId))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                // MARK: - Integrations
+                SectionHeader("Integrations")
+                VStack(alignment: .leading, spacing: AppSpacing.s) {
+                    // Telegram card
+                    VStack(alignment: .leading, spacing: AppSpacing.s) {
+                        HStack(spacing: AppSpacing.s) {
+                            Image(systemName: "paperplane.fill").foregroundStyle(.blue)
+                            Text("Telegram").compact(AppFont.body)
                             Spacer()
-                            Button("테스트 메시지 보내기") {
-                                Task { await viewModel.sendTelegramTestMessage() }
-                            }
+                            BadgeView(style: .status(viewModel.settings.telegramEnabled ? .green : .secondary), text: viewModel.settings.telegramEnabled ? "활성" : "비활성")
                         }
-                    } else if viewModel.settings.telegramEnabled {
-                        Text("봇에게 먼저 DM을 보내주세요.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
+                        SecureField("Bot Token", text: Binding(
+                            get: { viewModel.settings.telegramBotToken },
+                            set: { viewModel.settings.telegramBotToken = $0 }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        HStack {
+                            Text("상태").compact(AppFont.caption)
+                            Spacer()
+                            Text(viewModel.settings.telegramEnabled ? "수신 대기 중" : "비활성").compact(AppFont.caption).foregroundStyle(.secondary)
+                        }
+                        if let lastId = viewModel.settings.telegramLastChatId, viewModel.settings.telegramEnabled {
+                            HStack {
+                                Text("최근 DM 대상: \(String(lastId))").compact(AppFont.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Button("테스트 메시지 보내기") { Task { await viewModel.sendTelegramTestMessage() } }
+                            }
+                        } else if viewModel.settings.telegramEnabled {
+                            Text("봇에게 먼저 DM을 보내주세요.").compact(AppFont.caption).foregroundStyle(.secondary)
+                        }
                     }
+                    .padding(AppSpacing.m)
+                    .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.large))
                 }
 
                 // MARK: - About
+                SectionHeader("About")
                 Section("정보") {
                     HStack {
                         Text("버전")

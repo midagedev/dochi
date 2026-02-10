@@ -8,7 +8,7 @@ struct ConversationView: View {
         ZStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 16) {
+                    LazyVStack(spacing: AppSpacing.m) {
                         if viewModel.messages.isEmpty && !viewModel.isConnected {
                             emptyState
                         } else if viewModel.messages.isEmpty && viewModel.isConnected {
@@ -51,7 +51,7 @@ struct ConversationView: View {
                             liveBubble(
                                 label: "도치",
                                 text: assistantTranscript,
-                                color: Color(.controlBackgroundColor),
+                                color: AppColor.surface,
                                 alignment: .leading
                             )
                             .id("assistant-live")
@@ -62,7 +62,7 @@ struct ConversationView: View {
                             .frame(height: 120)
                             .id("bottom")
                     }
-                    .padding()
+                    .padding(AppSpacing.m)
                 }
                 .onChange(of: viewModel.messages.count) {
                     withAnimation {
@@ -119,41 +119,11 @@ struct ConversationView: View {
     // MARK: - States
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image("DochiMascot")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 100, height: 100)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .opacity(0.2)
-            Text("도치에게 말을 걸어보세요")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-            Text("설정에서 LLM API 키를 입력하고 연결하세요")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.top, 100)
+        EmptyState(icon: "questionmark.circle", title: "도치에게 말을 걸어보세요", subtitle: "설정에서 LLM API 키를 입력하고 연결하세요")
     }
 
     private var connectedEmptyState: some View {
-        VStack(spacing: 16) {
-            Image("DochiMascot")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 100, height: 100)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .opacity(0.2)
-            Text("연결됨 — 메시지를 입력하세요")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-            Text("텍스트 입력 또는 마이크 버튼으로 음성 입력")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.top, 100)
+        EmptyState(icon: "bubble.left", title: "연결됨 — 메시지를 입력하세요", subtitle: "텍스트 입력 또는 마이크 버튼으로 음성 입력")
     }
 
     // MARK: - Bubbles
@@ -161,13 +131,11 @@ struct ConversationView: View {
     private var thinkingBubble: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("도치")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("도치").compact(AppFont.caption).foregroundStyle(.secondary)
                 ThinkingDotsView()
-                    .padding(12)
-                    .background(Color(.controlBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(AppSpacing.m)
+                    .background(AppColor.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
             }
             Spacer(minLength: 60)
         }
@@ -177,14 +145,12 @@ struct ConversationView: View {
         HStack(alignment: .top) {
             if alignment == .trailing { Spacer(minLength: 60) }
             VStack(alignment: alignment == .trailing ? .trailing : .leading, spacing: 4) {
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(label).compact(AppFont.caption).foregroundStyle(.secondary)
                 Text(text)
                     .font(.system(size: viewModel.settings.chatFontSize))
-                    .padding(12)
+                    .padding(AppSpacing.m)
                     .background(color)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
             }
             if alignment == .leading { Spacer(minLength: 60) }
         }
@@ -523,7 +489,7 @@ struct MessageBubbleView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: AppSpacing.s) {
                     let displayText = allImageURLs.isEmpty ? message.content : textWithoutImages
                     if !displayText.isEmpty {
                         Text(displayText)
@@ -538,13 +504,13 @@ struct MessageBubbleView: View {
                             }
                     }
                 }
-                .padding(12)
+                .padding(AppSpacing.m)
                 .background(
                     message.role == .user
                         ? Color.blue.opacity(0.15)
-                        : Color(.controlBackgroundColor)
+                        : AppColor.surface
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
             }
             if message.role == .assistant { Spacer(minLength: 60) }
         }

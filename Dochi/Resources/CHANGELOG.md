@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.5.0 (Unreleased)
+
+### UI Refresh (high-density)
+- 3-pane layout: right-side Inspector (Context/Tools/Sources/Vars)
+- Command Palette (Cmd+K): quick actions and recent conversations
+- Design tokens introduced (spacing, type scale, color) for consistency
+- Chat compact spacing and surfaces; unified placeholder/thinking visuals
+- Sidebar search filter for conversations
+- Settings restructured with section headers and Integrations card (Telegram)
+
 ## v1.4.0
 
 ### 새로운 기능
