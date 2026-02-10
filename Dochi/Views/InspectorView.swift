@@ -2,12 +2,30 @@ import SwiftUI
 
 struct InspectorView: View {
     @EnvironmentObject var viewModel: DochiViewModel
+    @Environment(\.dismiss) private var dismiss
     @State private var tab: Tab = .context
+    // Editors
+    @State private var showBasePromptEditor = false
+    @State private var showSystemEditor = false
+    @State private var showAgentPersonaEditor = false
+    @State private var showAgentMemoryEditor = false
+    @State private var showMemoryEditor = false
+    @State private var showFamilyMemoryEditor = false
 
     enum Tab: String, CaseIterable { case context = "Context", tools = "Tools", coding = "Coding", sources = "Sources", vars = "Vars" }
 
     var body: some View {
         VStack(spacing: 0) {
+            // Header with close button
+            HStack {
+                Text("컨텍스트").font(.headline)
+                Spacer()
+                Button("닫기") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+            .padding()
+            .background(.bar)
+            .overlay(alignment: .bottom) { Rectangle().fill(AppColor.border).frame(height: 1) }
             // Tabs
             HStack(spacing: AppSpacing.s) {
                 ForEach(Tab.allCases, id: \.self) { t in
@@ -33,7 +51,14 @@ struct InspectorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppSpacing.m) {
                     switch tab {
-                    case .context: ContextPanel(viewModel: viewModel)
+                    case .context: ContextPanel(
+                        viewModel: viewModel,
+                        onOpenBasePrompt: { showBasePromptEditor = true },
+                        onOpenWorkspaceMemory: { showFamilyMemoryEditor = true },
+                        onOpenAgentPersona: { showAgentPersonaEditor = true },
+                        onOpenAgentMemory: { showAgentMemoryEditor = true },
+                        onOpenPersonalMemory: { showMemoryEditor = true }
+                    )
                     case .tools: ToolsPanel(viewModel: viewModel)
                     case .coding: ClaudeUIPanel(viewModel: viewModel)
                     case .sources: SourcesPanel()
@@ -43,18 +68,83 @@ struct InspectorView: View {
                 .padding(AppSpacing.s)
             }
         }
+        // Sheets for editors
+        .sheet(isPresented: $showBasePromptEditor) { BasePromptEditorView(contextService: viewModel.settings.contextService) }
+        .sheet(isPresented: $showSystemEditor) { SystemEditorView(contextService: viewModel.settings.contextService) }
+        .sheet(isPresented: $showAgentPersonaEditor) { AgentPersonaEditorView(contextService: viewModel.settings.contextService, agentName: viewModel.settings.activeAgentName) }
+        .sheet(isPresented: $showAgentMemoryEditor) { AgentMemoryEditorView(contextService: viewModel.settings.contextService, agentName: viewModel.settings.activeAgentName) }
+        .sheet(isPresented: $showMemoryEditor) { MemoryEditorView(contextService: viewModel.settings.contextService) }
+        .sheet(isPresented: $showFamilyMemoryEditor) { FamilyMemoryEditorView(contextService: viewModel.settings.contextService) }
     }
 }
 
 private struct ContextPanel: View {
     let viewModel: DochiViewModel
+    var onOpenBasePrompt: () -> Void
+    var onOpenWorkspaceMemory: () -> Void
+    var onOpenAgentPersona: () -> Void
+    var onOpenAgentMemory: () -> Void
+    var onOpenPersonalMemory: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.m) {
-            SectionCard("시스템 프롬프트", icon: "rectangle.and.pencil.and.ellipsis") {
-                Text(viewModel.settings.buildInstructions())
-                    .compact(AppFont.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(10)
+            SectionCard("컨텍스트 스택", icon: "archivebox") {
+                // Base rules
+                HStack {
+                    Text("기본 규칙").compact(AppFont.caption)
+                    Spacer()
+                    Button("편집") { onOpenBasePrompt() }.compact(AppFont.caption)
+                }
+                .padding(.bottom, AppSpacing.xs)
+                if !viewModel.settings.contextService.loadBaseSystemPrompt().isEmpty {
+                    Text(viewModel.settings.contextService.loadBaseSystemPrompt())
+                        .compact(AppFont.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else {
+                    Text("설정되지 않음").compact(AppFont.caption).foregroundStyle(.tertiary)
+                }
+
+                // Workspace memory
+                HStack {
+                    Text("워크스페이스 기억").compact(AppFont.caption)
+                    Spacer()
+                    Button("편집") { onOpenWorkspaceMemory() }.compact(AppFont.caption)
+                }
+                .padding(.top, AppSpacing.s)
+                if let wsId = viewModel.settings.currentWorkspaceId {
+                    let memory = viewModel.settings.contextService.loadWorkspaceMemory(workspaceId: wsId)
+                    Text(memory.isEmpty ? "(없음)" : memory).compact(AppFont.caption).foregroundStyle(.secondary).lineLimit(2)
+                } else {
+                    Text("워크스페이스 없음").compact(AppFont.caption).foregroundStyle(.tertiary)
+                }
+
+                // Agent persona + memory
+                HStack {
+                    Text("에이전트: \(viewModel.settings.activeAgentName)").compact(AppFont.caption)
+                    Spacer()
+                    Button("페르소나") { onOpenAgentPersona() }.compact(AppFont.caption)
+                    Button("기억") { onOpenAgentMemory() }.compact(AppFont.caption)
+                }
+                if let wsId = viewModel.settings.currentWorkspaceId {
+                    let persona = viewModel.settings.contextService.loadAgentPersona(workspaceId: wsId, agentName: viewModel.settings.activeAgentName)
+                    Text(persona.isEmpty ? "(페르소나 없음)" : persona).compact(AppFont.caption).foregroundStyle(.secondary).lineLimit(2)
+                } else {
+                    let persona = viewModel.settings.contextService.loadAgentPersona(agentName: viewModel.settings.activeAgentName)
+                    Text(persona.isEmpty ? "(페르소나 없음)" : persona).compact(AppFont.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+
+                // Personal memory for current user
+                HStack {
+                    Text("개인 기억").compact(AppFont.caption)
+                    Spacer()
+                    Button("편집") { onOpenPersonalMemory() }.compact(AppFont.caption)
+                }
+                if let uid = viewModel.currentUserId {
+                    let mem = viewModel.settings.contextService.loadUserMemory(userId: uid)
+                    Text(mem.isEmpty ? "(없음)" : mem).compact(AppFont.caption).foregroundStyle(.secondary).lineLimit(2)
+                } else {
+                    Text("현재 사용자 미확인 — set_current_user 사용").compact(AppFont.caption).foregroundStyle(.tertiary)
+                }
             }
 
             SectionCard("대화 메타", icon: "info.circle") {

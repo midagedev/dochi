@@ -48,3 +48,19 @@ enum SupertonicVoice: String, CaseIterable, Codable {
 
     var displayName: String { rawValue }
 }
+
+// MARK: - Interaction Mode
+
+enum InteractionMode: String, CaseIterable, Codable, Identifiable {
+    case voiceAndText
+    case textOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .voiceAndText: "음성+텍스트"
+        case .textOnly: "텍스트 전용"
+        }
+    }
+}

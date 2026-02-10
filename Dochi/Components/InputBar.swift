@@ -19,7 +19,7 @@ struct InputBar: View {
             }
         }
         .padding(barPadding)
-        .background(.ultraThinMaterial)
+        .background(.bar)
         .overlay(listeningGlow)
         .animation(.easeInOut(duration: 0.3), value: isListening)
         .onChange(of: isListening) { _, newValue in
@@ -81,11 +81,24 @@ struct InputBar: View {
 
     private var textInputContent: some View {
         HStack(spacing: AppSpacing.m) {
-            TextField("메시지를 입력하세요...", text: $inputText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .onSubmit { submitText() }
-                .accessibilityIdentifier("input.textField")
+            // Input field container for better affordance
+            HStack {
+                TextField("메시지를 입력하세요...", text: $inputText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...5)
+                    .onSubmit { submitText() }
+                    .accessibilityIdentifier("input.textField")
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.large)
+                    .fill(AppColor.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.large)
+                    .stroke(AppColor.border, lineWidth: 1)
+            )
 
             if isResponding {
                 Button { viewModel.cancelResponse() } label: {

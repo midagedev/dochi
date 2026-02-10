@@ -12,6 +12,7 @@ struct ConversationView: View {
                         if viewModel.messages.isEmpty && !viewModel.isConnected {
                             emptyState
                         } else if viewModel.messages.isEmpty && viewModel.isConnected {
+                            contextSummaryBar
                             connectedEmptyState
                         }
 
@@ -34,6 +35,7 @@ struct ConversationView: View {
                                 label: "나",
                                 text: viewModel.speechService.transcript,
                                 color: Color.blue.opacity(0.1),
+                                borderColor: Color.blue.opacity(0.2),
                                 alignment: .trailing
                             )
                             .id("user-live")
@@ -52,6 +54,7 @@ struct ConversationView: View {
                                 label: "도치",
                                 text: assistantTranscript,
                                 color: AppColor.surface,
+                                borderColor: AppColor.border,
                                 alignment: .leading
                             )
                             .id("assistant-live")
@@ -120,12 +123,32 @@ struct ConversationView: View {
     // MARK: - States
 
     private var emptyState: some View {
-        EmptyState(icon: "questionmark.circle", title: "도치에게 말을 걸어보세요", subtitle: "설정에서 LLM API 키를 입력하고 연결하세요")
+        VStack(spacing: AppSpacing.m) {
+            EmptyState(icon: "questionmark.circle", title: "도치에게 말을 걸어보세요", subtitle: "설정에서 LLM API 키를 입력하고 연결하세요")
+            HStack(spacing: AppSpacing.s) {
+                Button { viewModel.showSettingsSheet = true } label: { Label("설정 열기", systemImage: "gear") }
+                Button { viewModel.sendMessage("예시: 내일 일정 알려줘") } label: { Text("예시 질문 보내기") }
+                Button {
+                    viewModel.settings.wakeWordEnabled = true
+                    viewModel.startWakeWordIfNeeded()
+                } label: { Text("웨이크워드 켜기") }
+                Button { viewModel.showSettingsSheet = true } label: { Text("가족 구성원 추가") }
+            }
+            .buttonStyle(.bordered)
+        }
     }
 
     private var connectedEmptyState: some View {
-        EmptyState(icon: "bubble.left", title: "연결됨 — 메시지를 입력하세요", subtitle: "텍스트 입력 또는 마이크 버튼으로 음성 입력")
-            .accessibilityIdentifier("connected.empty")
+        VStack(spacing: AppSpacing.m) {
+            EmptyState(icon: "bubble.left", title: "연결됨 — 메시지를 입력하세요", subtitle: "텍스트 입력 또는 마이크 버튼으로 음성 입력")
+                .accessibilityIdentifier("connected.empty")
+            HStack(spacing: AppSpacing.s) {
+                Button { viewModel.sendMessage("가족 일정 요약해줘") } label: { Text("예시: 가족 일정") }
+                Button { viewModel.sendMessage("할 일 목록 정리해줘") } label: { Text("예시: 할 일 정리") }
+                Button { viewModel.sendMessage("코드 리뷰 도와줘") } label: { Text("예시: 코드 리뷰") }
+            }
+            .buttonStyle(.bordered)
+        }
     }
 
     // MARK: - Bubbles
@@ -143,19 +166,68 @@ struct ConversationView: View {
         }
     }
 
-    private func liveBubble(label: String, text: String, color: Color, alignment: HorizontalAlignment) -> some View {
+    private func liveBubble(label: String, text: String, color: Color, borderColor: Color, alignment: HorizontalAlignment) -> some View {
         HStack(alignment: .top) {
             if alignment == .trailing { Spacer(minLength: sideSpacer) }
             VStack(alignment: alignment == .trailing ? .trailing : .leading, spacing: 4) {
                 Text(label).compact(AppFont.caption).foregroundStyle(.secondary)
                 Text(text)
                     .font(.system(size: viewModel.settings.chatFontSize))
+                    .lineSpacing(2)
                     .padding(bubblePadding)
                     .background(color)
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.large)
+                            .stroke(borderColor, lineWidth: 1)
+                    )
+                    .frame(maxWidth: 580, alignment: alignment == .trailing ? .trailing : .leading)
             }
             if alignment == .leading { Spacer(minLength: sideSpacer) }
         }
+    }
+
+    private var contextSummaryBar: some View {
+        HStack(spacing: 8) {
+            // Agent
+            HStack(spacing: 6) {
+                Image(systemName: "person.fill").foregroundStyle(.blue)
+                Text(viewModel.settings.activeAgentName).compact(AppFont.caption)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color.primary.opacity(0.06), in: Capsule())
+
+            // Model
+            HStack(spacing: 6) {
+                Image(systemName: "brain.head.profile").foregroundStyle(.purple)
+                Text("\(viewModel.settings.llmProvider.displayName)/\(viewModel.settings.llmModel)").compact(AppFont.caption)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color.primary.opacity(0.06), in: Capsule())
+
+            // Workspace
+            if let supabase = viewModel.supabaseServiceForView, case .signedIn(_, _) = supabase.authState, let ws = supabase.selectedWorkspace {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.3.fill").foregroundStyle(.teal)
+                    Text(ws.name).compact(AppFont.caption)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.primary.opacity(0.06), in: Capsule())
+            }
+
+            // User
+            if let user = viewModel.currentUserName {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.crop.circle").foregroundStyle(.green)
+                    Text(user).compact(AppFont.caption)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.primary.opacity(0.06), in: Capsule())
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -453,6 +525,25 @@ struct MessageBubbleView: View {
     let message: Message
     @EnvironmentObject var viewModel: DochiViewModel
     @State private var expandedImageURL: URL?
+    
+    private enum Block { case text(String), code(String) }
+    
+    private func parseBlocks(_ text: String) -> [Block] {
+        var blocks: [Block] = []
+        var isCode = false
+        var buffer = ""
+        for line in text.components(separatedBy: "\n") {
+            if line.trimmingCharacters(in: .whitespaces) == "```" {
+                if isCode { blocks.append(.code(buffer)); buffer = "" }
+                else if !buffer.isEmpty { blocks.append(.text(buffer)); buffer = "" }
+                isCode.toggle()
+                continue
+            }
+            buffer += buffer.isEmpty ? line : "\n" + line
+        }
+        if !buffer.isEmpty { blocks.append(isCode ? .code(buffer) : .text(buffer)) }
+        return blocks
+    }
 
     // ![image](url) 패턴에서 URL 추출
     private var imageURLsFromContent: [URL] {
@@ -494,9 +585,45 @@ struct MessageBubbleView: View {
                 VStack(alignment: .leading, spacing: AppSpacing.s) {
                     let displayText = allImageURLs.isEmpty ? message.content : textWithoutImages
                     if !displayText.isEmpty {
-                        Text(displayText)
-                            .font(.system(size: viewModel.settings.chatFontSize))
-                            .textSelection(.enabled)
+                        let blocks = parseBlocks(displayText)
+                        if blocks.count > 1 || displayText.contains("```") {
+                            ForEach(Array(blocks.enumerated()), id: \.offset) { _, b in
+                                switch b {
+                                case .text(let t):
+                                    if let attr = try? AttributedString(markdown: t) {
+                                        Text(attr)
+                                            .font(.system(size: viewModel.settings.chatFontSize))
+                                            .lineSpacing(2)
+                                            .textSelection(.enabled)
+                                    } else {
+                                        Text(t)
+                                            .font(.system(size: viewModel.settings.chatFontSize))
+                                            .lineSpacing(2)
+                                            .textSelection(.enabled)
+                                    }
+                                case .code(let c):
+                                    ScrollView(.horizontal, showsIndicators: true) {
+                                        Text(c)
+                                            .font(.system(size: max(12, viewModel.settings.chatFontSize - 1), design: .monospaced))
+                                            .textSelection(.enabled)
+                                            .padding(8)
+                                            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                                    }
+                                }
+                            }
+                        } else {
+                            if let attr = try? AttributedString(markdown: displayText) {
+                                Text(attr)
+                                    .font(.system(size: viewModel.settings.chatFontSize))
+                                    .lineSpacing(2)
+                                    .textSelection(.enabled)
+                            } else {
+                                Text(displayText)
+                                    .font(.system(size: viewModel.settings.chatFontSize))
+                                    .lineSpacing(2)
+                                    .textSelection(.enabled)
+                            }
+                        }
                     }
 
                     ForEach(allImageURLs, id: \.absoluteString) { imageURL in
@@ -513,6 +640,14 @@ struct MessageBubbleView: View {
                         : AppColor.surface
                 )
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.large)
+                        .stroke(
+                            message.role == .user ? Color.blue.opacity(0.2) : AppColor.border,
+                            lineWidth: 1
+                        )
+                )
+                .frame(maxWidth: 620, alignment: .leading)
             }
             if message.role == .assistant { Spacer(minLength: sideSpacerLocal) }
         }

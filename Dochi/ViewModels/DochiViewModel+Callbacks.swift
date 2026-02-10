@@ -55,6 +55,7 @@ extension DochiViewModel {
 
         llmService.onSentenceReady = { [weak self] sentence in
             guard let self else { return }
+            guard self.settings.interactionMode == .voiceAndText else { return }
             if self.supertonicService.state == .ready || self.supertonicService.state == .synthesizing || self.supertonicService.state == .playing {
                 if self.state != .speaking {
                     self.speechService.stopListening()
@@ -102,16 +103,18 @@ extension DochiViewModel {
         builtInToolService.onAlarmFired = { [weak self] message in
             guard let self else { return }
             Log.app.info("알람 발동: \(message), 현재 상태: \(String(describing: self.state)), TTS 상태: \(String(describing: self.supertonicService.state))")
-            if self.state == .speaking {
-                self.supertonicService.stopPlayback()
+            if self.settings.interactionMode == .voiceAndText {
+                if self.state == .speaking { self.supertonicService.stopPlayback() }
+                if self.state == .listening { self.speechService.stopListening() }
+                self.state = .speaking
+                self.supertonicService.speed = self.settings.ttsSpeed
+                self.supertonicService.diffusionSteps = self.settings.ttsDiffusionSteps
+                self.supertonicService.speak("알람이에요! \(message)", voice: self.settings.supertonicVoice)
+            } else {
+                // 텍스트 모드: 음성 대신 메시지로 안내
+                self.messages.append(Message(role: .assistant, content: "알람이에요! \(message)"))
+                self.state = .idle
             }
-            if self.state == .listening {
-                self.speechService.stopListening()
-            }
-            self.state = .speaking
-            self.supertonicService.speed = self.settings.ttsSpeed
-            self.supertonicService.diffusionSteps = self.settings.ttsDiffusionSteps
-            self.supertonicService.speak("알람이에요! \(message)", voice: self.settings.supertonicVoice)
         }
 
         supertonicService.$state

@@ -49,6 +49,7 @@ final class DochiViewModel: ObservableObject {
     // UI overlays
     @Published var showCommandPalette: Bool = false
     @Published var showSettingsSheet: Bool = false
+    @Published var showPermissionSheet: Bool = false
 
     // Modules
     private(set) lazy var sessionManager = SessionManager(viewModel: self)
@@ -75,7 +76,7 @@ final class DochiViewModel: ObservableObject {
     }
 
     var isConnected: Bool {
-        supertonicService.state == .ready || state != .idle
+        settings.interactionMode == .voiceAndText && (supertonicService.state == .ready || state != .idle)
     }
 
     // MARK: - Init
@@ -154,17 +155,12 @@ final class DochiViewModel: ObservableObject {
     // MARK: - Connection
 
     func connectOnLaunch() {
-        Task {
-            let granted = await speechService.requestAuthorization()
-            if granted {
-                self.sessionManager.startWakeWordIfNeeded()
-            } else {
-                Log.app.warning("마이크/음성인식 권한 거부됨")
+        if settings.interactionMode == .voiceAndText {
+            // 권한을 자동으로 '요청'하지 않고, 이미 승인된 경우에만 웨이크워드 시작
+            if SpeechService.isAuthorized() {
+                sessionManager.startWakeWordIfNeeded()
             }
-        }
-
-        if supertonicService.state == .unloaded {
-            connect()
+            if supertonicService.state == .unloaded { connect() }
         }
 
         // Restore cloud session, sync context/conversations, register device, start Realtime
@@ -188,6 +184,7 @@ final class DochiViewModel: ObservableObject {
     }
 
     func toggleConnection() {
+        guard settings.interactionMode == .voiceAndText else { return }
         if supertonicService.state == .ready {
             sessionManager.stopWakeWord()
             supertonicService.tearDown()
@@ -259,6 +256,23 @@ final class DochiViewModel: ObservableObject {
     // MARK: - Push-to-Talk
 
     func startListening() {
+        // 권한 확인/요청 — 사용자 의도에 의해 호출되므로 이때 요청
+        if !SpeechService.isAuthorized() && !settings.hasSeenPermissionInfo {
+            showPermissionSheet = true
+            return
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            let granted = await self.speechService.requestAuthorization()
+            guard granted else {
+                self.errorMessage = "마이크/음성 인식 권한을 허용해주세요."
+                return
+            }
+            self._startListeningGranted()
+        }
+    }
+
+    private func _startListeningGranted() {
         switch state {
         case .speaking:
             supertonicService.stopPlayback()
