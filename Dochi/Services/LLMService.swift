@@ -202,15 +202,8 @@ final class LLMService: ObservableObject {
         }
     }
 
-    // MARK: - Sentence Detection
-
-    private static let punctuationTerminators: Set<Character> = [".", "?", "!", "。"]
-
-    // sentence chunking is delegated to SentenceChunker
-
-    // MARK: - Delta Parsing
-
-    // Provider-specific builders and delta parsing moved to Providers/* helpers
+    // Sentence chunking and provider-specific parsing are delegated to
+    // SentenceChunker and Providers/* helpers respectively.
 }
 
 // MARK: - Error
