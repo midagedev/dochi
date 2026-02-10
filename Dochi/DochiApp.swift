@@ -29,5 +29,14 @@ struct DochiApp: App {
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 900, height: 650)
+        .commands {
+            CommandMenu("Dochi") {
+                Button("Command Palette…") { viewModel.showCommandPalette = true }
+                    .keyboardShortcut("k", modifiers: [.command])
+                Divider()
+                Button(viewModel.isConnected ? "연결 해제" : "연결") { viewModel.toggleConnection() }
+                Button("새 대화") { viewModel.clearConversation() }
+            }
+        }
     }
 }

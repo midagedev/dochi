@@ -38,6 +38,7 @@ struct SettingsView: View {
             Divider()
 
             Form {
+                SectionHeader("General")
                 // MARK: - API Keys
                 Section("API 키") {
                     SecureField("OpenAI API 키", text: $openaiKey)
@@ -63,6 +64,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - LLM
+                SectionHeader("Models")
                 Section("LLM") {
                     Picker("제공자", selection: $viewModel.settings.llmProvider) {
                         ForEach(LLMProvider.allCases, id: \.self) { provider in
@@ -77,6 +79,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - Display
+                SectionHeader("Display")
                 Section("표시") {
                     HStack {
                         Text("글자 크기")
@@ -91,6 +94,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - STT
+                SectionHeader("STT")
                 Section("STT") {
                     HStack {
                         Text("무음 대기")
@@ -102,6 +106,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - TTS
+                SectionHeader("TTS")
                 Section("TTS") {
                     Picker("음성", selection: $viewModel.settings.supertonicVoice) {
                         ForEach(SupertonicVoice.allCases, id: \.self) { voice in
@@ -125,6 +130,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - System Prompt
+                SectionHeader("Context & Memory")
                 Section("시스템 프롬프트") {
                     VStack(alignment: .leading) {
                         let system = contextService.loadSystem()
@@ -186,6 +192,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - Family Profiles
+                SectionHeader("Profiles")
                 Section("가족 구성원") {
                     let profiles = contextService.loadProfiles()
                     if profiles.isEmpty {
@@ -263,6 +270,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: - MCP Servers
+                SectionHeader("Tools & MCP")
                 Section("MCP 서버") {
                     if viewModel.settings.mcpServers.isEmpty {
                         Text("등록된 MCP 서버가 없습니다.")
@@ -373,10 +381,11 @@ struct SettingsView: View {
                         Text(viewModel.settings.telegramEnabled ? "수신 대기 중" : "비활성")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
+                }
                 }
 
                 // MARK: - About
+                SectionHeader("About")
                 Section("정보") {
                     HStack {
                         Text("버전")

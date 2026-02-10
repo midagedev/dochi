@@ -75,3 +75,17 @@ targets:
         SWIFT_VERSION: "6.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
+
+  DochiUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: DochiUITests
+    dependencies:
+      - target: Dochi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi.uitests
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: YES
