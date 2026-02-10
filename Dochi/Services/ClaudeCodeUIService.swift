@@ -50,6 +50,27 @@ final class ClaudeCodeUIService {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
+    struct AuthResponse: Decodable { let success: Bool?; let token: String? }
+
+    func register(username: String, password: String) async throws -> String {
+        let body: [String: Any] = ["username": username, "password": password]
+        let (data, http) = try await request("POST", "/api/auth/register", json: body)
+        guard http.statusCode == 200 else { throw APIError(message: "Register HTTP \(http.statusCode)") }
+        if let decoded = try? JSONDecoder().decode(AuthResponse.self, from: data), let token = decoded.token, !token.isEmpty { return token }
+        // Fallback: try to parse manually
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let token = obj["token"] as? String, !token.isEmpty { return token }
+        throw APIError(message: "Register succeeded without token")
+    }
+
+    func login(username: String, password: String) async throws -> String {
+        let body: [String: Any] = ["username": username, "password": password]
+        let (data, http) = try await request("POST", "/api/auth/login", json: body)
+        guard http.statusCode == 200 else { throw APIError(message: "Login HTTP \(http.statusCode)") }
+        if let decoded = try? JSONDecoder().decode(AuthResponse.self, from: data), let token = decoded.token, !token.isEmpty { return token }
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let token = obj["token"] as? String, !token.isEmpty { return token }
+        throw APIError(message: "Login succeeded without token")
+    }
+
     // MCP CLI wrappers
     func mcpList() async throws -> String {
         let (data, http) = try await request("GET", "/api/mcp/cli/list")

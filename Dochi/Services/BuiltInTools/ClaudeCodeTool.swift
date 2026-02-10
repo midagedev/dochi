@@ -163,7 +163,7 @@ final class ClaudeCodeTool: BuiltInTool {
         return MCPToolResult(content: ok ? "Opened project in Finder" : "Failed to open project", isError: !ok)
     }
 
-    private func parseJSONL(fileURL: URL, onEntry: ([String: Any]) -> Void) throws {
+    private func parseJSONL(fileURL: URL, onEntry: @escaping ([String: Any]) -> Void) throws {
         guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return }
         defer { try? handle.close() }
         let data = try handle.readToEnd() ?? Data()
@@ -177,4 +177,3 @@ final class ClaudeCodeTool: BuiltInTool {
         }
     }
 }
-

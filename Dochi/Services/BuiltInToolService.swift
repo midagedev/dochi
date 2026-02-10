@@ -38,7 +38,7 @@ final class BuiltInToolService: ObservableObject {
     // Baseline tools always included to serve common conversational needs
     private let baselineAllowlist: Set<String> = [
         // Registry
-        "tools.list", "tools.enable",
+        "tools.list", "tools.enable", "tools.enable_categories", "tools.enable_ttl",
         // Reminders
         "create_reminder", "list_reminders", "complete_reminder",
         // Alarm
@@ -220,7 +220,10 @@ final class BuiltInToolService: ObservableObject {
             contextEditTool,
             profileAdminTool,
             workspaceTool,
-            telegramTool
+            telegramTool,
+            codingAgentTool,
+            claudeCodeTool,
+            claudeUITool
         ]
 
         for module in allModules {

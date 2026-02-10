@@ -1,14 +1,25 @@
 # Changelog
 
-## v1.5.0 (Unreleased)
+## v1.5.0
 
-### UI Refresh (high-density)
-- 3-pane layout: right-side Inspector (Context/Tools/Sources/Vars)
-- Command Palette (Cmd+K): quick actions and recent conversations
-- Design tokens introduced (spacing, type scale, color) for consistency
-- Chat compact spacing and surfaces; unified placeholder/thinking visuals
-- Sidebar search filter for conversations
-- Settings restructured with section headers and Integrations card (Telegram)
+### Claude Code UI Integration
+- API-only integration with Claude Code UI (projects/sessions tools)
+- Built-in tools: `claude_ui.*` (configure/health/auth/mcp)
+- Sandbox installer (launchd): local npm prefix at `~/Library/Application Support/Dochi/claude-ui`, launch agent `com.dochi.claude-ui`, logs under `~/Library/Logs/Dochi`
+- Tools: `claude_ui.sandbox_install/status/logs/upgrade/uninstall`
+
+### Settings UI (Claude UI)
+- Sandbox-first controls (install/upgrade/status/logs/remove)
+- External server mode retained (Base URL/Token/test)
+- Scrollable logs with copy/open
+
+### LLM Tooling
+- Tools registry baseline exposes `tools.enable_categories`/`tools.enable_ttl` so models can enable categories during chat
+- Coding helpers: open Claude / open IDE / copy task context
+
+### Telegram Improvements
+- Per-token polling offset scoping (switching tokens does not cross-contaminate offsets)
+- Non‑streaming reply mode option (typing indicator + single final message)
 
 ## v1.4.0
 

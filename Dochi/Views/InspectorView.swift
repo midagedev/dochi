@@ -207,7 +207,8 @@ private struct ClaudeUIPanel: View {
             if projects.isEmpty {
                 Text("프로젝트 없음 또는 로드 안 됨").compact(AppFont.caption).foregroundStyle(.tertiary)
             } else {
-                ForEach(projects, id: \.self) { p in
+                ForEach(Array(projects.indices), id: \.self) { i in
+                    let p = projects[i]
                     let name = (p["name"] as? String) ?? "(unknown)"
                     Button {
                         selectedProject = name
@@ -220,7 +221,8 @@ private struct ClaudeUIPanel: View {
             if let sp = selectedProject {
                 SectionHeader("세션 — \(sp)")
                 if let arr = sessions["sessions"] as? [[String: Any]], !arr.isEmpty {
-                    ForEach(arr, id: \.self) { s in
+                    ForEach(Array(arr.indices), id: \.self) { i in
+                        let s = arr[i]
                         HStack {
                             Text((s["summary"] as? String) ?? "(no summary)")
                                 .compact(AppFont.caption)

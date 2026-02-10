@@ -83,6 +83,9 @@ final class AppSettings: ObservableObject {
     @Published var claudeUIBaseURL: String {
         didSet { defaults.set(claudeUIBaseURL, forKey: Keys.claudeUIBaseURL) }
     }
+    @Published var claudeUISandboxEnabled: Bool {
+        didSet { defaults.set(claudeUISandboxEnabled, forKey: Keys.claudeUISandboxEnabled) }
+    }
 
     // Workspace
     @Published var currentWorkspaceId: UUID? {
@@ -134,6 +137,7 @@ final class AppSettings: ObservableObject {
         static let telegramStreamReplies = "settings.telegramStreamReplies"
         static let claudeUIEnabled = "settings.claudeUIEnabled"
         static let claudeUIBaseURL = "settings.claudeUIBaseURL"
+        static let claudeUISandboxEnabled = "settings.claudeUISandboxEnabled"
     }
 
     // MARK: - Dependencies
@@ -182,6 +186,7 @@ final class AppSettings: ObservableObject {
         self.autoModelRoutingEnabled = defaults.object(forKey: Keys.autoModelRoutingEnabled) as? Bool ?? false
         self.claudeUIEnabled = defaults.object(forKey: Keys.claudeUIEnabled) as? Bool ?? false
         self.claudeUIBaseURL = defaults.string(forKey: Keys.claudeUIBaseURL) ?? "http://localhost:3001"
+        self.claudeUISandboxEnabled = defaults.object(forKey: Keys.claudeUISandboxEnabled) as? Bool ?? true
 
         // MCP servers
         if let data = defaults.data(forKey: Keys.mcpServers) {
