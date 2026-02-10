@@ -300,7 +300,9 @@ final class DochiViewModel: ObservableObject {
         state = .idle
         sessionManager.startWakeWordIfNeeded()
         // Auto-reset enabled admin/advanced tools at session end to save tokens
-        builtInToolService.setEnabledToolNames(nil)
+        if settings.toolsRegistryAutoReset {
+            builtInToolService.setEnabledToolNames(nil)
+        }
     }
 
     // MARK: - Conversation (forwarding to ConversationManager)
