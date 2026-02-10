@@ -128,6 +128,23 @@ struct CloudSettingsView: View {
                             .buttonStyle(.borderless)
                             .font(.caption)
                         }
+                        Button {
+                            Task {
+                                do {
+                                    let newCode = try await supabaseService.regenerateInviteCode(workspaceId: ws.id)
+                                    // Update local list
+                                    if let idx = workspaces.firstIndex(where: { $0.id == ws.id }) {
+                                        workspaces[idx].inviteCode = newCode
+                                    }
+                                } catch {
+                                    errorMessage = error.localizedDescription
+                                }
+                            }
+                        } label: {
+                            Label("초대 코드 재발급", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
                     }
                 }
             }
@@ -145,6 +162,7 @@ struct CloudSettingsView: View {
                     Label("초대 코드로 참가", systemImage: "person.badge.plus")
                 }
             }
+            Button("새로고침") { loadWorkspaces() }
         }
         .onAppear { loadWorkspaces() }
         .sheet(isPresented: $showCreateWorkspace) {
