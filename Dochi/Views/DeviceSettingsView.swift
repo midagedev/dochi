@@ -8,7 +8,7 @@ struct DeviceSettingsView: View {
     @State private var newName = ""
 
     var body: some View {
-        Section("디바이스") {
+        VStack(alignment: .leading, spacing: 8) {
             if devices.isEmpty {
                 Text("등록된 디바이스가 없습니다.")
                     .foregroundStyle(.tertiary)

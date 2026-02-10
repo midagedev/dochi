@@ -21,7 +21,6 @@ struct SectionHeader: View {
         }
         .padding(.horizontal, AppSpacing.s)
         .padding(.vertical, compact ? AppSpacing.xs : AppSpacing.s)
-        .background(AppColor.background)
+        .background(Color.clear)
     }
 }
-

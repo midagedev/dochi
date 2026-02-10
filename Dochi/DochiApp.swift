@@ -27,6 +27,8 @@ struct DochiApp: App {
             ContentView()
                 .environmentObject(viewModel)
         }
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unifiedCompact)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 900, height: 650)
         .commands {

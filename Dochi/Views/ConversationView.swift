@@ -8,7 +8,7 @@ struct ConversationView: View {
         ZStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: AppSpacing.m) {
+                    LazyVStack(spacing: itemSpacing) {
                         if viewModel.messages.isEmpty && !viewModel.isConnected {
                             emptyState
                         } else if viewModel.messages.isEmpty && viewModel.isConnected {
@@ -60,10 +60,10 @@ struct ConversationView: View {
 
                         // 하단 여백 — 마지막 메시지가 충분히 위로 올라오도록
                         Spacer()
-                            .frame(height: 120)
+                            .frame(height: bottomSpacerHeight)
                             .id("bottom")
                     }
-                    .padding(AppSpacing.m)
+                    .padding(stackPadding)
                 }
                 .onChange(of: viewModel.messages.count) {
                     withAnimation {
@@ -135,26 +135,26 @@ struct ConversationView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("도치").compact(AppFont.caption).foregroundStyle(.secondary)
                 ThinkingDotsView()
-                    .padding(AppSpacing.m)
+                    .padding(bubblePadding)
                     .background(AppColor.surface)
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
             }
-            Spacer(minLength: 60)
+            Spacer(minLength: sideSpacer)
         }
     }
 
     private func liveBubble(label: String, text: String, color: Color, alignment: HorizontalAlignment) -> some View {
         HStack(alignment: .top) {
-            if alignment == .trailing { Spacer(minLength: 60) }
+            if alignment == .trailing { Spacer(minLength: sideSpacer) }
             VStack(alignment: alignment == .trailing ? .trailing : .leading, spacing: 4) {
                 Text(label).compact(AppFont.caption).foregroundStyle(.secondary)
                 Text(text)
                     .font(.system(size: viewModel.settings.chatFontSize))
-                    .padding(AppSpacing.m)
+                    .padding(bubblePadding)
                     .background(color)
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
             }
-            if alignment == .leading { Spacer(minLength: 60) }
+            if alignment == .leading { Spacer(minLength: sideSpacer) }
         }
     }
 }
@@ -485,7 +485,7 @@ struct MessageBubbleView: View {
 
     var body: some View {
         HStack(alignment: .top) {
-            if message.role == .user { Spacer(minLength: 60) }
+            if message.role == .user { Spacer(minLength: sideSpacerLocal) }
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
                 Text(message.role == .user ? "나" : "도치")
                     .font(.caption)
@@ -506,7 +506,7 @@ struct MessageBubbleView: View {
                             }
                     }
                 }
-                .padding(AppSpacing.m)
+                .padding(bubblePaddingLocal)
                 .background(
                     message.role == .user
                         ? Color.blue.opacity(0.15)
@@ -514,12 +514,28 @@ struct MessageBubbleView: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
             }
-            if message.role == .assistant { Spacer(minLength: 60) }
+            if message.role == .assistant { Spacer(minLength: sideSpacerLocal) }
         }
         .sheet(item: $expandedImageURL) { url in
             ImagePreviewView(url: url)
         }
     }
+
+    // Density-aware locals (MessageBubbleView scope)
+    private var isCompactLocal: Bool { viewModel.settings.uiDensity == .compact }
+    private var bubblePaddingLocal: CGFloat { isCompactLocal ? AppSpacing.s : AppSpacing.m }
+    private var sideSpacerLocal: CGFloat { isCompactLocal ? 36 : 60 }
+}
+
+// MARK: - Density Helpers
+
+private extension ConversationView {
+    var isCompact: Bool { viewModel.settings.uiDensity == .compact }
+    var itemSpacing: CGFloat { isCompact ? AppSpacing.s : AppSpacing.m }
+    var bubblePadding: CGFloat { isCompact ? AppSpacing.s : AppSpacing.m }
+    var stackPadding: CGFloat { isCompact ? AppSpacing.s : AppSpacing.m }
+    var bottomSpacerHeight: CGFloat { isCompact ? 80 : 120 }
+    var sideSpacer: CGFloat { isCompact ? 36 : 60 }
 }
 
 // MARK: - Generated Image View
