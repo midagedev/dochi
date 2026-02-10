@@ -356,44 +356,31 @@ struct SettingsView: View {
                     DeviceSettingsView(deviceService: device)
                 }
 
-                // MARK: - Integrations
-                SectionHeader("Integrations")
-                VStack(alignment: .leading, spacing: AppSpacing.s) {
-                    // Telegram card
-                    VStack(alignment: .leading, spacing: AppSpacing.s) {
-                        HStack(spacing: AppSpacing.s) {
-                            Image(systemName: "paperplane.fill").foregroundStyle(.blue)
-                            Text("Telegram").compact(AppFont.body)
-                            Spacer()
-                            BadgeView(style: .status(viewModel.settings.telegramEnabled ? .green : .secondary), text: viewModel.settings.telegramEnabled ? "활성" : "비활성")
-                        }
-                        Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
-                            .accessibilityIdentifier("integrations.telegram.toggle")
-                        SecureField("Bot Token", text: Binding(
-                            get: { viewModel.settings.telegramBotToken },
-                            set: { viewModel.settings.telegramBotToken = $0 }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("integrations.telegram.token")
-                        HStack {
-                            Text("상태").compact(AppFont.caption)
-                            Spacer()
-                            Text(viewModel.settings.telegramEnabled ? "수신 대기 중" : "비활성").compact(AppFont.caption).foregroundStyle(.secondary)
-                                .accessibilityIdentifier("integrations.telegram.status")
-                        }
-                        if let lastId = viewModel.settings.telegramLastChatId, viewModel.settings.telegramEnabled {
-                            HStack {
-                                Text("최근 DM 대상: \(String(lastId))").compact(AppFont.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Button("테스트 메시지 보내기") { Task { await viewModel.sendTelegramTestMessage() } }
-                                    .accessibilityIdentifier("integrations.telegram.testSend")
+                // MARK: - Messenger
+                Section("메신저") {
+                    Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
+                    SecureField("Telegram Bot Token", text: Binding(
+                        get: { viewModel.settings.telegramBotToken },
+                        set: { viewModel.settings.telegramBotToken = $0 }
+                    ))
+                    HStack {
+                        Button("연결 테스트") {
+                            Task {
+                                if viewModel.settings.telegramBotToken.isEmpty { return }
+                                let svc = TelegramService(conversationService: ConversationService())
+                                do {
+                                    let name = try await svc.getMe(token: viewModel.settings.telegramBotToken)
+                                    Log.telegram.info("봇 확인: @\(name)")
+                                } catch {
+                                    Log.telegram.error("봇 확인 실패: \(error.localizedDescription, privacy: .public)")
+                                }
                             }
-                        } else if viewModel.settings.telegramEnabled {
-                            Text("봇에게 먼저 DM을 보내주세요.").compact(AppFont.caption).foregroundStyle(.secondary)
                         }
-                    }
-                    .padding(AppSpacing.m)
-                    .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.large))
+                        .disabled(viewModel.settings.telegramBotToken.isEmpty)
+                        Spacer()
+                        Text(viewModel.settings.telegramEnabled ? "수신 대기 중" : "비활성")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                 }
 
                 // MARK: - About
