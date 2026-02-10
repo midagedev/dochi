@@ -4,7 +4,7 @@ struct InspectorView: View {
     @EnvironmentObject var viewModel: DochiViewModel
     @State private var tab: Tab = .context
 
-    enum Tab: String, CaseIterable { case context = "Context", tools = "Tools", sources = "Sources", vars = "Vars" }
+    enum Tab: String, CaseIterable { case context = "Context", tools = "Tools", coding = "Coding", sources = "Sources", vars = "Vars" }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,6 +35,7 @@ struct InspectorView: View {
                     switch tab {
                     case .context: ContextPanel(viewModel: viewModel)
                     case .tools: ToolsPanel(viewModel: viewModel)
+                    case .coding: ClaudeUIPanel(viewModel: viewModel)
                     case .sources: SourcesPanel()
                     case .vars: VarsPanel(viewModel: viewModel)
                     }
@@ -178,6 +179,79 @@ private struct SourcesPanel: View {
                 .compact(AppFont.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+private struct ClaudeUIPanel: View {
+    @ObservedObject var viewModel: DochiViewModel
+    @State private var health: String = ""
+    @State private var projects: [[String: Any]] = []
+    @State private var selectedProject: String?
+    @State private var sessions: [String: Any] = [:]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s) {
+            SectionHeader("연결")
+            HStack {
+                Text(viewModel.settings.claudeUIEnabled ? "사용" : "비활성").compact(AppFont.caption)
+                Spacer()
+                Button("새로고침") { Task { await refresh() } }
+                    .compact(AppFont.caption)
+                    .disabled(!viewModel.settings.claudeUIEnabled)
+            }
+            if !health.isEmpty {
+                Text(health).compact(AppFont.caption).foregroundStyle(.secondary)
+            }
+
+            SectionHeader("프로젝트")
+            if projects.isEmpty {
+                Text("프로젝트 없음 또는 로드 안 됨").compact(AppFont.caption).foregroundStyle(.tertiary)
+            } else {
+                ForEach(projects, id: \.self) { p in
+                    let name = (p["name"] as? String) ?? "(unknown)"
+                    Button {
+                        selectedProject = name
+                        Task { await loadSessions(project: name) }
+                    } label: { Text(name).compact(AppFont.caption) }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if let sp = selectedProject {
+                SectionHeader("세션 — \(sp)")
+                if let arr = sessions["sessions"] as? [[String: Any]], !arr.isEmpty {
+                    ForEach(arr, id: \.self) { s in
+                        HStack {
+                            Text((s["summary"] as? String) ?? "(no summary)")
+                                .compact(AppFont.caption)
+                                .lineLimit(1)
+                            Spacer()
+                            Text((s["lastActivity"] as? String) ?? "").compact(AppFont.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Text("세션 없음").compact(AppFont.caption).foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .onAppear { Task { await refresh() } }
+    }
+
+    private func refresh() async {
+        guard viewModel.settings.claudeUIEnabled else { return }
+        let svc = ClaudeCodeUIService(settings: viewModel.settings)
+        do {
+            health = try await svc.health()
+            projects = try await svc.listProjects()
+        } catch {
+            health = "연결 실패: \(error.localizedDescription)"
+            projects = []
+        }
+    }
+
+    private func loadSessions(project: String) async {
+        let svc = ClaudeCodeUIService(settings: viewModel.settings)
+        do { sessions = try await svc.listSessions(projectName: project, limit: 5, offset: 0) } catch { sessions = [:] }
     }
 }
 

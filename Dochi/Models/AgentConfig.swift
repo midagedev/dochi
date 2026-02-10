@@ -6,4 +6,5 @@ struct AgentConfig: Codable, Equatable {
     var name: String
     var wakeWord: String
     var description: String
+    var defaultModel: String?
 }

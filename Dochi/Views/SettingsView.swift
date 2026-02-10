@@ -364,6 +364,8 @@ struct SettingsView: View {
                 Section("메신저") {
                     Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
                         .accessibilityIdentifier("integrations.telegram.toggle")
+                    Toggle("텔레그램 스트리밍 응답 사용", isOn: $viewModel.settings.telegramStreamReplies)
+                        .accessibilityIdentifier("integrations.telegram.streaming")
                     SecureField("Telegram Bot Token", text: Binding(
                         get: { viewModel.settings.telegramBotToken },
                         set: { viewModel.settings.telegramBotToken = $0 }
@@ -400,6 +402,41 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+
+                // MARK: - Claude Code UI
+                Section("Claude Code UI") {
+                    Toggle("연동 사용", isOn: $viewModel.settings.claudeUIEnabled)
+                    HStack {
+                        Text("Base URL")
+                        Spacer()
+                        TextField("http://localhost:3001", text: $viewModel.settings.claudeUIBaseURL)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 260)
+                    }
+                    SecureField("API Token", text: Binding(
+                        get: { viewModel.settings.claudeUIToken },
+                        set: { viewModel.settings.claudeUIToken = $0 }
+                    ))
+                    HStack {
+                        Button("연결 테스트") {
+                            Task {
+                                guard viewModel.settings.claudeUIEnabled else { return }
+                                let svc = ClaudeCodeUIService(settings: viewModel.settings)
+                                do {
+                                    let health = try await svc.health()
+                                    Log.app.info("Claude UI Health: \(health, privacy: .public)")
+                                    let auth = try await svc.authStatus()
+                                    Log.app.info("Claude UI Auth: \(auth, privacy: .public)")
+                                } catch {
+                                    Log.app.error("Claude UI 연결 실패: \(error.localizedDescription, privacy: .public)")
+                                }
+                            }
+                        }
+                        .disabled(!viewModel.settings.claudeUIEnabled)
+                        Spacer()
+                    }
+                    .font(.caption)
                 }
 
                 // MARK: - About

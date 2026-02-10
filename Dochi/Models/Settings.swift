@@ -67,10 +67,21 @@ final class AppSettings: ObservableObject {
     @Published var telegramEnabled: Bool {
         didSet { defaults.set(telegramEnabled, forKey: Keys.telegramEnabled) }
     }
+    @Published var telegramStreamReplies: Bool {
+        didSet { defaults.set(telegramStreamReplies, forKey: Keys.telegramStreamReplies) }
+    }
 
     // MCP servers
     @Published var mcpServers: [MCPServerConfig] {
         didSet { saveMCPServers() }
+    }
+
+    // Claude Code UI integration
+    @Published var claudeUIEnabled: Bool {
+        didSet { defaults.set(claudeUIEnabled, forKey: Keys.claudeUIEnabled) }
+    }
+    @Published var claudeUIBaseURL: String {
+        didSet { defaults.set(claudeUIBaseURL, forKey: Keys.claudeUIBaseURL) }
     }
 
     // Workspace
@@ -120,6 +131,9 @@ final class AppSettings: ObservableObject {
         static let telegramEnabled = "settings.telegramEnabled"
         static let toolsRegistryAutoReset = "settings.toolsRegistryAutoReset"
         static let autoModelRoutingEnabled = "settings.autoModelRoutingEnabled"
+        static let telegramStreamReplies = "settings.telegramStreamReplies"
+        static let claudeUIEnabled = "settings.claudeUIEnabled"
+        static let claudeUIBaseURL = "settings.claudeUIBaseURL"
     }
 
     // MARK: - Dependencies
@@ -163,8 +177,11 @@ final class AppSettings: ObservableObject {
 
         self.activeAgentName = defaults.string(forKey: Keys.activeAgentName) ?? Constants.Agent.defaultName
         self.telegramEnabled = defaults.bool(forKey: Keys.telegramEnabled)
+        self.telegramStreamReplies = defaults.object(forKey: Keys.telegramStreamReplies) as? Bool ?? true
         self.toolsRegistryAutoReset = defaults.object(forKey: Keys.toolsRegistryAutoReset) as? Bool ?? true
         self.autoModelRoutingEnabled = defaults.object(forKey: Keys.autoModelRoutingEnabled) as? Bool ?? false
+        self.claudeUIEnabled = defaults.object(forKey: Keys.claudeUIEnabled) as? Bool ?? false
+        self.claudeUIBaseURL = defaults.string(forKey: Keys.claudeUIBaseURL) ?? "http://localhost:3001"
 
         // MCP servers
         if let data = defaults.data(forKey: Keys.mcpServers) {
@@ -271,6 +288,16 @@ final class AppSettings: ObservableObject {
         get { keychainService.load(account: "telegram_bot_token") ?? "" }
         set {
             keychainService.save(account: "telegram_bot_token", value: newValue)
+            objectWillChange.send()
+        }
+    }
+
+    // MARK: - Claude Code UI
+
+    var claudeUIToken: String {
+        get { keychainService.load(account: "claude_ui_token") ?? "" }
+        set {
+            keychainService.save(account: "claude_ui_token", value: newValue)
             objectWillChange.send()
         }
     }
