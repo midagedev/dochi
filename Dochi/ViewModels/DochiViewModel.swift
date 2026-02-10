@@ -108,6 +108,11 @@ final class DochiViewModel: ObservableObject {
         setupTerminationHandler()
         conversationManager.loadAll()
 
+        // Inject settings to built-in tools that need it
+        builtInToolService.configureSettings(settings)
+        builtInToolService.configureConversations(conversationService)
+        builtInToolService.configureSupabase(supa)
+
         // Initialize Telegram service
         self.telegramService = TelegramService(
             conversationService: conversationService,
@@ -116,6 +121,8 @@ final class DochiViewModel: ObservableObject {
             }
         )
         setupTelegramBindings()
+        // Provide Telegram to built-in tools
+        if let telegramService { builtInToolService.configureTelegram(telegramService) }
     }
 
     private func setupTerminationHandler() {
