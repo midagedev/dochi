@@ -396,6 +396,89 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
             return nil
         }
     }
+
+    // MARK: - Leader Lock (Best-effort)
+
+    /// Acquire a leader lock for a resource within the selected workspace.
+    /// Returns true on success or if cloud is not configured; false if held by another.
+    func acquireLeaderLock(resource: String, ttlSeconds: Int = 60) async -> Bool {
+        guard let client else { return true }
+        guard case .signedIn(let userId, _) = authState, let wsId = selectedWorkspace?.id else { return true }
+        struct LockRow: Codable { let resource: String; let workspace_id: UUID; let holder_user_id: UUID; let expires_at: Date }
+        do {
+            // Fetch existing lock
+            let existing: [LockRow] = try await client
+                .from("leader_locks")
+                .select()
+                .eq("resource", value: resource)
+                .eq("workspace_id", value: wsId)
+                .limit(1)
+                .execute()
+                .value
+            let now = Date()
+            let exp = Date(timeIntervalSinceNow: TimeInterval(ttlSeconds))
+            if let row = existing.first {
+                if row.expires_at <= now || row.holder_user_id == userId {
+                    struct Update: Encodable { let holder_user_id: UUID; let expires_at: Date }
+                    try await client
+                        .from("leader_locks")
+                        .update(Update(holder_user_id: userId, expires_at: exp))
+                        .eq("resource", value: resource)
+                        .eq("workspace_id", value: wsId)
+                        .execute()
+                    return true
+                } else {
+                    return false
+                }
+            } else {
+                struct Insert: Encodable { let resource: String; let workspace_id: UUID; let holder_user_id: UUID; let expires_at: Date }
+                try await client
+                    .from("leader_locks")
+                    .insert(Insert(resource: resource, workspace_id: wsId, holder_user_id: userId, expires_at: exp))
+                    .execute()
+                return true
+            }
+        } catch {
+            Log.cloud.warning("리더 락 획득 실패(무시): \(error.localizedDescription, privacy: .public)")
+            return true // fail-open
+        }
+    }
+
+    /// Refresh a leader lock (if we hold it). Best-effort; errors ignored.
+    func refreshLeaderLock(resource: String, ttlSeconds: Int = 60) async {
+        guard let client else { return }
+        guard case .signedIn(let userId, _) = authState, let wsId = selectedWorkspace?.id else { return }
+        do {
+            let exp = Date(timeIntervalSinceNow: TimeInterval(ttlSeconds))
+            struct Update: Encodable { let holder_user_id: UUID; let expires_at: Date }
+            try await client
+                .from("leader_locks")
+                .update(Update(holder_user_id: userId, expires_at: exp))
+                .eq("resource", value: resource)
+                .eq("workspace_id", value: wsId)
+                .eq("holder_user_id", value: userId)
+                .execute()
+        } catch {
+            Log.cloud.warning("리더 락 갱신 실패(무시): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Release a leader lock if held by current user. Best-effort.
+    func releaseLeaderLock(resource: String) async {
+        guard let client else { return }
+        guard case .signedIn(let userId, _) = authState, let wsId = selectedWorkspace?.id else { return }
+        do {
+            try await client
+                .from("leader_locks")
+                .delete()
+                .eq("resource", value: resource)
+                .eq("workspace_id", value: wsId)
+                .eq("holder_user_id", value: userId)
+                .execute()
+        } catch {
+            Log.cloud.warning("리더 락 해제 실패(무시): \(error.localizedDescription, privacy: .public)")
+        }
+    }
 }
 
 // MARK: - Errors

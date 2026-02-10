@@ -2,6 +2,9 @@ import Foundation
 
 @MainActor
 final class IntegrationsController {
+    private var telegramLockKeepAlive: Task<Void, Never>?
+    private var telegramHasLock: Bool = false
+
     func setupTelegramBindings(_ vm: DochiViewModel) {
         vm.settings.objectWillChange
             .receive(on: DispatchQueue.main)
@@ -23,7 +26,41 @@ final class IntegrationsController {
         guard let tg = vm.telegramService else { return }
         let enabled = vm.settings.telegramEnabled
         let token = vm.settings.telegramBotToken
-        if enabled && !token.isEmpty { tg.start(token: token) } else { tg.stop() }
+        if enabled && !token.isEmpty {
+            Task { @MainActor in
+                // Try to acquire leader lock (best-effort; fail-open when cloud absent)
+                var canStart = true
+                if let supa = vm.supabaseService as? SupabaseService, case .signedIn = vm.supabaseService.authState, let ws = supa.selectedWorkspace {
+                    let resource = "telegram:\(ws.id.uuidString)"
+                    canStart = await supa.acquireLeaderLock(resource: resource, ttlSeconds: 60)
+                    telegramHasLock = canStart
+                    if canStart {
+                        telegramLockKeepAlive?.cancel()
+                        telegramLockKeepAlive = Task { [weak vm] in
+                            while !(Task.isCancelled) {
+                                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
+                                guard let vm, let supa = vm.supabaseService as? SupabaseService else { continue }
+                                await supa.refreshLeaderLock(resource: resource, ttlSeconds: 60)
+                            }
+                        }
+                    }
+                }
+                if canStart { tg.start(token: token) } else {
+                    tg.stop()
+                    Log.telegram.info("다른 디바이스가 텔레그램 리더 락 보유 중 — 폴링 비활성화")
+                }
+            }
+        } else {
+            tg.stop()
+            if telegramHasLock, let supa = vm.supabaseService as? SupabaseService, let ws = supa.selectedWorkspace {
+                telegramLockKeepAlive?.cancel(); telegramLockKeepAlive = nil
+                Task { @MainActor in
+                    let resource = "telegram:\(ws.id.uuidString)"
+                    await supa.releaseLeaderLock(resource: resource)
+                    telegramHasLock = false
+                }
+            }
+        }
     }
 
     // MARK: - Telegram flow

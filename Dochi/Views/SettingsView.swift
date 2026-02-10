@@ -384,11 +384,22 @@ struct SettingsView: View {
                         }
                         .disabled(viewModel.settings.telegramBotToken.isEmpty)
                         Spacer()
-                        Text(viewModel.settings.telegramEnabled ? "수신 대기 중" : "비활성")
+                        let running = viewModel.telegramService?.running == true
+                        Text(running ? "수신 대기 중" : (viewModel.settings.telegramEnabled ? "대기 중(락 대기)" : "비활성"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("integrations.telegram.status")
-                }
+                    }
+                    if let err = viewModel.telegramService?.lastErrorMessage, !err.isEmpty {
+                        Text("최근 오류: \(err)")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    if let t = viewModel.telegramService?.lastDMAt {
+                        Text("최근 DM: \(DateFormatter.localizedString(from: t, dateStyle: .short, timeStyle: .short))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 // MARK: - About

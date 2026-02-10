@@ -31,10 +31,14 @@ final class TelegramService: @unchecked Sendable {
 
     private var token: String = ""
     private var isRunning = false
+    var running: Bool { isRunning }
     private var pollingTask: Task<Void, Never>?
     private var lastUpdateId: Int64 = 0
+    var lastUpdateCheckpoint: Int64 { lastUpdateId }
     private let defaults = UserDefaults.standard
     private var processedMessageKeys = Set<String>()
+    private(set) var lastErrorMessage: String?
+    private(set) var lastDMAt: Date?
 
     init(conversationService: ConversationServiceProtocol, onConversationsChanged: (() -> Void)? = nil) {
         self.conversationService = conversationService
@@ -107,12 +111,14 @@ final class TelegramService: @unchecked Sendable {
                                 let excess = processedMessageKeys.count - 1000
                                 for _ in 0..<excess { if let first = processedMessageKeys.first { processedMessageKeys.remove(first) } }
                             }
+                            lastDMAt = Date()
                             if let onDM { onDM(DMEvent(chatId: msg.chat.id, username: msg.from?.username, text: text)) }
                         }
                     }
                     defaults.set(NSNumber(value: lastUpdateId), forKey: "telegram.lastUpdateId")
                 }
             } catch {
+                lastErrorMessage = error.localizedDescription
                 Log.telegram.warning("Polling error: \(error.localizedDescription, privacy: .public)")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
@@ -129,6 +135,7 @@ final class TelegramService: @unchecked Sendable {
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                lastErrorMessage = "sendMessage HTTP 실패"
                 Log.telegram.warning("sendMessage HTTP 실패")
                 return nil
             }
@@ -136,6 +143,7 @@ final class TelegramService: @unchecked Sendable {
                 return res.result.message_id
             }
         } catch {
+            lastErrorMessage = error.localizedDescription
             Log.telegram.warning("sendMessage 실패: \(error.localizedDescription, privacy: .public)")
         }
         return nil
@@ -154,10 +162,12 @@ final class TelegramService: @unchecked Sendable {
         do {
             let (_, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                lastErrorMessage = "editMessageText HTTP 실패"
                 Log.telegram.warning("editMessageText HTTP 실패")
                 return
             }
         } catch {
+            lastErrorMessage = error.localizedDescription
             Log.telegram.warning("editMessageText 실패: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -178,16 +188,19 @@ final class TelegramService: @unchecked Sendable {
         do {
             let (_, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                lastErrorMessage = "sendPhoto HTTP 실패(원격 URL)"
                 Log.telegram.warning("sendPhoto HTTP 실패(원격 URL)")
                 return
             }
         } catch {
+            lastErrorMessage = error.localizedDescription
             Log.telegram.warning("sendPhoto 실패(원격 URL): \(error.localizedDescription, privacy: .public)")
         }
     }
 
     private func sendLocalPhotoMultipart(chatId: Int64, fileURL: URL) async {
         guard let data = try? Data(contentsOf: fileURL) else {
+            lastErrorMessage = "sendPhoto: 파일 읽기 실패"
             Log.telegram.warning("sendPhoto: 로컬 파일을 읽을 수 없습니다: \(fileURL.path, privacy: .public)")
             return
         }
@@ -214,10 +227,12 @@ final class TelegramService: @unchecked Sendable {
         do {
             let (_, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                lastErrorMessage = "sendPhoto HTTP 실패(로컬 업로드)"
                 Log.telegram.warning("sendPhoto HTTP 실패(로컬 업로드)")
                 return
             }
         } catch {
+            lastErrorMessage = error.localizedDescription
             Log.telegram.warning("sendPhoto 실패(로컬 업로드): \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -234,10 +249,12 @@ final class TelegramService: @unchecked Sendable {
         do {
             let (_, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                lastErrorMessage = "sendChatAction 실패"
                 Log.telegram.warning("sendChatAction 실패: action=\(action)")
                 return
             }
         } catch {
+            lastErrorMessage = error.localizedDescription
             Log.telegram.warning("sendChatAction 에러: \(error.localizedDescription, privacy: .public)")
         }
     }
