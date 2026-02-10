@@ -84,8 +84,12 @@ private struct ToolsPanel: View {
                     .foregroundStyle(.secondary)
             }
 
+            // Registry quick controls
+            SectionHeader("도구 레지스트리")
+            RegistryControls(viewModel: viewModel)
+
             if !viewModel.mcpService.availableTools.isEmpty {
-                SectionHeader("사용 가능한 도구")
+                SectionHeader("MCP 도구")
                 ForEach(viewModel.mcpService.availableTools) { tool in
                     HStack(spacing: AppSpacing.s) {
                         Image(systemName: "wrench.and.screwdriver")
@@ -97,6 +101,72 @@ private struct ToolsPanel: View {
                 }
             }
         }
+    }
+}
+
+private struct RegistryControls: View {
+    @ObservedObject var viewModel: DochiViewModel
+    @State private var ttl: Int = 10
+    @State private var selectedCategories: Set<String> = []
+    @State private var enabledNames: [String] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s) {
+            Toggle("세션 종료 시 자동 리셋", isOn: $viewModel.settings.toolsRegistryAutoReset)
+                .compact(AppFont.caption)
+            HStack {
+                Text("TTL(분)").compact(AppFont.caption).foregroundStyle(.secondary)
+                Slider(value: Binding(get: { Double(ttl) }, set: { ttl = Int($0) ; viewModel.builtInToolService.setRegistryTTL(minutes: ttl) }), in: 1...60, step: 1)
+                Text("\(ttl)").compact(AppFont.caption).monospacedDigit().frame(width: 28)
+            }
+            .onAppear { ttl = 10 }
+
+            let catalog = viewModel.builtInToolService.toolCatalogByCategory()
+            if !catalog.isEmpty {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text("카테고리 선택").compact(AppFont.caption).foregroundStyle(.secondary)
+                    ForEach(catalog.keys.sorted(), id: \.self) { key in
+                        Toggle(isOn: Binding(
+                            get: { selectedCategories.contains(key) },
+                            set: { newValue in
+                                if newValue { selectedCategories.insert(key) } else { selectedCategories.remove(key) }
+                                applyCategories(catalog)
+                            }
+                        )) {
+                            Text(key).compact(AppFont.caption)
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                Button("리셋") { viewModel.builtInToolService.setEnabledToolNames(nil); refreshEnabled() }
+                Spacer()
+                Button("새로고침") { refreshEnabled() }
+            }
+            .compact(AppFont.caption)
+
+            if !enabledNames.isEmpty {
+                Text("활성 도구: \(enabledNames.sorted().joined(separator: ", "))")
+                    .compact(AppFont.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("활성 도구: (베이스라인만 노출)")
+                    .compact(AppFont.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .onAppear { refreshEnabled() }
+    }
+
+    private func applyCategories(_ catalog: [String: [String]]) {
+        let names = selectedCategories.flatMap { catalog[$0] ?? [] }
+        viewModel.builtInToolService.setEnabledToolNames(Array(Set(names)))
+        refreshEnabled()
+    }
+
+    private func refreshEnabled() {
+        enabledNames = viewModel.builtInToolService.getEnabledToolNames() ?? []
     }
 }
 
@@ -137,4 +207,3 @@ private struct KVRow: View {
         .padding(.vertical, AppSpacing.xs)
     }
 }
-

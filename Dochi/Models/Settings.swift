@@ -79,6 +79,11 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    // Tools Registry
+    @Published var toolsRegistryAutoReset: Bool {
+        didSet { defaults.set(toolsRegistryAutoReset, forKey: Keys.toolsRegistryAutoReset) }
+    }
+
     // User profiles
     @Published var defaultUserId: UUID? {
         didSet {
@@ -108,6 +113,7 @@ final class AppSettings: ObservableObject {
         static let currentWorkspaceId = "settings.currentWorkspaceId"
         static let migratedToWorkspaceStructure = "settings.migratedToWorkspaceStructure"
         static let telegramEnabled = "settings.telegramEnabled"
+        static let toolsRegistryAutoReset = "settings.toolsRegistryAutoReset"
     }
 
     // MARK: - Dependencies
@@ -151,6 +157,7 @@ final class AppSettings: ObservableObject {
 
         self.activeAgentName = defaults.string(forKey: Keys.activeAgentName) ?? Constants.Agent.defaultName
         self.telegramEnabled = defaults.bool(forKey: Keys.telegramEnabled)
+        self.toolsRegistryAutoReset = defaults.object(forKey: Keys.toolsRegistryAutoReset) as? Bool ?? true
 
         // MCP servers
         if let data = defaults.data(forKey: Keys.mcpServers) {
