@@ -41,6 +41,14 @@ final class ConversationFlowController {
     }
 
     private func selectModel(vm: DochiViewModel, messages: [Message]) -> String {
+        // Agent-specific default model override
+        let agentName = vm.settings.activeAgentName
+        if let wsId = vm.settings.currentWorkspaceId, let cfg = vm.contextService.loadAgentConfig(workspaceId: wsId, agentName: agentName), let m = cfg.defaultModel, !m.isEmpty {
+            return m
+        } else if let cfg = vm.contextService.loadAgentConfig(agentName: agentName), let m = cfg.defaultModel, !m.isEmpty {
+            return m
+        }
+
         guard vm.settings.autoModelRoutingEnabled else { return vm.settings.llmModel }
         let provider = vm.settings.llmProvider
         let models = provider.models

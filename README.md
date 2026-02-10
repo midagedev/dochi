@@ -56,10 +56,10 @@ open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.ap
 └── workspaces/{workspaceId}/
     ├── config.json
     ├── memory.md                # 워크스페이스 공유 기억
-    └── agents/{name}/
-        ├── persona.md           # 에이전트 페르소나
-        ├── memory.md            # 에이전트 기억
-        └── config.json          # 에이전트 설정 (웨이크워드 등)
+        └── agents/{name}/
+            ├── persona.md           # 에이전트 페르소나
+            ├── memory.md            # 에이전트 기억
+            └── config.json          # 에이전트 설정 (웨이크워드, 기본 모델 등)
 
 # 레거시(존재 시 계속 읽기): system.md, family.md, memory.md
 ```
@@ -74,6 +74,7 @@ open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.ap
 - `workspaces/{id}/memory.md` — 워크스페이스 공유 기억
 - `workspaces/{id}/agents/{name}/persona.md` — 에이전트 페르소나
 - `workspaces/{id}/agents/{name}/memory.md` — 에이전트 기억
+- `workspaces/{id}/agents/{name}/config.json` — 에이전트 설정(예: `{ "defaultModel": "gpt-4o-mini" }`)
 - `profiles.json` — 사용자 프로필(다중 사용자)
 - `memory/{userId}.md` — 개인 기억
 - (레거시) `system.md`, `family.md`, `memory.md`

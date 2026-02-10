@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import os
 
 struct SettingsView: View {
@@ -364,6 +365,8 @@ struct SettingsView: View {
                 Section("메신저") {
                     Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
                         .accessibilityIdentifier("integrations.telegram.toggle")
+                    Toggle("텔레그램 스트리밍 응답 사용", isOn: $viewModel.settings.telegramStreamReplies)
+                        .accessibilityIdentifier("integrations.telegram.streaming")
                     SecureField("Telegram Bot Token", text: Binding(
                         get: { viewModel.settings.telegramBotToken },
                         set: { viewModel.settings.telegramBotToken = $0 }
@@ -401,6 +404,9 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                // MARK: - Claude Code UI (Sandbox + External)
+                ClaudeUISettingsSection(viewModel: viewModel)
 
                 // MARK: - About
                 SectionHeader("About")
@@ -555,6 +561,225 @@ struct SystemEditorView: View {
         .onAppear {
             content = contextService.loadSystem()
         }
+    }
+}
+
+// MARK: - Claude UI Setup Helper
+
+private struct ClaudeUISetupView: View {
+    @ObservedObject var viewModel: DochiViewModel
+    @State private var adminUser: String = ""
+    @State private var adminPass: String = ""
+    @State private var port: String = "3001"
+    @State private var usePM2: Bool = true
+    @State private var methodIndex: Int = 0 // 0=npm, 1=npx
+    @State private var isRunning: Bool = false
+    @State private var lastOutput: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("관리자 사용자명").compact(AppFont.caption).foregroundStyle(.secondary)
+                    TextField("admin", text: $adminUser)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                }
+                VStack(alignment: .leading) {
+                    Text("관리자 비밀번호").compact(AppFont.caption).foregroundStyle(.secondary)
+                    SecureField("password", text: $adminPass)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                }
+                VStack(alignment: .leading) {
+                    Text("포트").compact(AppFont.caption).foregroundStyle(.secondary)
+                    TextField("3001", text: $port)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                }
+            }
+            HStack(spacing: 12) {
+                Picker("설치 방식", selection: $methodIndex) {
+                    Text("npm").tag(0)
+                    Text("npx").tag(1)
+                }
+                .pickerStyle(.segmented)
+                Toggle("pm2 사용", isOn: $usePM2).toggleStyle(.switch)
+                Spacer()
+                Button(isRunning ? "진행 중…" : "자동 설치/연동 실행") {
+                    Task { await runSetup() }
+                }
+                .disabled(isRunning || adminUser.isEmpty || adminPass.isEmpty)
+            }
+            if !lastOutput.isEmpty {
+                ScrollView {
+                    Text(lastOutput)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(height: 180)
+                HStack(spacing: 12) {
+                    Button("로그 파일 열기") {
+                        let url = FileManager.default.homeDirectoryForCurrentUser
+                            .appendingPathComponent("Library/Logs/Dochi/claude-ui.log")
+                        NSWorkspace.shared.open(url)
+                    }
+                    Button("복사") {
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(lastOutput, forType: .string)
+                    }
+                    Spacer()
+                }
+                .compact(AppFont.caption)
+            }
+        }
+        .onAppear {
+            if adminUser.isEmpty { adminUser = "admin" }
+        }
+    }
+
+    private func runSetup() async {
+        isRunning = true
+        defer { isRunning = false }
+        let method = methodIndex == 0 ? "npm" : "npx"
+        let portNum = Int(port) ?? 3001
+        do {
+            let args: [String: Any] = [
+                "confirm": true,
+                "base_url": viewModel.settings.claudeUIBaseURL,
+                "method": method,
+                "install_pm2": usePM2,
+                "port": portNum,
+                "username": adminUser,
+                "password": adminPass
+            ]
+            let res = try await viewModel.builtInToolService.callTool(name: "claude_ui.setup", arguments: args)
+            lastOutput = res.content
+        } catch {
+            lastOutput = "실패: \(error.localizedDescription)"
+        }
+    }
+}
+
+// MARK: - Claude UI Settings Section (Sandbox-first)
+
+private struct ClaudeUISettingsSection: View {
+    @ObservedObject var viewModel: DochiViewModel
+    @State private var port: String = "3001"
+    @State private var statusText: String = ""
+    @State private var logsText: String = ""
+    @State private var busy: Bool = false
+
+    var body: some View {
+        Section("Claude Code UI") {
+            Toggle("샌드박스 모드(launchd)", isOn: $viewModel.settings.claudeUISandboxEnabled)
+                .onChange(of: viewModel.settings.claudeUISandboxEnabled) { _, newValue in
+                    Task { await onSandboxToggle(newValue) }
+                }
+            if viewModel.settings.claudeUISandboxEnabled {
+                // Sandbox controls
+                HStack {
+                    Text("포트").compact(AppFont.caption)
+                    Spacer()
+                    TextField("3001", text: $port)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                }
+                HStack(spacing: 8) {
+                    Button(busy ? "진행 중…" : "샌드박스 설치/시작") { Task { await sandboxInstall() } }
+                        .disabled(busy)
+                    Button("상태") { Task { await sandboxStatus() } }
+                    Button("로그") { Task { await sandboxLogs() } }
+                    Button("업그레이드") { Task { await sandboxUpgrade() } }
+                    Button(role: .destructive) { Task { await sandboxUninstall() } } label: { Text("제거") }
+                        .disabled(busy)
+                }.compact(AppFont.caption)
+
+                if !statusText.isEmpty {
+                    ScrollView { Text(statusText).font(.caption2).frame(maxWidth: .infinity, alignment: .leading) }
+                        .frame(height: 140)
+                }
+                if !logsText.isEmpty {
+                    ScrollView { Text(logsText).font(.caption2).frame(maxWidth: .infinity, alignment: .leading) }
+                        .frame(height: 160)
+                }
+            } else {
+                // External server mode (existing fields)
+                Toggle("연동 사용", isOn: $viewModel.settings.claudeUIEnabled)
+                HStack {
+                    Text("Base URL")
+                    Spacer()
+                    TextField("http://localhost:3001", text: $viewModel.settings.claudeUIBaseURL)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 260)
+                }
+                SecureField("API Token", text: Binding(
+                    get: { viewModel.settings.claudeUIToken },
+                    set: { viewModel.settings.claudeUIToken = $0 }
+                ))
+                HStack {
+                    Button("연결 테스트") { Task { await externalTest() } }
+                        .disabled(!viewModel.settings.claudeUIEnabled)
+                    Spacer()
+                }.font(.caption)
+            }
+        }
+        .onAppear {
+            if port.isEmpty { port = "3001" }
+        }
+    }
+
+    private func onSandboxToggle(_ enabled: Bool) async {
+        if enabled {
+            // Update base URL hint and refresh status
+            if let p = Int(port) { viewModel.settings.claudeUIBaseURL = "http://localhost:\(p)" }
+            await sandboxStatus()
+        } else {
+            busy = true; defer { busy = false }
+            do {
+                let res = try await viewModel.builtInToolService.callTool(name: "claude_ui.sandbox_uninstall", arguments: [:])
+                statusText = res.content
+            } catch { statusText = "비활성화 실패: \(error.localizedDescription)" }
+        }
+    }
+
+    private func sandboxInstall() async {
+        busy = true; defer { busy = false }
+        let p = Int(port) ?? 3001
+        do {
+            let res = try await viewModel.builtInToolService.callTool(name: "claude_ui.sandbox_install", arguments: ["port": p])
+            statusText = res.content
+        } catch { statusText = "설치 실패: \(error.localizedDescription)" }
+    }
+
+    private func sandboxStatus() async {
+        do { let res = try await viewModel.builtInToolService.callTool(name: "claude_ui.sandbox_status", arguments: [:]); statusText = res.content } catch { statusText = error.localizedDescription }
+    }
+
+    private func sandboxLogs() async {
+        do { let res = try await viewModel.builtInToolService.callTool(name: "claude_ui.sandbox_logs", arguments: ["lines": 400]); logsText = res.content } catch { logsText = error.localizedDescription }
+    }
+
+    private func sandboxUpgrade() async {
+        busy = true; defer { busy = false }
+        do { let res = try await viewModel.builtInToolService.callTool(name: "claude_ui.sandbox_upgrade", arguments: [:]); statusText = res.content } catch { statusText = error.localizedDescription }
+    }
+
+    private func sandboxUninstall() async {
+        busy = true; defer { busy = false }
+        do { let res = try await viewModel.builtInToolService.callTool(name: "claude_ui.sandbox_uninstall", arguments: [:]); statusText = res.content } catch { statusText = error.localizedDescription }
+    }
+
+    private func externalTest() async {
+        let svc = ClaudeCodeUIService(settings: viewModel.settings)
+        do {
+            let health = try await svc.health()
+            let auth = try await svc.authStatus()
+            statusText = "Health: \(health)\nAuth: \(auth)"
+        } catch { statusText = "연결 실패: \(error.localizedDescription)" }
     }
 }
 

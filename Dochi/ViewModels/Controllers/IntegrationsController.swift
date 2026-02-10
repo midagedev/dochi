@@ -118,21 +118,35 @@ final class IntegrationsController {
         var lastEditTime = Date.distantPast
         let editInterval: TimeInterval = 0.4
         var replyMessageId: Int?
+        let useStreaming = vm.settings.telegramStreamReplies
+        var typingTask: Task<Void, Never>?
+
+        if !useStreaming {
+            typingTask = Task { [weak vm] in
+                while !Task.isCancelled {
+                    guard let vm else { break }
+                    await vm.telegramService?.sendChatAction(chatId: chatId, action: "typing")
+                    try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                }
+            }
+        }
 
         llm.onSentenceReady = { [weak vm] sentence in
             guard let vm else { return }
             streamedText += sentence
-            let now = Date()
-            if replyMessageId == nil {
-                Task { @MainActor in
-                    replyMessageId = await self.streamReply(vm, to: chatId, initialText: self.sanitizeForTelegram(streamedText))
-                }
-                lastEditTime = now
-            } else if now.timeIntervalSince(lastEditTime) >= editInterval, let msgId = replyMessageId {
-                lastEditTime = now
-                Task { [weak vm] in
-                    guard let vm = vm else { return }
-                    await self.updateReply(vm, chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
+            if useStreaming {
+                let now = Date()
+                if replyMessageId == nil {
+                    Task { @MainActor in
+                        replyMessageId = await self.streamReply(vm, to: chatId, initialText: self.sanitizeForTelegram(streamedText))
+                    }
+                    lastEditTime = now
+                } else if now.timeIntervalSince(lastEditTime) >= editInterval, let msgId = replyMessageId {
+                    lastEditTime = now
+                    Task { [weak vm] in
+                        guard let vm = vm else { return }
+                        await self.updateReply(vm, chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
+                    }
                 }
             }
         }
@@ -149,7 +163,7 @@ final class IntegrationsController {
                     do {
                         let isBuiltIn = vm.builtInToolService.availableTools.contains { $0.name == toolCall.name }
                         let toolResult: MCPToolResult = try await (isBuiltIn ? vm.builtInToolService.callTool(name: toolCall.name, arguments: argsDict) : vm.mcpService.callTool(name: toolCall.name, arguments: argsDict))
-                        if let msgId = replyMessageId {
+                        if useStreaming, let msgId = replyMessageId {
                             let snippet = String(toolResult.content.prefix(400))
                             streamedText += "\n\n🔧 \(toolCall.name): \(snippet)"
                             await self.updateReply(vm, chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
@@ -157,7 +171,7 @@ final class IntegrationsController {
                         results.append(ToolResult(toolCallId: toolCall.id, content: toolResult.content, isError: toolResult.isError))
                     } catch {
                         let err = "Error: \(error.localizedDescription)"
-                        if let msgId = replyMessageId {
+                        if useStreaming, let msgId = replyMessageId {
                             streamedText += "\n\n🔧 \(toolCall.name): \(err)"
                             await self.updateReply(vm, chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
                         }
@@ -171,10 +185,11 @@ final class IntegrationsController {
 
         llm.onResponseComplete = { [weak vm] finalText in
             guard let vm else { return }
+            typingTask?.cancel(); typingTask = nil
             let clean = self.sanitizeForTelegram(finalText.isEmpty ? streamedText : finalText)
-            if let msgId = replyMessageId, !clean.isEmpty {
+            if useStreaming, let msgId = replyMessageId, !clean.isEmpty {
                 Task { await self.updateReply(vm, chatId: chatId, messageId: msgId, text: clean) }
-            } else if replyMessageId == nil {
+            } else if replyMessageId == nil, !clean.isEmpty {
                 Task { _ = await self.streamReply(vm, to: chatId, initialText: clean) }
             }
             var conv = conversation

@@ -15,6 +15,7 @@ enum Log {
 // MARK: - Telegram Service (temporarily inlined; move to its own file with XcodeGen inclusion later)
 
 import Foundation
+import CryptoKit
 
 final class TelegramService: @unchecked Sendable {
     private let session: URLSession
@@ -39,6 +40,13 @@ final class TelegramService: @unchecked Sendable {
     private var processedMessageKeys = Set<String>()
     private(set) var lastErrorMessage: String?
     private(set) var lastDMAt: Date?
+    private var offsetDefaultsKey: String { "telegram.lastUpdateId" } // fallback
+    private func perTokenOffsetKey(_ token: String) -> String {
+        guard let data = token.data(using: .utf8) else { return offsetDefaultsKey }
+        let digest = SHA256.hash(data: data)
+        let hex = digest.compactMap { String(format: "%02x", $0) }.joined()
+        return "telegram.lastUpdateId.\(hex.prefix(16))"
+    }
 
     init(conversationService: ConversationServiceProtocol, onConversationsChanged: (() -> Void)? = nil) {
         self.conversationService = conversationService
@@ -54,9 +62,10 @@ final class TelegramService: @unchecked Sendable {
         if isRunning && self.token == token { return }
         stop()
         self.token = token
-        if let saved = defaults.object(forKey: "telegram.lastUpdateId") as? Int64 {
+        let key = perTokenOffsetKey(token)
+        if let saved = defaults.object(forKey: key) as? Int64 {
             lastUpdateId = saved
-        } else if let savedNum = defaults.object(forKey: "telegram.lastUpdateId") as? NSNumber {
+        } else if let savedNum = defaults.object(forKey: key) as? NSNumber {
             lastUpdateId = savedNum.int64Value
         }
         isRunning = true
@@ -115,7 +124,8 @@ final class TelegramService: @unchecked Sendable {
                             if let onDM { onDM(DMEvent(chatId: msg.chat.id, username: msg.from?.username, text: text)) }
                         }
                     }
-                    defaults.set(NSNumber(value: lastUpdateId), forKey: "telegram.lastUpdateId")
+                    let offKey = perTokenOffsetKey(token)
+                    defaults.set(NSNumber(value: lastUpdateId), forKey: offKey)
                 }
             } catch {
                 lastErrorMessage = error.localizedDescription

@@ -77,7 +77,9 @@ final class ToolsRegistryTool: BuiltInTool {
                 "context": "Base system prompt editing",
                 "profile_admin": "Profile create/alias/rename/merge",
                 "workspace": "Supabase workspace ops",
-                "telegram": "Telegram integration ops"
+                "telegram": "Telegram integration ops",
+                "coding": "Claude Code helpers (open, IDE, clipboard)",
+                "claude_ui": "Claude Code UI API integration (health, MCP manage)"
             ]
             let payload: [String: Any] = [
                 "catalog": catalog,

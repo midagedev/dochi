@@ -21,6 +21,9 @@ final class BuiltInToolService: ObservableObject {
     let telegramTool = TelegramTool()
     let toolsRegistryTool = ToolsRegistryTool()
     let systemControlTool = SystemControlTool()
+    let codingAgentTool = CodingAgentTool()
+    let claudeCodeTool = ClaudeCodeTool()
+    let claudeUITool = ClaudeUITool()
 
     // Optional shared services for tools that need them
     private(set) var conversationService: (any ConversationServiceProtocol)?
@@ -35,7 +38,7 @@ final class BuiltInToolService: ObservableObject {
     // Baseline tools always included to serve common conversational needs
     private let baselineAllowlist: Set<String> = [
         // Registry
-        "tools.list", "tools.enable",
+        "tools.list", "tools.enable", "tools.enable_categories", "tools.enable_ttl",
         // Reminders
         "create_reminder", "list_reminders", "complete_reminder",
         // Alarm
@@ -82,6 +85,7 @@ final class BuiltInToolService: ObservableObject {
         workspaceTool.settings = settings
         agentEditorTool.settings = settings
         telegramTool.settings = settings
+        claudeUITool.settings = settings
         toolsRegistryTool.registryHost = self
     }
 
@@ -178,6 +182,15 @@ final class BuiltInToolService: ObservableObject {
         // 디바이스 제어: macOS에서만 노출 (앱 런타임)
         tools.append(contentsOf: systemControlTool.tools)
 
+        // 코딩 에이전트 툴 (IDE/Claude launcher, clipboard helper)
+        tools.append(contentsOf: codingAgentTool.tools)
+
+        // Claude Code session/project introspection
+        tools.append(contentsOf: claudeCodeTool.tools)
+
+        // Claude Code UI integration (API-only, no local fallback)
+        tools.append(contentsOf: claudeUITool.tools)
+
         // Registry tools always available
         tools.append(contentsOf: toolsRegistryTool.tools)
 
@@ -207,7 +220,10 @@ final class BuiltInToolService: ObservableObject {
             contextEditTool,
             profileAdminTool,
             workspaceTool,
-            telegramTool
+            telegramTool,
+            codingAgentTool,
+            claudeCodeTool,
+            claudeUITool
         ]
 
         for module in allModules {
@@ -265,6 +281,9 @@ extension BuiltInToolService {
         if workspaceTool.supabase != nil { all.append(contentsOf: workspaceTool.tools) }
         if telegramTool.telegram != nil, telegramTool.settings != nil { all.append(contentsOf: telegramTool.tools) }
         all.append(contentsOf: systemControlTool.tools)
+        all.append(contentsOf: codingAgentTool.tools)
+        all.append(contentsOf: claudeCodeTool.tools)
+        all.append(contentsOf: claudeUITool.tools)
 
         let available = Set(all.map { $0.name })
         add("registry", toolsRegistryTool.tools)
@@ -280,6 +299,9 @@ extension BuiltInToolService {
         add("profile_admin", profileAdminTool.tools)
         add("workspace", workspaceTool.tools)
         add("telegram", telegramTool.tools)
+        add("coding", codingAgentTool.tools)
+        add("coding", claudeCodeTool.tools)
+        add("claude_ui", claudeUITool.tools)
         add("device", systemControlTool.tools)
 
         for (k, v) in catalog {
