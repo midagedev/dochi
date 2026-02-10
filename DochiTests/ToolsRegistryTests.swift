@@ -1,6 +1,7 @@
 import XCTest
 @testable import Dochi
 
+@MainActor
 final class ToolsRegistryTests: XCTestCase {
     private func makeTempDir() -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("DochiTest_\(UUID().uuidString)", isDirectory: true)
@@ -34,4 +35,3 @@ final class ToolsRegistryTests: XCTestCase {
         XCTAssertFalse(namesAfter.contains("settings.set"))
     }
 }
-

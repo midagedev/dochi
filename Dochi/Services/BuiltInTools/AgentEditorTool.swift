@@ -5,7 +5,7 @@ import os
 @MainActor
 final class AgentEditorTool: BuiltInTool {
     var contextService: (any ContextServiceProtocol)?
-    weak var settings: AppSettings?
+    var settings: AppSettings?
 
     nonisolated var tools: [MCPToolInfo] {
         [
@@ -194,7 +194,8 @@ final class AgentEditorTool: BuiltInTool {
                 matches.append(["index": idx, "line": line])
             }
             let data = try? JSONSerialization.data(withJSONObject: matches, options: [.prettyPrinted])
-            return MCPToolResult(content: String(data: data ?? Data()) , isError: false)
+            let str = String(data: data ?? Data(), encoding: .utf8) ?? "{}"
+            return MCPToolResult(content: str, isError: false)
 
         case "agent.persona_replace":
             let (agentName, wsId) = resolveAgentNameAndWorkspace(settings: settings, args: arguments)
@@ -210,7 +211,8 @@ final class AgentEditorTool: BuiltInTool {
             if (arguments["preview"] as? Bool) == true {
                 let info: [String: Any] = ["matches": count, "size_before": text.count, "size_after": replaced.count]
                 let data = try? JSONSerialization.data(withJSONObject: info, options: [.prettyPrinted])
-                return MCPToolResult(content: String(data: data ?? Data()), isError: false)
+                let str = String(data: data ?? Data(), encoding: .utf8) ?? "{}"
+                return MCPToolResult(content: str, isError: false)
             }
             if count > 5 && (arguments["confirm"] as? Bool) != true {
                 return MCPToolResult(content: "This will modify \(count) places. Re-run with confirm=true or preview first.", isError: true)
@@ -236,7 +238,8 @@ final class AgentEditorTool: BuiltInTool {
             if (arguments["preview"] as? Bool) == true {
                 let info: [String: Any] = ["deleted": removed, "total_before": lines.count, "total_after": filtered.count]
                 let data = try? JSONSerialization.data(withJSONObject: info, options: [.prettyPrinted])
-                return MCPToolResult(content: String(data: data ?? Data()), isError: false)
+                let str = String(data: data ?? Data(), encoding: .utf8) ?? "{}"
+                return MCPToolResult(content: str, isError: false)
             }
             if removed > 5 && (arguments["confirm"] as? Bool) != true {
                 return MCPToolResult(content: "This will delete \(removed) lines. Re-run with confirm=true or preview first.", isError: true)
@@ -353,14 +356,12 @@ final class AgentEditorTool: BuiltInTool {
 
     private func replaceAll(_ text: String, find: String, with replacement: String) -> (String, Int) {
         var count = 0
-        var result = text
-        var searchRange: Range<String.Index>? = result.startIndex..<result.endIndex
-        while let range = result.range(of: find, options: [.caseInsensitive], range: searchRange) {
-            result.replaceSubrange(range, with: replacement)
+        var searchRange: Range<String.Index>? = text.startIndex..<text.endIndex
+        while let range = text.range(of: find, options: [.caseInsensitive], range: searchRange) {
             count += 1
-            let idx = result.index(range.lowerBound, offsetBy: replacement.count)
-            searchRange = idx..<result.endIndex
+            searchRange = range.upperBound..<text.endIndex
         }
-        return (result, count)
+        let replaced = text.replacingOccurrences(of: find, with: replacement, options: [.caseInsensitive], range: nil)
+        return (replaced, count)
     }
 }

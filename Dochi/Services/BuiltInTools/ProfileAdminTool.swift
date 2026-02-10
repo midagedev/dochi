@@ -6,7 +6,7 @@ import os
 final class ProfileAdminTool: BuiltInTool {
     var contextService: (any ContextServiceProtocol)?
     weak var settings: AppSettings?
-    weak var conversationService: ConversationServiceProtocol?
+    var conversationService: (any ConversationServiceProtocol)?
 
     nonisolated var tools: [MCPToolInfo] {
         [
@@ -204,4 +204,3 @@ final class ProfileAdminTool: BuiltInTool {
         }
     }
 }
-

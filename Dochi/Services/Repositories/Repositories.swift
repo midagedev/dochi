@@ -2,6 +2,7 @@ import Foundation
 
 // MARK: - Agent Repository
 
+@MainActor
 protocol AgentRepository {
     func listAgents(workspaceId: UUID?) -> [String]
     func createAgent(workspaceId: UUID?, name: String, wakeWord: String, description: String)
@@ -14,6 +15,7 @@ protocol AgentRepository {
     func setConfig(workspaceId: UUID?, config: AgentConfig)
 }
 
+@MainActor
 struct LocalAgentRepository: AgentRepository {
     let context: ContextServiceProtocol
 
@@ -65,6 +67,7 @@ struct LocalAgentRepository: AgentRepository {
 
 // MARK: - Workspace Repository
 
+@MainActor
 protocol WorkspaceRepository {
     func create(name: String) async throws -> Workspace
     func join(inviteCode: String) async throws -> Workspace
@@ -73,6 +76,7 @@ protocol WorkspaceRepository {
     func regenerateInviteCode(id: UUID) async throws -> String
 }
 
+@MainActor
 struct CloudWorkspaceRepository: WorkspaceRepository {
     let service: SupabaseServiceProtocol
 
@@ -82,7 +86,7 @@ struct CloudWorkspaceRepository: WorkspaceRepository {
     func switchTo(id: UUID) async throws -> Workspace {
         let workspaces = try await list()
         guard let ws = workspaces.first(where: { $0.id == id }) else { throw SupabaseError.invalidInviteCode }
-        service.setCurrentWorkspace(ws)
+        await service.setCurrentWorkspace(ws)
         return ws
     }
     func regenerateInviteCode(id: UUID) async throws -> String { try await service.regenerateInviteCode(workspaceId: id) }
@@ -90,16 +94,17 @@ struct CloudWorkspaceRepository: WorkspaceRepository {
 
 // MARK: - Auth Repository
 
+@MainActor
 protocol AuthRepository {
     var authState: AuthState { get }
     func restoreSession() async
     func signOut() async throws
 }
 
+@MainActor
 struct CloudAuthRepository: AuthRepository {
     let service: SupabaseServiceProtocol
     var authState: AuthState { service.authState }
     func restoreSession() async { await service.restoreSession() }
     func signOut() async throws { try await service.signOut() }
 }
-

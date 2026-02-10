@@ -22,9 +22,9 @@ final class BuiltInToolService: ObservableObject {
     let toolsRegistryTool = ToolsRegistryTool()
 
     // Optional shared services for tools that need them
-    private(set) weak var conversationService: ConversationServiceProtocol?
-    private(set) weak var supabaseService: (any SupabaseServiceProtocol)?
-    private(set) weak var telegramService: TelegramService?
+    private(set) var conversationService: (any ConversationServiceProtocol)?
+    private(set) var supabaseService: (any SupabaseServiceProtocol)?
+    private(set) var telegramService: TelegramService?
 
     // Registry-based enablement: if set, only these names (plus baseline) are exposed
     private var enabledToolNames: Set<String>? = nil

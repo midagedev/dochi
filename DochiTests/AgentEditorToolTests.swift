@@ -1,6 +1,7 @@
 import XCTest
 @testable import Dochi
 
+@MainActor
 final class AgentEditorToolTests: XCTestCase {
     private func makeTempDir() -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("DochiTest_\(UUID().uuidString)", isDirectory: true)
@@ -30,4 +31,3 @@ final class AgentEditorToolTests: XCTestCase {
         XCTAssertFalse(mem.contains("제주 맛집\n"))
     }
 }
-

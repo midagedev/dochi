@@ -58,8 +58,8 @@ final class DochiViewModel: ObservableObject {
         viewModel: self, conversationService: conversationService
     )
 
-    private let conversationService: ConversationServiceProtocol
-    private var telegramService: TelegramService?
+    let conversationService: ConversationServiceProtocol
+    var telegramService: TelegramService?
     // Controllers
     private(set) lazy var cloud = CloudController()
     private(set) lazy var integrations = IntegrationsController()

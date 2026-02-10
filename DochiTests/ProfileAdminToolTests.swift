@@ -1,6 +1,7 @@
 import XCTest
 @testable import Dochi
 
+@MainActor
 final class ProfileAdminToolTests: XCTestCase {
     private func makeTempDir() -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("DochiTest_\(UUID().uuidString)", isDirectory: true)
@@ -57,4 +58,3 @@ final class ProfileAdminToolTests: XCTestCase {
         XCTAssertEqual(saved?.userId, target.id.uuidString)
     }
 }
-
