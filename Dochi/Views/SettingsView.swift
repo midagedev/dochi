@@ -76,6 +76,10 @@ struct SettingsView: View {
                             Text(model).tag(model)
                         }
                     }
+                    Toggle("자동 모델 선택 (베타)", isOn: $viewModel.settings.autoModelRoutingEnabled)
+                    Text("짧은 대화는 경량 모델, 복잡/긴 요청은 고급 모델로 자동 선택합니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 // MARK: - Display
