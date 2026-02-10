@@ -6,13 +6,15 @@ final class IntegrationsController {
         vm.settings.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak vm] _ in
-                vm?.integrations.updateTelegramService(vm!)
+                guard let vm = vm else { return }
+                vm.integrations.updateTelegramService(vm)
             }
             .store(in: &vm.cancellables)
         updateTelegramService(vm)
         vm.telegramService?.onDM = { [weak vm] event in
             Task { @MainActor in
-                await vm?.integrations.processTelegramDM(vm!, chatId: event.chatId, username: event.username, text: event.text)
+                guard let vm = vm else { return }
+                await vm.integrations.processTelegramDM(vm, chatId: event.chatId, username: event.username, text: event.text)
             }
         }
     }
@@ -92,7 +94,8 @@ final class IntegrationsController {
             } else if now.timeIntervalSince(lastEditTime) >= editInterval, let msgId = replyMessageId {
                 lastEditTime = now
                 Task { [weak vm] in
-                    await self.updateReply(vm!, chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
+                    guard let vm = vm else { return }
+                    await self.updateReply(vm, chatId: chatId, messageId: msgId, text: self.sanitizeForTelegram(streamedText))
                 }
             }
         }
@@ -146,4 +149,3 @@ final class IntegrationsController {
         llm.sendMessage(messages: loopMessages, systemPrompt: systemPrompt, provider: provider, model: model, apiKey: apiKey, tools: toolSpecs.isEmpty ? nil : toolSpecs, toolResults: nil)
     }
 }
-

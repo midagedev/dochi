@@ -207,10 +207,6 @@ final class DochiViewModel: ObservableObject {
 
     // MARK: - Telegram processing
 
-    private func loadOrCreateTelegramConversation(chatId: Int64, username: String?) -> Conversation { integrations.performNonisolated { self.conversationService.list().first(where: { $0.userId == "tg:\(chatId)" }) } ?? Conversation(title: "Telegram DM \(username ?? String(chatId))", messages: [], userId: "tg:\(chatId)") }
-
-    private func buildSystemPromptForTelegram() -> String { integrations.performNonisolated { let recent = self.conversationManager.buildRecentSummaries(for: nil, limit: 5); return self.settings.buildInstructions(currentUserName: nil, currentUserId: nil, recentSummaries: recent) } ?? "" }
-
     private func llmApiKey() -> String { settings.apiKey(for: settings.llmProvider) }
 
     private func llmModels() -> (provider: LLMProvider, model: String) { (settings.llmProvider, settings.llmModel) }
