@@ -361,11 +361,7 @@ final class DochiViewModel: ObservableObject {
 
                 var results: [ToolResult] = []
                 for toolCall in toolCalls {
-                    var argsDict: [String: Any] = [:]
-                    if let data = toolCall.arguments.data(using: .utf8),
-                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        argsDict = obj
-                    }
+                    let argsDict = toolCall.arguments
                     do {
                         let isBuiltIn = self.builtInToolService.availableTools.contains { $0.name == toolCall.name }
                         let toolResult: MCPToolResult
