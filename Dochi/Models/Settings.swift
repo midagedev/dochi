@@ -24,6 +24,11 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(llmModel, forKey: Keys.llmModel) }
     }
 
+    // Model routing (beta)
+    @Published var autoModelRoutingEnabled: Bool {
+        didSet { defaults.set(autoModelRoutingEnabled, forKey: Keys.autoModelRoutingEnabled) }
+    }
+
     // TTS settings
     @Published var supertonicVoice: SupertonicVoice {
         didSet { defaults.set(supertonicVoice.rawValue, forKey: Keys.supertonicVoice) }
@@ -114,6 +119,7 @@ final class AppSettings: ObservableObject {
         static let migratedToWorkspaceStructure = "settings.migratedToWorkspaceStructure"
         static let telegramEnabled = "settings.telegramEnabled"
         static let toolsRegistryAutoReset = "settings.toolsRegistryAutoReset"
+        static let autoModelRoutingEnabled = "settings.autoModelRoutingEnabled"
     }
 
     // MARK: - Dependencies
@@ -158,6 +164,7 @@ final class AppSettings: ObservableObject {
         self.activeAgentName = defaults.string(forKey: Keys.activeAgentName) ?? Constants.Agent.defaultName
         self.telegramEnabled = defaults.bool(forKey: Keys.telegramEnabled)
         self.toolsRegistryAutoReset = defaults.object(forKey: Keys.toolsRegistryAutoReset) as? Bool ?? true
+        self.autoModelRoutingEnabled = defaults.object(forKey: Keys.autoModelRoutingEnabled) as? Bool ?? false
 
         // MCP servers
         if let data = defaults.data(forKey: Keys.mcpServers) {

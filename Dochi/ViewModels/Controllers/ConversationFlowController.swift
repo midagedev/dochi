@@ -4,7 +4,7 @@ import Foundation
 final class ConversationFlowController {
     func sendLLMRequest(_ vm: DochiViewModel, messages: [Message], toolResults: [ToolResult]?) {
         let provider = vm.settings.llmProvider
-        let model = vm.settings.llmModel
+        let model = selectModel(vm: vm, messages: messages)
         let apiKey = vm.settings.apiKey(for: provider)
 
         let hasProfiles = !vm.contextService.loadProfiles().isEmpty
@@ -39,5 +39,33 @@ final class ConversationFlowController {
             toolResults: toolResults
         )
     }
-}
 
+    private func selectModel(vm: DochiViewModel, messages: [Message]) -> String {
+        guard vm.settings.autoModelRoutingEnabled else { return vm.settings.llmModel }
+        let provider = vm.settings.llmProvider
+        let models = provider.models
+        // Heuristics: short chat without tools → lightweight; otherwise default/heavier
+        let lastUser = messages.last(where: { $0.role == .user })
+        let length = lastUser?.content.count ?? 0
+        let wantsLightweight = length < 120 && (vm.builtInToolService.availableTools.isEmpty) // tool specs empty in body leads to pure chat
+
+        switch provider {
+        case .openai:
+            if wantsLightweight {
+                if let mini = models.first(where: { $0.contains("mini") }) { return mini }
+            }
+            // prefer highest-capability listed first
+            return models.first ?? vm.settings.llmModel
+        case .anthropic:
+            if wantsLightweight {
+                if let haiku = models.first(where: { $0.lowercased().contains("haiku") }) { return haiku }
+            }
+            // prefer sonnet/opus if present
+            if let sonnet = models.first(where: { $0.lowercased().contains("sonnet") }) { return sonnet }
+            if let opus = models.first(where: { $0.lowercased().contains("opus") }) { return opus }
+            return models.first ?? vm.settings.llmModel
+        case .zai:
+            return models.first ?? vm.settings.llmModel
+        }
+    }
+}
