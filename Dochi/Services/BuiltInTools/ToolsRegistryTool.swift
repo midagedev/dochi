@@ -15,6 +15,18 @@ final class ToolsRegistryTool: BuiltInTool {
                 inputSchema: ["type": "object", "properties": [:]]
             ),
             MCPToolInfo(
+                id: "builtin:tools.enable_categories",
+                name: "tools.enable_categories",
+                description: "Enable tools by category names (e.g., agent, agent_edit, settings, workspace, telegram, context, profile_admin).",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "categories": ["type": "array", "items": ["type": "string"]]
+                    ],
+                    "required": ["categories"]
+                ]
+            ),
+            MCPToolInfo(
                 id: "builtin:tools.enable",
                 name: "tools.enable",
                 description: "Enable a set of tools by name. Only enabled tools (plus baseline) will be exposed in subsequent requests.",
@@ -62,6 +74,17 @@ final class ToolsRegistryTool: BuiltInTool {
             let names = arr.compactMap { $0 as? String }
             host.setEnabledToolNames(names)
             return MCPToolResult(content: "Enabled tools: \(names)", isError: false)
+
+        case "tools.enable_categories":
+            guard let arr = arguments["categories"] as? [Any] else {
+                return MCPToolResult(content: "categories array is required", isError: true)
+            }
+            let cats = arr.compactMap { $0 as? String }
+            // Map categories to tool names via catalog
+            let catalog = host.toolCatalogByCategory()
+            let names = cats.flatMap { catalog[$0] ?? [] }
+            host.setEnabledToolNames(Array(Set(names)))
+            return MCPToolResult(content: "Enabled categories: \(cats) → tools: \(names)", isError: false)
 
         case "tools.enable_ttl":
             guard let minutes = arguments["minutes"] as? Int else {

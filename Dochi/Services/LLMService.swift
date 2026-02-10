@@ -88,26 +88,13 @@ final class LLMService: ObservableObject {
         switch provider {
         case .openai, .zai:
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            let body = buildOpenAIBody(
-                messages: messages,
-                systemPrompt: systemPrompt,
-                model: model,
-                provider: provider,
-                tools: tools,
-                toolResults: toolResults
-            )
+            let body = OpenAIProviderHelper.buildBody(messages: messages, systemPrompt: systemPrompt, model: model, tools: tools, toolResults: toolResults, providerIsZAI: provider == .zai)
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         case .anthropic:
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
             request.setValue(Constants.LLM.anthropicAPIVersion, forHTTPHeaderField: "anthropic-version")
-            let body = buildAnthropicBody(
-                messages: messages,
-                systemPrompt: systemPrompt,
-                model: model,
-                tools: tools,
-                toolResults: toolResults
-            )
+            let body = AnthropicProviderHelper.buildBody(messages: messages, systemPrompt: systemPrompt, model: model, tools: tools, toolResults: toolResults, maxTokens: Constants.LLM.anthropicMaxTokens)
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
@@ -332,7 +319,16 @@ final class LLMService: ObservableObject {
 
             switch provider {
             case .openai, .zai:
-                if let (text, toolCallDelta) = Self.parseOpenAIDelta(json) {
+                if let parsed = OpenAIProviderHelper.parseDelta(json) {
+                    let text = parsed.text
+                    var toolCallDelta: ToolCallDelta?
+                    if let tc = parsed.toolCall {
+                        var d = ToolCallDelta()
+                        d.id = tc.id
+                        d.name = tc.name
+                        d.arguments = tc.arguments
+                        toolCallDelta = d
+                    }
                     if let text = text {
                         partialResponse += text
                         for sentence in sentenceChunker.process(text) { self.onSentenceReady?(sentence) }
@@ -357,7 +353,7 @@ final class LLMService: ObservableObject {
                 }
 
             case .anthropic:
-                if let result = Self.parseAnthropicDelta(json) {
+                if let result = AnthropicProviderHelper.parseDelta(json) {
                     switch result {
                     case .text(let text):
                         partialResponse += text
