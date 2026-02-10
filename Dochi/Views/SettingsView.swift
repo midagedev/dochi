@@ -356,30 +356,21 @@ struct SettingsView: View {
                         set: { viewModel.settings.telegramBotToken = $0 }
                     ))
                     HStack {
-                        Text("상태")
-                        Spacer()
-                        if viewModel.settings.telegramEnabled {
-                            Text("수신 대기 중")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("비활성")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    if let lastId = viewModel.settings.telegramLastChatId, viewModel.settings.telegramEnabled {
-                        HStack {
-                            Text("최근 DM 대상: \(String(lastId))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button("테스트 메시지 보내기") {
-                                Task { await viewModel.sendTelegramTestMessage() }
+                        Button("연결 테스트") {
+                            Task {
+                                if viewModel.settings.telegramBotToken.isEmpty { return }
+                                let svc = TelegramService(conversationService: ConversationService())
+                                do {
+                                    let name = try await svc.getMe(token: viewModel.settings.telegramBotToken)
+                                    Log.telegram.info("봇 확인: @\(name)")
+                                } catch {
+                                    Log.telegram.error("봇 확인 실패: \(error.localizedDescription, privacy: .public)")
+                                }
                             }
                         }
-                    } else if viewModel.settings.telegramEnabled {
-                        Text("봇에게 먼저 DM을 보내주세요.")
+                        .disabled(viewModel.settings.telegramBotToken.isEmpty)
+                        Spacer()
+                        Text(viewModel.settings.telegramEnabled ? "수신 대기 중" : "비활성")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

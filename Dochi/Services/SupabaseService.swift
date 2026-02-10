@@ -350,7 +350,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
             let existing: [Row] = try await client
                 .from("telegram_accounts")
                 .select()
-                .eq("telegram_user_id", value: Int(telegramUserId))
+                .eq("telegram_user_id", value: telegramUserId)
                 .eq("workspace_id", value: wsId)
                 .limit(1)
                 .execute()
@@ -368,7 +368,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
                 try await client
                     .from("telegram_accounts")
                     .update(Update(username: username))
-                    .eq("telegram_user_id", value: Int(telegramUserId))
+                    .eq("telegram_user_id", value: telegramUserId)
                     .eq("workspace_id", value: wsId)
                     .execute()
             }
@@ -385,7 +385,7 @@ final class SupabaseService: ObservableObject, SupabaseServiceProtocol {
             let rows: [Row] = try await client
                 .from("telegram_accounts")
                 .select("workspace_id, updated_at")
-                .eq("telegram_user_id", value: Int(telegramUserId))
+                .eq("telegram_user_id", value: telegramUserId)
                 .order("updated_at", ascending: false)
                 .limit(1)
                 .execute()
