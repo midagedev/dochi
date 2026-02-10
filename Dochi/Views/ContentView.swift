@@ -6,29 +6,24 @@ struct ContentView: View {
     // Settings moved to ViewModel toggle for command palette access
     @State private var showChangelog = false
     @State private var showOnboarding = false
-    @State private var inputText = ""
-    @State private var glowPulse = false
-    @State private var glowFlash = false
-    @State private var previousTranscript = ""
 
     private let changelogService = ChangelogService()
+    @State private var splitVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $splitVisibility) {
             SidebarView(showSettings: $viewModel.showSettingsSheet)
-        } content: {
+        } detail: {
             VStack(spacing: 0) {
-                toolbarArea
-                if !viewModel.builtInToolService.activeAlarms.isEmpty {
-                    ActiveAlarmsBar()
-                }
-                Divider()
                 ConversationView()
                 Divider()
-                inputArea
+                InputBar()
+                    .environmentObject(viewModel)
             }
-        } detail: {
-            InspectorView()
+            .safeAreaInset(edge: .top) {
+                AppToolbar()
+                    .environmentObject(viewModel)
+            }
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 300)
         .frame(minWidth: 700, minHeight: 500)
@@ -43,6 +38,7 @@ struct ContentView: View {
             OnboardingView()
         }
         .onAppear {
+            splitVisibility = .all
             let isUITest = ProcessInfo.processInfo.arguments.contains("-uiTest") || ProcessInfo.processInfo.environment["UITEST"] == "1"
             if !isUITest {
                 if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
@@ -75,298 +71,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Toolbar
-
-    private var toolbarArea: some View {
-        HStack(spacing: 12) {
-            // Connection toggle
-            Button {
-                viewModel.toggleConnection()
-            } label: {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(connectionColor)
-                        .frame(width: 8, height: 8)
-                    Text(connectionLabel)
-                        .font(.caption)
-                }
-            }
-            .buttonStyle(.borderless)
-
-            // State indicator
-            if viewModel.isConnected {
-                if isWakeWordActive {
-                    WakeWordIndicator(wakeWord: viewModel.settings.wakeWord)
-                } else {
-                    Text(stateLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-
-            if let error = currentError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            // Context usage indicator (actual usage only)
-            if let _ = viewModel.actualContextUsage {
-                contextUsageIndicator
-            }
-
-            // 자동종료 토글
-            if viewModel.isConnected {
-                Button {
-                    viewModel.autoEndSession.toggle()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: viewModel.autoEndSession ? "timer" : "timer.circle")
-                            .font(.caption)
-                        Text("자동종료")
-                            .font(.caption)
-                    }
-                    .foregroundStyle(viewModel.autoEndSession ? .primary : .tertiary)
-                }
-                .buttonStyle(.borderless)
-                .help(viewModel.autoEndSession ? "자동종료 켜짐: 무응답 시 대화 종료" : "자동종료 꺼짐: 무응답 시 계속 듣기")
-            }
-
-            // Voice indicator
-            if isResponding {
-                HStack(spacing: 4) {
-                    AudioBarsView()
-                    Text("응답 중")
-                        .font(.caption)
-                        .foregroundStyle(.blue)
-                }
-            }
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-    }
-
-    private var connectionColor: Color {
-        switch viewModel.supertonicService.state {
-        case .unloaded: return .red
-        case .loading: return .yellow
-        case .ready:
-            switch viewModel.state {
-            case .idle: return .green
-            case .listening: return .orange
-            case .processing: return .blue
-            case .executingTool: return .cyan
-            case .speaking: return .purple
-            }
-        case .synthesizing: return .blue
-        case .playing: return .purple
-        }
-    }
-
-    private var connectionLabel: String {
-        switch viewModel.supertonicService.state {
-        case .unloaded: return "연결"
-        case .loading: return "로딩 중..."
-        case .ready, .synthesizing, .playing: return "연결됨"
-        }
-    }
-
-    private var stateLabel: String {
-        switch viewModel.state {
-        case .idle: return "대기 중"
-        case .listening: return "듣는 중..."
-        case .processing: return "응답 생성 중..."
-        case .executingTool(let name): return "\(name) 실행 중..."
-        case .speaking: return "음성 재생 중..."
-        }
-    }
-
-    private var currentError: String? {
-        viewModel.errorMessage ?? viewModel.llmService.error ?? viewModel.supertonicService.error
-    }
-
-    private var isWakeWordActive: Bool {
-        viewModel.speechService.state == .waitingForWakeWord
-    }
-
-    private var isResponding: Bool {
-        switch viewModel.state {
-        case .processing, .executingTool, .speaking: return true
-        case .idle, .listening: return false
-        }
-    }
-
-    private var contextUsageIndicator: some View {
-        let info = viewModel.actualContextUsage!
-        return HStack(spacing: 6) {
-            Image(systemName: "gauge")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.secondary.opacity(0.15))
-                Capsule().fill(info.percent < 0.8 ? Color.blue.opacity(0.6) : (info.percent < 1.0 ? Color.orange.opacity(0.7) : Color.red.opacity(0.7)))
-                    .frame(width: max(0, CGFloat(info.percent)) * 90)
-            }
-            .frame(width: 90, height: 8)
-            Text("\(Int(info.percent * 100))%")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(info.percent < 0.8 ? Color.secondary : (info.percent < 1.0 ? Color.orange : Color.red))
-        }
-        .accessibilityIdentifier("indicator.contextUsage")
-    }
-
-    // MARK: - Input Area
-
-    private var isListening: Bool {
-        viewModel.state == .listening
-    }
-
-    private var inputArea: some View {
-        HStack(spacing: 12) {
-            // 마이크 버튼 (연결 시)
-            if viewModel.isConnected {
-                micButton
-            }
-
-            if isListening {
-                listeningContent
-            } else {
-                textInputContent
-            }
-        }
-        .padding()
-        .background(listeningGlow)
-        .animation(.easeInOut(duration: 0.3), value: isListening)
-        .onChange(of: isListening) { _, newValue in
-            if newValue {
-                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
-                    glowPulse = true
-                }
-                previousTranscript = ""
-            } else {
-                glowPulse = false
-                glowFlash = false
-            }
-        }
-        .onChange(of: viewModel.speechService.transcript) { oldValue, newValue in
-            guard isListening, !newValue.isEmpty, newValue != oldValue else { return }
-            // 트랜스크립트 변경 시 반짝임
-            glowFlash = true
-            withAnimation(.easeOut(duration: 0.3)) {
-                glowFlash = false
-            }
-        }
-    }
-
-    private var micButton: some View {
-        Button {
-            if isListening {
-                viewModel.stopListening()
-            } else {
-                viewModel.startListening()
-            }
-        } label: {
-            ZStack {
-                if isListening {
-                    Circle()
-                        .fill(Color.orange.opacity(0.2))
-                        .frame(width: 36, height: 36)
-                        .scaleEffect(glowPulse ? 1.4 : 1.0)
-                        .opacity(glowPulse ? 0.0 : 0.6)
-                }
-                Image(systemName: isListening ? "mic.fill" : "mic")
-                    .font(.title2)
-                    .foregroundStyle(isListening ? .orange : .secondary)
-            }
-            .frame(width: 36, height: 36)
-        }
-        .buttonStyle(.borderless)
-    }
-
-    private var listeningContent: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("듣는 중...")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if !viewModel.speechService.transcript.isEmpty {
-                    Text(viewModel.speechService.transcript)
-                        .font(.body)
-                        .lineLimit(3)
-                        .truncationMode(.head)
-                }
-            }
-            Spacer()
-            AudioBarsView()
-        }
-    }
-
-    private var textInputContent: some View {
-        HStack(spacing: 12) {
-            TextField("메시지를 입력하세요...", text: $inputText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .onSubmit { submitText() }
-                .accessibilityIdentifier("input.textField")
-
-            if isResponding {
-                Button {
-                    viewModel.cancelResponse()
-                } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.red)
-                }
-                .buttonStyle(.borderless)
-                .help("응답 취소")
-            } else {
-                Button {
-                    submitText()
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(
-                            inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? Color.secondary : Color.blue
-                        )
-                }
-                .buttonStyle(.borderless)
-                .disabled(sendDisabled)
-                .accessibilityIdentifier("input.send")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var listeningGlow: some View {
-        if isListening {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.orange.opacity(0.06))
-                .shadow(
-                    color: .orange.opacity(glowFlash ? 0.6 : (glowPulse ? 0.4 : 0.1)),
-                    radius: glowFlash ? 16 : (glowPulse ? 12 : 4)
-                )
-        }
-    }
-
-    private var sendDisabled: Bool {
-        let empty = inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let provider = viewModel.settings.llmProvider
-        let hasKey = !viewModel.settings.apiKey(for: provider).isEmpty
-        return empty || !hasKey || viewModel.state == .processing
-    }
-
-    private func submitText() {
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        inputText = ""
-        viewModel.sendMessage(text)
-    }
 }
 
 // MARK: - Wake Word Indicator
@@ -469,272 +173,448 @@ struct SidebarView: View {
 
     @State private var query: String = ""
 
+    // Accordion open states
+    // Removed 요약: 상단 앱바로 요약 이동
+    @State private var openChats: Bool = true
+    @State private var openAgents: Bool = true
+    @State private var openMemory: Bool = false
+    @State private var openTools: Bool = false
+    @State private var openCloud: Bool = false
+    @State private var openDevices: Bool = false
+
     var body: some View {
         List {
+            // Search
             SectionHeader("검색", compact: true)
-            HStack(spacing: AppSpacing.s) {
+            HStack(spacing: rowSpacing) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("대화 검색...", text: $query)
             }
-            .padding(.horizontal, AppSpacing.s)
+            .padding(.horizontal, rowPaddingH)
+            .padding(.vertical, rowPaddingV)
+
+            // Expand/Collapse helpers
+            HStack(spacing: 8) {
+                Button("모두 펼치기") { setAllOpen(true) }
+                Button("모두 접기") { setAllOpen(false) }
+                Spacer()
+            }
+            .compact(AppFont.caption)
+            .padding(.horizontal, rowPaddingH)
             .padding(.vertical, AppSpacing.xs)
 
-            Section("에이전트") {
-                // 에이전트 페르소나
-                Button {
-                    showAgentPersonaEditor = true
-                } label: {
-                    HStack {
-                        Image(systemName: "person.fill")
-                            .foregroundStyle(.blue)
-                        VStack(alignment: .leading, spacing: 2) {
-                            let agentName = viewModel.settings.activeAgentName
-                            Text(agentName)
-                                .font(.body)
-                            let persona = contextService.loadAgentPersona(agentName: agentName)
-                            Text(persona.isEmpty ? "페르소나 미설정" : persona)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-
-                // 에이전트 기억
-                Button {
-                    showAgentMemoryEditor = true
-                } label: {
-                    HStack {
-                        Image(systemName: "brain")
-                            .foregroundStyle(.mint)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("에이전트 기억")
-                                .font(.body)
-                            let agentMemory = contextService.loadAgentMemory(agentName: viewModel.settings.activeAgentName)
-                            Text(agentMemory.isEmpty ? "비어 있음" : "\(agentMemory.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-
-            Section("시스템 프롬프트") {
-                // 앱 레벨 기본 규칙
-                Button {
-                    showBasePromptEditor = true
-                } label: {
-                    HStack {
-                        Image(systemName: "doc.text")
-                            .foregroundStyle(.orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("기본 규칙")
-                                .font(.body)
-                            let basePrompt = contextService.loadBaseSystemPrompt()
-                            Text(basePrompt.isEmpty ? "설정되지 않음" : basePrompt)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-
-                // 레거시 system.md (존재하는 경우만 표시)
-                let legacySystem = contextService.loadSystem()
-                if !legacySystem.isEmpty {
-                    Button {
-                        showSystemEditor = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "doc.text.fill")
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("system.md (레거시)")
-                                    .font(.body)
-                                Text(legacySystem)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            let profiles = contextService.loadProfiles()
-            if profiles.isEmpty {
-                // 레거시 모드: 단일 사용자 기억
-                Section("사용자 기억") {
-                    Button {
-                        showMemoryEditor = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "brain")
-                                .foregroundStyle(.purple)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("memory.md")
-                                    .font(.body)
-                                let memory = contextService.loadMemory()
-                                Text(memory.isEmpty ? "비어 있음" : "\(memory.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            } else {
-                // 다중 사용자 모드: 가족 기억 + 개인 기억
-                Section("기억") {
-                    Button {
-                        showFamilyMemoryEditor = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "house")
-                                .foregroundStyle(.orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("가족 공유")
-                                    .font(.body)
-                                let family = contextService.loadFamilyMemory()
-                                Text(family.isEmpty ? "비어 있음" : "\(family.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-
-                    ForEach(profiles) { profile in
-                        Button {
-                            editingUserMemoryProfile = profile
-                        } label: {
-                            HStack {
-                                Image(systemName: "brain")
-                                    .foregroundStyle(.purple)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(profile.name)
-                                        .font(.body)
-                                    let userMem = contextService.loadUserMemory(userId: profile.id)
-                                    Text(userMem.isEmpty ? "비어 있음" : "\(userMem.components(separatedBy: .newlines).filter { !$0.isEmpty }.count)개 항목")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            // 현재 사용자 표시
-            if let userName = viewModel.currentUserName {
-                Section("현재 사용자") {
-                    HStack {
-                        Image(systemName: "person.circle.fill")
-                            .foregroundStyle(.green)
-                        Text(userName)
-                            .font(.body)
-                    }
-                }
-            }
-
-            Section("대화") {
-                Button {
-                    viewModel.clearConversation()
-                } label: {
-                    Label("새 대화", systemImage: "plus.circle")
-                }
-                if !viewModel.messages.isEmpty {
-                    HStack {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                            .foregroundStyle(.blue)
-                        Text("현재 대화")
-                            .font(.body)
-                        Spacer()
-                        Text("\(viewModel.messages.count)개")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Section("대화 기록") {
-                if viewModel.conversations.isEmpty {
-                    Text("저장된 대화가 없습니다")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.conversations.filter { query.isEmpty ? true : $0.title.lowercased().contains(query.lowercased()) }) { conv in
-                        Button {
-                            viewModel.loadConversation(conv)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(conv.title)
-                                        .font(.body)
-                                        .lineLimit(1)
-                                    Text(conv.updatedAt, style: .relative)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if viewModel.currentConversationId == conv.id {
-                                    Image(systemName: "checkmark")
-                                        .font(.caption)
-                                        .foregroundStyle(.blue)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                viewModel.deleteConversation(id: conv.id)
-                            } label: {
-                                Label("삭제", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-            }
+            // Accordion sections
+            DisclosureGroup("대화", isExpanded: $openChats) { chatsGroup }
+            DisclosureGroup("에이전트", isExpanded: $openAgents) { agentsGroup }
+            DisclosureGroup("기억", isExpanded: $openMemory) { memoryGroup }
+            DisclosureGroup("도구", isExpanded: $openTools) { toolsGroup }
+            DisclosureGroup("클라우드", isExpanded: $openCloud) { cloudGroup }
+            DisclosureGroup("디바이스", isExpanded: $openDevices) { devicesGroup }
         }
         .listStyle(.sidebar)
-        .sheet(isPresented: $showSystemEditor) {
-            SystemEditorView(contextService: contextService)
-        }
-        .sheet(isPresented: $showBasePromptEditor) {
-            BasePromptEditorView(contextService: contextService)
-        }
-        .sheet(isPresented: $showAgentPersonaEditor) {
-            AgentPersonaEditorView(contextService: contextService, agentName: viewModel.settings.activeAgentName)
-        }
-        .sheet(isPresented: $showAgentMemoryEditor) {
-            AgentMemoryEditorView(contextService: contextService, agentName: viewModel.settings.activeAgentName)
-        }
-        .sheet(isPresented: $showMemoryEditor) {
-            MemoryEditorView(contextService: contextService)
-        }
-        .sheet(isPresented: $showFamilyMemoryEditor) {
-            FamilyMemoryEditorView(contextService: contextService)
-        }
-        .sheet(item: $editingUserMemoryProfile) { profile in
-            UserMemoryEditorView(contextService: contextService, profile: profile)
-        }
+        .scrollContentBackground(.hidden)
+        .background(AppColor.background)
+        .environment(\.defaultMinListRowHeight, minRowHeight)
+        .sheet(isPresented: $showSystemEditor) { SystemEditorView(contextService: contextService) }
+        .sheet(isPresented: $showBasePromptEditor) { BasePromptEditorView(contextService: contextService) }
+        .sheet(isPresented: $showAgentPersonaEditor) { AgentPersonaEditorView(contextService: contextService, agentName: viewModel.settings.activeAgentName) }
+        .sheet(isPresented: $showAgentMemoryEditor) { AgentMemoryEditorView(contextService: contextService, agentName: viewModel.settings.activeAgentName) }
+        .sheet(isPresented: $showMemoryEditor) { MemoryEditorView(contextService: contextService) }
+        .sheet(isPresented: $showFamilyMemoryEditor) { FamilyMemoryEditorView(contextService: contextService) }
+        .sheet(item: $editingUserMemoryProfile) { profile in UserMemoryEditorView(contextService: contextService, profile: profile) }
         .safeAreaInset(edge: .bottom) {
-            Button {
-                showSettings = true
-            } label: {
+            Button { showSettings = true } label: {
                 Label("설정", systemImage: "gear")
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, rowPaddingH)
+                    .padding(.vertical, rowPaddingV)
             }
             .buttonStyle(.borderless)
             .accessibilityIdentifier("open.settings")
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
+    }
+}
+
+// MARK: - Density helpers
+private extension SidebarView {
+    var isCompact: Bool { viewModel.settings.uiDensity == .compact }
+    var rowPaddingH: CGFloat { isCompact ? AppSpacing.s : AppSpacing.s }
+    var rowPaddingV: CGFloat { isCompact ? AppSpacing.xs : AppSpacing.s }
+    var rowSpacing: CGFloat { isCompact ? AppSpacing.s : AppSpacing.s }
+    var minRowHeight: CGFloat { isCompact ? 26 : 32 }
+
+    func setAllOpen(_ v: Bool) {
+        openChats = v; openAgents = v; openMemory = v; openTools = v; openCloud = v; openDevices = v
+    }
+}
+
+// MARK: - Tab content builders
+private extension SidebarView {
+    // Removed homeGroup: 요약 정보는 앱바로 이동
+
+    var toolsGroup: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s) {
+            if let name = viewModel.currentToolExecution { HStack { Image(systemName: "bolt.fill").foregroundStyle(.cyan); Text("\(name) 실행 중…"); Spacer(); ProgressView().controlSize(.small) } }
+            if let enabled = viewModel.builtInToolService.getEnabledToolNames(), !enabled.isEmpty {
+                HStack { Text("사용 중인 도구 ("); Text("\(enabled.count)").bold(); Text(")"); Spacer() }
+                let list = Array(enabled.prefix(8)).joined(separator: ", ") + (enabled.count > 8 ? "…" : "")
+                Text(list).font(.caption).foregroundStyle(.secondary)
+            } else { Text("최근 실행 중인 도구 없음").font(.caption).foregroundStyle(.secondary) }
+            if !viewModel.mcpService.availableTools.isEmpty { Text("MCP 도구 \(viewModel.mcpService.availableTools.count)개").font(.caption) }
+            // Catalog by category with enable toggles
+            let catalog = viewModel.builtInToolService.toolCatalogByCategory()
+            let currentEnabled = Set(viewModel.builtInToolService.getEnabledToolNames() ?? [])
+            ForEach(catalog.keys.sorted(), id: \.self) { category in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(category.uppercased()).compact(AppFont.caption).foregroundStyle(.secondary)
+                    ForEach(catalog[category] ?? [], id: \.self) { toolName in
+                        Toggle(isOn: Binding(
+                            get: { currentEnabled.contains(toolName) },
+                            set: { on in
+                                var new = currentEnabled
+                                if on { new.insert(toolName) } else { new.remove(toolName) }
+                                viewModel.builtInToolService.setEnabledToolNames(Array(new))
+                            }
+                        )) {
+                            Text(toolName).compact(AppFont.caption)
+                        }
+                        .toggleStyle(.switch)
+                    }
+                    .padding(.leading, 2)
+                }
+                .padding(.vertical, 2)
+            }
+            Text("참고: 기본 제공 도구는 항상 활성입니다. 여기서는 추가 활성 도구를 설정합니다.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            Button { showSettings = true } label: { Label("도구 관리 열기", systemImage: "slider.horizontal.3") }.buttonStyle(.plain)
+        }
+    }
+
+    var cloudGroup: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s) {
+            if let supabase = viewModel.supabaseServiceForView, supabase.isConfigured {
+                switch supabase.authState {
+                case .signedOut: HStack { Image(systemName: "person.crop.circle.badge.exclam"); Text("로그인 필요").foregroundStyle(.secondary) }
+                case .signedIn(_, let email): VStack(alignment: .leading, spacing: 4) { HStack { Image(systemName: "person.crop.circle"); Text(email ?? "로그인됨"); Spacer() }; if let ws = supabase.selectedWorkspace { Text("워크스페이스: \(ws.name)").font(.caption).foregroundStyle(.secondary) } }
+                }
+            } else { Text("Supabase 설정이 필요합니다").font(.caption).foregroundStyle(.secondary) }
+            if let device = viewModel.deviceServiceForView, let current = device.currentDevice { HStack(spacing: 6) { Circle().fill(current.isOnline ? Color.green : Color.gray).frame(width: 8, height: 8); Text(current.deviceName); Spacer() } }
+            HStack { Button { showSettings = true } label: { Label("클라우드/디바이스 관리", systemImage: "gear") }; Spacer(); if let supabase = viewModel.supabaseServiceForView, case .signedIn = supabase.authState { Button("워크스페이스 전환/참가") { showSettings = true }.buttonStyle(.plain) } }.buttonStyle(.plain)
+        }
+    }
+
+    var chatsGroup: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s) {
+            HStack {
+                Button { viewModel.clearConversation() } label: { Label("새 대화", systemImage: "plus.circle") }
+                Spacer()
+                if !viewModel.messages.isEmpty {
+                    Text("현재 메시지: \(viewModel.messages.count)").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if viewModel.conversations.isEmpty { Text("저장된 대화가 없습니다").font(.caption).foregroundStyle(.secondary) }
+            else {
+                ForEach(viewModel.conversations.filter { query.isEmpty ? true : $0.title.lowercased().contains(query.lowercased()) }) { conv in
+                    Button { viewModel.loadConversation(conv) } label: {
+                        HStack { VStack(alignment: .leading, spacing: 2) { Text(conv.title).lineLimit(1); Text(conv.updatedAt, style: .relative).font(.caption).foregroundStyle(.secondary) }; Spacer(); if viewModel.currentConversationId == conv.id { Image(systemName: "checkmark").font(.caption).foregroundStyle(.blue) } }
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu { Button(role: .destructive) { viewModel.deleteConversation(id: conv.id) } label: { Label("삭제", systemImage: "trash") } }
+                }
+            }
+        }
+    }
+
+    var agentsGroup: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s) {
+            let agents = contextService.listAgents()
+            if agents.isEmpty { Text("등록된 에이전트가 없습니다").font(.caption).foregroundStyle(.secondary) }
+            else {
+                ForEach(agents, id: \.self) { name in
+                    Button { viewModel.settings.activeAgentName = name } label: {
+                        HStack { Text(name); Spacer(); if viewModel.settings.activeAgentName == name { Image(systemName: "checkmark").foregroundStyle(.blue) } }
+                    }.buttonStyle(.plain)
+                }
+            }
+            HStack(spacing: 8) { Button { showAgentPersonaEditor = true } label: { Label("페르소나 편집", systemImage: "text.badge.star") }; Button { showAgentMemoryEditor = true } label: { Label("에이전트 기억", systemImage: "brain") } }
+        }
+    }
+
+    var memoryGroup: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s) {
+            Button { showBasePromptEditor = true } label: { HStack { Image(systemName: "doc.text").foregroundStyle(.orange); VStack(alignment: .leading, spacing: 2) { Text("기본 규칙"); let basePrompt = contextService.loadBaseSystemPrompt(); Text(basePrompt.isEmpty ? "설정되지 않음" : basePrompt).font(.caption).foregroundStyle(.secondary).lineLimit(1) }; Spacer() } }.buttonStyle(.plain)
+            let legacySystem = contextService.loadSystem(); if !legacySystem.isEmpty { Button { showSystemEditor = true } label: { HStack { Image(systemName: "doc.text.fill").foregroundStyle(.secondary); Text("system.md (레거시)"); Spacer() } }.buttonStyle(.plain) }
+            let profiles = contextService.loadProfiles()
+            if profiles.isEmpty { Button { showMemoryEditor = true } label: { HStack { Image(systemName: "brain").foregroundStyle(.purple); Text("사용자 기억 편집"); Spacer() } }.buttonStyle(.plain) }
+            else {
+                Button { showFamilyMemoryEditor = true } label: { HStack { Image(systemName: "house").foregroundStyle(.orange); Text("가족 공유 기억 편집"); Spacer() } }.buttonStyle(.plain)
+                ForEach(profiles) { profile in Button { editingUserMemoryProfile = profile } label: { HStack { Image(systemName: "person"); Text(profile.name); Spacer() } }.buttonStyle(.plain) }
+            }
+        }
+    }
+
+    var devicesGroup: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s) {
+            if let device = viewModel.deviceServiceForView, let current = device.currentDevice {
+                HStack(spacing: 8) { Circle().fill(current.isOnline ? Color.green : Color.gray).frame(width: 8, height: 8); VStack(alignment: .leading, spacing: 2) { Text(current.deviceName); HStack(spacing: 6) { Text(current.platform).font(.caption).foregroundStyle(.secondary); if !current.capabilities.isEmpty { Text(current.capabilities.joined(separator: ", ")).font(.caption2).foregroundStyle(.tertiary) } } }; Spacer() }
+            } else { Text("디바이스 정보 없음").font(.caption).foregroundStyle(.secondary) }
+            Button { showSettings = true } label: { Label("디바이스 관리 열기", systemImage: "desktopcomputer") }.buttonStyle(.plain)
+        }
+    }
+    var homeSection: some View {
+        Section("개요") {
+            // Connection quick toggle
+            Button { viewModel.toggleConnection() } label: {
+                HStack {
+                    Circle().fill(connectionColor).frame(width: 8, height: 8)
+                    Text(viewModel.isConnected ? "연결됨" : "연결")
+                    Spacer()
+                }
+            }.buttonStyle(.plain)
+
+            // Model/provider
+            HStack {
+                Image(systemName: "brain.head.profile").foregroundStyle(.blue)
+                Text("\(viewModel.settings.llmProvider.displayName) / \(viewModel.settings.llmModel)")
+                    .lineLimit(1)
+                Spacer()
+            }
+
+            // Context usage
+            if let usage = viewModel.actualContextUsage {
+                contextUsageRow(usage)
+            }
+
+            // Current user
+            if let user = viewModel.currentUserName {
+                HStack {
+                    Image(systemName: "person.circle.fill").foregroundStyle(.green)
+                    Text(user)
+                    Spacer()
+                }
+            }
+
+            // Messages count
+            if !viewModel.messages.isEmpty {
+                HStack {
+                    Image(systemName: "text.bubble").foregroundStyle(.secondary)
+                    Text("메시지 \(viewModel.messages.count)개")
+                    Spacer()
+                }
+            }
+
+            // Quick actions
+            Button { viewModel.clearConversation() } label: { Label("새 대화", systemImage: "plus.circle") }.buttonStyle(.plain)
+            Button { showSettings = true } label: { Label("설정", systemImage: "gear") }.buttonStyle(.plain)
+        }
+    }
+
+    var toolsSection: some View {
+        Section("도구") {
+            if let name = viewModel.currentToolExecution {
+                HStack {
+                    Image(systemName: "bolt.fill").foregroundStyle(.cyan)
+                    Text("\(name) 실행 중…")
+                    Spacer(); ProgressView().controlSize(.small)
+                }
+            } else {
+                Text("최근 실행 중인 도구 없음").font(.caption).foregroundStyle(.secondary)
+            }
+
+            // Enabled tools summary (if available)
+            if let enabled = viewModel.builtInToolService.getEnabledToolNames(), !enabled.isEmpty {
+                HStack { Text("사용 중인 도구 ("); Text("\(enabled.count)").bold(); Text(")"); Spacer() }
+                let list = Array(enabled.prefix(8)).joined(separator: ", ") + (enabled.count > 8 ? "…" : "")
+                Text(list).font(.caption).foregroundStyle(.secondary)
+            }
+
+            if !viewModel.mcpService.availableTools.isEmpty {
+                Text("MCP 도구 \(viewModel.mcpService.availableTools.count)개").font(.caption)
+            }
+
+            Button { showSettings = true } label: { Label("도구 관리 열기", systemImage: "slider.horizontal.3") }.buttonStyle(.plain)
+        }
+    }
+
+    var cloudSection: some View {
+        Section("클라우드") {
+            if let supabase = viewModel.supabaseServiceForView, supabase.isConfigured {
+                switch supabase.authState {
+                case .signedOut:
+                    HStack { Image(systemName: "person.crop.circle.badge.exclam"); Text("로그인 필요").foregroundStyle(.secondary) }
+                case .signedIn(_, let email):
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack { Image(systemName: "person.crop.circle"); Text(email ?? "로그인됨"); Spacer() }
+                        if let ws = supabase.selectedWorkspace { Text("워크스페이스: \(ws.name)").font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+            } else {
+                Text("Supabase 설정이 필요합니다").font(.caption).foregroundStyle(.secondary)
+            }
+            // Device brief
+            if let device = viewModel.deviceServiceForView, let current = device.currentDevice {
+                HStack(spacing: 6) {
+                    Circle().fill(current.isOnline ? Color.green : Color.gray).frame(width: 8, height: 8)
+                    Text(current.deviceName)
+                    Spacer()
+                }
+            }
+            HStack {
+                Button { showSettings = true } label: { Label("클라우드/디바이스 관리", systemImage: "gear") }
+                Spacer()
+                if let supabase = viewModel.supabaseServiceForView, case .signedIn = supabase.authState {
+                    Button("워크스페이스 전환/참가") { showSettings = true }.buttonStyle(.plain)
+                }
+            }.buttonStyle(.plain)
+        }
+    }
+
+    var agentsSection: some View {
+        Section("에이전트") {
+            let agents = contextService.listAgents()
+            if agents.isEmpty {
+                Text("등록된 에이전트가 없습니다").font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(agents, id: \.self) { name in
+                    Button {
+                        viewModel.settings.activeAgentName = name
+                    } label: {
+                        HStack {
+                            Text(name)
+                            Spacer()
+                            if viewModel.settings.activeAgentName == name {
+                                Image(systemName: "checkmark").foregroundStyle(.blue)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack(spacing: 8) {
+                Button { showAgentPersonaEditor = true } label: { Label("페르소나 편집", systemImage: "text.badge.star") }
+                Button { showAgentMemoryEditor = true } label: { Label("에이전트 기억", systemImage: "brain") }
+            }
+        }
+    }
+
+    var memorySection: some View {
+        Section("기억") {
+            // Base rules
+            Button { showBasePromptEditor = true } label: {
+                HStack {
+                    Image(systemName: "doc.text").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("기본 규칙")
+                        let basePrompt = contextService.loadBaseSystemPrompt()
+                        Text(basePrompt.isEmpty ? "설정되지 않음" : basePrompt).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }.buttonStyle(.plain)
+
+            // Legacy system (if any)
+            let legacySystem = contextService.loadSystem()
+            if !legacySystem.isEmpty {
+                Button { showSystemEditor = true } label: {
+                    HStack { Image(systemName: "doc.text.fill").foregroundStyle(.secondary); Text("system.md (레거시)"); Spacer() }
+                }.buttonStyle(.plain)
+            }
+
+            // Memory: personal / family
+            let profiles = contextService.loadProfiles()
+            if profiles.isEmpty {
+                Button { showMemoryEditor = true } label: {
+                    HStack { Image(systemName: "brain").foregroundStyle(.purple); Text("사용자 기억 편집"); Spacer() }
+                }.buttonStyle(.plain)
+            } else {
+                Button { showFamilyMemoryEditor = true } label: {
+                    HStack { Image(systemName: "house").foregroundStyle(.orange); Text("가족 공유 기억 편집"); Spacer() }
+                }.buttonStyle(.plain)
+                ForEach(profiles) { profile in
+                    Button { editingUserMemoryProfile = profile } label: {
+                        HStack { Image(systemName: "person"); Text(profile.name); Spacer() }
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    var devicesSection: some View {
+        Section("디바이스") {
+            if let device = viewModel.deviceServiceForView, let current = device.currentDevice {
+                HStack(spacing: 8) {
+                    Circle().fill(current.isOnline ? Color.green : Color.gray).frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(current.deviceName)
+                        HStack(spacing: 6) {
+                            Text(current.platform).font(.caption).foregroundStyle(.secondary)
+                            if !current.capabilities.isEmpty { Text(current.capabilities.joined(separator: ", ")).font(.caption2).foregroundStyle(.tertiary) }
+                        }
+                    }
+                    Spacer()
+                }
+            } else {
+                Text("디바이스 정보 없음").font(.caption).foregroundStyle(.secondary)
+            }
+            Button { showSettings = true } label: { Label("디바이스 관리 열기", systemImage: "desktopcomputer") }.buttonStyle(.plain)
+        }
+    }
+
+    var chatsSection: some View {
+        Section("대화 기록") {
+            if viewModel.conversations.isEmpty {
+                Text("저장된 대화가 없습니다").font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(viewModel.conversations.filter { query.isEmpty ? true : $0.title.lowercased().contains(query.lowercased()) }) { conv in
+                    Button { viewModel.loadConversation(conv) } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(conv.title).lineLimit(1)
+                                Text(conv.updatedAt, style: .relative).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if viewModel.currentConversationId == conv.id { Image(systemName: "checkmark").font(.caption).foregroundStyle(.blue) }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu { Button(role: .destructive) { viewModel.deleteConversation(id: conv.id) } label: { Label("삭제", systemImage: "trash") } }
+                }
+            }
+        }
+    }
+
+    // Helpers
+    func contextUsageRow(_ info: DochiViewModel.ContextUsageInfo) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "gauge").font(.caption).foregroundStyle(.secondary)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.15))
+                Capsule().fill(info.percent < 0.8 ? Color.blue.opacity(0.6) : (info.percent < 1.0 ? Color.orange.opacity(0.7) : Color.red.opacity(0.7)))
+                    .frame(width: max(0, CGFloat(info.percent)) * 90)
+            }
+            .frame(width: 90, height: 8)
+            Text("\(Int(info.percent * 100))%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(info.percent < 0.8 ? Color.secondary : (info.percent < 1.0 ? Color.orange : Color.red))
+            Spacer()
+        }
+    }
+
+    var connectionColor: Color {
+        switch viewModel.supertonicService.state {
+        case .unloaded: return .red
+        case .loading: return .yellow
+        case .ready:
+            switch viewModel.state {
+            case .idle: return .green
+            case .listening: return .orange
+            case .processing: return .blue
+            case .executingTool: return .cyan
+            case .speaking: return .purple
+            }
+        case .synthesizing: return .blue
+        case .playing: return .purple
+        }
     }
 }

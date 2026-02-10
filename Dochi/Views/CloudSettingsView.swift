@@ -11,7 +11,7 @@ struct CloudSettingsView: View {
     @State private var isLoading = false
 
     var body: some View {
-        Section("클라우드") {
+        VStack(alignment: .leading, spacing: 8) {
             if !supabaseService.isConfigured {
                 configurationNeededView
             } else {

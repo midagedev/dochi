@@ -44,6 +44,9 @@ final class AppSettings: ObservableObject {
     @Published var chatFontSize: Double {
         didSet { defaults.set(chatFontSize, forKey: Keys.chatFontSize) }
     }
+    @Published var uiDensity: UIDensity {
+        didSet { defaults.set(uiDensity.rawValue, forKey: Keys.uiDensity) }
+    }
 
     // STT settings
     @Published var sttSilenceTimeout: Double {
@@ -123,6 +126,7 @@ final class AppSettings: ObservableObject {
         static let ttsSpeed = "settings.ttsSpeed"
         static let ttsDiffusionSteps = "settings.ttsDiffusionSteps"
         static let chatFontSize = "settings.chatFontSize"
+        static let uiDensity = "settings.uiDensity"
         static let sttSilenceTimeout = "settings.sttSilenceTimeout"
         static let contextAutoCompress = "settings.contextAutoCompress"
         static let contextMaxSize = "settings.contextMaxSize"
@@ -175,6 +179,11 @@ final class AppSettings: ObservableObject {
         self.ttsDiffusionSteps = defaults.object(forKey: Keys.ttsDiffusionSteps) as? Int ?? Constants.Defaults.ttsDiffusionSteps
 
         self.chatFontSize = defaults.object(forKey: Keys.chatFontSize) as? Double ?? Constants.Defaults.chatFontSize
+        if let densityRaw = defaults.string(forKey: Keys.uiDensity), let d = UIDensity(rawValue: densityRaw) {
+            self.uiDensity = d
+        } else {
+            self.uiDensity = .standard
+        }
         self.sttSilenceTimeout = defaults.object(forKey: Keys.sttSilenceTimeout) as? Double ?? Constants.Defaults.sttSilenceTimeout
         self.contextAutoCompress = defaults.object(forKey: Keys.contextAutoCompress) as? Bool ?? true
         self.contextMaxSize = defaults.object(forKey: Keys.contextMaxSize) as? Int ?? Constants.Defaults.contextMaxSize

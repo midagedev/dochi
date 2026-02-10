@@ -49,37 +49,20 @@ struct InspectorView: View {
 private struct ContextPanel: View {
     let viewModel: DochiViewModel
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s) {
-            SectionHeader("시스템 프롬프트")
-            Text(viewModel.settings.buildInstructions())
-                .compact(AppFont.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(10)
-
-            SectionHeader("대화 메타")
-            HStack {
-                Text("메시지 수").compact(AppFont.caption)
-                Spacer()
-                Text("\(viewModel.messages.count)").compact(AppFont.caption)
-            }
-            .foregroundStyle(.secondary)
-
-            HStack {
-                Text("모델").compact(AppFont.caption)
-                Spacer()
-                Text("\(viewModel.settings.llmProvider.displayName) / \(viewModel.settings.llmModel)")
+        VStack(alignment: .leading, spacing: AppSpacing.m) {
+            SectionCard("시스템 프롬프트", icon: "rectangle.and.pencil.and.ellipsis") {
+                Text(viewModel.settings.buildInstructions())
                     .compact(AppFont.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(10)
             }
-            .foregroundStyle(.secondary)
 
-            if let usage = viewModel.actualContextUsage {
-                HStack {
-                    Text("컨텍스트 사용량").compact(AppFont.caption)
-                    Spacer()
-                    Text("\(usage.usedTokens) / \(usage.limitTokens) tokens (\(Int(usage.percent * 100))%)")
-                        .compact(AppFont.caption.monospacedDigit())
+            SectionCard("대화 메타", icon: "info.circle") {
+                KVRow(k: "메시지 수", v: "\(viewModel.messages.count)")
+                KVRow(k: "모델", v: "\(viewModel.settings.llmProvider.displayName) / \(viewModel.settings.llmModel)")
+                if let usage = viewModel.actualContextUsage {
+                    KVRow(k: "컨텍스트", v: "\(usage.usedTokens) / \(usage.limitTokens) (\(Int(usage.percent * 100))%)")
                 }
-                .foregroundStyle(.secondary)
             }
         }
     }
@@ -88,35 +71,36 @@ private struct ContextPanel: View {
 private struct ToolsPanel: View {
     let viewModel: DochiViewModel
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s) {
-            SectionHeader("도구 상태")
-            if let name = viewModel.currentToolExecution {
-                HStack(spacing: AppSpacing.s) {
-                    Image(systemName: "hammer")
-                        .foregroundStyle(.cyan)
-                    Text("\(name) 실행 중...")
+        VStack(alignment: .leading, spacing: AppSpacing.m) {
+            SectionCard("도구 상태", icon: "hammer") {
+                if let name = viewModel.currentToolExecution {
+                    HStack(spacing: AppSpacing.s) {
+                        Image(systemName: "bolt.fill").foregroundStyle(.cyan).font(.caption)
+                        Text("\(name) 실행 중...").compact(AppFont.caption)
+                        Spacer()
+                        ProgressView().controlSize(.small)
+                    }
+                } else {
+                    Text("최근 실행 중인 도구 없음")
                         .compact(AppFont.caption)
+                        .foregroundStyle(.secondary)
                 }
-            } else {
-                Text("최근 실행 중인 도구 없음")
-                    .compact(AppFont.caption)
-                    .foregroundStyle(.secondary)
             }
 
-            // Registry quick controls
-            SectionHeader("도구 레지스트리")
-            RegistryControls(viewModel: viewModel)
+            SectionCard("도구 레지스트리", icon: "shippingbox") {
+                RegistryControls(viewModel: viewModel)
+            }
 
             if !viewModel.mcpService.availableTools.isEmpty {
-                SectionHeader("MCP 도구")
-                ForEach(viewModel.mcpService.availableTools) { tool in
-                    HStack(spacing: AppSpacing.s) {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .foregroundStyle(.cyan)
-                        Text(tool.name).compact(AppFont.caption)
-                        Spacer()
+                SectionCard("MCP 도구", icon: "wrench.and.screwdriver") {
+                    ForEach(viewModel.mcpService.availableTools) { tool in
+                        HStack(spacing: AppSpacing.s) {
+                            Image(systemName: "wrench.and.screwdriver").foregroundStyle(.cyan)
+                            Text(tool.name).compact(AppFont.caption)
+                            Spacer()
+                        }
+                        .padding(.vertical, AppSpacing.xs)
                     }
-                    .padding(.vertical, AppSpacing.xs)
                 }
             }
         }
@@ -191,8 +175,7 @@ private struct RegistryControls: View {
 
 private struct SourcesPanel: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s) {
-            SectionHeader("출처")
+        SectionCard("출처", icon: "link") {
             Text("연결된 출처 없음")
                 .compact(AppFont.caption)
                 .foregroundStyle(.secondary)
@@ -208,49 +191,52 @@ private struct ClaudeUIPanel: View {
     @State private var sessions: [String: Any] = [:]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s) {
-            SectionHeader("연결")
-            HStack {
-                Text(viewModel.settings.claudeUIEnabled ? "사용" : "비활성").compact(AppFont.caption)
-                Spacer()
-                Button("새로고침") { Task { await refresh() } }
-                    .compact(AppFont.caption)
-                    .disabled(!viewModel.settings.claudeUIEnabled)
-            }
-            if !health.isEmpty {
-                Text(health).compact(AppFont.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: AppSpacing.m) {
+            SectionCard("연결", icon: "network") {
+                HStack {
+                    Text(viewModel.settings.claudeUIEnabled ? "사용" : "비활성").compact(AppFont.caption)
+                    Spacer()
+                    Button("새로고침") { Task { await refresh() } }
+                        .compact(AppFont.caption)
+                        .disabled(!viewModel.settings.claudeUIEnabled)
+                }
+                if !health.isEmpty {
+                    Text(health).compact(AppFont.caption).foregroundStyle(.secondary)
+                }
             }
 
-            SectionHeader("프로젝트")
-            if projects.isEmpty {
-                Text("프로젝트 없음 또는 로드 안 됨").compact(AppFont.caption).foregroundStyle(.tertiary)
-            } else {
-                ForEach(Array(projects.indices), id: \.self) { i in
-                    let p = projects[i]
-                    let name = (p["name"] as? String) ?? "(unknown)"
-                    Button {
-                        selectedProject = name
-                        Task { await loadSessions(project: name) }
-                    } label: { Text(name).compact(AppFont.caption) }
-                    .buttonStyle(.plain)
+            SectionCard("프로젝트", icon: "folder") {
+                if projects.isEmpty {
+                    Text("프로젝트 없음 또는 로드 안 됨").compact(AppFont.caption).foregroundStyle(.tertiary)
+                } else {
+                    ForEach(Array(projects.indices), id: \.self) { i in
+                        let p = projects[i]
+                        let name = (p["name"] as? String) ?? "(unknown)"
+                        Button {
+                            selectedProject = name
+                            Task { await loadSessions(project: name) }
+                        } label: { Text(name).compact(AppFont.caption) }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
 
             if let sp = selectedProject {
-                SectionHeader("세션 — \(sp)")
-                if let arr = sessions["sessions"] as? [[String: Any]], !arr.isEmpty {
-                    ForEach(Array(arr.indices), id: \.self) { i in
-                        let s = arr[i]
-                        HStack {
-                            Text((s["summary"] as? String) ?? "(no summary)")
-                                .compact(AppFont.caption)
-                                .lineLimit(1)
-                            Spacer()
-                            Text((s["lastActivity"] as? String) ?? "").compact(AppFont.caption).foregroundStyle(.secondary)
+                SectionCard("세션 — \(sp)", icon: "clock") {
+                    if let arr = sessions["sessions"] as? [[String: Any]], !arr.isEmpty {
+                        ForEach(Array(arr.indices), id: \.self) { i in
+                            let s = arr[i]
+                            HStack {
+                                Text((s["summary"] as? String) ?? "(no summary)")
+                                    .compact(AppFont.caption)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text((s["lastActivity"] as? String) ?? "").compact(AppFont.caption).foregroundStyle(.secondary)
+                            }
                         }
+                    } else {
+                        Text("세션 없음").compact(AppFont.caption).foregroundStyle(.tertiary)
                     }
-                } else {
-                    Text("세션 없음").compact(AppFont.caption).foregroundStyle(.tertiary)
                 }
             }
         }
@@ -278,8 +264,7 @@ private struct ClaudeUIPanel: View {
 private struct VarsPanel: View {
     let viewModel: DochiViewModel
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s) {
-            SectionHeader("런타임 변수")
+        SectionCard("런타임 변수", icon: "terminal") {
             Group {
                 KVRow(k: "모델", v: "\(viewModel.settings.llmProvider.displayName) / \(viewModel.settings.llmModel)")
                 KVRow(k: "상태", v: "\(String(describing: viewModel.state))")

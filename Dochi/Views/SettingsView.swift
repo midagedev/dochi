@@ -35,405 +35,323 @@ struct SettingsView: View {
                     .keyboardShortcut(.escape)
             }
             .padding()
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .bottom) { Rectangle().fill(AppColor.border).frame(height: 1) }
 
-            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppSpacing.m) {
+                    // API Keys
+                    SectionCard("API 키", icon: "key.fill") {
+                        SecureField("OpenAI API 키", text: $openaiKey)
+                            .onChange(of: openaiKey) { _, newValue in viewModel.settings.apiKey = newValue }
+                        SecureField("Anthropic API 키", text: $anthropicKey)
+                            .onChange(of: anthropicKey) { _, newValue in viewModel.settings.anthropicApiKey = newValue }
+                        SecureField("Z.AI API 키", text: $zaiKey)
+                            .onChange(of: zaiKey) { _, newValue in viewModel.settings.zaiApiKey = newValue }
+                        SecureField("Tavily API 키 (웹검색)", text: $tavilyKey)
+                            .onChange(of: tavilyKey) { _, newValue in viewModel.settings.tavilyApiKey = newValue }
+                        SecureField("Fal.ai API 키 (이미지생성)", text: $falaiKey)
+                            .onChange(of: falaiKey) { _, newValue in viewModel.settings.falaiApiKey = newValue }
+                    }
 
-            Form {
-                SectionHeader("General")
-                // MARK: - API Keys
-                Section("API 키") {
-                    SecureField("OpenAI API 키", text: $openaiKey)
-                        .onChange(of: openaiKey) { _, newValue in
-                            viewModel.settings.apiKey = newValue
-                        }
-                    SecureField("Anthropic API 키", text: $anthropicKey)
-                        .onChange(of: anthropicKey) { _, newValue in
-                            viewModel.settings.anthropicApiKey = newValue
-                        }
-                    SecureField("Z.AI API 키", text: $zaiKey)
-                        .onChange(of: zaiKey) { _, newValue in
-                            viewModel.settings.zaiApiKey = newValue
-                        }
-                    SecureField("Tavily API 키 (웹검색)", text: $tavilyKey)
-                        .onChange(of: tavilyKey) { _, newValue in
-                            viewModel.settings.tavilyApiKey = newValue
-                        }
-                    SecureField("Fal.ai API 키 (이미지생성)", text: $falaiKey)
-                        .onChange(of: falaiKey) { _, newValue in
-                            viewModel.settings.falaiApiKey = newValue
-                        }
-                }
-
-                // MARK: - LLM
-                SectionHeader("Models")
-                Section("LLM") {
-                    Picker("제공자", selection: $viewModel.settings.llmProvider) {
-                        ForEach(LLMProvider.allCases, id: \.self) { provider in
-                            Text(provider.displayName).tag(provider)
-                        }
-                    }
-                    Picker("모델", selection: $viewModel.settings.llmModel) {
-                        ForEach(viewModel.settings.llmProvider.models, id: \.self) { model in
-                            Text(model).tag(model)
-                        }
-                    }
-                    Toggle("자동 모델 선택 (베타)", isOn: $viewModel.settings.autoModelRoutingEnabled)
-                    Text("짧은 대화는 경량 모델, 복잡/긴 요청은 고급 모델로 자동 선택합니다.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                // MARK: - Display
-                SectionHeader("Display")
-                Section("표시") {
-                    HStack {
-                        Text("글자 크기")
-                        Slider(value: $viewModel.settings.chatFontSize, in: 12...28, step: 1)
-                        Text("\(Int(viewModel.settings.chatFontSize))pt")
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 36)
-                    }
-                    Text("가나다라마바사 ABC 123")
-                        .font(.system(size: viewModel.settings.chatFontSize))
-                        .foregroundStyle(.secondary)
-                }
-
-                // MARK: - STT
-                SectionHeader("STT")
-                Section("STT") {
-                    HStack {
-                        Text("무음 대기")
-                        Slider(value: $viewModel.settings.sttSilenceTimeout, in: 0.5...3.0, step: 0.5)
-                        Text(String(format: "%.1f초", viewModel.settings.sttSilenceTimeout))
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 36)
-                    }
-                }
-
-                // MARK: - TTS
-                SectionHeader("TTS")
-                Section("TTS") {
-                    Picker("음성", selection: $viewModel.settings.supertonicVoice) {
-                        ForEach(SupertonicVoice.allCases, id: \.self) { voice in
-                            Text(voice.displayName).tag(voice)
-                        }
-                    }
-                    HStack {
-                        Text("속도")
-                        Slider(value: $viewModel.settings.ttsSpeed, in: 0.8...1.5, step: 0.05)
-                        Text(String(format: "%.2f", viewModel.settings.ttsSpeed))
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 36)
-                    }
-                    HStack {
-                        Text("표현력")
-                        Slider(value: diffusionStepsBinding, in: 4...20, step: 2)
-                        Text("\(viewModel.settings.ttsDiffusionSteps)")
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 20)
-                    }
-                }
-
-                // MARK: - System Prompt
-                SectionHeader("Context & Memory")
-                Section("시스템 프롬프트") {
-                    VStack(alignment: .leading) {
-                        let system = contextService.loadSystem()
-                        Text(system.isEmpty
-                             ? "페르소나와 행동 지침이 설정되지 않았습니다."
-                             : system)
-                            .font(.body)
-                            .foregroundStyle(system.isEmpty ? .tertiary : .primary)
-                            .lineLimit(3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        HStack {
-                            Button("편집") {
-                                showSystemEditor = true
+                    // LLM
+                    SectionCard("LLM", icon: "brain.head.profile") {
+                        Picker("제공자", selection: $viewModel.settings.llmProvider) {
+                            ForEach(LLMProvider.allCases, id: \.self) { provider in
+                                Text(provider.displayName).tag(provider)
                             }
-                            Spacer()
-                            Text("system.md")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
                         }
+                        Picker("모델", selection: $viewModel.settings.llmModel) {
+                            ForEach(viewModel.settings.llmProvider.models, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        Toggle("자동 모델 선택 (베타)", isOn: $viewModel.settings.autoModelRoutingEnabled)
+                        Text("짧은 대화는 경량 모델, 복잡/긴 요청은 고급 모델로 자동 선택합니다.")
+                            .compact(AppFont.caption)
+                            .foregroundStyle(.secondary)
                     }
-                }
 
-                // MARK: - User Memory
-                Section("사용자 기억") {
-                    VStack(alignment: .leading) {
-                        let memory = contextService.loadMemory()
-                        Text(memory.isEmpty
-                             ? "저장된 기억이 없습니다. 대화 종료 시 자동으로 추가됩니다."
-                             : memory)
-                            .font(.body)
-                            .foregroundStyle(memory.isEmpty ? .tertiary : .primary)
-                            .lineLimit(5)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    // Display
+                    SectionCard("표시", icon: "textformat.size") {
                         HStack {
-                            Button("편집") {
-                                showMemoryEditor = true
-                            }
-                            if !memory.isEmpty {
-                                Button("초기화", role: .destructive) {
-                                    contextService.saveMemory("")
-                                }
-                            }
-                            Spacer()
-                            Text("\(contextService.memorySize / 1024)KB / \(viewModel.settings.contextMaxSize / 1024)KB")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Toggle("자동 압축", isOn: $viewModel.settings.contextAutoCompress)
-                    if viewModel.settings.contextAutoCompress {
-                        HStack {
-                            Text("최대 크기")
-                            Slider(value: contextMaxSizeBinding, in: 5...50, step: 5)
-                            Text("\(viewModel.settings.contextMaxSize / 1024)KB")
+                            Text("글자 크기")
+                            Slider(value: $viewModel.settings.chatFontSize, in: 12...28, step: 1)
+                            Text("\(Int(viewModel.settings.chatFontSize))pt")
                                 .font(.caption.monospacedDigit())
-                                .frame(width: 40)
+                                .frame(width: 36)
+                        }
+                        Text("가나다라마바사 ABC 123")
+                            .font(.system(size: viewModel.settings.chatFontSize))
+                            .foregroundStyle(.secondary)
+
+                        Picker("밀도", selection: $viewModel.settings.uiDensity) {
+                            ForEach(UIDensity.allCases) { d in
+                                Text(d.displayName).tag(d)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    // STT
+                    SectionCard("STT", icon: "waveform") {
+                        HStack {
+                            Text("무음 대기")
+                            Slider(value: $viewModel.settings.sttSilenceTimeout, in: 0.5...3.0, step: 0.5)
+                            Text(String(format: "%.1f초", viewModel.settings.sttSilenceTimeout))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 36)
                         }
                     }
-                }
 
-                // MARK: - Family Profiles
-                SectionHeader("Profiles")
-                Section("가족 구성원") {
-                    let profiles = contextService.loadProfiles()
-                    if profiles.isEmpty {
-                        Text("가족 구성원을 추가하면 사용자별 기억이 분리됩니다.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        ForEach(profiles) { profile in
+                    // TTS
+                    SectionCard("TTS", icon: "speaker.wave.2") {
+                        Picker("음성", selection: $viewModel.settings.supertonicVoice) {
+                            ForEach(SupertonicVoice.allCases, id: \.self) { voice in
+                                Text(voice.displayName).tag(voice)
+                            }
+                        }
+                        HStack {
+                            Text("속도")
+                            Slider(value: $viewModel.settings.ttsSpeed, in: 0.8...1.5, step: 0.05)
+                            Text(String(format: "%.2f", viewModel.settings.ttsSpeed))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 36)
+                        }
+                        HStack {
+                            Text("표현력")
+                            Slider(value: diffusionStepsBinding, in: 4...20, step: 2)
+                            Text("\(viewModel.settings.ttsDiffusionSteps)")
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 20)
+                        }
+                    }
+
+                    // System Prompt
+                    SectionCard("시스템 프롬프트", icon: "rectangle.and.pencil.and.ellipsis") {
+                        VStack(alignment: .leading) {
+                            let system = contextService.loadSystem()
+                            Text(system.isEmpty ? "페르소나와 행동 지침이 설정되지 않았습니다." : system)
+                                .font(.body)
+                                .foregroundStyle(system.isEmpty ? .tertiary : .primary)
+                                .lineLimit(3)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 6) {
-                                        Text(profile.name)
-                                            .font(.body)
-                                        if viewModel.settings.defaultUserId == profile.id {
-                                            Text("기본")
-                                                .font(.caption2)
-                                                .padding(.horizontal, 4)
-                                                .padding(.vertical, 1)
-                                                .background(.blue.opacity(0.15), in: Capsule())
-                                                .foregroundStyle(.blue)
-                                        }
-                                    }
-                                    if !profile.aliases.isEmpty {
-                                        Text("별칭: \(profile.aliases.joined(separator: ", "))")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    if !profile.description.isEmpty {
-                                        Text(profile.description)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
+                                Button("편집") { showSystemEditor = true }
+                                Spacer()
+                                Text("system.md")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+
+                    // User Memory
+                    SectionCard("사용자 기억", icon: "brain.head.profile") {
+                        VStack(alignment: .leading) {
+                            let memory = contextService.loadMemory()
+                            Text(memory.isEmpty ? "저장된 기억이 없습니다. 대화 종료 시 자동으로 추가됩니다." : memory)
+                                .font(.body)
+                                .foregroundStyle(memory.isEmpty ? .tertiary : .primary)
+                                .lineLimit(5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            HStack {
+                                Button("편집") { showMemoryEditor = true }
+                                if !memory.isEmpty {
+                                    Button("초기화", role: .destructive) { contextService.saveMemory("") }
                                 }
                                 Spacer()
-                                Button {
-                                    editingUserMemoryProfile = profile
-                                } label: {
-                                    Image(systemName: "brain")
-                                        .font(.caption)
-                                }
-                                .buttonStyle(.borderless)
-                                .help("개인 기억 편집")
-                                Button(role: .destructive) {
-                                    deleteProfile(profile)
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.caption)
-                                }
-                                .buttonStyle(.borderless)
+                                Text("\(contextService.memorySize / 1024)KB / \(viewModel.settings.contextMaxSize / 1024)KB")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
-
-                        Picker("기본 사용자", selection: defaultUserBinding) {
-                            Text("없음").tag(nil as UUID?)
-                            ForEach(profiles) { profile in
-                                Text(profile.name).tag(profile.id as UUID?)
-                            }
-                        }
-
-                        Button {
-                            showFamilyMemoryEditor = true
-                        } label: {
+                        Toggle("자동 압축", isOn: $viewModel.settings.contextAutoCompress)
+                        if viewModel.settings.contextAutoCompress {
                             HStack {
-                                Image(systemName: "house")
-                                Text("가족 공유 기억 편집")
+                                Text("최대 크기")
+                                Slider(value: contextMaxSizeBinding, in: 5...50, step: 5)
+                                Text("\(viewModel.settings.contextMaxSize / 1024)KB")
+                                    .font(.caption.monospacedDigit())
+                                    .frame(width: 40)
                             }
                         }
                     }
 
-                    Button {
-                        showAddProfile = true
-                    } label: {
-                        Label("구성원 추가", systemImage: "plus.circle")
-                    }
-                }
-
-                // MARK: - MCP Servers
-                SectionHeader("Tools & MCP")
-                Section("MCP 서버") {
-                    if viewModel.settings.mcpServers.isEmpty {
-                        Text("등록된 MCP 서버가 없습니다.")
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        ForEach(viewModel.settings.mcpServers) { server in
-                            MCPServerRow(
-                                server: server,
-                                isConnected: viewModel.mcpService.connectedServers[server.id] != nil,
-                                onToggle: { enabled in
-                                    var updated = server
-                                    updated.isEnabled = enabled
-                                    viewModel.settings.updateMCPServer(updated)
-                                    if enabled {
-                                        Task {
-                                            do {
-                                                try await viewModel.mcpService.connect(config: updated)
-                                            } catch {
-                                                Log.mcp.error("MCP 서버 연결 실패 (\(updated.name, privacy: .public)): \(error, privacy: .public)")
+                    // Profiles
+                    SectionCard("가족 구성원", icon: "person.2") {
+                        let profiles = contextService.loadProfiles()
+                        if profiles.isEmpty {
+                            Text("가족 구성원을 추가하면 사용자별 기억이 분리됩니다.")
+                                .compact(AppFont.caption)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            ForEach(profiles) { profile in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Text(profile.name).font(.body)
+                                            if viewModel.settings.defaultUserId == profile.id {
+                                                Text("기본")
+                                                    .font(.caption2)
+                                                    .padding(.horizontal, 4)
+                                                    .padding(.vertical, 1)
+                                                    .background(.blue.opacity(0.15), in: Capsule())
+                                                    .foregroundStyle(.blue)
                                             }
                                         }
-                                    } else {
-                                        Task {
-                                            await viewModel.mcpService.disconnect(serverId: server.id)
+                                        if !profile.aliases.isEmpty {
+                                            Text("별칭: \(profile.aliases.joined(separator: ", "))").font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        if !profile.description.isEmpty {
+                                            Text(profile.description).font(.caption).foregroundStyle(.secondary)
                                         }
                                     }
-                                },
-                                onDelete: {
-                                    Task {
-                                        await viewModel.mcpService.disconnect(serverId: server.id)
-                                    }
-                                    viewModel.settings.removeMCPServer(id: server.id)
+                                    Spacer()
+                                    Button { editingUserMemoryProfile = profile } label: { Image(systemName: "brain").font(.caption) }
+                                        .buttonStyle(.borderless)
+                                        .help("개인 기억 편집")
+                                    Button(role: .destructive) { deleteProfile(profile) } label: { Image(systemName: "trash").font(.caption) }
+                                        .buttonStyle(.borderless)
                                 }
-                            )
+                            }
+
+                            Picker("기본 사용자", selection: defaultUserBinding) {
+                                Text("없음").tag(nil as UUID?)
+                                ForEach(profiles) { profile in Text(profile.name).tag(profile.id as UUID?) }
+                            }
+
+                            Button { showFamilyMemoryEditor = true } label: {
+                                HStack { Image(systemName: "house"); Text("가족 공유 기억 편집") }
+                            }
                         }
-                    }
-                    Button {
-                        showAddMCPServer = true
-                    } label: {
-                        Label("서버 추가", systemImage: "plus.circle")
+
+                        Button { showAddProfile = true } label: { Label("구성원 추가", systemImage: "plus.circle") }
                     }
 
-                    if !viewModel.mcpService.availableTools.isEmpty {
-                        DisclosureGroup("사용 가능한 도구 (\(viewModel.mcpService.availableTools.count)개)") {
-                            ForEach(viewModel.mcpService.availableTools) { tool in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(tool.name)
-                                        .font(.body.monospaced())
-                                    if let desc = tool.description {
-                                        Text(desc)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
+                    // Tools & MCP
+                    SectionCard("MCP 서버", icon: "shippingbox") {
+                        if viewModel.settings.mcpServers.isEmpty {
+                            Text("등록된 MCP 서버가 없습니다.").foregroundStyle(.tertiary)
+                        } else {
+                            ForEach(viewModel.settings.mcpServers) { server in
+                                MCPServerRow(
+                                    server: server,
+                                    isConnected: viewModel.mcpService.connectedServers[server.id] != nil,
+                                    onToggle: { enabled in
+                                        var updated = server
+                                        updated.isEnabled = enabled
+                                        viewModel.settings.updateMCPServer(updated)
+                                        if enabled {
+                                            Task { do { try await viewModel.mcpService.connect(config: updated) } catch { Log.mcp.error("MCP 서버 연결 실패 (\(updated.name, privacy: .public)): \(error, privacy: .public)") } }
+                                        } else {
+                                            Task { await viewModel.mcpService.disconnect(serverId: server.id) }
+                                        }
+                                    },
+                                    onDelete: {
+                                        Task { await viewModel.mcpService.disconnect(serverId: server.id) }
+                                        viewModel.settings.removeMCPServer(id: server.id)
                                     }
+                                )
+                            }
+                        }
+                        Button { showAddMCPServer = true } label: { Label("서버 추가", systemImage: "plus.circle") }
+                        if !viewModel.mcpService.availableTools.isEmpty {
+                            DisclosureGroup("사용 가능한 도구 (\(viewModel.mcpService.availableTools.count)개)") {
+                                ForEach(viewModel.mcpService.availableTools) { tool in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(tool.name).font(.body.monospaced())
+                                        if let desc = tool.description { Text(desc).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                                    }
+                                    .padding(.vertical, 2)
                                 }
-                                .padding(.vertical, 2)
                             }
                         }
                     }
-                }
 
-                // MARK: - Wake Word
-                Section("웨이크워드") {
-                    Toggle("웨이크워드 활성화", isOn: wakeWordBinding)
-                    if viewModel.settings.wakeWordEnabled {
-                        HStack {
-                            Text("웨이크워드")
-                            Spacer()
-                            TextField("웨이크워드", text: $viewModel.settings.wakeWord)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 150)
-                        }
-                    }
-                }
-
-                // MARK: - Cloud
-                if let supabase = viewModel.supabaseServiceForView {
-                    CloudSettingsView(supabaseService: supabase)
-                }
-
-                if case .signedIn = viewModel.supabaseService.authState,
-                   let device = viewModel.deviceServiceForView {
-                    DeviceSettingsView(deviceService: device)
-                }
-
-                // MARK: - Messenger
-                Section("메신저") {
-                    Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
-                        .accessibilityIdentifier("integrations.telegram.toggle")
-                    Toggle("텔레그램 스트리밍 응답 사용", isOn: $viewModel.settings.telegramStreamReplies)
-                        .accessibilityIdentifier("integrations.telegram.streaming")
-                    SecureField("Telegram Bot Token", text: Binding(
-                        get: { viewModel.settings.telegramBotToken },
-                        set: { viewModel.settings.telegramBotToken = $0 }
-                    ))
-                    .accessibilityIdentifier("integrations.telegram.token")
-                    HStack {
-                        Button("연결 테스트") {
-                            Task {
-                                if viewModel.settings.telegramBotToken.isEmpty { return }
-                                let svc = TelegramService(conversationService: ConversationService())
-                                do {
-                                    let name = try await svc.getMe(token: viewModel.settings.telegramBotToken)
-                                    Log.telegram.info("봇 확인: @\(name)")
-                                } catch {
-                                    Log.telegram.error("봇 확인 실패: \(error.localizedDescription, privacy: .public)")
-                                }
+                    // Wake Word
+                    SectionCard("웨이크워드", icon: "ear") {
+                        Toggle("웨이크워드 활성화", isOn: wakeWordBinding)
+                        if viewModel.settings.wakeWordEnabled {
+                            HStack {
+                                Text("웨이크워드")
+                                Spacer()
+                                TextField("웨이크워드", text: $viewModel.settings.wakeWord)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 150)
                             }
                         }
-                        .disabled(viewModel.settings.telegramBotToken.isEmpty)
-                        Spacer()
-                        let running = viewModel.telegramService?.running == true
-                        Text(running ? "수신 대기 중" : (viewModel.settings.telegramEnabled ? "대기 중(락 대기)" : "비활성"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("integrations.telegram.status")
                     }
-                    if let err = viewModel.telegramService?.lastErrorMessage, !err.isEmpty {
-                        Text("최근 오류: \(err)")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                    if let t = viewModel.telegramService?.lastDMAt {
-                        Text("최근 DM: \(DateFormatter.localizedString(from: t, dateStyle: .short, timeStyle: .short))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
 
-                // MARK: - Claude Code UI (Sandbox + External)
-                ClaudeUISettingsSection(viewModel: viewModel)
-
-                // MARK: - About
-                SectionHeader("About")
-                Section("정보") {
-                    HStack {
-                        Text("버전")
-                        Spacer()
-                        Text("v\(changelogService.currentVersion) (\(changelogService.currentBuild))")
-                            .foregroundStyle(.secondary)
+                    // Cloud
+                    if let supabase = viewModel.supabaseServiceForView {
+                        SectionCard(nil) { CloudSettingsView(supabaseService: supabase) }
                     }
-                    Button {
-                        showChangelog = true
-                    } label: {
+
+                    // Device
+                    if case .signedIn = viewModel.supabaseService.authState, let device = viewModel.deviceServiceForView {
+                        SectionCard(nil) { DeviceSettingsView(deviceService: device) }
+                    }
+
+                    // Messenger
+                    SectionCard("메신저", icon: "paperplane") {
+                        Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
+                            .accessibilityIdentifier("integrations.telegram.toggle")
+                        Toggle("텔레그램 스트리밍 응답 사용", isOn: $viewModel.settings.telegramStreamReplies)
+                            .accessibilityIdentifier("integrations.telegram.streaming")
+                        SecureField("Telegram Bot Token", text: Binding(get: { viewModel.settings.telegramBotToken }, set: { viewModel.settings.telegramBotToken = $0 }))
+                            .accessibilityIdentifier("integrations.telegram.token")
                         HStack {
-                            Text("새로운 기능")
+                            Button("연결 테스트") {
+                                Task {
+                                    if viewModel.settings.telegramBotToken.isEmpty { return }
+                                    let svc = TelegramService(conversationService: ConversationService())
+                                    do { let name = try await svc.getMe(token: viewModel.settings.telegramBotToken); Log.telegram.info("봇 확인: @\(name)") }
+                                    catch { Log.telegram.error("봇 확인 실패: \(error.localizedDescription, privacy: .public)") }
+                                }
+                            }
+                            .disabled(viewModel.settings.telegramBotToken.isEmpty)
                             Spacer()
-                            Image(systemName: "chevron.right")
+                            let running = viewModel.telegramService?.running == true
+                            Text(running ? "수신 대기 중" : (viewModel.settings.telegramEnabled ? "대기 중(락 대기)" : "비활성"))
                                 .font(.caption)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("integrations.telegram.status")
+                        }
+                        if let err = viewModel.telegramService?.lastErrorMessage, !err.isEmpty {
+                            Text("최근 오류: \(err)").font(.caption).foregroundStyle(.red)
+                        }
+                        if let t = viewModel.telegramService?.lastDMAt {
+                            Text("최근 DM: \(DateFormatter.localizedString(from: t, dateStyle: .short, timeStyle: .short))").font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    .buttonStyle(.plain)
+
+                    // Claude Code UI
+                    SectionCard(nil) { ClaudeUISettingsSection(viewModel: viewModel) }
+
+                    // About
+                    SectionCard("정보", icon: "info.circle") {
+                        HStack {
+                            Text("버전")
+                            Spacer()
+                            Text("v\(changelogService.currentVersion) (\(changelogService.currentBuild))")
+                                .foregroundStyle(.secondary)
+                        }
+                        Button { showChangelog = true } label: {
+                            HStack {
+                                Text("새로운 기능")
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+                .padding(AppSpacing.m)
             }
-            .formStyle(.grouped)
         }
         .frame(width: 500, height: 750)
+        .background(.ultraThinMaterial)
         .onAppear {
             openaiKey = viewModel.settings.apiKey
             anthropicKey = viewModel.settings.anthropicApiKey
@@ -674,7 +592,7 @@ private struct ClaudeUISettingsSection: View {
     @State private var busy: Bool = false
 
     var body: some View {
-        Section("Claude Code UI") {
+        VStack(alignment: .leading, spacing: 8) {
             Toggle("샌드박스 모드(launchd)", isOn: $viewModel.settings.claudeUISandboxEnabled)
                 .onChange(of: viewModel.settings.claudeUISandboxEnabled) { _, newValue in
                     Task { await onSandboxToggle(newValue) }

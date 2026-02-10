@@ -31,7 +31,7 @@ struct CommandPaletteView: View {
                     .accessibilityIdentifier("palette.search")
             }
             .padding(AppSpacing.s)
-            .background(AppColor.surface)
+            .background(.ultraThinMaterial)
 
             Divider()
 
@@ -51,9 +51,9 @@ struct CommandPaletteView: View {
             .listStyle(.bordered)
             .frame(width: 600, height: 420)
         }
-        .background(AppColor.background)
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
-        .shadow(radius: 16)
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.large)
                 .stroke(AppColor.border.opacity(0.6), lineWidth: 1)
