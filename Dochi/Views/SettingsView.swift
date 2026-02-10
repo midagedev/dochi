@@ -382,6 +382,7 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                 }
+                }
 
                 // MARK: - About
                 SectionHeader("About")
