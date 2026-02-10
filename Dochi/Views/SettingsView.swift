@@ -368,21 +368,25 @@ struct SettingsView: View {
                             BadgeView(style: .status(viewModel.settings.telegramEnabled ? .green : .secondary), text: viewModel.settings.telegramEnabled ? "활성" : "비활성")
                         }
                         Toggle("텔레그램 봇 활성화", isOn: $viewModel.settings.telegramEnabled)
+                            .accessibilityIdentifier("integrations.telegram.toggle")
                         SecureField("Bot Token", text: Binding(
                             get: { viewModel.settings.telegramBotToken },
                             set: { viewModel.settings.telegramBotToken = $0 }
                         ))
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("integrations.telegram.token")
                         HStack {
                             Text("상태").compact(AppFont.caption)
                             Spacer()
                             Text(viewModel.settings.telegramEnabled ? "수신 대기 중" : "비활성").compact(AppFont.caption).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("integrations.telegram.status")
                         }
                         if let lastId = viewModel.settings.telegramLastChatId, viewModel.settings.telegramEnabled {
                             HStack {
                                 Text("최근 DM 대상: \(String(lastId))").compact(AppFont.caption).foregroundStyle(.secondary)
                                 Spacer()
                                 Button("테스트 메시지 보내기") { Task { await viewModel.sendTelegramTestMessage() } }
+                                    .accessibilityIdentifier("integrations.telegram.testSend")
                             }
                         } else if viewModel.settings.telegramEnabled {
                             Text("봇에게 먼저 DM을 보내주세요.").compact(AppFont.caption).foregroundStyle(.secondary)

@@ -28,6 +28,7 @@ struct CommandPaletteView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("명령 검색...", text: $query)
                     .textFieldStyle(.plain)
+                    .accessibilityIdentifier("palette.search")
             }
             .padding(AppSpacing.s)
             .background(AppColor.surface)
@@ -60,4 +61,3 @@ struct CommandPaletteView: View {
         .onExitCommand { viewModel.showCommandPalette = false }
     }
 }
-

@@ -30,7 +30,6 @@ struct DochiApp: App {
         .windowResizability(.contentMinSize)
         .defaultSize(width: 900, height: 650)
         .commands {
-            CommandGroup(replacing: .find) { }
             CommandMenu("Dochi") {
                 Button("Command Palette…") { viewModel.showCommandPalette = true }
                     .keyboardShortcut("k", modifiers: [.command])

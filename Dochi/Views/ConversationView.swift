@@ -55,6 +55,7 @@ struct ConversationView: View {
                                 alignment: .leading
                             )
                             .id("assistant-live")
+                            .accessibilityIdentifier("assistant.live")
                         }
 
                         // 하단 여백 — 마지막 메시지가 충분히 위로 올라오도록
@@ -124,6 +125,7 @@ struct ConversationView: View {
 
     private var connectedEmptyState: some View {
         EmptyState(icon: "bubble.left", title: "연결됨 — 메시지를 입력하세요", subtitle: "텍스트 입력 또는 마이크 버튼으로 음성 입력")
+            .accessibilityIdentifier("connected.empty")
     }
 
     // MARK: - Bubbles

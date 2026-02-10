@@ -34,6 +34,7 @@ struct ContentView: View {
         .frame(minWidth: 700, minHeight: 500)
         .sheet(isPresented: $viewModel.showSettingsSheet) {
             SettingsView()
+                .accessibilityIdentifier("sheet.settings")
         }
         .sheet(isPresented: $showChangelog) {
             ChangelogView(changelogService: changelogService, showFullChangelog: false)
@@ -42,9 +43,12 @@ struct ContentView: View {
             OnboardingView()
         }
         .onAppear {
-            if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
-                viewModel.connectOnLaunch()
-                checkForNewVersion()
+            let isUITest = ProcessInfo.processInfo.arguments.contains("-uiTest") || ProcessInfo.processInfo.environment["UITEST"] == "1"
+            if !isUITest {
+                if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+                    viewModel.connectOnLaunch()
+                    checkForNewVersion()
+                }
             }
         }
         .overlay(alignment: .center) {
@@ -284,6 +288,7 @@ struct ContentView: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
                 .onSubmit { submitText() }
+                .accessibilityIdentifier("input.textField")
 
             if isResponding {
                 Button {
@@ -308,6 +313,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(sendDisabled)
+                .accessibilityIdentifier("input.send")
             }
         }
     }
@@ -703,6 +709,7 @@ struct SidebarView: View {
                     .padding(.vertical, 8)
             }
             .buttonStyle(.borderless)
+            .accessibilityIdentifier("open.settings")
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
     }
