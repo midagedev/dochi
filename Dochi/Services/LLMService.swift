@@ -7,6 +7,8 @@ final class LLMService: ObservableObject {
     @Published var partialResponse: String = ""
     @Published var error: String?
     @Published var isStreaming: Bool = false
+    struct TokenUsage: Sendable { let inputTokens: Int; let outputTokens: Int; let totalTokens: Int }
+    @Published var tokenUsage: TokenUsage? = nil
 
     var onResponseComplete: ((String) -> Void)?
     var onSentenceReady: ((String) -> Void)?
@@ -37,6 +39,7 @@ final class LLMService: ObservableObject {
         pendingToolCalls = []
         error = nil
         isStreaming = true
+        tokenUsage = nil
 
         Log.llm.info("요청 시작: provider=\(provider.displayName, privacy: .public), model=\(model, privacy: .public), messages=\(messages.count)")
 
@@ -88,7 +91,15 @@ final class LLMService: ObservableObject {
         switch provider {
         case .openai, .zai:
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            let body = OpenAIProviderHelper.buildBody(messages: messages, systemPrompt: systemPrompt, model: model, tools: tools, toolResults: toolResults, providerIsZAI: provider == .zai)
+            let body = OpenAIProviderHelper.buildBody(
+                messages: messages,
+                systemPrompt: systemPrompt,
+                model: model,
+                tools: tools,
+                toolResults: toolResults,
+                providerIsZAI: provider == .zai,
+                includeUsage: provider == .openai || provider == .zai
+            )
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         case .anthropic:
@@ -156,6 +167,13 @@ final class LLMService: ObservableObject {
                         }
                     }
                 }
+                // Usage (OpenAI-compatible). Only present when stream_options.include_usage=true (OpenAI) or if provider supports it.
+                if let usage = json["usage"] as? [String: Any] {
+                    let prompt = usage["prompt_tokens"] as? Int ?? tokenUsage?.inputTokens
+                    let completion = usage["completion_tokens"] as? Int ?? tokenUsage?.outputTokens
+                    let total = usage["total_tokens"] as? Int ?? ((prompt ?? 0) + (completion ?? 0))
+                    await MainActor.run { self.tokenUsage = TokenUsage(inputTokens: prompt ?? 0, outputTokens: completion ?? 0, totalTokens: total) }
+                }
 
             case .anthropic:
                 if let result = AnthropicProviderHelper.parseDelta(json) {
@@ -174,6 +192,24 @@ final class LLMService: ObservableObject {
                         currentToolCall = (id, name, "")
                     case .toolUseInput(let input):
                         currentToolCall?.arguments += input
+                    }
+                }
+                // Anthropic streaming usage events
+                if let type = json["type"] as? String {
+                    if type == "message_start" {
+                        if let message = json["message"] as? [String: Any], let usage = message["usage"] as? [String: Any], let input = usage["input_tokens"] as? Int {
+                            await MainActor.run {
+                                let existing = self.tokenUsage
+                                self.tokenUsage = TokenUsage(inputTokens: input, outputTokens: existing?.outputTokens ?? 0, totalTokens: input + (existing?.outputTokens ?? 0))
+                            }
+                        }
+                    } else if type == "message_delta" {
+                        if let usage = json["usage"] as? [String: Any], let output = usage["output_tokens"] as? Int {
+                            await MainActor.run {
+                                let existingIn = self.tokenUsage?.inputTokens ?? 0
+                                self.tokenUsage = TokenUsage(inputTokens: existingIn, outputTokens: output, totalTokens: existingIn + output)
+                            }
+                        }
                     }
                 }
             }

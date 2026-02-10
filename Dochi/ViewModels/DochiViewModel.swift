@@ -330,4 +330,34 @@ final class DochiViewModel: ObservableObject {
     func saveConversationWithTitle(_ title: String, summary: String?, userId: UUID?, messages: [Message]) {
         conversationManager.save(title: title, summary: summary, userId: userId, messages: messages)
     }
+
+    // MARK: - Context Usage
+    struct ContextUsageInfo { let usedTokens: Int; let limitTokens: Int; let percent: Double }
+
+    private func contextLimitTokens(provider: LLMProvider, model: String) -> Int {
+        let m = model.lowercased()
+        switch provider {
+        case .openai:
+            if m.contains("gpt-4.1") { return 128_000 }
+            if m.contains("gpt-4o") { return 128_000 }
+            if m.contains("o4") { return 128_000 }
+            if m.contains("o3") { return 128_000 }
+            return 128_000
+        case .anthropic:
+            return 200_000
+        case .zai:
+            if m.contains("glm-4.7") { return 200_000 }
+            return 128_000
+        }
+    }
+
+    var actualContextUsage: ContextUsageInfo? {
+        let provider = settings.llmProvider
+        let model = settings.llmModel
+        let limit = contextLimitTokens(provider: provider, model: model)
+        guard let usage = llmService.tokenUsage else { return nil }
+        let used = max(0, usage.inputTokens)
+        let pct = min(1.0, limit > 0 ? Double(used) / Double(limit) : 0.0)
+        return ContextUsageInfo(usedTokens: used, limitTokens: limit, percent: pct)
+    }
 }
