@@ -64,7 +64,29 @@ final class ToolsRegistryTool: BuiltInTool {
         switch name {
         case "tools.list":
             let catalog = host.toolCatalogByCategory()
-            let data = try JSONSerialization.data(withJSONObject: catalog, options: [.prettyPrinted])
+            let descriptions: [String: String] = [
+                "registry": "Tool registry operations (list/enable/ttl/reset)",
+                "reminders": "Apple Reminders (create/list/complete)",
+                "alarm": "Voice alarms via TTS (set/list/cancel)",
+                "memory": "Family/personal memory save/update",
+                "profile": "User identification (set_current_user)",
+                "search_image": "Web search and image generation/print",
+                "settings": "App settings and MCP servers",
+                "agent": "Agent create/list/set_active",
+                "agent_edit": "Agent persona/memory/config editing",
+                "context": "Base system prompt editing",
+                "profile_admin": "Profile create/alias/rename/merge",
+                "workspace": "Supabase workspace ops",
+                "telegram": "Telegram integration ops"
+            ]
+            let payload: [String: Any] = [
+                "catalog": catalog,
+                "descriptions": descriptions,
+                "enabled": host.getEnabledToolNames() ?? [],
+                "baseline_count": 1, // registry tools always present; baseline dynamic in host
+                "available_tool_count": catalog.values.reduce(0) { $0 + $1.count }
+            ]
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
             return MCPToolResult(content: String(data: data, encoding: .utf8) ?? "{}", isError: false)
 
         case "tools.enable":
@@ -73,6 +95,7 @@ final class ToolsRegistryTool: BuiltInTool {
             }
             let names = arr.compactMap { $0 as? String }
             host.setEnabledToolNames(names)
+            Log.tool.info("tools.enable names=\(names)")
             return MCPToolResult(content: "Enabled tools: \(names)", isError: false)
 
         case "tools.enable_categories":
@@ -82,19 +105,33 @@ final class ToolsRegistryTool: BuiltInTool {
             let cats = arr.compactMap { $0 as? String }
             // Map categories to tool names via catalog
             let catalog = host.toolCatalogByCategory()
-            let names = cats.flatMap { catalog[$0] ?? [] }
-            host.setEnabledToolNames(Array(Set(names)))
-            return MCPToolResult(content: "Enabled categories: \(cats) → tools: \(names)", isError: false)
+            var allNames: [String] = []
+            var unknown: [String] = []
+            for c in cats {
+                if let list = catalog[c], !list.isEmpty { allNames.append(contentsOf: list) }
+                else { unknown.append(c) }
+            }
+            guard !allNames.isEmpty else {
+                return MCPToolResult(content: "No tools found for categories: \(cats)", isError: true)
+            }
+            let unique = Array(Set(allNames)).sorted()
+            host.setEnabledToolNames(unique)
+            Log.tool.info("tools.enable_categories cats=\(cats) enabled=\(unique) unknown=\(unknown)")
+            var msg = "Enabled categories: \(cats) → tools: \(unique)"
+            if !unknown.isEmpty { msg += " (unknown categories: \(unknown))" }
+            return MCPToolResult(content: msg, isError: false)
 
         case "tools.enable_ttl":
             guard let minutes = arguments["minutes"] as? Int else {
                 return MCPToolResult(content: "minutes (integer) is required", isError: true)
             }
             host.setRegistryTTL(minutes: minutes)
+            Log.tool.info("tools.enable_ttl minutes=\(minutes)")
             return MCPToolResult(content: "Registry TTL set to \(minutes) minutes", isError: false)
 
         case "tools.reset":
             host.setEnabledToolNames(nil)
+            Log.tool.info("tools.reset")
             return MCPToolResult(content: "Enabled tools reset", isError: false)
 
         default:
