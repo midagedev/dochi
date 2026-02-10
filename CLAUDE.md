@@ -26,6 +26,7 @@ Dochi is a macOS SwiftUI voice assistant with:
 - Multi-provider LLM chat (OpenAI, Anthropic, Z.AI)
 - Apple STT input
 - Local Supertonic TTS output via ONNX Runtime
+- In-app Telegram DM integration (streaming replies, tool progress snippets)
 
 ### Data Flow
 
@@ -52,58 +53,72 @@ When wake word is enabled, sessions follow this flow:
 ```
 Dochi/
 ├── Models/
-│   ├── Settings.swift        # AppSettings with DI
+│   ├── Settings.swift            # AppSettings with DI
 │   ├── Conversation.swift
 │   ├── Message.swift
-│   ├── Enums.swift           # LLMProvider, SupertonicVoice
-│   └── Workspace.swift      # Workspace, WorkspaceMember
+│   ├── Enums.swift               # LLMProvider, SupertonicVoice
+│   ├── AgentConfig.swift
+│   └── Workspace.swift           # Workspace, WorkspaceMember
 ├── ViewModels/
-│   └── DochiViewModel.swift  # Central orchestrator
+│   ├── DochiViewModel.swift      # Central orchestrator
+│   └── Controllers/
+│       ├── CloudController.swift
+│       ├── IntegrationsController.swift   # Telegram DM pipeline
+│       └── ConversationFlowController.swift
 ├── Views/
 │   ├── ContentView.swift
 │   ├── SettingsView.swift
 │   ├── ConversationView.swift
 │   ├── ChangelogView.swift
-│   └── CloudSettingsView.swift
+│   ├── CloudSettingsView.swift
+│   ├── InspectorView.swift       # Context/Tools/Sources/Vars
+│   └── CommandPaletteView.swift
 ├── Services/
-│   ├── Protocols/            # Service protocols for DI
+│   ├── Protocols/                # Service protocols for DI
 │   │   ├── ContextServiceProtocol.swift
 │   │   ├── ConversationServiceProtocol.swift
 │   │   ├── KeychainServiceProtocol.swift
 │   │   ├── SoundServiceProtocol.swift
-│   │   └── SupabaseServiceProtocol.swift
-│   ├── BuiltInTools/         # Built-in tool modules
+│   │   ├── SupabaseServiceProtocol.swift
+│   │   └── MCPServiceProtocol.swift
+│   ├── BuiltInTools/             # Built-in tool modules
 │   │   ├── BuiltInToolProtocol.swift
 │   │   ├── WebSearchTool.swift
 │   │   ├── RemindersTool.swift
 │   │   ├── AlarmTool.swift
-│   │   └── ImageGenerationTool.swift
-│   ├── BuiltInToolService.swift  # Tool router
-│   ├── Log.swift               # os.Logger utility (Log.app, .llm, .stt, etc.)
+│   │   ├── ImageGenerationTool.swift
+│   │   ├── SettingsTool.swift
+│   │   ├── AgentTool.swift
+│   │   ├── AgentEditorTool.swift
+│   │   ├── ContextEditTool.swift
+│   │   ├── ProfileTool.swift
+│   │   ├── ProfileAdminTool.swift
+│   │   ├── WorkspaceTool.swift
+│   │   ├── TelegramTool.swift
+│   │   └── ToolsRegistryTool.swift
+│   ├── BuiltInToolService.swift  # Tool router + registry
+│   ├── Log.swift                 # os.Logger util; TelegramService inline here
 │   ├── LLMService.swift
 │   ├── SpeechService.swift
 │   ├── SupertonicService.swift
 │   ├── ContextService.swift
-│   ├── ConversationService.swift
-│   ├── KeychainService.swift
-│   ├── SoundService.swift
-│   ├── ChangelogService.swift
-│   ├── SupabaseService.swift
 │   ├── CloudContextService.swift
-│   └── Supertonic/           # TTS helpers
+│   ├── ConversationService.swift
+│   ├── CloudConversationService.swift
+│   ├── KeychainService.swift
+│   ├── SupabaseService.swift
+│   └── LLM/Providers/            # Provider helpers
 └── Resources/
     └── CHANGELOG.md
 
 DochiTests/
-├── Mocks/                    # Mock implementations for testing
+├── Mocks/
 │   ├── MockContextService.swift
 │   ├── MockConversationService.swift
 │   ├── MockKeychainService.swift
 │   ├── MockSoundService.swift
 │   └── MockSupabaseService.swift
-└── Services/
-    ├── ContextServiceTests.swift
-    └── ConversationServiceTests.swift
+└── Services & Tools tests (various)
 ```
 
 ### Key Components
@@ -155,20 +170,26 @@ let settings = AppSettings(contextService: mockContext)
 
 ### Prompt Files
 
+Workspace-based file structure (legacy files continue to be read if present):
+
 ```
 ~/Library/Application Support/Dochi/
-├── system.md    # Persona + behavior guidelines (manual edit)
-├── memory.md    # User info (auto-accumulated)
-└── conversations/
-    └── {uuid}.json  # Saved conversations
+├── system_prompt.md                 # App-level base rules (optional)
+├── profiles.json                    # User profiles (family)
+├── memory/
+│   └── {userId}.md                  # Per-user personal memory
+└── workspaces/{workspaceId}/
+    ├── config.json
+    ├── memory.md                    # Workspace shared memory
+    └── agents/{name}/
+        ├── persona.md               # Agent persona
+        ├── memory.md                # Agent memory
+        └── config.json
+
+# Legacy (still supported): system.md, family.md, memory.md
 ```
 
-**system.md** — AI identity and instructions, edited manually via sidebar
-**memory.md** — User memory, auto-populated on session end:
-1. `saveAndAnalyzeConversation()` sends conversation to LLM for analysis
-2. Extracted info appended to `memory.md` with timestamp
-3. `buildInstructions()` includes both files in system prompt
-4. Auto-compression when exceeding `contextMaxSize` (default 15KB)
+`AppSettings.buildInstructions(...)` composes: base system prompt → agent persona → date/time → (if multi-user) workspace memory, agent memory, user personal memory → recent conversation summaries.
 
 ### LLM Provider Details
 
@@ -180,7 +201,7 @@ let settings = AppSettings(contextService: mockContext)
 
 ### Logging
 
-All logging uses Apple `os.Logger` via the `Log` enum (`Services/Log.swift`). Subsystem: `com.dochi.app`.
+All logging uses Apple `os.Logger` via the `Log` enum (`Services/Log.swift`). Subsystem: `com.dochi.app`. TelegramService is defined inline in `Log.swift` and exposed via `DochiViewModel.telegramService`.
 
 | Logger | Category | Used in |
 |--------|----------|---------|
@@ -222,8 +243,4 @@ Tests are in `DochiTests/` target. Run with:
 xcodebuild -project Dochi.xcodeproj -scheme DochiTests test
 ```
 
-Current test coverage:
-- ContextService: 10 tests (file operations, memory management)
-- ConversationService: 7 tests (CRUD operations)
-
-Mock services are provided in `DochiTests/Mocks/` for testing components that depend on services.
+Areas covered include: context services (file ops, workspace memory), conversation services, built-in tools (settings/profile/agent), and settings. Mocks live under `DochiTests/Mocks/`.

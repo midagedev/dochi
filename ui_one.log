@@ -1,0 +1,9 @@
+2026-02-11 01:16:18.459 xcodebuild[83833:3601224] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:macOS, arch:arm64, id:00006000-001248910229801E, name:My Mac }
+{ platform:macOS, arch:x86_64, id:00006000-001248910229801E, name:My Mac }
+{ platform:macOS, name:Any Mac }
+2026-02-11 01:16:31.951 xcodebuild[83833:3601224] [MT] IDETestOperationsObserverDebug: 8.007 elapsed -- Testing started completed.
+2026-02-11 01:16:31.951 xcodebuild[83833:3601224] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-02-11 01:16:31.951 xcodebuild[83833:3601224] [MT] IDETestOperationsObserverDebug: 8.007 sec, +8.007 sec -- end
+Testing started
