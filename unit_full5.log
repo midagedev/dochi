@@ -1,0 +1,607 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project Dochi.xcodeproj -scheme DochiTests -configuration Debug test "-only-testing:DochiTests"
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  swift-log: https://github.com/apple/swift-log.git @ 1.9.1
+  swift-crypto: https://github.com/apple/swift-crypto.git @ 4.2.0
+  swift-concurrency-extras: https://github.com/pointfreeco/swift-concurrency-extras @ 1.3.2
+  swift-clocks: https://github.com/pointfreeco/swift-clocks @ 1.0.6
+  mcp-swift-sdk: https://github.com/modelcontextprotocol/swift-sdk.git @ 0.10.2
+  Supabase: https://github.com/supabase/supabase-swift.git @ 2.41.1
+  EventSource: https://github.com/mattt/eventsource.git @ 1.3.0
+  swift-system: https://github.com/apple/swift-system.git @ 1.6.4
+  swift-http-types: https://github.com/apple/swift-http-types.git @ 1.5.1
+  xctest-dynamic-overlay: https://github.com/pointfreeco/xctest-dynamic-overlay @ 1.8.1
+  onnxruntime: https://github.com/microsoft/onnxruntime-swift-package-manager.git @ 1.20.0
+  swift-asn1: https://github.com/apple/swift-asn1.git @ 1.5.1
+
+2026-02-11 01:14:38.175 xcodebuild[83579:3599191] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:macOS, arch:arm64, id:00006000-001248910229801E, name:My Mac }
+{ platform:macOS, arch:x86_64, id:00006000-001248910229801E, name:My Mac }
+{ platform:macOS, name:Any Mac }
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (36 targets)
+    Target 'DochiUITests' in project 'Dochi'
+        ➜ Explicit dependency on target 'Dochi' in project 'Dochi'
+    Target 'DochiTests' in project 'Dochi'
+        ➜ Explicit dependency on target 'Dochi' in project 'Dochi'
+    Target 'Dochi' in project 'Dochi'
+        ➜ Explicit dependency on target 'onnxruntime' in project 'onnxruntime'
+        ➜ Explicit dependency on target 'MCP' in project 'mcp-swift-sdk'
+        ➜ Explicit dependency on target 'Supabase' in project 'Supabase'
+    Target 'Supabase' in project 'Supabase'
+        ➜ Explicit dependency on target 'Supabase' in project 'Supabase'
+        ➜ Explicit dependency on target 'Functions' in project 'Supabase'
+        ➜ Explicit dependency on target 'PostgREST' in project 'Supabase'
+        ➜ Explicit dependency on target 'Auth' in project 'Supabase'
+        ➜ Explicit dependency on target 'Realtime' in project 'Supabase'
+        ➜ Explicit dependency on target 'Storage' in project 'Supabase'
+        ➜ Explicit dependency on target 'Helpers' in project 'Supabase'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'IssueReporting' in project 'xctest-dynamic-overlay'
+    Target 'Supabase' in project 'Supabase'
+        ➜ Explicit dependency on target 'Helpers' in project 'Supabase'
+        ➜ Explicit dependency on target 'Auth' in project 'Supabase'
+        ➜ Explicit dependency on target 'Functions' in project 'Supabase'
+        ➜ Explicit dependency on target 'PostgREST' in project 'Supabase'
+        ➜ Explicit dependency on target 'Realtime' in project 'Supabase'
+        ➜ Explicit dependency on target 'Storage' in project 'Supabase'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'IssueReporting' in project 'xctest-dynamic-overlay'
+    Target 'Storage' in project 'Supabase'
+        ➜ Explicit dependency on target 'Helpers' in project 'Supabase'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+    Target 'Realtime' in project 'Supabase'
+        ➜ Explicit dependency on target 'Helpers' in project 'Supabase'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'IssueReporting' in project 'xctest-dynamic-overlay'
+    Target 'PostgREST' in project 'Supabase'
+        ➜ Explicit dependency on target 'Helpers' in project 'Supabase'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+    Target 'Functions' in project 'Supabase'
+        ➜ Explicit dependency on target 'Helpers' in project 'Supabase'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+    Target 'Auth' in project 'Supabase'
+        ➜ Explicit dependency on target 'Helpers' in project 'Supabase'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'Crypto' in project 'swift-crypto'
+    Target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'swift-crypto_Crypto' in project 'swift-crypto'
+    Target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'swift-crypto_Crypto' in project 'swift-crypto'
+    Target 'swift-crypto_Crypto' in project 'swift-crypto' (no dependencies)
+    Target 'Helpers' in project 'Supabase'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+    Target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'IssueReportingPackageSupport' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'IssueReporting' in project 'xctest-dynamic-overlay'
+    Target 'XCTestDynamicOverlay' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'IssueReportingPackageSupport' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'IssueReporting' in project 'xctest-dynamic-overlay'
+    Target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'IssueReporting' in project 'xctest-dynamic-overlay'
+    Target 'Clocks' in project 'swift-clocks'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'IssueReporting' in project 'xctest-dynamic-overlay'
+    Target 'IssueReporting' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'IssueReporting' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'IssueReportingPackageSupport' in project 'xctest-dynamic-overlay'
+    Target 'IssueReporting' in project 'xctest-dynamic-overlay'
+        ➜ Explicit dependency on target 'IssueReportingPackageSupport' in project 'xctest-dynamic-overlay'
+    Target 'IssueReportingPackageSupport' in project 'xctest-dynamic-overlay' (no dependencies)
+    Target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+    Target 'HTTPTypes' in project 'swift-http-types' (no dependencies)
+    Target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+    Target 'ConcurrencyExtras' in project 'swift-concurrency-extras' (no dependencies)
+    Target 'MCP' in project 'mcp-swift-sdk'
+        ➜ Explicit dependency on target 'MCP' in project 'mcp-swift-sdk'
+        ➜ Explicit dependency on target 'SystemPackage' in project 'swift-system'
+        ➜ Explicit dependency on target 'Logging' in project 'swift-log'
+        ➜ Explicit dependency on target 'EventSource' in project 'EventSource'
+    Target 'MCP' in project 'mcp-swift-sdk'
+        ➜ Explicit dependency on target 'SystemPackage' in project 'swift-system'
+        ➜ Explicit dependency on target 'Logging' in project 'swift-log'
+        ➜ Explicit dependency on target 'EventSource' in project 'EventSource'
+    Target 'EventSource' in project 'EventSource'
+        ➜ Explicit dependency on target 'EventSource' in project 'EventSource'
+    Target 'EventSource' in project 'EventSource' (no dependencies)
+    Target 'Logging' in project 'swift-log'
+        ➜ Explicit dependency on target 'Logging' in project 'swift-log'
+    Target 'Logging' in project 'swift-log' (no dependencies)
+    Target 'SystemPackage' in project 'swift-system'
+        ➜ Explicit dependency on target 'SystemPackage' in project 'swift-system'
+        ➜ Explicit dependency on target 'CSystem' in project 'swift-system'
+    Target 'SystemPackage' in project 'swift-system'
+        ➜ Explicit dependency on target 'CSystem' in project 'swift-system'
+    Target 'CSystem' in project 'swift-system' (no dependencies)
+    Target 'onnxruntime' in project 'onnxruntime'
+        ➜ Explicit dependency on target 'OnnxRuntimeBindings' in project 'onnxruntime'
+    Target 'OnnxRuntimeBindings' in project 'onnxruntime' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk /Users/hckim/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx26.2-25C57-00fa09913b459cbbc988d1f6730289ae.sdkstatcache
+    cd /Users/hckim/repo/dochi/Dochi.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -o /Users/hckim/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx26.2-25C57-00fa09913b459cbbc988d1f6730289ae.sdkstatcache
+
+SwiftDriver DochiTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name DochiTests -Onone -enforce-exclusivity\=checked @/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.SwiftFileList -DDEBUG -Xcc -fmodule-map-file\=/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/GeneratedModuleMaps/OnnxRuntimeBindings.modulemap -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-macos14.0 -g -module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -Xfrontend -serialize-debugging-options -profile-coverage-mapping -profile-generate -enable-testing -index-store-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug -F /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks -c -j10 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx26.2-25C57-00fa09913b459cbbc988d1f6730289ae.sdkstatcache -output-file-map /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -sdk-module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.swiftmodule -validate-clang-modules-once -clang-build-session-file /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests_const_extract_protocols.json -Xcc -iquote -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-generated-files.hmap -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-own-target-headers.hmap -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/Dochi-8c38ef3064e5f8b6b08143ebde5a1f27-VFS/all-product-headers.yaml -Xcc -iquote -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-project-headers.hmap -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/SourcePackages/checkouts/onnxruntime-swift-package-manager/objectivec/include -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/SourcePackages/checkouts/swift-system/Sources/CSystem/include -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/include -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DerivedSources-normal/arm64 -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DerivedSources/arm64 -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests-Swift.h -working-directory /Users/hckim/repo/dochi -experimental-emit-module-separately -disable-cmo
+
+SwiftCompile normal arm64 Compiling\ AgentPersonaGuardrailTests.swift /Users/hckim/repo/dochi/DochiTests/AgentPersonaGuardrailTests.swift (in target 'DochiTests' from project 'Dochi')
+
+SwiftCompile normal arm64 /Users/hckim/repo/dochi/DochiTests/AgentPersonaGuardrailTests.swift (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ DochiTests (in target 'DochiTests' from project 'Dochi')
+
+EmitSwiftModule normal arm64 (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    
+
+SwiftCompile normal arm64 Compiling\ AgentEditorToolTests.swift /Users/hckim/repo/dochi/DochiTests/AgentEditorToolTests.swift (in target 'DochiTests' from project 'Dochi')
+
+SwiftCompile normal arm64 /Users/hckim/repo/dochi/DochiTests/AgentEditorToolTests.swift (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for DochiTests (in target 'DochiTests' from project 'Dochi')
+
+SwiftDriverJobDiscovery normal arm64 Compiling AgentEditorToolTests.swift (in target 'DochiTests' from project 'Dochi')
+
+SwiftDriver\ Compilation\ Requirements DochiTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name DochiTests -Onone -enforce-exclusivity\=checked @/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.SwiftFileList -DDEBUG -Xcc -fmodule-map-file\=/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/GeneratedModuleMaps/OnnxRuntimeBindings.modulemap -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-macos14.0 -g -module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -Xfrontend -serialize-debugging-options -profile-coverage-mapping -profile-generate -enable-testing -index-store-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug -F /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks -c -j10 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx26.2-25C57-00fa09913b459cbbc988d1f6730289ae.sdkstatcache -output-file-map /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -sdk-module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.swiftmodule -validate-clang-modules-once -clang-build-session-file /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests_const_extract_protocols.json -Xcc -iquote -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-generated-files.hmap -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-own-target-headers.hmap -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/Dochi-8c38ef3064e5f8b6b08143ebde5a1f27-VFS/all-product-headers.yaml -Xcc -iquote -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-project-headers.hmap -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/SourcePackages/checkouts/onnxruntime-swift-package-manager/objectivec/include -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/SourcePackages/checkouts/swift-system/Sources/CSystem/include -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/include -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DerivedSources-normal/arm64 -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DerivedSources/arm64 -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests-Swift.h -working-directory /Users/hckim/repo/dochi -experimental-emit-module-separately -disable-cmo
+
+Copy /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/DochiTests.swiftmodule/Project/arm64-apple-macos.swiftsourceinfo /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.swiftsourceinfo (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.swiftsourceinfo /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/DochiTests.swiftmodule/Project/arm64-apple-macos.swiftsourceinfo
+
+Copy /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/DochiTests.swiftmodule/arm64-apple-macos.abi.json /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.abi.json (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.abi.json /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/DochiTests.swiftmodule/arm64-apple-macos.abi.json
+
+SwiftDriverJobDiscovery normal arm64 Compiling AgentPersonaGuardrailTests.swift (in target 'DochiTests' from project 'Dochi')
+
+SwiftDriver\ Compilation DochiTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name DochiTests -Onone -enforce-exclusivity\=checked @/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.SwiftFileList -DDEBUG -Xcc -fmodule-map-file\=/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/GeneratedModuleMaps/OnnxRuntimeBindings.modulemap -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-macos14.0 -g -module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -Xfrontend -serialize-debugging-options -profile-coverage-mapping -profile-generate -enable-testing -index-store-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug -F /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks -c -j10 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx26.2-25C57-00fa09913b459cbbc988d1f6730289ae.sdkstatcache -output-file-map /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -sdk-module-cache-path /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.swiftmodule -validate-clang-modules-once -clang-build-session-file /Users/hckim/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests_const_extract_protocols.json -Xcc -iquote -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-generated-files.hmap -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-own-target-headers.hmap -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/Dochi-8c38ef3064e5f8b6b08143ebde5a1f27-VFS/all-product-headers.yaml -Xcc -iquote -Xcc /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests-project-headers.hmap -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/SourcePackages/checkouts/onnxruntime-swift-package-manager/objectivec/include -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/SourcePackages/checkouts/swift-system/Sources/CSystem/include -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/include -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DerivedSources-normal/arm64 -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DerivedSources/arm64 -Xcc -I/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests-Swift.h -working-directory /Users/hckim/repo/dochi -experimental-emit-module-separately -disable-cmo
+
+Ld /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/MacOS/DochiTests normal (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-macos14.0 -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -O0 -L/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/EagerLinkingTBDs/Debug -L/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug -L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/EagerLinkingTBDs/Debug -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -F/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks -filelist /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/PackageFrameworks -Xlinker -rpath -Xlinker @loader_path/../Frameworks -Xlinker -rpath -Xlinker @executable_path/../Frameworks -bundle_loader /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/MacOS/Dochi -Xlinker -object_path_lto -Xlinker /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -debug_variant -Xlinker -dependency_info -Xlinker /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests_dependency_info.dat -fobjc-link-runtime -fprofile-instr-generate -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.swiftmodule @/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests-linker-args.resp -lc++ -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Wl,-no_warn_duplicate_libraries -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/MacOS/Dochi.debug.dylib -Xlinker -no_adhoc_codesign -o /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/MacOS/DochiTests
+
+ExtractAppIntentsMetadata (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --module-name DochiTests --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk --xcode-version 17C52 --platform-family macOS --deployment-target 14.0 --bundle-identifier com.hckim.dochi.tests --output /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/Resources --target-triple arm64-apple-macos14.0 --binary-file /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/MacOS/DochiTests --dependency-file /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests_dependency_info.dat --stringsdata-file /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.SwiftFileList --metadata-file-list /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests.DependencyMetadataFileList --static-metadata-file-list /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/DochiTests.DependencyStaticMetadataFileList --swift-const-vals-list /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/Objects-normal/arm64/DochiTests.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --validate-assistant-intents --no-app-shortcuts-localization
+2026-02-11 01:14:40.619 appintentsmetadataprocessor[83628:3599487] Starting appintentsmetadataprocessor export
+2026-02-11 01:14:40.621 appintentsmetadataprocessor[83628:3599487] warning: Metadata extraction skipped. No AppIntents.framework dependency found.
+
+CopySwiftLibs /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/MacOS/DochiTests --scan-folder /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/Frameworks --scan-folder /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/PlugIns --scan-folder /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/Library/SystemExtensions --scan-folder /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/Extensions --platform macosx --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest/Contents/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/DochiTests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+
+CodeSign /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest (in target 'DochiTests' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/PlugIns/DochiTests.xctest
+
+CodeSign /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/MacOS/Dochi.debug.dylib (in target 'Dochi' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/MacOS/Dochi.debug.dylib
+/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/MacOS/Dochi.debug.dylib: replacing existing signature
+
+CodeSign /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/MacOS/__preview.dylib (in target 'Dochi' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/MacOS/__preview.dylib
+/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app/Contents/MacOS/__preview.dylib: replacing existing signature
+
+CodeSign /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app (in target 'Dochi' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --entitlements /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Intermediates.noindex/Dochi.build/Debug/Dochi.build/Dochi.app.xcent --timestamp\=none --generate-entitlement-der /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app
+/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app: replacing existing signature
+
+Validate /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app (in target 'Dochi' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    builtin-validationUtility /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app -no-validate-extension -infoplist-subpath Contents/Info.plist
+
+RegisterWithLaunchServices /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app (in target 'Dochi' from project 'Dochi')
+    cd /Users/hckim/repo/dochi
+    /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted /Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Build/Products/Debug/Dochi.app
+
+2026-02-11 01:14:42.040861+0900 Dochi[83634:3599554] [Cloud] Supabase 클라이언트 초기화 완료
+2026-02-11 01:14:42.085569+0900 Dochi[83634:3599554] [Telegram] Telegram polling stopped
+2026-02-11 01:14:42.085631+0900 Dochi[83634:3599554] [Telegram] Telegram polling started
+2026-02-11 01:14:42.110709+0900 Dochi[83634:3599554] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/5r/l4b5_bld58v49kpw3rsjxshm0000gn/T/com.hckim.dochi.savedState
+2026-02-11 01:14:42.556501+0900 Dochi[83634:3599585] [Common] Unable to obtain a task name port right for pid 166: (os/kern) failure (0x5)
+Test Suite 'All tests' started at 2026-02-11 01:14:42.925.
+Test Suite 'DochiTests.xctest' started at 2026-02-11 01:14:42.926.
+Test Suite 'AgentContextTests' started at 2026-02-11 01:14:42.926.
+Test Case '-[DochiTests.AgentContextTests testAppendAgentMemory]' started.
+Test Case '-[DochiTests.AgentContextTests testAppendAgentMemory]' passed (0.003 seconds).
+Test Case '-[DochiTests.AgentContextTests testAppendAgentMemoryOnEmpty]' started.
+Test Case '-[DochiTests.AgentContextTests testAppendAgentMemoryOnEmpty]' passed (0.002 seconds).
+Test Case '-[DochiTests.AgentContextTests testBaseSystemPromptPath]' started.
+Test Case '-[DochiTests.AgentContextTests testBaseSystemPromptPath]' passed (0.001 seconds).
+Test Case '-[DochiTests.AgentContextTests testBuildInstructionsUsesAgentFiles]' started.
+Test Case '-[DochiTests.AgentContextTests testBuildInstructionsUsesAgentFiles]' passed (0.006 seconds).
+Test Case '-[DochiTests.AgentContextTests testCreateAgent]' started.
+2026-02-11 01:14:42.940562+0900 Dochi[83634:3599554] [Storage] 에이전트 생성: 테스트
+Test Case '-[DochiTests.AgentContextTests testCreateAgent]' passed (0.003 seconds).
+Test Case '-[DochiTests.AgentContextTests testListAgentsEmpty]' started.
+Test Case '-[DochiTests.AgentContextTests testListAgentsEmpty]' passed (0.001 seconds).
+Test Case '-[DochiTests.AgentContextTests testListAgentsMultiple]' started.
+2026-02-11 01:14:42.944616+0900 Dochi[83634:3599554] [Storage] 에이전트 생성: 에이전트A
+2026-02-11 01:14:42.945380+0900 Dochi[83634:3599554] [Storage] 에이전트 생성: 에이전트B
+Test Case '-[DochiTests.AgentContextTests testListAgentsMultiple]' passed (0.003 seconds).
+Test Case '-[DochiTests.AgentContextTests testLoadAgentConfigReturnsNilWhenNoFile]' started.
+Test Case '-[DochiTests.AgentContextTests testLoadAgentConfigReturnsNilWhenNoFile]' passed (0.001 seconds).
+Test Case '-[DochiTests.AgentContextTests testLoadAgentPersonaReturnsEmptyWhenNoFile]' started.
+Test Case '-[DochiTests.AgentContextTests testLoadAgentPersonaReturnsEmptyWhenNoFile]' passed (0.001 seconds).
+Test Case '-[DochiTests.AgentContextTests testLoadBaseSystemPromptReturnsEmptyWhenNoFile]' started.
+Test Case '-[DochiTests.AgentContextTests testLoadBaseSystemPromptReturnsEmptyWhenNoFile]' passed (0.001 seconds).
+Test Case '-[DochiTests.AgentContextTests testSaveAndLoadAgentConfig]' started.
+Test Case '-[DochiTests.AgentContextTests testSaveAndLoadAgentConfig]' passed (0.002 seconds).
+Test Case '-[DochiTests.AgentContextTests testSaveAndLoadAgentMemory]' started.
+Test Case '-[DochiTests.AgentContextTests testSaveAndLoadAgentMemory]' passed (0.002 seconds).
+Test Case '-[DochiTests.AgentContextTests testSaveAndLoadAgentPersona]' started.
+Test Case '-[DochiTests.AgentContextTests testSaveAndLoadAgentPersona]' passed (0.002 seconds).
+Test Case '-[DochiTests.AgentContextTests testSaveAndLoadBaseSystemPrompt]' started.
+Test Case '-[DochiTests.AgentContextTests testSaveAndLoadBaseSystemPrompt]' passed (0.002 seconds).
+Test Suite 'AgentContextTests' passed at 2026-02-11 01:14:42.960.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.031 (0.035) seconds
+Test Suite 'AgentEditorToolTests' started at 2026-02-11 01:14:42.961.
+Test Case '-[DochiTests.AgentEditorToolTests testAgentMemoryUpdate]' started.
+2026-02-11 01:14:42.962662+0900 Dochi[83634:3599554] [Storage] 에이전트 생성: 테스트
+Test Case '-[DochiTests.AgentEditorToolTests testAgentMemoryUpdate]' passed (0.003 seconds).
+Test Suite 'AgentEditorToolTests' passed at 2026-02-11 01:14:42.964.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'AgentPersonaGuardrailTests' started at 2026-02-11 01:14:42.964.
+Test Case '-[DochiTests.AgentPersonaGuardrailTests testPersonaReplacePreviewAndConfirm]' started.
+2026-02-11 01:14:42.966270+0900 Dochi[83634:3599554] [Storage] 에이전트 생성: 테스트
+Test Case '-[DochiTests.AgentPersonaGuardrailTests testPersonaReplacePreviewAndConfirm]' passed (0.003 seconds).
+Test Suite 'AgentPersonaGuardrailTests' passed at 2026-02-11 01:14:42.968.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Suite 'AppSettingsTests' started at 2026-02-11 01:14:42.968.
+Test Case '-[DochiTests.AppSettingsTests testAddMCPServer]' started.
+Test Case '-[DochiTests.AppSettingsTests testAddMCPServer]' passed (0.002 seconds).
+Test Case '-[DochiTests.AppSettingsTests testAnthropicApiKeyStorage]' started.
+Test Case '-[DochiTests.AppSettingsTests testAnthropicApiKeyStorage]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testApiKeyForProvider]' started.
+Test Case '-[DochiTests.AppSettingsTests testApiKeyForProvider]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testApiKeyReturnsEmptyWhenNotSet]' started.
+Test Case '-[DochiTests.AppSettingsTests testApiKeyReturnsEmptyWhenNotSet]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testApiKeyStorage]' started.
+Test Case '-[DochiTests.AppSettingsTests testApiKeyStorage]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testBuildInstructionsIncludesCurrentTime]' started.
+Test Case '-[DochiTests.AppSettingsTests testBuildInstructionsIncludesCurrentTime]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testBuildInstructionsWithProfiles]' started.
+Test Case '-[DochiTests.AppSettingsTests testBuildInstructionsWithProfiles]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testBuildInstructionsWithSystemPrompt]' started.
+Test Case '-[DochiTests.AppSettingsTests testBuildInstructionsWithSystemPrompt]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testDefaultChatFontSize]' started.
+Test Case '-[DochiTests.AppSettingsTests testDefaultChatFontSize]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testDefaultContextAutoCompress]' started.
+Test Case '-[DochiTests.AppSettingsTests testDefaultContextAutoCompress]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testDefaultContextMaxSize]' started.
+Test Case '-[DochiTests.AppSettingsTests testDefaultContextMaxSize]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testDefaultTTSSpeed]' started.
+Test Case '-[DochiTests.AppSettingsTests testDefaultTTSSpeed]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testDefaultWakeWord]' started.
+Test Case '-[DochiTests.AppSettingsTests testDefaultWakeWord]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testRemoveMCPServer]' started.
+Test Case '-[DochiTests.AppSettingsTests testRemoveMCPServer]' passed (0.001 seconds).
+Test Case '-[DochiTests.AppSettingsTests testUpdateMCPServer]' started.
+Test Case '-[DochiTests.AppSettingsTests testUpdateMCPServer]' passed (0.001 seconds).
+Test Suite 'AppSettingsTests' passed at 2026-02-11 01:14:42.988.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.016 (0.019) seconds
+Test Suite 'BuiltInToolServiceTests' started at 2026-02-11 01:14:42.988.
+Test Case '-[DochiTests.BuiltInToolServiceTests testCallUnknownToolThrowsError]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testCallUnknownToolThrowsError]' passed (0.001 seconds).
+Test Case '-[DochiTests.BuiltInToolServiceTests testConfigureSetsApiKeys]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testConfigureSetsApiKeys]' passed (0.001 seconds).
+Test Case '-[DochiTests.BuiltInToolServiceTests testDefaultToolsIncludeAlarm]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testDefaultToolsIncludeAlarm]' passed (0.001 seconds).
+Test Case '-[DochiTests.BuiltInToolServiceTests testDefaultToolsIncludeReminders]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testDefaultToolsIncludeReminders]' passed (0.001 seconds).
+Test Case '-[DochiTests.BuiltInToolServiceTests testImageGenerationAvailableWithApiKey]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testImageGenerationAvailableWithApiKey]' passed (0.001 seconds).
+Test Case '-[DochiTests.BuiltInToolServiceTests testImageGenerationNotAvailableWithoutApiKey]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testImageGenerationNotAvailableWithoutApiKey]' passed (0.001 seconds).
+Test Case '-[DochiTests.BuiltInToolServiceTests testMemoryToolAvailableWithContext]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testMemoryToolAvailableWithContext]' passed (0.001 seconds).
+Test Case '-[DochiTests.BuiltInToolServiceTests testMemoryToolNotAvailableWithoutProfiles]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testMemoryToolNotAvailableWithoutProfiles]' passed (0.001 seconds).
+Test Case '-[DochiTests.BuiltInToolServiceTests testWebSearchAvailableWithApiKey]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testWebSearchAvailableWithApiKey]' passed (0.001 seconds).
+Test Case '-[DochiTests.BuiltInToolServiceTests testWebSearchNotAvailableWithoutApiKey]' started.
+Test Case '-[DochiTests.BuiltInToolServiceTests testWebSearchNotAvailableWithoutApiKey]' passed (0.001 seconds).
+Test Suite 'BuiltInToolServiceTests' passed at 2026-02-11 01:14:42.997.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.007 (0.009) seconds
+Test Suite 'ContextServiceTests' started at 2026-02-11 01:14:42.997.
+Test Case '-[DochiTests.ContextServiceTests testAppendMemory]' started.
+Test Case '-[DochiTests.ContextServiceTests testAppendMemory]' passed (0.002 seconds).
+Test Case '-[DochiTests.ContextServiceTests testAppendMemoryPreservesNewline]' started.
+Test Case '-[DochiTests.ContextServiceTests testAppendMemoryPreservesNewline]' passed (0.002 seconds).
+Test Case '-[DochiTests.ContextServiceTests testAppendMemoryToEmpty]' started.
+Test Case '-[DochiTests.ContextServiceTests testAppendMemoryToEmpty]' passed (0.001 seconds).
+Test Case '-[DochiTests.ContextServiceTests testLoadSystemReturnsEmptyStringWhenNoFile]' started.
+Test Case '-[DochiTests.ContextServiceTests testLoadSystemReturnsEmptyStringWhenNoFile]' passed (0.001 seconds).
+Test Case '-[DochiTests.ContextServiceTests testMemoryPath]' started.
+Test Case '-[DochiTests.ContextServiceTests testMemoryPath]' passed (0.001 seconds).
+Test Case '-[DochiTests.ContextServiceTests testMemorySize]' started.
+Test Case '-[DochiTests.ContextServiceTests testMemorySize]' passed (0.002 seconds).
+Test Case '-[DochiTests.ContextServiceTests testMemorySizeReturnsZeroWhenNoFile]' started.
+Test Case '-[DochiTests.ContextServiceTests testMemorySizeReturnsZeroWhenNoFile]' passed (0.001 seconds).
+Test Case '-[DochiTests.ContextServiceTests testSaveAndLoadMemory]' started.
+Test Case '-[DochiTests.ContextServiceTests testSaveAndLoadMemory]' passed (0.002 seconds).
+Test Case '-[DochiTests.ContextServiceTests testSaveAndLoadSystem]' started.
+Test Case '-[DochiTests.ContextServiceTests testSaveAndLoadSystem]' passed (0.001 seconds).
+Test Case '-[DochiTests.ContextServiceTests testSystemPath]' started.
+Test Case '-[DochiTests.ContextServiceTests testSystemPath]' passed (0.001 seconds).
+Test Suite 'ContextServiceTests' passed at 2026-02-11 01:14:43.013.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.014 (0.016) seconds
+Test Suite 'ConversationServiceTests' started at 2026-02-11 01:14:43.013.
+Test Case '-[DochiTests.ConversationServiceTests testDeleteConversation]' started.
+2026-02-11 01:14:43.015425+0900 Dochi[83634:3599554] [Storage] 대화 로드 실패 2C137A5C-7CF2-4BF6-926B-AB051A20E11C: Error Domain=NSCocoaErrorDomain Code=260 "The file “2C137A5C-7CF2-4BF6-926B-AB051A20E11C.json” couldn’t be opened because there is no such file." UserInfo={NSFilePath=/var/folders/5r/l4b5_bld58v49kpw3rsjxshm0000gn/T/EB1A3BE7-EEE4-4446-AA41-7FA0C0992CA1/conversations/2C137A5C-7CF2-4BF6-926B-AB051A20E11C.json, NSURL=file:///var/folders/5r/l4b5_bld58v49kpw3rsjxshm0000gn/T/EB1A3BE7-EEE4-4446-AA41-7FA0C0992CA1/conversations/2C137A5C-7CF2-4BF6-926B-AB051A20E11C.json, NSUnderlyingError=0xb9151def0 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}}
+Test Case '-[DochiTests.ConversationServiceTests testDeleteConversation]' passed (0.002 seconds).
+Test Case '-[DochiTests.ConversationServiceTests testDeleteNonExistentConversationDoesNotThrow]' started.
+2026-02-11 01:14:43.017153+0900 Dochi[83634:3599554] [Storage] 대화 삭제 실패 34E90127-6C1F-4D0A-AE96-C3DF80FE9838: Error Domain=NSCocoaErrorDomain Code=4 "“34E90127-6C1F-4D0A-AE96-C3DF80FE9838.json” couldn’t be removed." UserInfo={NSUserStringVariant=(
+    Remove
+), NSFilePath=/var/folders/5r/l4b5_bld58v49kpw3rsjxshm0000gn/T/13BDD745-7E98-44A1-BE5F-85024A1EA8F6/conversations/34E90127-6C1F-4D0A-AE96-C3DF80FE9838.json, NSURL=file:///var/folders/5r/l4b5_bld58v49kpw3rsjxshm0000gn/T/13BDD745-7E98-44A1-BE5F-85024A1EA8F6/conversations/34E90127-6C1F-4D0A-AE96-C3DF80FE9838.json, NSUnderlyingError=0xb9151df20 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}}
+Test Case '-[DochiTests.ConversationServiceTests testDeleteNonExistentConversationDoesNotThrow]' passed (0.001 seconds).
+Test Case '-[DochiTests.ConversationServiceTests testListConversationsReturnsOrderedByDate]' started.
+Test Case '-[DochiTests.ConversationServiceTests testListConversationsReturnsOrderedByDate]' passed (0.002 seconds).
+Test Case '-[DochiTests.ConversationServiceTests testListReturnsEmptyWhenNoConversations]' started.
+Test Case '-[DochiTests.ConversationServiceTests testListReturnsEmptyWhenNoConversations]' passed (0.001 seconds).
+Test Case '-[DochiTests.ConversationServiceTests testLoadReturnsNilWhenNotFound]' started.
+2026-02-11 01:14:43.021952+0900 Dochi[83634:3599554] [Storage] 대화 로드 실패 7DA7989C-600D-41EE-AEC8-97F6AF10B93F: Error Domain=NSCocoaErrorDomain Code=260 "The file “7DA7989C-600D-41EE-AEC8-97F6AF10B93F.json” couldn’t be opened because there is no such file." UserInfo={NSFilePath=/var/folders/5r/l4b5_bld58v49kpw3rsjxshm0000gn/T/0EF71A85-70B9-4078-8D63-C44183275CE8/conversations/7DA7989C-600D-41EE-AEC8-97F6AF10B93F.json, NSURL=file:///var/folders/5r/l4b5_bld58v49kpw3rsjxshm0000gn/T/0EF71A85-70B9-4078-8D63-C44183275CE8/conversations/7DA7989C-600D-41EE-AEC8-97F6AF10B93F.json, NSUnderlyingError=0xb9151dfb0 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}}
+Test Case '-[DochiTests.ConversationServiceTests testLoadReturnsNilWhenNotFound]' passed (0.001 seconds).
+Test Case '-[DochiTests.ConversationServiceTests testSaveAndLoadConversation]' started.
+Test Case '-[DochiTests.ConversationServiceTests testSaveAndLoadConversation]' passed (0.002 seconds).
+Test Case '-[DochiTests.ConversationServiceTests testUpdateConversation]' started.
+Test Case '-[DochiTests.ConversationServiceTests testUpdateConversation]' passed (0.002 seconds).
+Test Suite 'ConversationServiceTests' passed at 2026-02-11 01:14:43.027.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+Test Suite 'KeychainServiceTests' started at 2026-02-11 01:14:43.027.
+Test Case '-[DochiTests.KeychainServiceTests testDeleteKey]' started.
+Test Case '-[DochiTests.KeychainServiceTests testDeleteKey]' passed (0.002 seconds).
+Test Case '-[DochiTests.KeychainServiceTests testDeleteNonExistentKeyDoesNotCrash]' started.
+2026-02-11 01:14:43.029405+0900 Dochi[83634:3599554] [Storage] 키 삭제 실패 nonexistent: Error Domain=NSCocoaErrorDomain Code=4 "“key_nonexistent” couldn’t be removed." UserInfo={NSUserStringVariant=(
+    Remove
+), NSFilePath=/var/folders/5r/l4b5_bld58v49kpw3rsjxshm0000gn/T/E2810E08-B130-4D5B-A853-03570A9706FF/key_nonexistent, NSURL=file:///var/folders/5r/l4b5_bld58v49kpw3rsjxshm0000gn/T/E2810E08-B130-4D5B-A853-03570A9706FF/key_nonexistent, NSUnderlyingError=0xb9151ea30 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}}
+Test Case '-[DochiTests.KeychainServiceTests testDeleteNonExistentKeyDoesNotCrash]' passed (0.001 seconds).
+Test Case '-[DochiTests.KeychainServiceTests testLoadNonExistentKeyReturnsNil]' started.
+Test Case '-[DochiTests.KeychainServiceTests testLoadNonExistentKeyReturnsNil]' passed (0.001 seconds).
+Test Case '-[DochiTests.KeychainServiceTests testMultipleAccounts]' started.
+Test Case '-[DochiTests.KeychainServiceTests testMultipleAccounts]' passed (0.002 seconds).
+Test Case '-[DochiTests.KeychainServiceTests testSaveAndLoad]' started.
+Test Case '-[DochiTests.KeychainServiceTests testSaveAndLoad]' passed (0.001 seconds).
+Test Case '-[DochiTests.KeychainServiceTests testSaveEmptyValue]' started.
+Test Case '-[DochiTests.KeychainServiceTests testSaveEmptyValue]' passed (0.001 seconds).
+Test Case '-[DochiTests.KeychainServiceTests testUpdateExistingKey]' started.
+Test Case '-[DochiTests.KeychainServiceTests testUpdateExistingKey]' passed (0.002 seconds).
+Test Suite 'KeychainServiceTests' passed at 2026-02-11 01:14:43.038.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.009 (0.011) seconds
+Test Suite 'MCPToolInfoTests' started at 2026-02-11 01:14:43.038.
+Test Case '-[DochiTests.MCPToolInfoTests testAsDictionaryBasic]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testAsDictionaryBasic]' passed (0.001 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testAsDictionaryWithComplexInputSchema]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testAsDictionaryWithComplexInputSchema]' passed (0.001 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testAsDictionaryWithoutDescription]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testAsDictionaryWithoutDescription]' passed (0.000 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testAsDictionaryWithoutInputSchema]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testAsDictionaryWithoutInputSchema]' passed (0.001 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testMCPServerConfigCodable]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testMCPServerConfigCodable]' passed (0.001 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testMCPServerConfigDefaults]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testMCPServerConfigDefaults]' passed (0.001 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testMCPServerConfigInit]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testMCPServerConfigInit]' passed (0.001 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testMCPToolInfoInit]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testMCPToolInfoInit]' passed (0.000 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testMCPToolInfoWithNilDescription]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testMCPToolInfoWithNilDescription]' passed (0.000 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testMCPToolResultInit]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testMCPToolResultInit]' passed (0.000 seconds).
+Test Case '-[DochiTests.MCPToolInfoTests testMCPToolResultWithError]' started.
+Test Case '-[DochiTests.MCPToolInfoTests testMCPToolResultWithError]' passed (0.001 seconds).
+Test Suite 'MCPToolInfoTests' passed at 2026-02-11 01:14:43.046.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.006 (0.009) seconds
+Test Suite 'MessageTests' started at 2026-02-11 01:14:43.047.
+Test Case '-[DochiTests.MessageTests testAllRoles]' started.
+Test Case '-[DochiTests.MessageTests testAllRoles]' passed (0.001 seconds).
+Test Case '-[DochiTests.MessageTests testMessageDecodingWithEmptyToolCalls]' started.
+Test Case '-[DochiTests.MessageTests testMessageDecodingWithEmptyToolCalls]' passed (0.001 seconds).
+Test Case '-[DochiTests.MessageTests testMessageDecodingWithNestedToolCallArguments]' started.
+Test Case '-[DochiTests.MessageTests testMessageDecodingWithNestedToolCallArguments]' passed (0.001 seconds).
+Test Case '-[DochiTests.MessageTests testMessageDecodingWithoutToolCalls]' started.
+Test Case '-[DochiTests.MessageTests testMessageDecodingWithoutToolCalls]' passed (0.001 seconds).
+Test Case '-[DochiTests.MessageTests testMessageDecodingWithToolCalls]' started.
+Test Case '-[DochiTests.MessageTests testMessageDecodingWithToolCalls]' passed (0.003 seconds).
+Test Case '-[DochiTests.MessageTests testMessageEncodingWithoutToolCalls]' started.
+Test Case '-[DochiTests.MessageTests testMessageEncodingWithoutToolCalls]' passed (0.001 seconds).
+Test Case '-[DochiTests.MessageTests testMessageEncodingWithToolCalls]' started.
+Test Case '-[DochiTests.MessageTests testMessageEncodingWithToolCalls]' passed (0.001 seconds).
+Test Case '-[DochiTests.MessageTests testMessageInitWithContent]' started.
+Test Case '-[DochiTests.MessageTests testMessageInitWithContent]' passed (0.001 seconds).
+Test Case '-[DochiTests.MessageTests testMessageInitWithToolCalls]' started.
+Test Case '-[DochiTests.MessageTests testMessageInitWithToolCalls]' passed (0.001 seconds).
+Test Case '-[DochiTests.MessageTests testMessageRoundTripWithToolCalls]' started.
+Test Case '-[DochiTests.MessageTests testMessageRoundTripWithToolCalls]' passed (0.001 seconds).
+Test Suite 'MessageTests' passed at 2026-02-11 01:14:43.060.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.009 (0.013) seconds
+Test Suite 'ProfileAdminToolTests' started at 2026-02-11 01:14:43.060.
+Test Case '-[DochiTests.ProfileAdminToolTests testProfileMergeAppendsMemoryAndMigratesConversations]' started.
+2026-02-11 01:14:43.063524+0900 Dochi[83634:3599554] [Tool] 프로필 병합: 민수 -> 민서, strategy=append
+Test Case '-[DochiTests.ProfileAdminToolTests testProfileMergeAppendsMemoryAndMigratesConversations]' passed (0.004 seconds).
+Test Suite 'ProfileAdminToolTests' passed at 2026-02-11 01:14:43.064.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.004 (0.004) seconds
+Test Suite 'TTSSanitizationTests' started at 2026-02-11 01:14:43.064.
+Test Case '-[DochiTests.TTSSanitizationTests testBlockquoteStripped]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testBlockquoteStripped]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testBoldStripped]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testBoldStripped]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testBulletListStripped]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testBulletListStripped]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testCodeBlockReturnsEmpty]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testCodeBlockReturnsEmpty]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testColonReplacedWithComma]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testColonReplacedWithComma]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testEmptyStringReturnsEmpty]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testEmptyStringReturnsEmpty]' passed (0.000 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testHeaderStripped]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testHeaderStripped]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testHorizontalRuleRemoved]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testHorizontalRuleRemoved]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testImageMarkdownRemoved]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testImageMarkdownRemoved]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testInlineCodeStripped]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testInlineCodeStripped]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testItalicStripped]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testItalicStripped]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testLinkMarkdownKeepsText]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testLinkMarkdownKeepsText]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testMultipleSpacesCollapsed]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testMultipleSpacesCollapsed]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testPlainTextUnchanged]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testPlainTextUnchanged]' passed (0.001 seconds).
+Test Case '-[DochiTests.TTSSanitizationTests testTrimsWhitespace]' started.
+Test Case '-[DochiTests.TTSSanitizationTests testTrimsWhitespace]' passed (0.001 seconds).
+Test Suite 'TTSSanitizationTests' passed at 2026-02-11 01:14:43.080.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.009 (0.016) seconds
+Test Suite 'ToolCallTests' started at 2026-02-11 01:14:43.080.
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithArguments]' started.
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithArguments]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithEmptyArguments]' started.
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithEmptyArguments]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithEmptyJSONString]' started.
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithEmptyJSONString]' passed (0.003 seconds).
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithInvalidJSONString]' started.
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithInvalidJSONString]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithJSONString]' started.
+Test Case '-[DochiTests.ToolCallTests testToolCallInitWithJSONString]' passed (0.000 seconds).
+Test Case '-[DochiTests.ToolCallTests testToolCallIsIdentifiable]' started.
+Test Case '-[DochiTests.ToolCallTests testToolCallIsIdentifiable]' passed (0.000 seconds).
+Test Case '-[DochiTests.ToolCallTests testToolCallWithNestedArguments]' started.
+Test Case '-[DochiTests.ToolCallTests testToolCallWithNestedArguments]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolCallTests testToolResultDefaultIsError]' started.
+Test Case '-[DochiTests.ToolCallTests testToolResultDefaultIsError]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolCallTests testToolResultInit]' started.
+Test Case '-[DochiTests.ToolCallTests testToolResultInit]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolCallTests testToolResultWithError]' started.
+Test Case '-[DochiTests.ToolCallTests testToolResultWithError]' passed (0.001 seconds).
+Test Suite 'ToolCallTests' passed at 2026-02-11 01:14:43.092.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.008 (0.012) seconds
+Test Suite 'ToolExecutorTests' started at 2026-02-11 01:14:43.092.
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsEmptyAlt]' started.
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsEmptyAlt]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsEmptyString]' started.
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsEmptyString]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsFromMarkdown]' started.
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsFromMarkdown]' passed (0.000 seconds).
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsIgnoresRegularLinks]' started.
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsIgnoresRegularLinks]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsNoImages]' started.
+Test Case '-[DochiTests.ToolExecutorTests testExtractImageURLsNoImages]' passed (0.001 seconds).
+Test Case '-[DochiTests.ToolExecutorTests testExtractMultipleImageURLs]' started.
+Test Case '-[DochiTests.ToolExecutorTests testExtractMultipleImageURLs]' passed (0.001 seconds).
+Test Suite 'ToolExecutorTests' passed at 2026-02-11 01:14:43.100.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.003 (0.008) seconds
+Test Suite 'ToolsRegistryTests' started at 2026-02-11 01:14:43.100.
+Test Case '-[DochiTests.ToolsRegistryTests testEnableCategoriesAndReset]' started.
+2026-02-11 01:14:43.105225+0900 Dochi[83634:3599554] [Tool] tools.enable_categories cats=["settings"] enabled=["settings.get", "settings.list", "settings.mcp_add_server", "settings.mcp_remove_server", "settings.mcp_update_server", "settings.set"] unknown=[]
+2026-02-11 01:14:43.105318+0900 Dochi[83634:3599554] [Tool] tools.reset
+Test Case '-[DochiTests.ToolsRegistryTests testEnableCategoriesAndReset]' passed (0.005 seconds).
+Test Suite 'ToolsRegistryTests' passed at 2026-02-11 01:14:43.106.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.005 (0.005) seconds
+Test Suite 'WorkspaceContextTests' started at 2026-02-11 01:14:43.106.
+Test Case '-[DochiTests.WorkspaceContextTests testAgentInWorkspace]' started.
+Test Case '-[DochiTests.WorkspaceContextTests testAgentInWorkspace]' passed (0.004 seconds).
+Test Case '-[DochiTests.WorkspaceContextTests testAgentIsolationBetweenWorkspaces]' started.
+Test Case '-[DochiTests.WorkspaceContextTests testAgentIsolationBetweenWorkspaces]' passed (0.004 seconds).
+Test Case '-[DochiTests.WorkspaceContextTests testAppendWorkspaceMemory]' started.
+Test Case '-[DochiTests.WorkspaceContextTests testAppendWorkspaceMemory]' passed (0.002 seconds).
+Test Case '-[DochiTests.WorkspaceContextTests testCreateAndLoadWorkspace]' started.
+Test Case '-[DochiTests.WorkspaceContextTests testCreateAndLoadWorkspace]' passed (0.002 seconds).
+Test Case '-[DochiTests.WorkspaceContextTests testListWorkspacesEmpty]' started.
+Test Case '-[DochiTests.WorkspaceContextTests testListWorkspacesEmpty]' passed (0.001 seconds).
+Test Case '-[DochiTests.WorkspaceContextTests testWorkspaceMemory]' started.
+Test Case '-[DochiTests.WorkspaceContextTests testWorkspaceMemory]' passed (0.002 seconds).
+Test Suite 'WorkspaceContextTests' passed at 2026-02-11 01:14:43.123.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.015 (0.017) seconds
+Test Suite 'DochiTests.xctest' passed at 2026-02-11 01:14:43.123.
+	 Executed 125 tests, with 0 failures (0 unexpected) in 0.156 (0.197) seconds
+Test Suite 'All tests' passed at 2026-02-11 01:14:43.123.
+	 Executed 125 tests, with 0 failures (0 unexpected) in 0.156 (0.198) seconds
+2026-02-11 01:14:43.411 xcodebuild[83579:3599191] [MT] IDETestOperationsObserverDebug: 2.606 elapsed -- Testing started completed.
+2026-02-11 01:14:43.411 xcodebuild[83579:3599191] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-02-11 01:14:43.411 xcodebuild[83579:3599191] [MT] IDETestOperationsObserverDebug: 2.606 sec, +2.606 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/hckim/Library/Developer/Xcode/DerivedData/Dochi-fvcerrzpbqssspbcabodnzxiwpdx/Logs/Test/Test-DochiTests-2026.02.11_01-14-38-+0900.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

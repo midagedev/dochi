@@ -13,6 +13,7 @@ final class AgentEditorToolTests: XCTestCase {
         let base = makeTempDir()
         let context = ContextService(baseDirectory: base)
         let settings = AppSettings(contextService: context)
+        settings.currentWorkspaceId = nil
         settings.activeAgentName = "테스트"
         context.createAgent(name: "테스트", wakeWord: "도치야", description: "")
         context.saveAgentMemory(agentName: "테스트", content: "- 제주 맛집\n- 부산 바다")

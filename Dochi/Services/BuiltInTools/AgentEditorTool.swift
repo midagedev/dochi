@@ -205,7 +205,7 @@ final class AgentEditorTool: BuiltInTool {
             let text = wsId != nil
                 ? contextService.loadAgentPersona(workspaceId: wsId!, agentName: agentName)
                 : contextService.loadAgentPersona(agentName: agentName)
-            // Count occurrences
+            // Count occurrences (line-based for robustness)
             let (replaced, count) = replaceAll(text, find: find, with: replace)
 
             if (arguments["preview"] as? Bool) == true {
@@ -292,7 +292,7 @@ final class AgentEditorTool: BuiltInTool {
                 ? contextService.loadAgentMemory(workspaceId: wsId!, agentName: agentName)
                 : contextService.loadAgentMemory(agentName: agentName)
             var lines = text.components(separatedBy: "\n")
-            if let idx = lines.firstIndex(where: { $0.localizedCaseInsensitiveContains(find) }) {
+            if let idx = lines.firstIndex(where: { $0.range(of: find, options: [.caseInsensitive]) != nil }) {
                 if replace.isEmpty {
                     lines.remove(at: idx)
                 } else {
@@ -355,12 +355,11 @@ final class AgentEditorTool: BuiltInTool {
     }
 
     private func replaceAll(_ text: String, find: String, with replacement: String) -> (String, Int) {
-        var count = 0
-        var searchRange: Range<String.Index>? = text.startIndex..<text.endIndex
-        while let range = text.range(of: find, options: [.caseInsensitive], range: searchRange) {
-            count += 1
-            searchRange = range.upperBound..<text.endIndex
+        // Count by lines to avoid overlapping/locale quirks
+        let lineMatches = text.components(separatedBy: "\n").filter { line in
+            line.range(of: find, options: [.caseInsensitive]) != nil
         }
+        let count = lineMatches.count
         let replaced = text.replacingOccurrences(of: find, with: replacement, options: [.caseInsensitive], range: nil)
         return (replaced, count)
     }

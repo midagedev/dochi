@@ -13,6 +13,7 @@ final class AgentPersonaGuardrailTests: XCTestCase {
         let base = makeTempDir()
         let context = ContextService(baseDirectory: base)
         let settings = AppSettings(contextService: context)
+        settings.currentWorkspaceId = nil
         settings.activeAgentName = "테스트"
 
         context.createAgent(name: "테스트", wakeWord: "도치야", description: "")
