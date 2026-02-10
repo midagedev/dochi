@@ -115,6 +115,11 @@ struct ContentView: View {
 
             Spacer()
 
+            // Context usage indicator (actual usage only)
+            if let _ = viewModel.actualContextUsage {
+                contextUsageIndicator
+            }
+
             // 자동종료 토글
             if viewModel.isConnected {
                 Button {
@@ -194,6 +199,25 @@ struct ContentView: View {
         case .processing, .executingTool, .speaking: return true
         case .idle, .listening: return false
         }
+    }
+
+    private var contextUsageIndicator: some View {
+        let info = viewModel.actualContextUsage!
+        return HStack(spacing: 6) {
+            Image(systemName: "gauge")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.15))
+                Capsule().fill(info.percent < 0.8 ? Color.blue.opacity(0.6) : (info.percent < 1.0 ? Color.orange.opacity(0.7) : Color.red.opacity(0.7)))
+                    .frame(width: max(0, CGFloat(info.percent)) * 90)
+            }
+            .frame(width: 90, height: 8)
+            Text("\(Int(info.percent * 100))%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(info.percent < 0.8 ? Color.secondary : (info.percent < 1.0 ? Color.orange : Color.red))
+        }
+        .accessibilityIdentifier("indicator.contextUsage")
     }
 
     // MARK: - Input Area

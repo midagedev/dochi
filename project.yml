@@ -25,6 +25,8 @@ targets:
         excludes:
           - Info.plist
           - Resources
+      - path: Dochi/Models/TokenUsage.swift
+      - path: Dochi/Services/LLM/ModelContextEstimator.swift
       - path: Dochi/Resources/CHANGELOG.md
         buildPhase: resources
       - path: Dochi/Resources/Assets.xcassets

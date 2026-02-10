@@ -1,7 +1,7 @@
 import Foundation
 
 enum OpenAIProviderHelper {
-    static func buildBody(messages: [Message], systemPrompt: String, model: String, tools: [[String: Any]]?, toolResults: [ToolResult]?, providerIsZAI: Bool) -> [String: Any] {
+    static func buildBody(messages: [Message], systemPrompt: String, model: String, tools: [[String: Any]]?, toolResults: [ToolResult]?, providerIsZAI: Bool, includeUsage: Bool = false) -> [String: Any] {
         var apiMessages: [[String: Any]] = []
         if !systemPrompt.isEmpty { apiMessages.append(["role": "system", "content": systemPrompt]) }
         for msg in messages {
@@ -36,6 +36,7 @@ enum OpenAIProviderHelper {
         var body: [String: Any] = ["model": model, "messages": apiMessages, "stream": true]
         if providerIsZAI { body["enable_thinking"] = false }
         if let tools, !tools.isEmpty { body["tools"] = tools }
+        if includeUsage { body["stream_options"] = ["include_usage": true] }
         return body
     }
 
@@ -54,4 +55,3 @@ enum OpenAIProviderHelper {
         return (text, (id, name, arguments))
     }
 }
-

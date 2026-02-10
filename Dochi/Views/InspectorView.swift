@@ -63,6 +63,24 @@ private struct ContextPanel: View {
                 Text("\(viewModel.messages.count)").compact(AppFont.caption)
             }
             .foregroundStyle(.secondary)
+
+            HStack {
+                Text("모델").compact(AppFont.caption)
+                Spacer()
+                Text("\(viewModel.settings.llmProvider.displayName) / \(viewModel.settings.llmModel)")
+                    .compact(AppFont.caption)
+            }
+            .foregroundStyle(.secondary)
+
+            if let usage = viewModel.actualContextUsage {
+                HStack {
+                    Text("컨텍스트 사용량").compact(AppFont.caption)
+                    Spacer()
+                    Text("\(usage.usedTokens) / \(usage.limitTokens) tokens (\(Int(usage.percent * 100))%)")
+                        .compact(AppFont.caption.monospacedDigit())
+                }
+                .foregroundStyle(.secondary)
+            }
         }
     }
 }
