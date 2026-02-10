@@ -25,6 +25,22 @@ final class ToolsRegistryTool: BuiltInTool {
                     ],
                     "required": ["names"]
                 ]
+            ),
+            MCPToolInfo(
+                id: "builtin:tools.enable_ttl",
+                name: "tools.enable_ttl",
+                description: "Set the TTL (minutes) for enabled tools registry.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["minutes": ["type": "integer"]],
+                    "required": ["minutes"]
+                ]
+            ),
+            MCPToolInfo(
+                id: "builtin:tools.reset",
+                name: "tools.reset",
+                description: "Reset enabled tools back to baseline only.",
+                inputSchema: ["type": "object", "properties": [:]]
             )
         ]
     }
@@ -47,9 +63,19 @@ final class ToolsRegistryTool: BuiltInTool {
             host.setEnabledToolNames(names)
             return MCPToolResult(content: "Enabled tools: \(names)", isError: false)
 
+        case "tools.enable_ttl":
+            guard let minutes = arguments["minutes"] as? Int else {
+                return MCPToolResult(content: "minutes (integer) is required", isError: true)
+            }
+            host.setRegistryTTL(minutes: minutes)
+            return MCPToolResult(content: "Registry TTL set to \(minutes) minutes", isError: false)
+
+        case "tools.reset":
+            host.setEnabledToolNames(nil)
+            return MCPToolResult(content: "Enabled tools reset", isError: false)
+
         default:
             throw BuiltInToolError.unknownTool(name)
         }
     }
 }
-

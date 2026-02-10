@@ -13,7 +13,7 @@ final class LLMService: ObservableObject {
     var onToolCallsReceived: (([ToolCall]) -> Void)?
 
     private var streamTask: Task<Void, Never>?
-    private var sentenceBuffer: String = ""
+    private let sentenceChunker = SentenceChunker()
     private var pendingToolCalls: [ToolCall] = []
 
     // MARK: - Public
@@ -33,7 +33,7 @@ final class LLMService: ObservableObject {
         }
         cancel()
         partialResponse = ""
-        sentenceBuffer = ""
+        sentenceChunker.reset()
         pendingToolCalls = []
         error = nil
         isStreaming = true
@@ -66,7 +66,7 @@ final class LLMService: ObservableObject {
         streamTask?.cancel()
         streamTask = nil
         isStreaming = false
-        sentenceBuffer = ""
+        sentenceChunker.reset()
         pendingToolCalls = []
     }
 
@@ -335,7 +335,7 @@ final class LLMService: ObservableObject {
                 if let (text, toolCallDelta) = Self.parseOpenAIDelta(json) {
                     if let text = text {
                         partialResponse += text
-                        feedSentenceBuffer(text)
+                        for sentence in sentenceChunker.process(text) { self.onSentenceReady?(sentence) }
                     }
                     if let delta = toolCallDelta {
                         // Tool call 조립
@@ -361,7 +361,7 @@ final class LLMService: ObservableObject {
                     switch result {
                     case .text(let text):
                         partialResponse += text
-                        feedSentenceBuffer(text)
+                        for sentence in sentenceChunker.process(text) { self.onSentenceReady?(sentence) }
                     case .toolUseStart(let id, let name):
                         if let current = currentToolCall {
                             pendingToolCalls.append(ToolCall(
@@ -388,7 +388,7 @@ final class LLMService: ObservableObject {
         }
 
         // 남은 버퍼 flush
-        flushSentenceBuffer()
+        if let last = sentenceChunker.flush() { onSentenceReady?(last) }
 
         // Tool calls가 있으면 콜백
         if !pendingToolCalls.isEmpty {
@@ -405,49 +405,7 @@ final class LLMService: ObservableObject {
 
     private static let punctuationTerminators: Set<Character> = [".", "?", "!", "。"]
 
-    private func feedSentenceBuffer(_ text: String) {
-        sentenceBuffer += text
-
-        while let splitIndex = findSentenceBoundary() {
-            let sentence = String(sentenceBuffer[sentenceBuffer.startIndex...splitIndex])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            sentenceBuffer = String(sentenceBuffer[sentenceBuffer.index(after: splitIndex)...])
-            if !sentence.isEmpty {
-                onSentenceReady?(sentence)
-            }
-        }
-    }
-
-    /// 줄바꿈이면 즉시 분할, 구두점은 뒤에 공백이 있을 때만 분할
-    private func findSentenceBoundary() -> String.Index? {
-        var i = sentenceBuffer.startIndex
-        while i < sentenceBuffer.endIndex {
-            let ch = sentenceBuffer[i]
-            if ch == "\n" {
-                return i
-            }
-            if Self.punctuationTerminators.contains(ch) {
-                let next = sentenceBuffer.index(after: i)
-                if next < sentenceBuffer.endIndex && sentenceBuffer[next].isWhitespace {
-                    return i
-                }
-                // 구두점 뒤에 아직 문자가 안 왔으면 대기
-                if next == sentenceBuffer.endIndex {
-                    return nil
-                }
-            }
-            i = sentenceBuffer.index(after: i)
-        }
-        return nil
-    }
-
-    private func flushSentenceBuffer() {
-        let remaining = sentenceBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        sentenceBuffer = ""
-        if !remaining.isEmpty {
-            onSentenceReady?(remaining)
-        }
-    }
+    // sentence chunking is delegated to SentenceChunker
 
     // MARK: - Delta Parsing
 
