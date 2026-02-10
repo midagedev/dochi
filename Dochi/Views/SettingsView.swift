@@ -91,6 +91,16 @@ struct SettingsView: View {
                             }
                         }
                         .pickerStyle(.segmented)
+
+                        Picker("모드", selection: $viewModel.settings.interactionMode) {
+                            ForEach(InteractionMode.allCases) { m in
+                                Text(m.displayName).tag(m)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        Text(viewModel.settings.interactionMode == .voiceAndText ? "음성 입력과 음성 출력(TTS)을 함께 사용합니다." : "텍스트로만 대화합니다. 마이크/음성 권한을 요청하지 않습니다.")
+                            .compact(AppFont.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     // STT
@@ -102,7 +112,11 @@ struct SettingsView: View {
                                 .font(.caption.monospacedDigit())
                                 .frame(width: 36)
                         }
+                        Text("최초 음성 입력 시 macOS 권한 대화상자가 표시됩니다.")
+                            .compact(AppFont.caption)
+                            .foregroundStyle(.tertiary)
                     }
+                    .disabled(viewModel.settings.interactionMode == .textOnly)
 
                     // TTS
                     SectionCard("TTS", icon: "speaker.wave.2") {
@@ -126,6 +140,7 @@ struct SettingsView: View {
                                 .frame(width: 20)
                         }
                     }
+                    .disabled(viewModel.settings.interactionMode == .textOnly)
 
                     // System Prompt
                     SectionCard("시스템 프롬프트", icon: "rectangle.and.pencil.and.ellipsis") {
@@ -282,6 +297,7 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    .disabled(viewModel.settings.interactionMode == .textOnly)
 
                     // Cloud
                     if let supabase = viewModel.supabaseServiceForView {

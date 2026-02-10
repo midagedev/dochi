@@ -22,6 +22,9 @@ final class SessionManager {
               !vm.settings.wakeWord.isEmpty
         else { return }
 
+        // 권한이 이미 허용된 경우에만 자동 시작 — 앱 시작 시 반복 프롬프트 방지
+        guard SpeechService.isAuthorized() else { return }
+
         Log.stt.info("웨이크워드 자모 매칭 시작: \(vm.settings.wakeWord)")
         vm.speechService.startWakeWordDetection(wakeWord: vm.settings.wakeWord)
     }
@@ -90,10 +93,15 @@ final class SessionManager {
         vm.isAskingToEndSession = true
         vm.speechService.stopListening()
         vm.speechService.stopWakeWordDetection()
-        vm.state = .speaking
-        vm.supertonicService.speed = vm.settings.ttsSpeed
-        vm.supertonicService.diffusionSteps = vm.settings.ttsDiffusionSteps
-        vm.supertonicService.speak(Constants.Session.askEndMessage, voice: vm.settings.supertonicVoice)
+        if vm.settings.interactionMode == .voiceAndText {
+            vm.state = .speaking
+            vm.supertonicService.speed = vm.settings.ttsSpeed
+            vm.supertonicService.diffusionSteps = vm.settings.ttsDiffusionSteps
+            vm.supertonicService.speak(Constants.Session.askEndMessage, voice: vm.settings.supertonicVoice)
+        } else {
+            vm.messages.append(Message(role: .assistant, content: Constants.Session.askEndMessage))
+            vm.state = .idle
+        }
         Log.app.info("세션 종료 여부 질문")
     }
 
@@ -120,17 +128,21 @@ final class SessionManager {
         guard let vm else { return }
         vm.speechService.stopListening()
         vm.speechService.stopWakeWordDetection()
-        vm.state = .speaking
-        vm.supertonicService.speed = vm.settings.ttsSpeed
-        vm.supertonicService.diffusionSteps = vm.settings.ttsDiffusionSteps
-        vm.supertonicService.speak(Constants.Session.endConfirmMessage, voice: vm.settings.supertonicVoice)
+        if vm.settings.interactionMode == .voiceAndText {
+            vm.state = .speaking
+            vm.supertonicService.speed = vm.settings.ttsSpeed
+            vm.supertonicService.diffusionSteps = vm.settings.ttsDiffusionSteps
+            vm.supertonicService.speak(Constants.Session.endConfirmMessage, voice: vm.settings.supertonicVoice)
 
-        Task { [weak vm] in
-            guard let vm else { return }
-            while vm.supertonicService.state == .playing || vm.supertonicService.state == .synthesizing {
-                // 폴링 대기 — 취소 시 즉시 종료 처리됨
-                try? await Task.sleep(for: .milliseconds(Constants.Timing.ttsCompletionPollMs))
+            Task { [weak vm] in
+                guard let vm else { return }
+                while vm.supertonicService.state == .playing || vm.supertonicService.state == .synthesizing {
+                    try? await Task.sleep(for: .milliseconds(Constants.Timing.ttsCompletionPollMs))
+                }
+                self.endSession()
             }
+        } else {
+            vm.messages.append(Message(role: .assistant, content: Constants.Session.endConfirmMessage))
             self.endSession()
         }
     }

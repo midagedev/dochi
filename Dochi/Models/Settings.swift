@@ -48,6 +48,16 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(uiDensity.rawValue, forKey: Keys.uiDensity) }
     }
 
+    // Interaction mode
+    @Published var interactionMode: InteractionMode {
+        didSet { defaults.set(interactionMode.rawValue, forKey: Keys.interactionMode) }
+    }
+
+    // Permission education
+    @Published var hasSeenPermissionInfo: Bool {
+        didSet { defaults.set(hasSeenPermissionInfo, forKey: Keys.hasSeenPermissionInfo) }
+    }
+
     // STT settings
     @Published var sttSilenceTimeout: Double {
         didSet { defaults.set(sttSilenceTimeout, forKey: Keys.sttSilenceTimeout) }
@@ -142,6 +152,8 @@ final class AppSettings: ObservableObject {
         static let claudeUIEnabled = "settings.claudeUIEnabled"
         static let claudeUIBaseURL = "settings.claudeUIBaseURL"
         static let claudeUISandboxEnabled = "settings.claudeUISandboxEnabled"
+        static let interactionMode = "settings.interactionMode"
+        static let hasSeenPermissionInfo = "settings.hasSeenPermissionInfo"
     }
 
     // MARK: - Dependencies
@@ -196,6 +208,14 @@ final class AppSettings: ObservableObject {
         self.claudeUIEnabled = defaults.object(forKey: Keys.claudeUIEnabled) as? Bool ?? false
         self.claudeUIBaseURL = defaults.string(forKey: Keys.claudeUIBaseURL) ?? "http://localhost:3001"
         self.claudeUISandboxEnabled = defaults.object(forKey: Keys.claudeUISandboxEnabled) as? Bool ?? true
+
+        if let modeRaw = defaults.string(forKey: Keys.interactionMode), let mode = InteractionMode(rawValue: modeRaw) {
+            self.interactionMode = mode
+        } else {
+            self.interactionMode = .voiceAndText
+        }
+
+        self.hasSeenPermissionInfo = defaults.object(forKey: Keys.hasSeenPermissionInfo) as? Bool ?? false
 
         // MCP servers
         if let data = defaults.data(forKey: Keys.mcpServers) {

@@ -45,17 +45,16 @@ final class SpeechService: ObservableObject {
     /// 마이크 + 음성인식 권한을 한 번에 요청. 앱 시작 시 호출.
     func requestAuthorization() async -> Bool {
         if authorizationGranted { return true }
-
-        // 1) 음성인식 권한 — nonisolated static으로 분리 (콜백이 백그라운드 스레드에서 옴)
-        let speechGranted = await Self.requestSpeechPermission()
+        // 1) 음성인식 권한 — 현재 상태 확인 후 필요한 경우에만 요청
+        let speechGranted = await Self.ensureSpeechPermission()
 
         guard speechGranted else {
             error = "음성 인식 권한이 거부되었습니다."
             return false
         }
 
-        // 2) 마이크 권한
-        let micGranted = await Self.requestMicPermission()
+        // 2) 마이크 권한 — 현재 상태 확인 후 필요한 경우에만 요청
+        let micGranted = await Self.ensureMicPermission()
 
         guard micGranted else {
             error = "마이크 권한이 거부되었습니다."
@@ -67,19 +66,61 @@ final class SpeechService: ObservableObject {
     }
 
     /// 백그라운드 스레드에서 콜백되므로 반드시 nonisolated
-    private nonisolated static func requestSpeechPermission() async -> Bool {
-        await withUnsafeContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status == .authorized)
+    private nonisolated static func ensureSpeechPermission() async -> Bool {
+        if #available(macOS 13.0, *) {
+            let status = SFSpeechRecognizer.authorizationStatus()
+            switch status {
+            case .authorized: return true
+            case .denied, .restricted: return false
+            case .notDetermined:
+                return await withUnsafeContinuation { continuation in
+                    SFSpeechRecognizer.requestAuthorization { newStatus in
+                        continuation.resume(returning: newStatus == .authorized)
+                    }
+                }
+            @unknown default:
+                return false
+            }
+        } else {
+            // Older macOS: request directly once
+            return await withUnsafeContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    continuation.resume(returning: status == .authorized)
+                }
             }
         }
     }
 
-    private nonisolated static func requestMicPermission() async -> Bool {
-        if #available(macOS 14.0, *) {
-            return await AVAudioApplication.requestRecordPermission()
+    private nonisolated static func ensureMicPermission() async -> Bool {
+        // Use AVCaptureDevice for robust permission check on macOS
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        switch status {
+        case .authorized:
+            return true
+        case .denied, .restricted:
+            return false
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        @unknown default:
+            return false
         }
-        return true
+    }
+
+    /// 현재 권한 상태 확인(프롬프트 없이)
+    nonisolated static func isAuthorized() -> Bool {
+        let speechOK: Bool = {
+            if #available(macOS 13.0, *) {
+                return SFSpeechRecognizer.authorizationStatus() == .authorized
+            } else { return true }
+        }()
+        let micOK: Bool = {
+            AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        }()
+        return speechOK && micOK
     }
 
     // MARK: - Push-to-Talk

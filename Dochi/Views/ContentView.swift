@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @EnvironmentObject var viewModel: DochiViewModel
@@ -36,6 +37,45 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showOnboarding) {
             OnboardingView()
+        }
+        .sheet(isPresented: $viewModel.showPermissionSheet) {
+            VStack(spacing: 16) {
+                HStack {
+                    Text("마이크/음성 인식 권한").font(.headline)
+                    Spacer()
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "mic.fill").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("음성 입력을 사용하려면 macOS 권한이 필요합니다.")
+                        Text("이 안내는 한 번만 표시되며, ‘허용’하면 다음부터 다시 묻지 않습니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                HStack {
+                    Button("취소", role: .cancel) { viewModel.showPermissionSheet = false }
+                    Button("시스템 설정 열기") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                            NSWorkspace.shared.open(url)
+                        }
+                        if let url2 = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition") {
+                            NSWorkspace.shared.open(url2)
+                        }
+                    }
+                    Spacer()
+                    Button("지금 허용") {
+                        viewModel.settings.hasSeenPermissionInfo = true
+                        viewModel.showPermissionSheet = false
+                        viewModel.startListening()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding()
+            .frame(minWidth: 420)
+            .background(.ultraThinMaterial)
         }
         .onAppear {
             splitVisibility = .all
@@ -192,6 +232,14 @@ struct SidebarView: View {
             }
             .padding(.horizontal, rowPaddingH)
             .padding(.vertical, rowPaddingV)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.large)
+                    .fill(AppColor.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.large)
+                    .stroke(AppColor.border, lineWidth: 1)
+            )
 
             // Expand/Collapse helpers
             HStack(spacing: 8) {
@@ -222,16 +270,6 @@ struct SidebarView: View {
         .sheet(isPresented: $showMemoryEditor) { MemoryEditorView(contextService: contextService) }
         .sheet(isPresented: $showFamilyMemoryEditor) { FamilyMemoryEditorView(contextService: contextService) }
         .sheet(item: $editingUserMemoryProfile) { profile in UserMemoryEditorView(contextService: contextService, profile: profile) }
-        .safeAreaInset(edge: .bottom) {
-            Button { showSettings = true } label: {
-                Label("설정", systemImage: "gear")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, rowPaddingH)
-                    .padding(.vertical, rowPaddingV)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier("open.settings")
-        }
         .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
     }
 }
