@@ -20,6 +20,7 @@ final class BuiltInToolService: ObservableObject {
     let workspaceTool = WorkspaceTool()
     let telegramTool = TelegramTool()
     let toolsRegistryTool = ToolsRegistryTool()
+    let systemControlTool = SystemControlTool()
 
     // Optional shared services for tools that need them
     private(set) var conversationService: (any ConversationServiceProtocol)?
@@ -174,6 +175,9 @@ final class BuiltInToolService: ObservableObject {
             tools.append(contentsOf: telegramTool.tools)
         }
 
+        // 디바이스 제어: macOS에서만 노출 (앱 런타임)
+        tools.append(contentsOf: systemControlTool.tools)
+
         // Registry tools always available
         tools.append(contentsOf: toolsRegistryTool.tools)
 
@@ -260,6 +264,7 @@ extension BuiltInToolService {
         if profileAdminTool.contextService != nil { all.append(contentsOf: profileAdminTool.tools) }
         if workspaceTool.supabase != nil { all.append(contentsOf: workspaceTool.tools) }
         if telegramTool.telegram != nil, telegramTool.settings != nil { all.append(contentsOf: telegramTool.tools) }
+        all.append(contentsOf: systemControlTool.tools)
 
         let available = Set(all.map { $0.name })
         add("registry", toolsRegistryTool.tools)
@@ -275,6 +280,7 @@ extension BuiltInToolService {
         add("profile_admin", profileAdminTool.tools)
         add("workspace", workspaceTool.tools)
         add("telegram", telegramTool.tools)
+        add("device", systemControlTool.tools)
 
         for (k, v) in catalog {
             catalog[k] = v.filter { available.contains($0) }
