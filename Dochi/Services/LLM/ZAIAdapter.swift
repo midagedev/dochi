@@ -20,6 +20,7 @@ struct ZAIAdapter: LLMProviderAdapter {
         var body: [String: Any] = [
             "model": model,
             "stream": true,
+            "stream_options": ["include_usage": true],
             "enable_thinking": false,
         ]
 

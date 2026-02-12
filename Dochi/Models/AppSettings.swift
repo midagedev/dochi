@@ -64,6 +64,14 @@ final class AppSettings {
     @ObservationIgnored
     @AppStorage("hasSeenPermissionInfo") var hasSeenPermissionInfo: Bool = false
 
+    // MARK: - P5 Settings
+
+    @ObservationIgnored
+    @AppStorage("fallbackLLMProvider") var fallbackLLMProvider: String = ""
+
+    @ObservationIgnored
+    @AppStorage("fallbackLLMModel") var fallbackLLMModel: String = ""
+
     // MARK: - Computed
 
     var currentProvider: LLMProvider {

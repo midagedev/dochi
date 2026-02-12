@@ -17,6 +17,8 @@ private enum SettingKey: String, CaseIterable {
     case contextMaxSize
     case activeAgentName
     case interactionMode
+    case fallbackLLMProvider
+    case fallbackLLMModel
 
     var typeHint: String {
         switch self {
@@ -27,7 +29,8 @@ private enum SettingKey: String, CaseIterable {
         case .ttsDiffusionSteps, .contextMaxSize:
             return "Int"
         case .wakeWord, .llmProvider, .llmModel, .supertonicVoice,
-             .activeAgentName, .interactionMode:
+             .activeAgentName, .interactionMode, .fallbackLLMProvider,
+             .fallbackLLMModel:
             return "String"
         }
     }
@@ -112,6 +115,8 @@ final class SettingsListTool: BuiltInToolProtocol {
         case .contextMaxSize: return String(settings.contextMaxSize)
         case .activeAgentName: return settings.activeAgentName
         case .interactionMode: return settings.interactionMode
+        case .fallbackLLMProvider: return settings.fallbackLLMProvider.isEmpty ? "(미설정)" : settings.fallbackLLMProvider
+        case .fallbackLLMModel: return settings.fallbackLLMModel.isEmpty ? "(미설정)" : settings.fallbackLLMModel
         }
     }
 }
@@ -185,6 +190,8 @@ final class SettingsGetTool: BuiltInToolProtocol {
         case .contextMaxSize: return String(settings.contextMaxSize)
         case .activeAgentName: return settings.activeAgentName
         case .interactionMode: return settings.interactionMode
+        case .fallbackLLMProvider: return settings.fallbackLLMProvider.isEmpty ? "(미설정)" : settings.fallbackLLMProvider
+        case .fallbackLLMModel: return settings.fallbackLLMModel.isEmpty ? "(미설정)" : settings.fallbackLLMModel
         }
     }
 }
@@ -347,6 +354,16 @@ final class SettingsSetTool: BuiltInToolProtocol {
                 return ToolResult(toolCallId: "", content: "오류: 유효하지 않은 interactionMode '\(rawValue)'. 가능한 값: voiceAndText, textOnly", isError: true)
             }
             settings.interactionMode = rawValue
+        case .fallbackLLMProvider:
+            if !rawValue.isEmpty {
+                guard LLMProvider(rawValue: rawValue) != nil else {
+                    let valid = LLMProvider.allCases.map(\.rawValue).joined(separator: ", ")
+                    return ToolResult(toolCallId: "", content: "오류: 유효하지 않은 fallbackLLMProvider '\(rawValue)'. 가능한 값: \(valid) (비우려면 빈 문자열)", isError: true)
+                }
+            }
+            settings.fallbackLLMProvider = rawValue
+        case .fallbackLLMModel:
+            settings.fallbackLLMModel = rawValue
         }
 
         Log.tool.info("Setting changed: \(key.rawValue) = \(rawValue)")

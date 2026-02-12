@@ -18,6 +18,7 @@ struct OpenAIAdapter: LLMProviderAdapter {
         var body: [String: Any] = [
             "model": model,
             "stream": true,
+            "stream_options": ["include_usage": true],
         ]
 
         var apiMessages: [[String: Any]] = []
@@ -103,6 +104,12 @@ struct OpenAIAdapter: LLMProviderAdapter {
 
                 return .toolCallDelta(index: index, id: id, name: name, argumentsDelta: argDelta)
             }
+        }
+
+        // Parse usage from final chunk (requires stream_options.include_usage)
+        if let usage = json["usage"] as? [String: Any] {
+            accumulated.inputTokens = usage["prompt_tokens"] as? Int
+            accumulated.outputTokens = usage["completion_tokens"] as? Int
         }
 
         // finish_reason check

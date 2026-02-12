@@ -33,6 +33,7 @@ final class DochiViewModel {
     private let soundService: SoundServiceProtocol
     let settings: AppSettings
     let sessionContext: SessionContext
+    let metricsCollector: MetricsCollector
 
     // MARK: - Internal
 
@@ -67,7 +68,8 @@ final class DochiViewModel {
         ttsService: TTSServiceProtocol,
         soundService: SoundServiceProtocol,
         settings: AppSettings,
-        sessionContext: SessionContext
+        sessionContext: SessionContext,
+        metricsCollector: MetricsCollector = MetricsCollector()
     ) {
         self.llmService = llmService
         self.toolService = toolService
@@ -79,6 +81,7 @@ final class DochiViewModel {
         self.soundService = soundService
         self.settings = settings
         self.sessionContext = sessionContext
+        self.metricsCollector = metricsCollector
 
         // Wire TTS completion callback
         self.ttsService.onComplete = { [weak self] in
@@ -527,14 +530,13 @@ final class DochiViewModel {
     private func processLLMLoop() async {
         guard var conversation = currentConversation else { return }
 
-        let provider = settings.currentProvider
-        let model = settings.llmModel
-
-        // Check API key before calling LLM
-        guard let apiKey = keychainService.load(account: provider.keychainAccount), !apiKey.isEmpty else {
+        // Resolve model via router (primary + optional fallback)
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        guard let primaryModel = router.resolvePrimary() else {
             handleError(LLMError.noAPIKey)
             return
         }
+        let fallbackModel = router.resolveFallback()
 
         // Compose context
         let systemPrompt = composeSystemPrompt()
@@ -559,29 +561,12 @@ final class DochiViewModel {
 
             let response: LLMResponse
             do {
-                response = try await llmService.send(
+                response = try await sendWithFallback(
                     messages: messages,
                     systemPrompt: systemPrompt,
-                    model: model,
-                    provider: provider,
-                    apiKey: apiKey,
-                    tools: tools.isEmpty ? nil : tools,
-                    onPartial: { [weak self] partial in
-                        guard let self else { return }
-                        self.streamingText += partial
-
-                        // Feed TTS sentence chunker for voice mode
-                        if self.isVoiceMode {
-                            let sentences = self.sentenceChunker.append(partial)
-                            for sentence in sentences {
-                                if self.interactionState == .processing {
-                                    self.processingSubState = .complete
-                                    self.transition(to: .speaking)
-                                }
-                                self.ttsService.enqueueSentence(sentence)
-                            }
-                        }
-                    }
+                    primary: primaryModel,
+                    fallback: fallbackModel,
+                    tools: tools
                 )
             } catch {
                 if Task.isCancelled { return }
@@ -700,6 +685,88 @@ final class DochiViewModel {
         }
         saveConversation()
         transition(to: .idle)
+    }
+
+    // MARK: - LLM Send with Fallback
+
+    /// Send to the primary model, falling back to alternate model on transient failure.
+    private func sendWithFallback(
+        messages: [Message],
+        systemPrompt: String,
+        primary: ResolvedModel,
+        fallback: ResolvedModel?,
+        tools: [[String: Any]]
+    ) async throws -> LLMResponse {
+        let onPartial: @MainActor @Sendable (String) -> Void = { [weak self] partial in
+            guard let self else { return }
+            self.streamingText += partial
+
+            if self.isVoiceMode {
+                let sentences = self.sentenceChunker.append(partial)
+                for sentence in sentences {
+                    if self.interactionState == .processing {
+                        self.processingSubState = .complete
+                        self.transition(to: .speaking)
+                    }
+                    self.ttsService.enqueueSentence(sentence)
+                }
+            }
+        }
+
+        do {
+            let response = try await llmService.send(
+                messages: messages,
+                systemPrompt: systemPrompt,
+                model: primary.model,
+                provider: primary.provider,
+                apiKey: primary.apiKey,
+                tools: tools.isEmpty ? nil : tools,
+                onPartial: onPartial
+            )
+            recordMetrics(wasFallback: false)
+            return response
+        } catch {
+            // Try fallback if available and the error is eligible
+            guard let fallback, ModelRouter.shouldFallback(for: error) else {
+                throw error
+            }
+
+            Log.llm.warning("Primary model failed, trying fallback: \(fallback.provider.displayName)/\(fallback.model)")
+            streamingText = ""
+            sentenceChunker = SentenceChunker()
+
+            let response = try await llmService.send(
+                messages: messages,
+                systemPrompt: systemPrompt,
+                model: fallback.model,
+                provider: fallback.provider,
+                apiKey: fallback.apiKey,
+                tools: tools.isEmpty ? nil : tools,
+                onPartial: onPartial
+            )
+            recordMetrics(wasFallback: true)
+            return response
+        }
+    }
+
+    /// Record metrics from the most recent LLM exchange.
+    private func recordMetrics(wasFallback: Bool) {
+        guard var metrics = llmService.lastMetrics else { return }
+        if wasFallback {
+            // Override the wasFallback flag since LLMService doesn't know about fallback
+            metrics = ExchangeMetrics(
+                provider: metrics.provider,
+                model: metrics.model,
+                inputTokens: metrics.inputTokens,
+                outputTokens: metrics.outputTokens,
+                totalTokens: metrics.totalTokens,
+                firstByteLatency: metrics.firstByteLatency,
+                totalLatency: metrics.totalLatency,
+                timestamp: metrics.timestamp,
+                wasFallback: true
+            )
+        }
+        metricsCollector.record(metrics)
     }
 
     // MARK: - Context Composition

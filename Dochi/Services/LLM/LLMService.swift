@@ -1,10 +1,19 @@
 import Foundation
 import os
 
+/// Internal result carrying both the LLM response and usage data from the stream.
+private struct StreamResult: Sendable {
+    let response: LLMResponse
+    let inputTokens: Int?
+    let outputTokens: Int?
+}
+
 @MainActor
 final class LLMService: LLMServiceProtocol {
-    private var currentTask: Task<LLMResponse, Error>?
+    private var currentTask: Task<StreamResult, Error>?
     private let session: URLSession
+
+    private(set) var lastMetrics: ExchangeMetrics?
 
     private let adapters: [LLMProvider: any LLMProviderAdapter] = [
         .openai: OpenAIAdapter(),
@@ -48,7 +57,9 @@ final class LLMService: LLMServiceProtocol {
         // Cancel any previous request
         currentTask?.cancel()
 
-        let task = Task<LLMResponse, Error> {
+        let exchangeStart = ContinuousClock.now
+
+        let task = Task<StreamResult, Error> {
             try await performWithRetry(
                 messages: messages,
                 systemPrompt: systemPrompt,
@@ -61,12 +72,54 @@ final class LLMService: LLMServiceProtocol {
         }
         currentTask = task
 
+        // Exchange timeout: cancel the task after the soft limit
+        let timeoutTask = Task {
+            try await Task.sleep(for: Self.exchangeTimeout)
+            task.cancel()
+        }
+
         do {
-            let result = try await task.value
+            let streamResult = try await task.value
+            timeoutTask.cancel()
             currentTask = nil
-            return result
+
+            // Build metrics
+            let elapsed = ContinuousClock.now - exchangeStart
+            lastMetrics = ExchangeMetrics(
+                provider: provider.rawValue,
+                model: model,
+                inputTokens: streamResult.inputTokens,
+                outputTokens: streamResult.outputTokens,
+                totalTokens: nil,
+                firstByteLatency: nil,
+                totalLatency: elapsed.seconds,
+                timestamp: Date(),
+                wasFallback: false
+            )
+
+            return streamResult.response
         } catch {
+            timeoutTask.cancel()
             currentTask = nil
+
+            // Record partial metrics even on failure (for diagnostics)
+            let elapsed = ContinuousClock.now - exchangeStart
+            lastMetrics = ExchangeMetrics(
+                provider: provider.rawValue,
+                model: model,
+                inputTokens: nil,
+                outputTokens: nil,
+                totalTokens: nil,
+                firstByteLatency: nil,
+                totalLatency: elapsed.seconds,
+                timestamp: Date(),
+                wasFallback: false
+            )
+
+            // If the task was cancelled by the exchange timeout, report as timeout
+            if Task.isCancelled {
+                throw LLMError.timeout
+            }
             throw error
         }
     }
@@ -89,7 +142,7 @@ final class LLMService: LLMServiceProtocol {
         tools: [[String: Any]]?,
         adapter: any LLMProviderAdapter,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
-    ) async throws -> LLMResponse {
+    ) async throws -> StreamResult {
         let hasToolResults = messages.contains { $0.role == .tool }
         var lastError: Error = LLMError.emptyResponse
 
@@ -161,7 +214,7 @@ final class LLMService: LLMServiceProtocol {
         tools: [[String: Any]]?,
         adapter: any LLMProviderAdapter,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
-    ) async throws -> LLMResponse {
+    ) async throws -> StreamResult {
         let request = try adapter.buildRequest(
             messages: messages,
             systemPrompt: systemPrompt,
@@ -203,7 +256,7 @@ final class LLMService: LLMServiceProtocol {
                     case .toolCallDelta:
                         break // accumulated in the StreamAccumulator
                     case .done:
-                        return buildResponse(from: accumulated)
+                        return buildStreamResult(from: accumulated)
                     case .error(let error):
                         throw error
                     }
@@ -214,8 +267,8 @@ final class LLMService: LLMServiceProtocol {
         }
 
         // Stream ended without explicit [DONE] — return what we have
-        let result = buildResponse(from: accumulated)
-        if case .text(let t) = result, t.isEmpty {
+        let result = buildStreamResult(from: accumulated)
+        if case .text(let t) = result.response, t.isEmpty {
             throw LLMError.emptyResponse
         }
         return result
@@ -246,12 +299,14 @@ final class LLMService: LLMServiceProtocol {
 
     // MARK: - Response Building
 
-    private nonisolated func buildResponse(from accumulated: StreamAccumulator) -> LLMResponse {
+    private nonisolated func buildStreamResult(from accumulated: StreamAccumulator) -> StreamResult {
         let toolCalls = accumulated.completedToolCalls
-        if !toolCalls.isEmpty {
-            return .toolCalls(toolCalls)
-        }
-        return .text(accumulated.text)
+        let response: LLMResponse = !toolCalls.isEmpty ? .toolCalls(toolCalls) : .text(accumulated.text)
+        return StreamResult(
+            response: response,
+            inputTokens: accumulated.inputTokens,
+            outputTokens: accumulated.outputTokens
+        )
     }
 
     // MARK: - HTTP Error Handling
@@ -274,5 +329,14 @@ final class LLMService: LLMServiceProtocol {
         default:
             throw LLMError.invalidResponse("HTTP \(code)")
         }
+    }
+}
+
+// MARK: - Duration Extension
+
+private extension Swift.Duration {
+    var seconds: TimeInterval {
+        let (s, atto) = components
+        return TimeInterval(s) + TimeInterval(atto) / 1_000_000_000_000_000_000
     }
 }

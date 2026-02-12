@@ -15,6 +15,10 @@ struct StreamAccumulator: Sendable {
     var text: String = ""
     var toolCalls: [Int: ToolCallAccumulator] = [:]
 
+    /// Token usage reported by the provider (populated from final SSE chunks).
+    var inputTokens: Int?
+    var outputTokens: Int?
+
     struct ToolCallAccumulator: Sendable {
         var id: String = ""
         var name: String = ""

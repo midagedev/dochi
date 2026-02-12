@@ -58,6 +58,14 @@ struct AnthropicAdapter: LLMProviderAdapter {
         }
 
         switch type {
+        case "message_start":
+            // Capture input tokens from message start event
+            if let message = json["message"] as? [String: Any],
+               let usage = message["usage"] as? [String: Any] {
+                accumulated.inputTokens = usage["input_tokens"] as? Int
+            }
+            return nil
+
         case "content_block_start":
             // A new content block is starting
             guard let index = json["index"] as? Int,
@@ -95,6 +103,10 @@ struct AnthropicAdapter: LLMProviderAdapter {
             return nil
 
         case "message_delta":
+            // Capture output tokens from message delta
+            if let usage = json["usage"] as? [String: Any] {
+                accumulated.outputTokens = usage["output_tokens"] as? Int
+            }
             // Check stop_reason
             if let delta = json["delta"] as? [String: Any],
                let stopReason = delta["stop_reason"] as? String,

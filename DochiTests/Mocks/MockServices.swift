@@ -5,6 +5,7 @@ import Foundation
 
 @MainActor
 final class MockLLMService: LLMServiceProtocol {
+    var lastMetrics: ExchangeMetrics?
     var sendCallCount = 0
     var lastMessages: [Message]?
     var lastSystemPrompt: String?
@@ -31,6 +32,20 @@ final class MockLLMService: LLMServiceProtocol {
         lastProvider = provider
         lastAPIKey = apiKey
         if let error = stubbedError { throw error }
+
+        // Populate mock metrics
+        lastMetrics = ExchangeMetrics(
+            provider: provider.rawValue,
+            model: model,
+            inputTokens: 100,
+            outputTokens: 50,
+            totalTokens: 150,
+            firstByteLatency: 0.5,
+            totalLatency: 1.0,
+            timestamp: Date(),
+            wasFallback: false
+        )
+
         return stubbedResponse
     }
 

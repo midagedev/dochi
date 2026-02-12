@@ -2,6 +2,9 @@ import Foundation
 
 @MainActor
 protocol LLMServiceProtocol {
+    /// Metrics from the most recent completed exchange.
+    var lastMetrics: ExchangeMetrics? { get }
+
     func send(
         messages: [Message],
         systemPrompt: String,
