@@ -1,30 +1,57 @@
 # Data Overview (Conceptual)
 
-High‑level entities and relationships (no storage specifics).
+엔티티와 관계. 구체적 필드는 [models.md](./models.md), 테이블 스키마는 [supabase.md](./supabase.md) 참조.
+
+---
 
 ## Entities
-- User: human identity; may have aliases; owns personal memory.
-- Workspace: shared context for a purpose (family, team); contains agents and shared memory; has members.
-- Agent: named assistant with persona, wake word, optional default model; scoped within a workspace.
-- Memory:
-  - Workspace memory: shared facts relevant to workspace.
-  - Agent memory: agent‑specific accumulated notes in a workspace.
-  - Personal memory: private, owned by a user, usable across workspaces.
-- Conversation: ordered messages between user and agent; may include tool invocations and summaries.
-- Message: system/user/assistant/tool content; may include images and tool calls.
-- Device: a runtime peer capable of executing actions (voice, tools, UI), associated to a user and workspace.
 
-## Relationships (informal)
-- Workspace 1‑N Agents, 1‑N Members, 1‑N Conversations.
-- User N‑M Workspaces (via membership); 1‑N Devices; 1 Personal Memory.
-- Agent 1‑N Conversations; 1 persona; 1 memory per workspace.
+- **User**: 사람. 별칭(aliases) 보유. 개인 기억(personal memory) 소유
+- **Workspace**: 목적별 공유 컨텍스트 (가족, 팀). 에이전트와 공유 기억 포함. 멤버 관리
+- **Agent**: 이름 있는 AI 어시스턴트. 페르소나, 웨이크워드, 기본 모델, 권한. 워크스페이스 범위
+- **Memory**:
+  - Workspace memory: 멤버 전체 공유 사실
+  - Agent memory: 에이전트가 자동 축적하는 메모
+  - Personal memory: 사용자 소유, 워크스페이스 횡단
+- **Conversation**: 사용자-에이전트 간 메시지 순서열. 도구 호출과 요약 포함 가능
+- **Message**: system/user/assistant/tool 콘텐츠. 이미지, 도구 호출 포함 가능
+- **Device**: 실행 피어. 음성, 도구, UI 수행 가능. 사용자와 워크스페이스에 연결
 
-## Retention & Size Guidelines
-- Keep memories human‑readable and line‑oriented; prefer append and safe updates.
-- Apply summarization/roll‑ups when files grow beyond configured limits.
-- Allow manual edits with preview and confirmation for bulk changes.
+---
 
-## Visibility (Conceptual)
-- Personal memory: visible to its owner; not shared across users.
-- Workspace memory: visible to workspace members; not exposed to remote interfaces without opt‑in redaction.
-- Agent memory: scoped to an agent within a workspace; used to specialize behavior.
+## Relationships
+
+```
+User ──1:N── Device
+User ──N:M── Workspace (via WorkspaceMember)
+User ──1:1── Personal Memory
+
+Workspace ──1:N── Agent
+Workspace ──1:N── Conversation
+Workspace ──1:1── Workspace Memory
+
+Agent ──1:1── Persona
+Agent ──1:1── Agent Memory
+Agent ──1:N── Conversation
+```
+
+---
+
+## Retention & Size
+
+- 메모리: 라인 지향 (`- ...`). append 우선, safe update
+- 크기 한도 초과 시 LLM 요약으로 압축 ([llm-requirements.md](./llm-requirements.md#context-compression) 참조)
+- 수동 편집: preview + confirm 가드레일 ([tools.md](./tools.md) Agent Editor 참조)
+
+---
+
+## Visibility
+
+| 데이터 | 가시성 |
+|--------|--------|
+| Personal memory | 소유 사용자만 |
+| Workspace memory | 워크스페이스 멤버 |
+| Agent memory | 해당 에이전트 대화 시 |
+| Conversation | 참여자(사용자 + 에이전트) |
+
+상세 권한 규칙: [security.md](./security.md) 참조.

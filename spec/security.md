@@ -1,24 +1,102 @@
-# Security & Privacy (High‑Level)
+# Security & Privacy
 
-## Principles
-- Local‑first execution: tools and audio run on the device when possible; cloud used for synchronization only.
-- Least privilege: agents have scoped permissions; sensitive actions require explicit user confirmation.
-- Transparency: surface what data is sent to external services and why.
+보안, 권한, 프라이버시 설계.
 
-## Secrets & Credentials
-- API keys and tokens are stored securely and masked in UI; avoid logging secrets.
-- External services (LLMs, search, image generation, messaging) are opt‑in.
+---
 
-## Risky Operations
-- Permission taxonomy:
-  - Safe: read‑only queries, reminders, alarms, web/image generation, printing.
-  - Sensitive: profile/context edits, workspace/agent management, device selection.
-  - Restricted‑remote: file/system control, shell execution, external app control.
-- Remote defaults: only Safe by default; Sensitive require explicit opt‑in; Restricted‑remote disabled.
-- Confirmation rules: Sensitive/Restricted actions require explicit user confirmation (in‑app); remote confirmations must be re‑verified in app before execution.
-- Model/tool outputs are validated for allowed operations and arguments before execution.
+## 원칙
 
-## Data Handling
-- Personal memory is private to the user; workspace memory is visible to members only.
-- Logs and telemetry (if enabled) minimize PII and are local by default.
-- Redaction: messages and tool results shown to remote interfaces may redact local paths, usernames, tokens, or device identifiers.
+1. **로컬 우선 실행**: 도구와 음성은 디바이스에서 실행. 클라우드는 동기화 전용
+2. **최소 권한**: 에이전트별 권한 범위 설정. 기본은 Safe만 허용
+3. **투명성**: 외부 서비스로 전송되는 데이터와 사유를 사용자에게 표시
+4. **명시적 확인**: 위험 동작은 사용자 승인 없이 실행하지 않음
+
+---
+
+## 비밀 관리
+
+- API 키/토큰은 Keychain에 저장
+- UI 표시 시 마스킹 (`sk-...****`)
+- 로그에 비밀 기록 금지
+- 외부 서비스(LLM, 검색, 이미지, 메시징)는 opt-in
+
+---
+
+## 권한 분류
+
+### 도구 카테고리
+
+| 카테고리 | 예시 | 로컬 기본 | 원격 기본 |
+|---------|------|----------|----------|
+| **safe** | 읽기 전용 조회, 미리알림, 알람, 웹검색, 이미지 생성, 프린트 | 허용 | 허용 |
+| **sensitive** | 프로필/컨텍스트 편집, 워크스페이스/에이전트 관리, 설정 변경 | 확인 필요 | 거부 (인앱 확인 필수) |
+| **restricted** | 파일/시스템 제어, 셸 실행, 외부 앱 제어 | 확인 필요 | 거부 |
+
+### 에이전트별 권한 선언
+
+`AgentConfig.permissions` 필드에 허용 카테고리 배열로 선언.
+
+```json
+// 예: 가족 비서 에이전트 (safe + 일부 sensitive)
+{
+  "name": "도치",
+  "permissions": ["safe", "sensitive"]
+}
+
+// 예: 아이 대화 친구 (safe만)
+{
+  "name": "키키",
+  "permissions": ["safe"]
+}
+
+// 예: 개발 에이전트 (모든 권한)
+{
+  "name": "코디",
+  "permissions": ["safe", "sensitive", "restricted"]
+}
+```
+
+### 권한 체크 시점
+
+1. **도구 목록 전달 시 (LLM 호출 전)**: 에이전트 권한에 포함되지 않은 카테고리의 도구는 LLM에 전달하지 않음
+2. **도구 실행 직전**: 이중 확인. 인터페이스(로컬/원격)에 따라 추가 제약 적용
+
+```
+도구 호출 → 에이전트 권한 확인 → 인터페이스 권한 확인 → (필요 시) 사용자 확인 → 실행
+```
+
+### 사용자 확인 UX
+
+| 인터페이스 | 방법 |
+|-----------|------|
+| 로컬 (앱) | 인라인 확인 배너: "[도구명] 실행하시겠습니까? [허용] [거부]". 30s 타임아웃 시 자동 거부 |
+| 텔레그램 | 실행 거부 + "이 작업은 앱에서 직접 확인해주세요" 안내. 인앱 알림 표시 |
+
+---
+
+## 데이터 가시성
+
+| 데이터 | 가시성 |
+|--------|--------|
+| Personal memory | 소유 사용자만. 다른 사용자/에이전트에 노출 안 됨 |
+| Workspace memory | 워크스페이스 멤버 전체 |
+| Agent memory | 해당 에이전트 대화 시에만 |
+| 대화 기록 | 대화 참여자(사용자+에이전트). 다른 에이전트에 노출 안 됨 |
+
+---
+
+## 원격 인터페이스 제약
+
+텔레그램 등 원격 인터페이스에 대한 추가 보호:
+
+- **기본 Safe만**: sensitive/restricted 도구는 원격에서 비활성
+- **경로 편집**: 로컬 파일 경로, 사용자명, 토큰, 디바이스 ID는 응답에서 제거
+- **로그 최소화**: 원격 요청의 로그에 PII 미포함
+
+---
+
+## 감사 (Audit)
+
+- 도구 실행 이력을 로컬 로그에 기록 (도구명, 입력 요약, 결과 성공/실패, 타임스탬프)
+- 사용자 확인 요청/승인/거부 이력 기록
+- 민감 작업(프로필 병합, 워크스페이스 탈퇴 등)은 별도 감사 로그
