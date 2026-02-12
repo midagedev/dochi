@@ -143,6 +143,15 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(FinderGetSelectionTool())
         registry.register(FinderListDirectoryTool())
 
+        // Kanban (baseline, safe)
+        registry.register(KanbanCreateBoardTool())
+        registry.register(KanbanListBoardsTool())
+        registry.register(KanbanListCardsTool())
+        registry.register(KanbanAddCardTool())
+        registry.register(KanbanMoveCardTool())
+        registry.register(KanbanUpdateCardTool())
+        registry.register(KanbanDeleteCardTool())
+
         // Git (conditional, safe/restricted)
         registry.register(GitStatusTool())
         registry.register(GitLogTool())
