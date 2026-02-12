@@ -102,6 +102,27 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(TelegramGetMeTool(keychainService: keychainService, telegramService: telegramService, settings: settings))
         registry.register(TelegramSendMessageTool(keychainService: keychainService, telegramService: telegramService, settings: settings))
 
+        // Clipboard (baseline, safe)
+        registry.register(ClipboardReadTool())
+        registry.register(ClipboardWriteTool())
+
+        // Timer (baseline, safe)
+        registry.register(SetTimerTool())
+        registry.register(ListTimersTool())
+        registry.register(CancelTimerTool())
+
+        // Calculator (baseline, safe)
+        registry.register(CalculatorTool())
+
+        // DateTime (baseline, safe)
+        registry.register(DateTimeTool())
+
+        // Open URL (conditional, sensitive)
+        registry.register(OpenURLTool())
+
+        // Shell command (conditional, restricted)
+        registry.register(ShellCommandTool())
+
         // MCP settings (conditional, sensitive)
         registry.register(MCPAddServerTool(mcpService: mcpService))
         registry.register(MCPUpdateServerTool(mcpService: mcpService))
