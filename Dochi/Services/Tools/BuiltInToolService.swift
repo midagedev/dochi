@@ -11,7 +11,10 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         contextService: ContextServiceProtocol,
         keychainService: KeychainServiceProtocol,
         sessionContext: SessionContext,
-        settings: AppSettings
+        settings: AppSettings,
+        supabaseService: SupabaseServiceProtocol,
+        telegramService: TelegramServiceProtocol,
+        mcpService: MCPServiceProtocol
     ) {
         self.sessionContext = sessionContext
 
@@ -82,6 +85,24 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
         // Context (conditional, sensitive)
         registry.register(UpdateBaseSystemPromptTool(contextService: contextService))
+
+        // Workspace (conditional, sensitive)
+        registry.register(WorkspaceCreateTool(supabaseService: supabaseService, settings: settings))
+        registry.register(WorkspaceJoinByInviteTool(supabaseService: supabaseService, settings: settings))
+        registry.register(WorkspaceListTool(supabaseService: supabaseService, settings: settings))
+        registry.register(WorkspaceSwitchTool(supabaseService: supabaseService, settings: settings))
+        registry.register(WorkspaceRegenerateInviteCodeTool(supabaseService: supabaseService, settings: settings))
+
+        // Telegram (conditional, sensitive)
+        registry.register(TelegramEnableTool(keychainService: keychainService, telegramService: telegramService, settings: settings))
+        registry.register(TelegramSetTokenTool(keychainService: keychainService, telegramService: telegramService, settings: settings))
+        registry.register(TelegramGetMeTool(keychainService: keychainService, telegramService: telegramService, settings: settings))
+        registry.register(TelegramSendMessageTool(keychainService: keychainService, telegramService: telegramService, settings: settings))
+
+        // MCP settings (conditional, sensitive)
+        registry.register(MCPAddServerTool(mcpService: mcpService))
+        registry.register(MCPUpdateServerTool(mcpService: mcpService))
+        registry.register(MCPRemoveServerTool(mcpService: mcpService))
 
         let toolCount = registry.allToolNames.count
         Log.tool.info("BuiltInToolService initialized with \(toolCount) tools")

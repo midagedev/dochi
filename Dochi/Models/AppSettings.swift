@@ -50,6 +50,20 @@ final class AppSettings {
     @ObservationIgnored
     @AppStorage("ttsDiffusionSteps") var ttsDiffusionSteps: Int = 3
 
+    // MARK: - P4 Settings
+
+    @ObservationIgnored
+    @AppStorage("telegramEnabled") var telegramEnabled: Bool = false
+
+    @ObservationIgnored
+    @AppStorage("telegramStreamReplies") var telegramStreamReplies: Bool = true
+
+    @ObservationIgnored
+    @AppStorage("currentWorkspaceId") var currentWorkspaceId: String = "00000000-0000-0000-0000-000000000000"
+
+    @ObservationIgnored
+    @AppStorage("hasSeenPermissionInfo") var hasSeenPermissionInfo: Bool = false
+
     // MARK: - Computed
 
     var currentProvider: LLMProvider {
