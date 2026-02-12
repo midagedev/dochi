@@ -19,6 +19,16 @@ struct ContentView: View {
                     )
                 }
 
+                // Tool confirmation banner
+                if let confirmation = viewModel.pendingToolConfirmation {
+                    ToolConfirmationBannerView(
+                        toolName: confirmation.toolName,
+                        toolDescription: confirmation.toolDescription,
+                        onApprove: { viewModel.respondToToolConfirmation(approved: true) },
+                        onDeny: { viewModel.respondToToolConfirmation(approved: false) }
+                    )
+                }
+
                 // Error banner
                 if let error = viewModel.errorMessage {
                     ErrorBannerView(message: error) {
@@ -175,6 +185,56 @@ struct StatusBarView: View {
         case .idle:
             return ""
         }
+    }
+}
+
+// MARK: - Tool Confirmation Banner
+
+struct ToolConfirmationBannerView: View {
+    let toolName: String
+    let toolDescription: String
+    let onApprove: () -> Void
+    let onDeny: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "shield.lefthalf.filled")
+                .foregroundStyle(.orange)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(toolName)")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(toolDescription)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                onDeny()
+            } label: {
+                Text("거부")
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered)
+
+            Button {
+                onApprove()
+            } label: {
+                Text("허용")
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.08))
     }
 }
 

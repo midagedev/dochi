@@ -25,7 +25,8 @@ struct DochiApp: App {
         let toolService = BuiltInToolService(
             contextService: contextService,
             keychainService: keychainService,
-            sessionContext: sessionContext
+            sessionContext: sessionContext,
+            settings: settings
         )
 
         _viewModel = State(initialValue: DochiViewModel(

@@ -19,11 +19,12 @@ final class DochiViewModel {
     var errorMessage: String?
     var currentToolName: String?
     var partialTranscript: String = ""
+    var pendingToolConfirmation: ToolConfirmation?
 
     // MARK: - Services
 
     private let llmService: LLMServiceProtocol
-    private let toolService: BuiltInToolServiceProtocol
+    private var toolService: BuiltInToolServiceProtocol
     private let contextService: ContextServiceProtocol
     private let conversationService: ConversationServiceProtocol
     private let keychainService: KeychainServiceProtocol
@@ -37,10 +38,12 @@ final class DochiViewModel {
 
     private var processingTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
+    private var confirmationTimeoutTask: Task<Void, Never>?
     private var sentenceChunker = SentenceChunker()
     private static let maxToolLoopIterations = 10
     private static let maxRecentMessages = 30
     private static let sessionEndingTimeout: TimeInterval = 10
+    private static let toolConfirmationTimeout: TimeInterval = 30
 
     // MARK: - Computed
 
@@ -80,6 +83,12 @@ final class DochiViewModel {
         // Wire TTS completion callback
         self.ttsService.onComplete = { [weak self] in
             self?.handleTTSComplete()
+        }
+
+        // Wire sensitive tool confirmation handler
+        self.toolService.confirmationHandler = { [weak self] toolName, toolDescription in
+            guard let self else { return false }
+            return await self.requestToolConfirmation(toolName: toolName, toolDescription: toolDescription)
         }
 
         Log.app.info("DochiViewModel initialized")
@@ -273,6 +282,40 @@ final class DochiViewModel {
         if isVoiceMode {
             startListening()
         }
+    }
+
+    // MARK: - Tool Confirmation
+
+    /// Show confirmation UI for a sensitive tool and wait for user response.
+    private func requestToolConfirmation(toolName: String, toolDescription: String) async -> Bool {
+        return await withCheckedContinuation { continuation in
+            self.pendingToolConfirmation = ToolConfirmation(
+                toolName: toolName,
+                toolDescription: toolDescription,
+                continuation: continuation
+            )
+
+            // Start 30s timeout — auto-deny if no response
+            self.confirmationTimeoutTask?.cancel()
+            self.confirmationTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.toolConfirmationTimeout))
+                guard !Task.isCancelled else { return }
+                if self?.pendingToolConfirmation?.toolName == toolName {
+                    Log.tool.warning("Tool confirmation timed out: \(toolName)")
+                    self?.respondToToolConfirmation(approved: false)
+                }
+            }
+        }
+    }
+
+    /// Called by UI when user approves or denies a sensitive tool.
+    func respondToToolConfirmation(approved: Bool) {
+        guard let confirmation = pendingToolConfirmation else { return }
+        confirmationTimeoutTask?.cancel()
+        confirmationTimeoutTask = nil
+        pendingToolConfirmation = nil
+        confirmation.continuation.resume(returning: approved)
+        Log.tool.info("Tool confirmation \(approved ? "approved" : "denied"): \(confirmation.toolName)")
     }
 
     /// End the voice session manually.
