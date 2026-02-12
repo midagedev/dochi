@@ -123,6 +123,43 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         // Shell command (conditional, restricted)
         registry.register(ShellCommandTool())
 
+        // Calendar (baseline: list, conditional: create/delete)
+        registry.register(ListCalendarEventsTool())
+        registry.register(CreateCalendarEventTool())
+        registry.register(DeleteCalendarEventTool())
+
+        // Contacts (baseline, safe)
+        registry.register(ContactsSearchTool())
+        registry.register(ContactsGetDetailTool())
+
+        // Music (baseline, safe)
+        registry.register(MusicNowPlayingTool())
+        registry.register(MusicPlayPauseTool())
+        registry.register(MusicNextTrackTool())
+        registry.register(MusicSearchPlayTool())
+
+        // Finder (baseline, safe)
+        registry.register(FinderRevealTool())
+        registry.register(FinderGetSelectionTool())
+        registry.register(FinderListDirectoryTool())
+
+        // Git (conditional, safe/restricted)
+        registry.register(GitStatusTool())
+        registry.register(GitLogTool())
+        registry.register(GitDiffTool())
+        registry.register(GitCommitTool())
+        registry.register(GitBranchTool())
+
+        // GitHub (conditional, safe/sensitive)
+        registry.register(GitHubListIssuesTool())
+        registry.register(GitHubCreateIssueTool())
+        registry.register(GitHubCreatePRTool())
+        registry.register(GitHubViewTool())
+
+        // Coding agent (conditional, restricted/sensitive)
+        registry.register(CodingRunTaskTool())
+        registry.register(CodingReviewTool())
+
         // MCP settings (conditional, sensitive)
         registry.register(MCPAddServerTool(mcpService: mcpService))
         registry.register(MCPUpdateServerTool(mcpService: mcpService))
