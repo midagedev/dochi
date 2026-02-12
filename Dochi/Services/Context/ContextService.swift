@@ -180,6 +180,67 @@ final class ContextService: ContextServiceProtocol {
         Log.storage.info("Created agent: \(name) in workspace \(workspaceId)")
     }
 
+    // MARK: - Workspace management
+
+    func listLocalWorkspaces() -> [UUID] {
+        let wsDir = baseURL.appendingPathComponent("workspaces")
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: wsDir.path) else { return [] }
+        return contents.compactMap { UUID(uuidString: $0) }.sorted { $0.uuidString < $1.uuidString }
+    }
+
+    func createLocalWorkspace(id: UUID) {
+        let wsURL = workspaceURL(id)
+        try? FileManager.default.createDirectory(at: wsURL, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: wsURL.appendingPathComponent("agents"), withIntermediateDirectories: true)
+        Log.storage.info("Created local workspace: \(id)")
+    }
+
+    func deleteLocalWorkspace(id: UUID) {
+        let wsURL = workspaceURL(id)
+        try? FileManager.default.removeItem(at: wsURL)
+        Log.storage.info("Deleted local workspace: \(id)")
+    }
+
+    func deleteAgent(workspaceId: UUID, name: String) {
+        let url = agentURL(workspaceId: workspaceId, agentName: name)
+        try? FileManager.default.removeItem(at: url)
+        Log.storage.info("Deleted agent: \(name) from workspace \(workspaceId)")
+    }
+
+    // MARK: - Snapshots (for context compression)
+
+    func saveWorkspaceMemorySnapshot(workspaceId: UUID, content: String) {
+        let url = workspaceURL(workspaceId).appendingPathComponent("memory.md.snapshot")
+        do {
+            try? FileManager.default.createDirectory(at: workspaceURL(workspaceId), withIntermediateDirectories: true)
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            Log.storage.info("Saved workspace memory snapshot for \(workspaceId)")
+        } catch {
+            Log.storage.error("Failed to save workspace memory snapshot: \(error.localizedDescription)")
+        }
+    }
+
+    func saveAgentMemorySnapshot(workspaceId: UUID, agentName: String, content: String) {
+        let url = agentURL(workspaceId: workspaceId, agentName: agentName).appendingPathComponent("memory.md.snapshot")
+        do {
+            try? FileManager.default.createDirectory(at: agentURL(workspaceId: workspaceId, agentName: agentName), withIntermediateDirectories: true)
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            Log.storage.info("Saved agent memory snapshot for \(agentName) in \(workspaceId)")
+        } catch {
+            Log.storage.error("Failed to save agent memory snapshot: \(error.localizedDescription)")
+        }
+    }
+
+    func saveUserMemorySnapshot(userId: String, content: String) {
+        let url = baseURL.appendingPathComponent("memory/\(userId).md.snapshot")
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            Log.storage.info("Saved user memory snapshot for \(userId)")
+        } catch {
+            Log.storage.error("Failed to save user memory snapshot: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Migration
 
     func migrateIfNeeded() {

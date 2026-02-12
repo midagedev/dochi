@@ -235,34 +235,25 @@ final class LLMService: LLMServiceProtocol {
         // Handle error status codes
         try Self.checkHTTPStatus(httpResponse)
 
-        // Parse SSE stream
+        // Parse SSE stream (use .lines for proper UTF-8 decoding)
         var accumulated = StreamAccumulator()
-        var lineBuffer = ""
 
-        for try await byte in asyncBytes {
+        for try await line in asyncBytes.lines {
             try Task.checkCancellation()
 
-            let char = Character(UnicodeScalar(byte))
-            if char == "\n" {
-                let line = lineBuffer
-                lineBuffer = ""
+            if line.isEmpty { continue }
 
-                if line.isEmpty { continue }
-
-                if let event = adapter.parseSSELine(line, accumulated: &accumulated) {
-                    switch event {
-                    case .partial(let text):
-                        await onPartial(text)
-                    case .toolCallDelta:
-                        break // accumulated in the StreamAccumulator
-                    case .done:
-                        return buildStreamResult(from: accumulated)
-                    case .error(let error):
-                        throw error
-                    }
+            if let event = adapter.parseSSELine(line, accumulated: &accumulated) {
+                switch event {
+                case .partial(let text):
+                    await onPartial(text)
+                case .toolCallDelta:
+                    break // accumulated in the StreamAccumulator
+                case .done:
+                    return buildStreamResult(from: accumulated)
+                case .error(let error):
+                    throw error
                 }
-            } else {
-                lineBuffer.append(char)
             }
         }
 

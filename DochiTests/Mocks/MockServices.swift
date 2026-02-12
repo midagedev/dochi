@@ -33,7 +33,6 @@ final class MockLLMService: LLMServiceProtocol {
         lastAPIKey = apiKey
         if let error = stubbedError { throw error }
 
-        // Populate mock metrics
         lastMetrics = ExchangeMetrics(
             provider: provider.rawValue,
             model: model,
@@ -67,6 +66,10 @@ final class MockContextService: ContextServiceProtocol {
     var agentConfigs: [String: AgentConfig] = [:]
     var agents: [UUID: [String]] = [:]
     var migrateCallCount = 0
+    var workspaceMemorySnapshots: [UUID: String] = [:]
+    var agentMemorySnapshots: [String: String] = [:]
+    var userMemorySnapshots: [String: String] = [:]
+    var localWorkspaces: [UUID] = [UUID(uuidString: "00000000-0000-0000-0000-000000000000")!]
 
     func loadBaseSystemPrompt() -> String? { baseSystemPrompt }
     func saveBaseSystemPrompt(_ content: String) { baseSystemPrompt = content }
@@ -119,6 +122,30 @@ final class MockContextService: ContextServiceProtocol {
         let config = AgentConfig(name: name, wakeWord: wakeWord, description: description)
         saveAgentConfig(workspaceId: workspaceId, config: config)
         agents[workspaceId, default: []].append(name)
+    }
+
+    func listLocalWorkspaces() -> [UUID] { localWorkspaces }
+    func createLocalWorkspace(id: UUID) {
+        if !localWorkspaces.contains(id) { localWorkspaces.append(id) }
+    }
+    func deleteLocalWorkspace(id: UUID) {
+        localWorkspaces.removeAll { $0 == id }
+    }
+    func deleteAgent(workspaceId: UUID, name: String) {
+        agents[workspaceId]?.removeAll { $0 == name }
+        agentConfigs.removeValue(forKey: agentKey(workspaceId, name))
+    }
+
+    func saveWorkspaceMemorySnapshot(workspaceId: UUID, content: String) {
+        workspaceMemorySnapshots[workspaceId] = content
+    }
+
+    func saveAgentMemorySnapshot(workspaceId: UUID, agentName: String, content: String) {
+        agentMemorySnapshots[agentKey(workspaceId, agentName)] = content
+    }
+
+    func saveUserMemorySnapshot(userId: String, content: String) {
+        userMemorySnapshots[userId] = content
     }
 
     func migrateIfNeeded() { migrateCallCount += 1 }
@@ -210,6 +237,7 @@ final class MockSpeechService: SpeechServiceProtocol {
     var isListening: Bool = false
     var stubbedAuthResult: Bool = true
     var lastSilenceTimeout: TimeInterval?
+    var continuousRecognitionActive = false
 
     func requestAuthorization() async -> Bool { stubbedAuthResult }
 
@@ -224,6 +252,19 @@ final class MockSpeechService: SpeechServiceProtocol {
     }
 
     func stopListening() {
+        isListening = false
+    }
+
+    func startContinuousRecognition(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onError: @escaping @MainActor (Error) -> Void
+    ) {
+        continuousRecognitionActive = true
+        isListening = true
+    }
+
+    func stopContinuousRecognition() {
+        continuousRecognitionActive = false
         isListening = false
     }
 }

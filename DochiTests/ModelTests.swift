@@ -126,7 +126,7 @@ final class ModelTests: XCTestCase {
 
         XCTAssertTrue(LLMProvider.openai.apiURL.absoluteString.contains("openai.com"))
         XCTAssertTrue(LLMProvider.anthropic.apiURL.absoluteString.contains("anthropic.com"))
-        XCTAssertTrue(LLMProvider.zai.apiURL.absoluteString.contains("bigmodel.cn"))
+        XCTAssertTrue(LLMProvider.zai.apiURL.absoluteString.contains("z.ai"))
     }
 
     // MARK: - State Enums

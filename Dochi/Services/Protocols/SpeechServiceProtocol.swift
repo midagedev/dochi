@@ -26,4 +26,14 @@ protocol SpeechServiceProtocol {
 
     /// Stop speech recognition
     func stopListening()
+
+    /// Start continuous recognition for wake word detection (no silence timeout).
+    /// Automatically restarts every 60 seconds to handle Apple STT limits.
+    func startContinuousRecognition(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onError: @escaping @MainActor (Error) -> Void
+    )
+
+    /// Stop continuous recognition
+    func stopContinuousRecognition()
 }

@@ -2,9 +2,9 @@
 
 ## Meta
 - DRI: @hckim
-- 상태: Draft
-- 생성: 2026-02-12
-- 갱신: 2026-02-12
+- 상태: Phase 0~5 완료, UI/기능 확장 진행 중
+- 생성: 2026-02-08
+- 갱신: 2026-02-13
 
 ---
 
@@ -30,46 +30,54 @@
 
 ---
 
-## Phases
+## Phases — 완료 현황
 
-### Phase 0 — 스펙 정착 & 스캐폴딩
+### Phase 0 — 스펙 정착 & 스캐폴딩 ✅
 - 스펙 동결 (핵심 섹션)
 - 새 폴더/모듈 구조 생성
 - 빈 화면/설정/대화 스텁
 - `CLAUDE.md` 새 구조에 맞게 갱신
 
-### Phase 1 — 텍스트 플로우 MVP
-- 컨텍스트 조합 ([flows.md](./flows.md#7-context-composition-flow))
-- LLM SSE 스트리밍 + 프로바이더 어댑터 ([llm-requirements.md](./llm-requirements.md#provider-adapter))
+### Phase 1 — 텍스트 플로우 MVP ✅
+- 컨텍스트 조합
+- LLM SSE 스트리밍 + 프로바이더 어댑터 (OpenAI, Anthropic, Z.AI)
 - 도구 호출 (Safe 카테고리)
 - 대화 저장
-- 취소/에러 처리 ([flows.md](./flows.md#1-text-interaction-flow) 실패 케이스)
-- 상태 머신 구현 ([states.md](./states.md))
+- 취소/에러 처리
+- 상태 머신 구현
 - 레거시 파일 마이그레이션
 
-### Phase 2 — 음성 플로우
-- 웨이크워드 매칭 + 에이전트 라우팅 ([voice-and-audio.md](./voice-and-audio.md))
-- Apple STT
-- Supertonic ONNX TTS + 문장 단위 스트리밍
-- 연속 대화 + barge-in ([states.md](./states.md#barge-in-처리))
-- UX 사운드
+### Phase 2 — 음성 플로우 ✅
+- 웨이크워드 매칭 + 에이전트 라우팅 (JamoMatcher)
+- Apple STT (SpeechService)
+- Supertonic TTS 서비스 + 문장 단위 스트리밍 (SentenceChunker)
+- 연속 대화 + barge-in
+- UX 사운드 (SoundService)
 
-### Phase 3 — 도구 & 권한
-- 전체 내장 도구 구현 ([tools.md](./tools.md))
-- MCP 서버 연동
-- 권한 시스템 ([security.md](./security.md#권한-분류))
-- 사용자 확인 UX
+### Phase 3 — 도구 & 권한 ✅
+- 전체 내장 도구 구현 (13개)
+- MCP 서버 연동 (MCPService)
+- 권한 시스템 (safe/sensitive/restricted)
+- 사용자 확인 UX (ToolConfirmationBannerView)
 
-### Phase 4 — 원격 인터페이스 & 동기화
-- 텔레그램 DM + progress snippet
-- 보수적 원격 권한
-- Supabase 동기화 ([supabase.md](./supabase.md))
-- Leader lock + 디바이스 관리
+### Phase 4 — 원격 인터페이스 & 동기화 ✅
+- 텔레그램 DM + 폴링
+- Supabase 인증/워크스페이스/리더락
+- 동기화 기본 구조 (마커 기반)
 
-### Phase 5 — 모델 정책 & 최적화
-- 기본 모델 라우팅
-- 재시도/타임아웃 튜닝
-- 관측 지표 수집 (로컬)
+### Phase 5 — 모델 정책 & 최적화 ✅
+- 모델 라우터 (ModelRouter)
+- 메트릭 수집 (MetricsCollector, ExchangeMetrics)
+
+### UI/기능 확장 (Phase A~E) ✅
+Phase 0~5 이후 추가 구현:
+
+- **Phase A**: 사이드바 리팩토링 — 워크스페이스/에이전트 피커, 관리 시트, 전환 로직
+- **Phase B**: 설정 6탭 확장 — 도구 API 키(Tavily, Fal.ai), 음성 설정, 통합/계정 탭 구조
+- **Phase C**: 텔레그램 메시지 처리 + MCP 서버 관리 UI + LLM 도구 노출
+- **Phase D**: Supabase 로그인/회원가입 UI, 사이드바 인증 상태, 기본 동기화
+- **Phase E**: TTS ONNX 추론 파이프라인 (KoreanG2P, ONNXModelManager), 상시 웨이크워드 감지
+- **공통 UI**: 컨텍스트 크기 인디케이터, 빈 대화 상태 안내, 컨텍스트 인스펙터
 
 ---
 
@@ -109,18 +117,18 @@
 
 ## 마일스톤 & 종료 기준
 
-| 마일스톤 | 종료 기준 |
-|---------|----------|
-| M1 텍스트 MVP | flows.md 텍스트 수용 기준 100%. 레이턴시 목표 달성 |
-| M2 음성 MVP | 웨이크워드 FAR/FRR 밴드 충족. TTS 첫 오디오 목표 달성 |
-| M3 도구/권한 | Safe 100% 구현. Sensitive 확인 루프 적용. 원격 기본 제한 |
-| M4 원격/동기화 | 텔레그램 플로우 수용 기준 충족. 충돌/장애 시 우아한 저하 |
+| 마일스톤 | 종료 기준 | 상태 |
+|---------|----------|------|
+| M1 텍스트 MVP | flows.md 텍스트 수용 기준 100%. 레이턴시 목표 달성 | ✅ |
+| M2 음성 MVP | 웨이크워드 FAR/FRR 밴드 충족. TTS 첫 오디오 목표 달성 | ✅ (placeholder 모드) |
+| M3 도구/권한 | Safe 100% 구현. Sensitive 확인 루프 적용. 원격 기본 제한 | ✅ |
+| M4 원격/동기화 | 텔레그램 플로우 수용 기준 충족. 충돌/장애 시 우아한 저하 | ✅ (기본 구조) |
 
 ---
 
 ## 브랜치 & 변경 관리
 - `main`: 보호 브랜치, 리뷰 필수
-- `rewrite/*`: 단계별 작업 브랜치 (M1/M2/...)
+- `rewrite/phase-0`: 현재 작업 브랜치 (Phase 0~5 + UI 확장)
 - PR 템플릿: 관련 스펙 링크, 수용 기준 체크, 리스크/백아웃
 
 ---

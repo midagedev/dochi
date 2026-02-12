@@ -7,6 +7,8 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     private let sessionContext: SessionContext
     var confirmationHandler: ToolConfirmationHandler?
 
+    private let mcpService: MCPServiceProtocol
+
     init(
         contextService: ContextServiceProtocol,
         keychainService: KeychainServiceProtocol,
@@ -17,6 +19,7 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         mcpService: MCPServiceProtocol
     ) {
         self.sessionContext = sessionContext
+        self.mcpService = mcpService
 
         // Registry meta-tools (baseline, safe)
         registry.register(ToolsListTool(registry: registry))
@@ -111,20 +114,44 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     // MARK: - BuiltInToolServiceProtocol
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]] {
+        var schemas: [[String: Any]] = []
+
+        // Built-in tools
         let tools = registry.availableTools(for: permissions)
-        return tools.map { tool in
-            [
+        for tool in tools {
+            schemas.append([
                 "type": "function",
                 "function": [
                     "name": tool.name,
                     "description": tool.description,
                     "parameters": tool.inputSchema
                 ] as [String: Any]
-            ]
+            ])
         }
+
+        // MCP tools (from connected servers)
+        let mcpTools = mcpService.listTools()
+        for mcpTool in mcpTools {
+            let toolName = "mcp_\(mcpTool.serverName)_\(mcpTool.name)"
+            schemas.append([
+                "type": "function",
+                "function": [
+                    "name": toolName,
+                    "description": "[MCP:\(mcpTool.serverName)] \(mcpTool.description)",
+                    "parameters": mcpTool.inputSchema
+                ] as [String: Any]
+            ])
+        }
+
+        return schemas
     }
 
     func execute(name: String, arguments: [String: Any]) async -> ToolResult {
+        // Route MCP tool calls
+        if name.hasPrefix("mcp_") {
+            return await executeMCPTool(name: name, arguments: arguments)
+        }
+
         guard let tool = registry.tool(named: name) else {
             Log.tool.warning("Tool not found: \(name)")
             return ToolResult(
@@ -171,5 +198,46 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
     func resetRegistry() {
         registry.reset()
+    }
+
+    // MARK: - MCP Tool Routing
+
+    private func executeMCPTool(name: String, arguments: [String: Any]) async -> ToolResult {
+        // Parse mcp_{serverName}_{toolName} — find the original tool name
+        let mcpTools = mcpService.listTools()
+        var matchedToolName: String?
+
+        for mcpTool in mcpTools {
+            let expectedName = "mcp_\(mcpTool.serverName)_\(mcpTool.name)"
+            if expectedName == name {
+                matchedToolName = mcpTool.name
+                break
+            }
+        }
+
+        guard let originalName = matchedToolName else {
+            Log.tool.warning("MCP tool not found: \(name)")
+            return ToolResult(
+                toolCallId: "",
+                content: "오류: MCP 도구 '\(name)'을(를) 찾을 수 없습니다.",
+                isError: true
+            )
+        }
+
+        do {
+            let result = try await mcpService.callTool(name: originalName, arguments: arguments)
+            return ToolResult(
+                toolCallId: "",
+                content: result.content,
+                isError: result.isError
+            )
+        } catch {
+            Log.tool.error("MCP tool execution failed: \(name) — \(error.localizedDescription)")
+            return ToolResult(
+                toolCallId: "",
+                content: "MCP 도구 실행 실패: \(error.localizedDescription)",
+                isError: true
+            )
+        }
     }
 }

@@ -12,11 +12,16 @@ final class SupertonicService: TTSServiceProtocol {
     private var isProcessing: Bool = false
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
+    private let modelManager = ONNXModelManager()
 
     // TTS settings
     var speed: Float = 1.0
     var diffusionSteps: Int = 3
     var voice: SupertonicVoice = .F1
+
+    // Audio format for output
+    private let sampleRate: Double = 22050
+    private let channels: AVAudioChannelCount = 1
 
     // MARK: - Engine Lifecycle
 
@@ -25,20 +30,30 @@ final class SupertonicService: TTSServiceProtocol {
         engineState = .loading
         Log.tts.info("Loading TTS engine...")
 
-        // TODO: Load ONNX models when available
-        // 1. Load duration model
-        // 2. Load acoustic model
-        // 3. Load vocoder model
-        // 4. Warm up with a test inference
+        // Load ONNX models if available
+        let mgr = modelManager
+        if mgr.areModelsAvailable() {
+            do {
+                try await Task.detached {
+                    try mgr.loadModels()
+                }.value
+                Log.tts.info("ONNX models loaded")
+            } catch {
+                Log.tts.warning("ONNX model load failed: \(error.localizedDescription) — running in placeholder mode")
+            }
+        } else {
+            Log.tts.info("ONNX models not found at \(mgr.modelsDirectoryPath.path) — running in placeholder mode")
+        }
 
         setupAudioEngine()
         engineState = .ready
-        Log.tts.info("TTS engine ready")
+        Log.tts.info("TTS engine ready (models loaded: \(mgr.isLoaded))")
     }
 
     func unloadEngine() {
         stopAndClear()
         teardownAudioEngine()
+        modelManager.unloadModels()
         engineState = .unloaded
         Log.tts.info("TTS engine unloaded")
     }
@@ -82,15 +97,101 @@ final class SupertonicService: TTSServiceProtocol {
     private func synthesizeAndPlay(_ text: String) async {
         Log.tts.debug("Synthesizing: \(text.prefix(30))...")
 
-        // TODO: Actual ONNX inference pipeline when models available
-        // 1. tokenize(text) -> ids, mask
-        // 2. durationModel.run(ids, mask) -> durations
-        // 3. acousticModel.run(ids, durations) -> latents
-        // 4. vocoderModel.run(latents) -> waveform
-        // 5. Play waveform through audio engine
+        if modelManager.isLoaded {
+            await synthesizeWithONNX(text)
+        } else {
+            // Placeholder: simulate synthesis time
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
 
-        // Placeholder: simulate synthesis time
-        try? await Task.sleep(for: .milliseconds(100))
+    // MARK: - ONNX Inference Pipeline
+
+    private func synthesizeWithONNX(_ text: String) async {
+        // Step 1: Grapheme-to-Phoneme conversion
+        let phonemes = KoreanG2P.convert(text)
+        guard !phonemes.isEmpty else {
+            Log.tts.warning("G2P produced empty phonemes for: \(text.prefix(30))")
+            return
+        }
+
+        Log.tts.debug("G2P: \(phonemes.count) phonemes")
+
+        // Step 2-5: Run ONNX inference on background thread
+        let waveform: [Float]? = await Task.detached { [modelManager, speed, diffusionSteps] in
+            return Self.runInferencePipeline(
+                phonemes: phonemes,
+                modelManager: modelManager,
+                speed: speed,
+                diffusionSteps: diffusionSteps
+            )
+        }.value
+
+        guard let waveform, !waveform.isEmpty else {
+            Log.tts.warning("ONNX inference produced no waveform")
+            return
+        }
+
+        // Step 6: Play audio
+        playWaveform(waveform)
+    }
+
+    /// Run the full ONNX inference pipeline (duration → acoustic → vocoder).
+    /// Called on a background thread via Task.detached.
+    private nonisolated static func runInferencePipeline(
+        phonemes: [String],
+        modelManager: ONNXModelManager,
+        speed: Float,
+        diffusionSteps: Int
+    ) -> [Float]? {
+        #if canImport(OnnxRuntimeBindings)
+        guard let durationSession = modelManager.durationSession,
+              let acousticSession = modelManager.acousticSession,
+              let vocoderSession = modelManager.vocoderSession else {
+            return nil
+        }
+
+        // TODO: Implement actual ONNX inference when model format is finalized
+        // 1. phonemes → token IDs (vocab mapping)
+        // 2. durationSession.run(tokenIds, mask) → durations
+        // 3. acousticSession.run(tokenIds, durations) → mel spectrogram
+        // 4. vocoderSession.run(mel) → waveform [Float]
+        // 5. Apply speed adjustment
+
+        return nil
+        #else
+        return nil
+        #endif
+    }
+
+    // MARK: - Audio Playback
+
+    private func playWaveform(_ waveform: [Float]) {
+        guard let engine = audioEngine, let player = playerNode else {
+            Log.tts.error("Audio engine not available for playback")
+            return
+        }
+
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels)!
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(waveform.count)) else {
+            Log.tts.error("Failed to create audio buffer")
+            return
+        }
+
+        buffer.frameLength = AVAudioFrameCount(waveform.count)
+        if let channelData = buffer.floatChannelData {
+            waveform.withUnsafeBufferPointer { src in
+                channelData[0].update(from: src.baseAddress!, count: waveform.count)
+            }
+        }
+
+        player.scheduleBuffer(buffer) {
+            Log.tts.debug("Buffer playback completed")
+        }
+
+        if !player.isPlaying {
+            player.play()
+        }
     }
 
     // MARK: - Text Preprocessing
@@ -103,10 +204,10 @@ final class SupertonicService: TTSServiceProtocol {
             .map(String.init)
             .joined()
         // Normalize quotes
-        result = result.replacingOccurrences(of: "\u{201C}", with: "\"")  // left double quote
-        result = result.replacingOccurrences(of: "\u{201D}", with: "\"")  // right double quote
-        result = result.replacingOccurrences(of: "\u{2018}", with: "'")   // left single quote
-        result = result.replacingOccurrences(of: "\u{2019}", with: "'")   // right single quote
+        result = result.replacingOccurrences(of: "\u{201C}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{201D}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{2018}", with: "'")
+        result = result.replacingOccurrences(of: "\u{2019}", with: "'")
         // Trim whitespace
         result = result.trimmingCharacters(in: .whitespacesAndNewlines)
         return result
@@ -119,7 +220,7 @@ final class SupertonicService: TTSServiceProtocol {
         playerNode = AVAudioPlayerNode()
         guard let engine = audioEngine, let player = playerNode else { return }
         engine.attach(player)
-        let format = AVAudioFormat(standardFormatWithSampleRate: 22050, channels: 1)!
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels)!
         engine.connect(player, to: engine.mainMixerNode, format: format)
         do {
             try engine.start()

@@ -224,6 +224,76 @@ final class SpeechService: SpeechServiceProtocol {
         }
     }
 
+    // MARK: - Continuous Recognition (Wake Word Detection)
+
+    private var continuousTask: Task<Void, Never>?
+    private var continuousOnPartial: (@MainActor (String) -> Void)?
+    private var continuousOnError: (@MainActor (Error) -> Void)?
+    private var isContinuousMode = false
+
+    func startContinuousRecognition(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onError: @escaping @MainActor (Error) -> Void
+    ) {
+        guard !isContinuousMode else {
+            Log.stt.warning("Continuous recognition already active")
+            return
+        }
+
+        isContinuousMode = true
+        continuousOnPartial = onPartialResult
+        continuousOnError = onError
+
+        Log.stt.info("Starting continuous recognition for wake word detection")
+        startContinuousSession()
+    }
+
+    func stopContinuousRecognition() {
+        guard isContinuousMode else { return }
+        isContinuousMode = false
+        continuousTask?.cancel()
+        continuousTask = nil
+        continuousOnPartial = nil
+        continuousOnError = nil
+
+        if isListening {
+            cleanup()
+        }
+        Log.stt.info("Continuous recognition stopped")
+    }
+
+    private func startContinuousSession() {
+        guard isContinuousMode else { return }
+
+        // Use a very long silence timeout (effectively no timeout)
+        startListening(
+            silenceTimeout: 55, // Restart before Apple's ~60s limit
+            onPartialResult: { [weak self] text in
+                self?.continuousOnPartial?(text)
+            },
+            onFinalResult: { [weak self] _ in
+                // Session ended (silence timeout or Apple limit) — restart
+                guard let self, self.isContinuousMode else { return }
+                Log.stt.debug("Continuous recognition session ended, restarting...")
+                self.continuousTask = Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard !Task.isCancelled else { return }
+                    self?.startContinuousSession()
+                }
+            },
+            onError: { [weak self] error in
+                guard let self, self.isContinuousMode else { return }
+                self.continuousOnError?(error)
+                // Retry after delay
+                self.continuousTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(1))
+                    guard !Task.isCancelled else { return }
+                    self?.startContinuousSession()
+                }
+            }
+        )
+    }
+
     // MARK: - Cleanup
 
     private func cleanup() {

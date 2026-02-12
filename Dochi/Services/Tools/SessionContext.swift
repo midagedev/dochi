@@ -4,7 +4,7 @@ import Foundation
 /// Reset when session ends.
 @MainActor
 final class SessionContext {
-    let workspaceId: UUID
+    var workspaceId: UUID
     var currentUserId: String?
 
     init(workspaceId: UUID, currentUserId: String? = nil) {

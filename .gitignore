@@ -14,3 +14,4 @@ Package.resolved
 # Supabase config (contains keys)
 SupabaseConfig.plist
 Dochi/Resources/SupabaseConfig.plist
+_backup/

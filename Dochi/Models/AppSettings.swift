@@ -64,6 +64,18 @@ final class AppSettings {
     @ObservationIgnored
     @AppStorage("hasSeenPermissionInfo") var hasSeenPermissionInfo: Bool = false
 
+    @ObservationIgnored
+    @AppStorage("supabaseURL") var supabaseURL: String = ""
+
+    @ObservationIgnored
+    @AppStorage("supabaseAnonKey") var supabaseAnonKey: String = ""
+
+    @ObservationIgnored
+    @AppStorage("mcpServersJSON") var mcpServersJSON: String = "[]"
+
+    @ObservationIgnored
+    @AppStorage("wakeWordAlwaysOn") var wakeWordAlwaysOn: Bool = false
+
     // MARK: - P5 Settings
 
     @ObservationIgnored

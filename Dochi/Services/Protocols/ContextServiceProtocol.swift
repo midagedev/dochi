@@ -35,6 +35,17 @@ protocol ContextServiceProtocol {
     func listAgents(workspaceId: UUID) -> [String]
     func createAgent(workspaceId: UUID, name: String, wakeWord: String?, description: String?)
 
+    // Workspace management
+    func listLocalWorkspaces() -> [UUID]
+    func createLocalWorkspace(id: UUID)
+    func deleteLocalWorkspace(id: UUID)
+    func deleteAgent(workspaceId: UUID, name: String)
+
+    // Snapshots (for context compression)
+    func saveWorkspaceMemorySnapshot(workspaceId: UUID, content: String)
+    func saveAgentMemorySnapshot(workspaceId: UUID, agentName: String, content: String)
+    func saveUserMemorySnapshot(userId: String, content: String)
+
     // Migration
     func migrateIfNeeded()
 }
