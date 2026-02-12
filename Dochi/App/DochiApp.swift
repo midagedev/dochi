@@ -80,6 +80,8 @@ struct DochiApp: App {
         }
     }
 
+    @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "onboardingCompleted")
+
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: viewModel, supabaseService: supabaseService)
@@ -95,6 +97,14 @@ struct DochiApp: App {
                             await viewModel.handleTelegramMessage(update)
                         }
                     }
+                }
+                .sheet(isPresented: $showOnboarding) {
+                    OnboardingView(
+                        settings: settings,
+                        keychainService: keychainService,
+                        onComplete: { showOnboarding = false }
+                    )
+                    .interactiveDismissDisabled()
                 }
         }
 
