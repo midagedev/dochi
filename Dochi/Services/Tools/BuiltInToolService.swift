@@ -165,6 +165,10 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(GitHubCreatePRTool())
         registry.register(GitHubViewTool())
 
+        // Agent orchestration (conditional, sensitive)
+        registry.register(AgentDelegateTaskTool(contextService: contextService, sessionContext: sessionContext, settings: settings))
+        registry.register(AgentCheckStatusTool(contextService: contextService, sessionContext: sessionContext, settings: settings))
+
         // Coding agent (conditional, restricted/sensitive)
         registry.register(CodingRunTaskTool())
         registry.register(CodingReviewTool())

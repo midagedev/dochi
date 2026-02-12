@@ -84,6 +84,29 @@ final class AppSettings {
     @ObservationIgnored
     @AppStorage("fallbackLLMModel") var fallbackLLMModel: String = ""
 
+    // MARK: - Heartbeat / Proactive Agent
+
+    @ObservationIgnored
+    @AppStorage("heartbeatEnabled") var heartbeatEnabled: Bool = false
+
+    @ObservationIgnored
+    @AppStorage("heartbeatIntervalMinutes") var heartbeatIntervalMinutes: Int = 30
+
+    @ObservationIgnored
+    @AppStorage("heartbeatCheckCalendar") var heartbeatCheckCalendar: Bool = true
+
+    @ObservationIgnored
+    @AppStorage("heartbeatCheckKanban") var heartbeatCheckKanban: Bool = true
+
+    @ObservationIgnored
+    @AppStorage("heartbeatCheckReminders") var heartbeatCheckReminders: Bool = true
+
+    @ObservationIgnored
+    @AppStorage("heartbeatQuietHoursStart") var heartbeatQuietHoursStart: Int = 23
+
+    @ObservationIgnored
+    @AppStorage("heartbeatQuietHoursEnd") var heartbeatQuietHoursEnd: Int = 8
+
     // MARK: - Computed
 
     var currentProvider: LLMProvider {
