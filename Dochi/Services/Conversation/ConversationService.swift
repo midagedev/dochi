@@ -11,6 +11,12 @@ final class ConversationService: ConversationServiceProtocol {
         try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
     }
 
+    /// Testable init with custom base directory.
+    init(baseURL: URL) {
+        self.baseURL = baseURL
+        try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+    }
+
     func list() -> [Conversation] {
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: baseURL.path) else { return [] }
         return files

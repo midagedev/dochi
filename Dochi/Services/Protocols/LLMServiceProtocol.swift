@@ -7,8 +7,9 @@ protocol LLMServiceProtocol {
         systemPrompt: String,
         model: String,
         provider: LLMProvider,
+        apiKey: String,
         tools: [[String: Any]]?,
-        onPartial: @MainActor @Sendable (String) -> Void
+        onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> LLMResponse
 
     func cancel()

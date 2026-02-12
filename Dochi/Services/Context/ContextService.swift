@@ -11,6 +11,12 @@ final class ContextService: ContextServiceProtocol {
         ensureDirectories()
     }
 
+    /// Testable init with custom base directory.
+    init(baseURL: URL) {
+        self.baseURL = baseURL
+        ensureDirectories()
+    }
+
     private func ensureDirectories() {
         let fm = FileManager.default
         let dirs = [
