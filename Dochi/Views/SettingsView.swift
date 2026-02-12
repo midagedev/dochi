@@ -3,6 +3,10 @@ import SwiftUI
 struct SettingsView: View {
     var settings: AppSettings
     var keychainService: KeychainServiceProtocol
+    var ttsService: TTSServiceProtocol?
+    var telegramService: TelegramServiceProtocol?
+    var mcpService: MCPServiceProtocol?
+    var supabaseService: SupabaseServiceProtocol?
 
     var body: some View {
         TabView {
@@ -20,8 +24,31 @@ struct SettingsView: View {
                 .tabItem {
                     Label("API 키", systemImage: "key")
                 }
+
+            VoiceSettingsView(settings: settings, ttsService: ttsService)
+                .tabItem {
+                    Label("음성", systemImage: "speaker.wave.2")
+                }
+
+            IntegrationsSettingsView(
+                keychainService: keychainService,
+                telegramService: telegramService,
+                mcpService: mcpService,
+                settings: settings
+            )
+            .tabItem {
+                Label("통합", systemImage: "puzzlepiece")
+            }
+
+            AccountSettingsView(
+                supabaseService: supabaseService,
+                settings: settings
+            )
+            .tabItem {
+                Label("계정", systemImage: "person.circle")
+            }
         }
-        .frame(width: 480, height: 340)
+        .frame(width: 540, height: 420)
     }
 }
 
@@ -56,6 +83,33 @@ struct GeneralSettingsView: View {
                 }
                 .pickerStyle(.radioGroup)
             }
+
+            Section("웨이크워드") {
+                Toggle("웨이크워드 감지", isOn: Binding(
+                    get: { settings.wakeWordEnabled },
+                    set: { settings.wakeWordEnabled = $0 }
+                ))
+
+                TextField("웨이크워드", text: Binding(
+                    get: { settings.wakeWord },
+                    set: { settings.wakeWord = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+
+                HStack {
+                    Text("침묵 타임아웃: \(String(format: "%.1f", settings.sttSilenceTimeout))초")
+                    Slider(value: Binding(
+                        get: { settings.sttSilenceTimeout },
+                        set: { settings.sttSilenceTimeout = $0 }
+                    ), in: 1...5, step: 0.5)
+                }
+
+                Toggle("항상 대기 모드", isOn: Binding(
+                    get: { settings.wakeWordAlwaysOn },
+                    set: { settings.wakeWordAlwaysOn = $0 }
+                ))
+                .help("앱이 활성화되어 있는 동안 항상 웨이크워드를 감지합니다")
+            }
         }
         .formStyle(.grouped)
         .padding()
@@ -67,60 +121,57 @@ struct GeneralSettingsView: View {
 struct ModelSettingsView: View {
     var settings: AppSettings
 
+    @State private var selectedProviderRaw: String = ""
+    @State private var selectedModel: String = ""
+
     private var selectedProvider: LLMProvider {
-        LLMProvider(rawValue: settings.llmProvider) ?? .openai
+        LLMProvider(rawValue: selectedProviderRaw) ?? .openai
     }
 
     var body: some View {
         Form {
             Section("LLM 프로바이더") {
-                Picker("프로바이더", selection: Binding(
-                    get: { settings.llmProvider },
-                    set: { newValue in
-                        settings.llmProvider = newValue
-                        // Reset model to first available when provider changes
-                        let provider = LLMProvider(rawValue: newValue) ?? .openai
-                        if !provider.models.contains(settings.llmModel) {
-                            settings.llmModel = provider.models.first ?? ""
-                        }
-                    }
-                )) {
+                Picker("프로바이더", selection: $selectedProviderRaw) {
                     ForEach(LLMProvider.allCases, id: \.self) { provider in
                         Text(provider.displayName).tag(provider.rawValue)
                     }
                 }
+                .onChange(of: selectedProviderRaw) { _, newValue in
+                    settings.llmProvider = newValue
+                    let provider = LLMProvider(rawValue: newValue) ?? .openai
+                    if !provider.models.contains(selectedModel) {
+                        selectedModel = provider.models.first ?? ""
+                        settings.llmModel = selectedModel
+                    }
+                }
 
-                Picker("모델", selection: Binding(
-                    get: { settings.llmModel },
-                    set: { settings.llmModel = $0 }
-                )) {
+                Picker("모델", selection: $selectedModel) {
                     ForEach(selectedProvider.models, id: \.self) { model in
                         Text(model).tag(model)
                     }
+                }
+                .onChange(of: selectedModel) { _, newValue in
+                    settings.llmModel = newValue
                 }
             }
 
             Section("컨텍스트") {
                 HStack {
-                    Text("최대 컨텍스트 크기")
+                    Text("컨텍스트 윈도우")
                     Spacer()
-                    Text("\(settings.contextMaxSize / 1000)K")
+                    let tokens = selectedProvider.contextWindowTokens(for: selectedModel)
+                    Text("\(tokens / 1000)K tokens")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                Slider(value: Binding(
-                    get: { Double(settings.contextMaxSize) },
-                    set: { settings.contextMaxSize = Int($0) }
-                ), in: 10_000...200_000, step: 10_000)
-
-                Toggle("자동 압축", isOn: Binding(
-                    get: { settings.contextAutoCompress },
-                    set: { settings.contextAutoCompress = $0 }
-                ))
             }
         }
         .formStyle(.grouped)
         .padding()
+        .onAppear {
+            selectedProviderRaw = settings.llmProvider
+            selectedModel = settings.llmModel
+        }
     }
 }
 
@@ -132,17 +183,24 @@ struct APIKeySettingsView: View {
     @State private var openaiKey: String = ""
     @State private var anthropicKey: String = ""
     @State private var zaiKey: String = ""
+    @State private var tavilyKey: String = ""
+    @State private var falKey: String = ""
     @State private var saveStatus: String?
     @State private var showKeys: Bool = false
 
     var body: some View {
         Form {
-            Section("API 키 관리") {
+            Section("LLM API 키") {
                 Toggle("키 표시", isOn: $showKeys)
 
                 apiKeyRow(label: "OpenAI", key: $openaiKey, account: LLMProvider.openai.keychainAccount)
                 apiKeyRow(label: "Anthropic", key: $anthropicKey, account: LLMProvider.anthropic.keychainAccount)
                 apiKeyRow(label: "Z.AI", key: $zaiKey, account: LLMProvider.zai.keychainAccount)
+            }
+
+            Section("도구 API 키") {
+                apiKeyRow(label: "Tavily (웹 검색)", key: $tavilyKey, account: "tavily_api_key")
+                apiKeyRow(label: "Fal.ai (이미지)", key: $falKey, account: "fal_api_key")
             }
 
             Section {
@@ -171,7 +229,7 @@ struct APIKeySettingsView: View {
     private func apiKeyRow(label: String, key: Binding<String>, account: String) -> some View {
         HStack {
             Text(label)
-                .frame(width: 80, alignment: .leading)
+                .frame(width: 120, alignment: .leading)
             if showKeys {
                 TextField("sk-...", text: key)
                     .textFieldStyle(.roundedBorder)
@@ -182,7 +240,6 @@ struct APIKeySettingsView: View {
                     .font(.system(size: 12, design: .monospaced))
             }
 
-            // Status indicator
             if let stored = keychainService.load(account: account), !stored.isEmpty {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
@@ -196,18 +253,23 @@ struct APIKeySettingsView: View {
         openaiKey = keychainService.load(account: LLMProvider.openai.keychainAccount) ?? ""
         anthropicKey = keychainService.load(account: LLMProvider.anthropic.keychainAccount) ?? ""
         zaiKey = keychainService.load(account: LLMProvider.zai.keychainAccount) ?? ""
+        tavilyKey = keychainService.load(account: "tavily_api_key") ?? ""
+        falKey = keychainService.load(account: "fal_api_key") ?? ""
     }
 
     private func saveAllKeys() {
         do {
-            if !openaiKey.isEmpty {
-                try keychainService.save(account: LLMProvider.openai.keychainAccount, value: openaiKey)
-            }
-            if !anthropicKey.isEmpty {
-                try keychainService.save(account: LLMProvider.anthropic.keychainAccount, value: anthropicKey)
-            }
-            if !zaiKey.isEmpty {
-                try keychainService.save(account: LLMProvider.zai.keychainAccount, value: zaiKey)
+            let keys: [(String, String)] = [
+                (LLMProvider.openai.keychainAccount, openaiKey),
+                (LLMProvider.anthropic.keychainAccount, anthropicKey),
+                (LLMProvider.zai.keychainAccount, zaiKey),
+                ("tavily_api_key", tavilyKey),
+                ("fal_api_key", falKey),
+            ]
+            for (account, value) in keys {
+                if !value.isEmpty {
+                    try keychainService.save(account: account, value: value)
+                }
             }
             saveStatus = "저장 완료"
             Log.app.info("API keys saved")
@@ -216,7 +278,6 @@ struct APIKeySettingsView: View {
             Log.app.error("API key save failed: \(error.localizedDescription)")
         }
 
-        // Clear status after delay
         Task {
             try? await Task.sleep(for: .seconds(3))
             saveStatus = nil

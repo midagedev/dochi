@@ -25,7 +25,7 @@ final class DochiViewModel {
 
     private let llmService: LLMServiceProtocol
     private var toolService: BuiltInToolServiceProtocol
-    private let contextService: ContextServiceProtocol
+    let contextService: ContextServiceProtocol
     private let conversationService: ConversationServiceProtocol
     private let keychainService: KeychainServiceProtocol
     private let speechService: SpeechServiceProtocol
@@ -45,6 +45,8 @@ final class DochiViewModel {
     private static let maxRecentMessages = 30
     private static let sessionEndingTimeout: TimeInterval = 10
     private static let toolConfirmationTimeout: TimeInterval = 30
+    private static let compressionModel = "gpt-4o-mini"
+    private static let compressionSummaryPrompt = "다음 메모리를 핵심 사실만 보존하여 50% 이하로 요약하세요. 라인 단위(`- ...`) 형식 유지."
 
     // MARK: - Computed
 
@@ -54,6 +56,21 @@ final class DochiViewModel {
 
     var isMicAuthorized: Bool {
         speechService.isAuthorized
+    }
+
+    /// Token usage from the most recent LLM exchange (input tokens sent).
+    var lastInputTokens: Int? {
+        llmService.lastMetrics?.inputTokens
+    }
+
+    /// Token usage from the most recent LLM exchange (output tokens received).
+    var lastOutputTokens: Int? {
+        llmService.lastMetrics?.outputTokens
+    }
+
+    /// Context window size (tokens) for the currently selected model.
+    var contextWindowTokens: Int {
+        settings.currentProvider.contextWindowTokens(for: settings.llmModel)
     }
 
     // MARK: - Init
@@ -206,6 +223,39 @@ final class DochiViewModel {
             toolService.resetRegistry()
             Log.app.info("Selected conversation: \(id)")
         }
+    }
+
+    // MARK: - Workspace / Agent Switching
+
+    func switchWorkspace(id: UUID) {
+        guard interactionState == .idle else { return }
+
+        saveConversation()
+        settings.currentWorkspaceId = id.uuidString
+        sessionContext.workspaceId = id
+        toolService.resetRegistry()
+
+        // Select first agent in the new workspace, or keep default
+        let agents = contextService.listAgents(workspaceId: id)
+        if let first = agents.first {
+            settings.activeAgentName = first
+        } else {
+            settings.activeAgentName = "도치"
+        }
+
+        newConversation()
+        loadConversations()
+        Log.app.info("Switched workspace to \(id)")
+    }
+
+    func switchAgent(name: String) {
+        guard interactionState == .idle else { return }
+
+        saveConversation()
+        settings.activeAgentName = name
+        toolService.resetRegistry()
+        newConversation()
+        Log.app.info("Switched agent to \(name)")
     }
 
     func deleteConversation(id: UUID) {
@@ -525,6 +575,160 @@ final class DochiViewModel {
         return stripped
     }
 
+    // MARK: - Telegram Message Handling
+
+    func handleTelegramMessage(_ update: TelegramUpdate) async {
+        Log.telegram.info("Processing Telegram message from \(update.senderUsername ?? "unknown")")
+
+        // Find or create a persistent conversation for this chat
+        var conversation = findOrCreateTelegramConversation(
+            chatId: update.chatId,
+            username: update.senderUsername
+        )
+
+        // Append user message
+        let userMessage = Message(role: .user, content: update.text)
+        conversation.messages.append(userMessage)
+        conversation.updatedAt = Date()
+
+        let systemPrompt = composeSystemPrompt()
+        let messages = prepareMessages(from: conversation)
+
+        // Resolve model
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        guard let model = router.resolvePrimary() else {
+            Log.telegram.error("No API key configured for Telegram response")
+            return
+        }
+
+        do {
+            var accumulatedText = ""
+
+            let onPartial: @MainActor @Sendable (String) -> Void = { partial in
+                accumulatedText += partial
+            }
+
+            let response = try await llmService.send(
+                messages: messages,
+                systemPrompt: systemPrompt,
+                model: model.model,
+                provider: model.provider,
+                apiKey: model.apiKey,
+                tools: nil,
+                onPartial: onPartial
+            )
+
+            let finalText: String
+            switch response {
+            case .text(let text):
+                finalText = text.isEmpty ? accumulatedText : text
+            default:
+                finalText = accumulatedText
+            }
+
+            guard !finalText.isEmpty else {
+                Log.telegram.warning("Empty response for Telegram message")
+                return
+            }
+
+            // Append assistant response to conversation
+            let assistantMessage = Message(role: .assistant, content: finalText)
+            conversation.messages.append(assistantMessage)
+            conversation.updatedAt = Date()
+
+            // Auto-title from first user message
+            if conversation.title == "새 대화",
+               let firstUser = conversation.messages.first(where: { $0.role == .user }) {
+                let title = String(firstUser.content.prefix(40))
+                conversation.title = title.count < firstUser.content.count ? title + "…" : title
+            }
+
+            // Persist conversation and refresh sidebar
+            conversationService.save(conversation: conversation)
+            loadConversations()
+
+            // Send response via Telegram
+            if let tg = getTelegramService() {
+                _ = try await tg.sendMessage(chatId: update.chatId, text: finalText)
+                Log.telegram.info("Sent Telegram response to chat \(update.chatId)")
+            }
+        } catch {
+            Log.telegram.error("Telegram response failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Find an existing telegram conversation by chatId, or create a new one.
+    private func findOrCreateTelegramConversation(chatId: Int64, username: String?) -> Conversation {
+        // Search existing conversations for matching telegramChatId
+        if let existing = conversations.first(where: { $0.source == .telegram && $0.telegramChatId == chatId }) {
+            // Load the full conversation (with all messages)
+            if let loaded = conversationService.load(id: existing.id) {
+                return loaded
+            }
+        }
+
+        // Create new telegram conversation
+        let displayName = username.map { "@\($0)" } ?? "Chat \(chatId)"
+        let conversation = Conversation(
+            title: "\(displayName) 텔레그램 DM",
+            source: .telegram,
+            telegramChatId: chatId
+        )
+        Log.telegram.info("Created new Telegram conversation for chat \(chatId)")
+        return conversation
+    }
+
+    /// Get telegram service reference - stored weakly to avoid circular deps
+    private var _telegramService: TelegramServiceProtocol?
+
+    func setTelegramService(_ service: TelegramServiceProtocol) {
+        _telegramService = service
+    }
+
+    private func getTelegramService() -> TelegramServiceProtocol? {
+        _telegramService
+    }
+
+    // MARK: - Background Wake Word Listener
+
+    private var isBackgroundListening = false
+
+    func startBackgroundWakeWordListener() {
+        guard settings.wakeWordEnabled, settings.wakeWordAlwaysOn else { return }
+        guard !isBackgroundListening else { return }
+        guard interactionState == .idle else { return }
+
+        isBackgroundListening = true
+        Log.app.info("Starting background wake word listener")
+
+        speechService.startContinuousRecognition(
+            onPartialResult: { [weak self] text in
+                guard let self else { return }
+                if self.handleWakeWordDetection(in: text) {
+                    self.stopBackgroundWakeWordListener()
+                    self.startListening()
+                }
+            },
+            onError: { [weak self] _ in
+                guard let self, self.isBackgroundListening else { return }
+                // Error handling is done inside SpeechService (auto-retry)
+            }
+        )
+    }
+
+    func stopBackgroundWakeWordListener() {
+        guard isBackgroundListening else { return }
+        isBackgroundListening = false
+        speechService.stopContinuousRecognition()
+        Log.app.info("Stopped background wake word listener")
+    }
+
+    private func handleWakeWordDetection(in text: String) -> Bool {
+        guard settings.wakeWordEnabled else { return false }
+        let wakeWord = settings.wakeWord
+        return JamoMatcher.isMatch(transcript: text, wakeWord: wakeWord)
+    }
+
     // MARK: - LLM Processing Loop
 
     private func processLLMLoop() async {
@@ -538,7 +742,10 @@ final class DochiViewModel {
         }
         let fallbackModel = router.resolveFallback()
 
-        // Compose context
+        // Compress context if needed (before composing final prompt)
+        await compressContextIfNeeded()
+
+        // Compose context (after potential compression)
         let systemPrompt = composeSystemPrompt()
 
         // Get available tool schemas
@@ -769,6 +976,116 @@ final class DochiViewModel {
         metricsCollector.record(metrics)
     }
 
+    // MARK: - Context Auto-Compression
+
+    /// Compress context memories if total context exceeds model's context window.
+    /// Priority order: workspace+agent memory first, then personal memory.
+    /// Base prompt and agent persona are NEVER compressed.
+    private func compressContextIfNeeded() async {
+        guard settings.contextAutoCompress else { return }
+        guard let conversation = currentConversation else { return }
+
+        let systemPrompt = composeSystemPrompt()
+        let messageChars = conversation.messages.reduce(0) { $0 + $1.content.count }
+        let totalChars = systemPrompt.count + messageChars
+        // Estimate max chars from model token window (Korean ~2 chars/token, use 80% budget)
+        let charLimit = Int(Double(contextWindowTokens) * 2.0 * 0.8)
+
+        guard totalChars > charLimit else {
+            Log.app.debug("Context size \(totalChars) within limit \(charLimit), no compression needed")
+            return
+        }
+
+        Log.app.info("Context size \(totalChars) exceeds limit \(charLimit), starting compression")
+
+        // Check for OpenAI API key (required for compression model)
+        guard let openAIKey = keychainService.load(account: LLMProvider.openai.keychainAccount),
+              !openAIKey.isEmpty else {
+            Log.app.warning("OpenAI API key not available, skipping context compression")
+            return
+        }
+
+        let wsId = sessionContext.workspaceId
+        let agentName = settings.activeAgentName
+
+        // Step 2: Compress workspace memory + agent memory
+        if let wsMem = contextService.loadWorkspaceMemory(workspaceId: wsId), !wsMem.isEmpty {
+            if let summary = await summarizeText(wsMem, apiKey: openAIKey) {
+                contextService.saveWorkspaceMemorySnapshot(workspaceId: wsId, content: wsMem)
+                contextService.saveWorkspaceMemory(workspaceId: wsId, content: summary)
+                Log.app.info("Compressed workspace memory: \(wsMem.count) → \(summary.count) chars")
+            }
+        }
+
+        if let agentMem = contextService.loadAgentMemory(workspaceId: wsId, agentName: agentName), !agentMem.isEmpty {
+            if let summary = await summarizeText(agentMem, apiKey: openAIKey) {
+                contextService.saveAgentMemorySnapshot(workspaceId: wsId, agentName: agentName, content: agentMem)
+                contextService.saveAgentMemory(workspaceId: wsId, agentName: agentName, content: summary)
+                Log.app.info("Compressed agent memory: \(agentMem.count) → \(summary.count) chars")
+            }
+        }
+
+        // Re-check if still over limit after workspace+agent compression
+        let afterStep2 = composeSystemPrompt().count + messageChars
+        guard afterStep2 > charLimit else {
+            Log.app.info("Context within limit after workspace+agent compression (\(afterStep2))")
+            return
+        }
+
+        // Step 3: Compress personal memory
+        if let userId = sessionContext.currentUserId,
+           let personalMem = contextService.loadUserMemory(userId: userId), !personalMem.isEmpty {
+            if let summary = await summarizeText(personalMem, apiKey: openAIKey) {
+                contextService.saveUserMemorySnapshot(userId: userId, content: personalMem)
+                contextService.saveUserMemory(userId: userId, content: summary)
+                Log.app.info("Compressed personal memory: \(personalMem.count) → \(summary.count) chars")
+            }
+        }
+
+        let afterStep3 = composeSystemPrompt().count + messageChars
+        Log.app.info("Context compression complete. Final size: \(afterStep3)")
+    }
+
+    /// Summarize text using a fixed lightweight model (gpt-4o-mini via OpenAI).
+    /// Returns the summary if shorter than the original, otherwise returns nil.
+    private func summarizeText(_ text: String, apiKey: String) async -> String? {
+        let userMessage = Message(role: .user, content: text)
+        let noopPartial: @MainActor @Sendable (String) -> Void = { _ in }
+
+        do {
+            let response = try await llmService.send(
+                messages: [userMessage],
+                systemPrompt: Self.compressionSummaryPrompt,
+                model: Self.compressionModel,
+                provider: .openai,
+                apiKey: apiKey,
+                tools: nil,
+                onPartial: noopPartial
+            )
+
+            switch response {
+            case .text(let summary):
+                let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    Log.app.warning("Compression returned empty summary, keeping original")
+                    return nil
+                }
+                // Safety: if summary is not shorter, keep original
+                if trimmed.count >= text.count {
+                    Log.app.warning("Compression summary (\(trimmed.count)) not shorter than original (\(text.count)), keeping original")
+                    return nil
+                }
+                return trimmed
+            default:
+                Log.app.warning("Compression returned unexpected response type, keeping original")
+                return nil
+            }
+        } catch {
+            Log.app.error("Context compression LLM call failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Context Composition
 
     private func composeSystemPrompt() -> String {
@@ -820,10 +1137,12 @@ final class DochiViewModel {
             messages = Array(messages.suffix(Self.maxRecentMessages))
         }
 
-        let maxSize = settings.contextMaxSize
+        // Estimate max chars from model's token window.
+        // Korean text averages ~2 chars/token; use 80% of window to leave room for system prompt + response.
+        let maxChars = Int(Double(contextWindowTokens) * 2.0 * 0.8)
         var totalChars = messages.reduce(0) { $0 + $1.content.count }
 
-        while totalChars > maxSize && messages.count > 5 {
+        while totalChars > maxChars && messages.count > 5 {
             let removed = messages.removeFirst()
             totalChars -= removed.content.count
         }
