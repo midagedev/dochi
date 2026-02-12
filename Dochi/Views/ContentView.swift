@@ -9,10 +9,13 @@ struct ContentView: View {
         } detail: {
             VStack(spacing: 0) {
                 // Status bar
-                if viewModel.interactionState == .processing {
+                if viewModel.interactionState != .idle {
                     StatusBarView(
+                        interactionState: viewModel.interactionState,
+                        sessionState: viewModel.sessionState,
                         processingSubState: viewModel.processingSubState,
-                        currentToolName: viewModel.currentToolName
+                        currentToolName: viewModel.currentToolName,
+                        partialTranscript: viewModel.partialTranscript
                     )
                 }
 
@@ -94,41 +97,83 @@ struct SidebarView: View {
 // MARK: - Status Bar
 
 struct StatusBarView: View {
+    let interactionState: InteractionState
+    let sessionState: SessionState
     let processingSubState: ProcessingSubState?
     let currentToolName: String?
+    let partialTranscript: String
 
     var body: some View {
         HStack(spacing: 6) {
-            ProgressView()
-                .scaleEffect(0.6)
+            statusIcon
                 .frame(width: 14, height: 14)
 
             Text(statusText)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
 
             Spacer()
+
+            if sessionState == .active {
+                Text("연속 대화")
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.green.opacity(0.15))
+                    .cornerRadius(4)
+            } else if sessionState == .ending {
+                Text("종료 대기")
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.15))
+                    .cornerRadius(4)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.ultraThinMaterial)
     }
 
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch interactionState {
+        case .listening:
+            Image(systemName: "mic.fill")
+                .foregroundStyle(.red)
+                .font(.system(size: 10))
+        case .speaking:
+            Image(systemName: "speaker.wave.2.fill")
+                .foregroundStyle(.blue)
+                .font(.system(size: 10))
+        default:
+            ProgressView()
+                .scaleEffect(0.6)
+        }
+    }
+
     private var statusText: String {
-        switch processingSubState {
-        case .streaming:
-            return "응답 생성 중..."
-        case .toolCalling:
-            if let name = currentToolName {
-                return "도구 실행 중: \(name)"
+        switch interactionState {
+        case .listening:
+            if !partialTranscript.isEmpty {
+                return partialTranscript
             }
-            return "도구 실행 중..."
-        case .toolError:
-            return "도구 오류 — 재시도 중..."
-        case .complete:
-            return "완료"
-        case nil:
-            return "처리 중..."
+            return "듣고 있습니다..."
+        case .speaking:
+            return "말하는 중..."
+        case .processing:
+            switch processingSubState {
+            case .streaming: return "응답 생성 중..."
+            case .toolCalling:
+                if let name = currentToolName { return "도구 실행 중: \(name)" }
+                return "도구 실행 중..."
+            case .toolError: return "도구 오류 — 재시도 중..."
+            case .complete: return "완료"
+            case nil: return "처리 중..."
+            }
+        case .idle:
+            return ""
         }
     }
 }
@@ -171,6 +216,11 @@ struct InputBarView: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            // Microphone button (voice mode)
+            if viewModel.isVoiceMode {
+                microphoneButton
+            }
+
             TextField("메시지를 입력하세요...", text: $viewModel.inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
@@ -191,6 +241,16 @@ struct InputBarView: View {
                 }
                 .buttonStyle(.plain)
                 .help("취소")
+            } else if viewModel.interactionState == .speaking {
+                Button {
+                    viewModel.handleBargeIn()
+                } label: {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.orange.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+                .help("말하기 중단")
             } else {
                 Button {
                     viewModel.sendMessage()
@@ -208,7 +268,33 @@ struct InputBarView: View {
         .padding(.vertical, 8)
     }
 
+    @ViewBuilder
+    private var microphoneButton: some View {
+        if viewModel.interactionState == .listening {
+            Button {
+                viewModel.stopListening()
+            } label: {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+            .help("듣기 중지")
+        } else if viewModel.interactionState == .idle {
+            Button {
+                viewModel.startListening()
+            } label: {
+                Image(systemName: "mic")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("음성 입력")
+        }
+    }
+
     private var canSend: Bool {
+        viewModel.interactionState == .idle &&
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }

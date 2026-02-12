@@ -185,3 +185,73 @@ final class MockBuiltInToolService: BuiltInToolServiceProtocol {
         enabledNames.removeAll()
     }
 }
+
+// MARK: - MockSpeechService
+
+@MainActor
+final class MockSpeechService: SpeechServiceProtocol {
+    var isAuthorized: Bool = true
+    var isListening: Bool = false
+    var stubbedAuthResult: Bool = true
+    var lastSilenceTimeout: TimeInterval?
+
+    func requestAuthorization() async -> Bool { stubbedAuthResult }
+
+    func startListening(
+        silenceTimeout: TimeInterval,
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onFinalResult: @escaping @MainActor (String) -> Void,
+        onError: @escaping @MainActor (Error) -> Void
+    ) {
+        lastSilenceTimeout = silenceTimeout
+        isListening = true
+    }
+
+    func stopListening() {
+        isListening = false
+    }
+}
+
+// MARK: - MockTTSService
+
+@MainActor
+final class MockTTSService: TTSServiceProtocol {
+    var engineState: TTSEngineState = .ready
+    var isSpeaking: Bool = false
+    var onComplete: (@MainActor () -> Void)?
+
+    var loadCallCount = 0
+    var enqueuedSentences: [String] = []
+    var stopCallCount = 0
+
+    func loadEngine() async throws {
+        loadCallCount += 1
+        engineState = .ready
+    }
+
+    func unloadEngine() {
+        engineState = .unloaded
+    }
+
+    func enqueueSentence(_ text: String) {
+        enqueuedSentences.append(text)
+        isSpeaking = true
+    }
+
+    func stopAndClear() {
+        stopCallCount += 1
+        enqueuedSentences.removeAll()
+        isSpeaking = false
+    }
+}
+
+// MARK: - MockSoundService
+
+@MainActor
+final class MockSoundService: SoundServiceProtocol {
+    var wakeWordCount = 0
+    var inputCompleteCount = 0
+
+    func playWakeWordDetected() { wakeWordCount += 1 }
+    func playInputComplete() { inputCompleteCount += 1 }
+}

@@ -12,11 +12,13 @@ struct DochiApp: App {
         let keychainService = KeychainService()
         let conversationService = ConversationService()
         let llmService = LLMService()
+        let speechService = SpeechService()
+        let ttsService = SupertonicService()
+        let soundService = SoundService()
 
         self.keychainService = keychainService
         self.settings = settings
 
-        // Use a default workspace ID for local-only mode (P4 will add workspace switching)
         let defaultWorkspaceId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         let sessionContext = SessionContext(workspaceId: defaultWorkspaceId)
 
@@ -32,6 +34,9 @@ struct DochiApp: App {
             contextService: contextService,
             conversationService: conversationService,
             keychainService: keychainService,
+            speechService: speechService,
+            ttsService: ttsService,
+            soundService: soundService,
             settings: settings,
             sessionContext: sessionContext
         ))
@@ -42,6 +47,11 @@ struct DochiApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: viewModel)
+                .onAppear {
+                    if viewModel.isVoiceMode {
+                        viewModel.prepareTTSEngine()
+                    }
+                }
         }
 
         Settings {
