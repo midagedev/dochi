@@ -65,13 +65,7 @@ final class SupabaseService: SupabaseServiceProtocol {
     }
 
     func configure(url: URL, anonKey: String) {
-        client = SupabaseClient(
-            supabaseURL: url,
-            supabaseKey: anonKey,
-            options: SupabaseClientOptions(
-                auth: .init(storage: FileAuthStorage())
-            )
-        )
+        client = SupabaseClient(supabaseURL: url, supabaseKey: anonKey)
         Log.cloud.info("Supabase configured with URL: \(url.absoluteString)")
     }
 

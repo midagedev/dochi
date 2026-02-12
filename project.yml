@@ -56,7 +56,7 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_ENTITLEMENTS: Dochi/Dochi.entitlements
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: XEF9KH7N43
         SWIFT_STRICT_CONCURRENCY: targeted
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
