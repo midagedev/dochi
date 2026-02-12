@@ -89,6 +89,14 @@ struct ContentView: View {
                 sessionContext: viewModel.sessionContext
             )
         }
+        // Keyboard shortcut: Escape to cancel
+        .onKeyPress(.escape) {
+            if viewModel.interactionState == .processing {
+                viewModel.cancelRequest()
+                return .handled
+            }
+            return .ignored
+        }
     }
 }
 
@@ -97,6 +105,18 @@ struct ContentView: View {
 struct SidebarView: View {
     @Bindable var viewModel: DochiViewModel
     var supabaseService: SupabaseServiceProtocol?
+    @State private var searchText: String = ""
+
+    private var filteredConversations: [Conversation] {
+        if searchText.isEmpty {
+            return viewModel.conversations
+        }
+        let query = searchText.lowercased()
+        return viewModel.conversations.filter { conversation in
+            conversation.title.lowercased().contains(query) ||
+            conversation.messages.contains { $0.content.lowercased().contains(query) }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,13 +124,36 @@ struct SidebarView: View {
 
             Divider()
 
+            // Search field
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                TextField("대화 검색...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.06))
+
             List(selection: Binding(
                 get: { viewModel.currentConversation?.id },
                 set: { id in
                     if let id { viewModel.selectConversation(id: id) }
                 }
             )) {
-                ForEach(viewModel.conversations) { conversation in
+                ForEach(filteredConversations) { conversation in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
                             if conversation.source == .telegram {
@@ -128,6 +171,10 @@ struct SidebarView: View {
                     }
                     .tag(conversation.id)
                     .contextMenu {
+                        Button("이름 변경") {
+                            viewModel.renameConversation(id: conversation.id, title: "")
+                        }
+                        Divider()
                         Button(role: .destructive) {
                             viewModel.deleteConversation(id: conversation.id)
                         } label: {
@@ -151,7 +198,8 @@ struct SidebarView: View {
                 } label: {
                     Label("새 대화", systemImage: "plus")
                 }
-                .help("새 대화")
+                .help("새 대화 (⌘N)")
+                .keyboardShortcut("n", modifiers: .command)
             }
         }
     }

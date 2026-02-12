@@ -268,6 +268,22 @@ final class DochiViewModel {
         Log.app.info("Deleted conversation: \(id)")
     }
 
+    func renameConversation(id: UUID, title: String) {
+        guard var conversation = conversationService.load(id: id) else { return }
+        if title.isEmpty {
+            // Auto-generate from first user message
+            let firstUserMessage = conversation.messages.first { $0.role == .user }
+            conversation.title = String((firstUserMessage?.content ?? "대화").prefix(40))
+        } else {
+            conversation.title = title
+        }
+        conversationService.save(conversation: conversation)
+        if currentConversation?.id == id {
+            currentConversation = conversation
+        }
+        loadConversations()
+    }
+
     // MARK: - Voice Actions
 
     /// Start listening via STT (triggered by wake word or UI button).
