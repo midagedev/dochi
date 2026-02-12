@@ -25,10 +25,6 @@ targets:
         excludes:
           - Info.plist
           - Resources
-      - path: Dochi/Models/TokenUsage.swift
-      - path: Dochi/Services/LLM/ModelContextEstimator.swift
-      - path: Dochi/Resources/CHANGELOG.md
-        buildPhase: resources
       - path: Dochi/Resources/Assets.xcassets
         buildPhase: resources
       - path: Dochi/Resources/SupabaseConfig.plist
@@ -54,13 +50,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi
         PRODUCT_NAME: Dochi
-        MARKETING_VERSION: "1.5.0"
-        CURRENT_PROJECT_VERSION: 4
+        MARKETING_VERSION: "2.0.0"
+        CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "6.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_ENTITLEMENTS: Dochi/Dochi.entitlements
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: XEF9KH7N43
         SWIFT_STRICT_CONCURRENCY: targeted
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
