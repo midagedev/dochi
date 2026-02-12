@@ -9,6 +9,7 @@ This `spec/` folder follows GitHub’s spec-kit conventions with high-level, imp
 - `data-overview.md` — conceptual entities and relationships (no table or struct names).
 - `security.md` — security/privacy principles and guardrails.
 - `supabase.md` — high-level integration notes and behaviors.
+- `rewrite-plan.md` — scope, phases, milestones, quality bars, and branch plan for the rewrite.
 
 How to work with these specs
 - Keep both specs updated as the source of truth before major refactors.
