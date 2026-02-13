@@ -118,3 +118,102 @@
 - `removeDevice(id: UUID) async throws`
 - `fetchWorkspaceDevices() async throws -> [Device]`
 - `updateDeviceName(_: String) async throws`
+
+---
+
+## TTSServiceProtocol (P2)
+
+TTS 서비스 공통 인터페이스. 여러 프로바이더가 구현.
+
+- `engineState: TTSEngineState` — unloaded / loading / ready / error(String)
+- `isSpeaking: Bool`
+- `loadEngine() async throws`
+- `unloadEngine()`
+- `enqueueSentence(_: String)`
+- `stopAndClear()`
+- `onComplete: (() -> Void)?`
+
+### 구현체
+
+| 서비스 | 설명 |
+|--------|------|
+| `TTSRouter` | 설정에 따라 프로바이더 전환 (System / GoogleCloud) |
+| `SystemTTSService` | Apple AVSpeechSynthesizer 기반. 폴백 역할 |
+| `GoogleCloudTTSService` | Google Cloud TTS API. Wavenet/Neural2/Standard/Chirp3-HD 음성 |
+| `SupertonicService` | ONNX 기반 로컬 TTS (현재 추론 파이프라인 TODO) |
+
+---
+
+## SpeechServiceProtocol (P2)
+
+- `isAuthorized: Bool`
+- `isListening: Bool`
+- `requestAuthorization() async -> Bool`
+- `startListening(silenceTimeout: TimeInterval, onPartialResult: ((String) -> Void)?, onFinalResult: ((String) -> Void)?)`
+- `stopListening()`
+- `startContinuousRecognition(wakeWord: String, threshold: Int?, onWakeWordDetected: (() -> Void)?)`
+- `stopContinuousRecognition()`
+
+---
+
+## LLMServiceProtocol (P1)
+
+- `send(messages:systemPrompt:model:provider:apiKey:tools:onPartial:) async throws -> LLMResponse`
+- `cancel()`
+- `lastMetrics: ExchangeMetrics?`
+
+---
+
+## TelegramServiceProtocol (P4)
+
+- `isPolling: Bool`
+- `startPolling(token: String) async throws`
+- `stopPolling()`
+- `sendMessage(chatId: Int, text: String) async throws`
+- `editMessage(chatId: Int, messageId: Int, text: String) async throws`
+- `getMe() async throws -> String`
+- `onMessage: ((TelegramUpdate) -> Void)?`
+
+---
+
+## BuiltInToolServiceProtocol (P1/P3)
+
+- `confirmationHandler: ToolConfirmationHandler?`
+- `availableToolSchemas(for permissions: [String]) -> [[String: Any]]`
+- `execute(name: String, arguments: [String: Any]) async -> ToolResult`
+- `enableTools(names: [String])`
+- `enableToolsTTL(minutes: Int)`
+- `resetRegistry()`
+- `allToolInfos: [ToolInfo]` — UI용 도구 정보 목록
+
+---
+
+## HeartbeatService (UI)
+
+프로액티브 에이전트: 주기적으로 캘린더/칸반/미리알림 점검.
+
+- `restart()` — 설정에 따라 타이머 시작/재시작
+- `stop()`
+- `setProactiveHandler(_: (String) -> Void)`
+
+---
+
+## MetricsCollector (P5)
+
+LLM 교환 메트릭 수집 (링버퍼 100건).
+
+- `record(_: ExchangeMetrics)`
+- `recentMetrics: [ExchangeMetrics]`
+- `sessionSummary() -> String`
+
+---
+
+## AvatarManager (UI)
+
+VRM 3D 아바타 관리. macOS 15+ (RealityKit).
+
+- `loadVRM() async throws -> Entity`
+- `setExpression(_: AvatarExpression)`
+- `setLipSync(intensity: Float)`
+- `startIdleAnimation()`
+- `updateHeadRotation(yaw:pitch:)`

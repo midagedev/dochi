@@ -2,9 +2,9 @@
 
 ## Meta
 - DRI: @hckim
-- 상태: Phase 0~5 완료, UI/기능 확장 진행 중
+- 상태: Phase 0~5 완료, UI/기능 확장 Phase F 완료
 - 생성: 2026-02-08
-- 갱신: 2026-02-13
+- 갱신: 2026-02-14
 
 ---
 
@@ -78,6 +78,23 @@ Phase 0~5 이후 추가 구현:
 - **Phase D**: Supabase 로그인/회원가입 UI, 사이드바 인증 상태, 기본 동기화
 - **Phase E**: TTS ONNX 추론 파이프라인 (KoreanG2P, ONNXModelManager), 상시 웨이크워드 감지
 - **공통 UI**: 컨텍스트 크기 인디케이터, 빈 대화 상태 안내, 컨텍스트 인스펙터
+
+### Phase F — 멀티프로바이더 TTS + 3D 아바타 + 칸반 + 도구 확장 ✅
+- **TTS 멀티프로바이더**: TTSRouter로 System/GoogleCloud 전환, 음성 설정 UI 확장
+  - Google Cloud TTS: Wavenet/Neural2/Standard/Chirp3-HD 14종 한국어 음성
+  - 피치 조절, GCP API 키 관리
+- **3D 아바타**: VRMKit 기반 아바타 뷰 (AvatarView + AvatarManager + FaceTrackingService)
+  - RealityKit 렌더링 (macOS 15+), 표정/립싱크/호흡 애니메이션
+- **칸반 보드**: KanbanBoard 모델, KanbanManager, 7종 칸반 도구, KanbanWorkspaceView UI
+- **Apple 네이티브 도구**: Calendar, Contacts, Music, Finder, Clipboard, Timer, Calculator, DateTime
+- **Git/GitHub 도구**: git.status/log/diff/commit/branch, github.list_issues/create_issue/create_pr/view
+- **코딩 에이전트**: coding.run_task, coding.review
+- **에이전트 오케스트레이션**: agent.delegate_task, agent.check_status
+- **STT 안정화**: mergeTranscription 부분결과 병합, 무음 타임아웃 개선
+- **LLM 스트리밍**: llmStreamActive 플래그로 TTS 완료 시 조기 idle 방지
+- **AppSettings**: @AppStorage → UserDefaults didSet 패턴 (@Observable 호환)
+- **도구 설정 UI**: ToolsSettingsView — 도구 검색/필터/카테고리별 표시
+- **기타**: 도구명 sanitize (OpenAI 호환), 이미지 URL 자동 추출, AppDelegate 창 관리
 
 ---
 

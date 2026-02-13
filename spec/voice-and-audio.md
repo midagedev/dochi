@@ -72,14 +72,46 @@
 
 ---
 
-## TTS (Supertonic ONNX)
+## TTS 멀티프로바이더
+
+### 프로바이더 구조
+- `TTSRouter`: 설정(`ttsProvider`)에 따라 활성 프로바이더 전환
+- 모든 프로바이더는 `TTSServiceProtocol` 구현
+- 전환 시 기존 엔진 언로드 → 새 엔진 로드
+
+### System TTS (Apple)
+- `SystemTTSService`: `AVSpeechSynthesizer` 기반
+- 별도 API 키 불필요, 기본 프로바이더
+- 속도(`ttsSpeed`) 적용
+
+### Google Cloud TTS
+- `GoogleCloudTTSService`: REST API + `AVAudioEngine` 재생
+- 음성: 14종 한국어 (ko-KR-Chirp3-HD, Wavenet, Neural2, Standard)
+- 설정: 속도(`ttsSpeed`), 피치(`ttsPitch`)
+- API 키: Keychain `google_cloud_tts`
+- 응답: Linear16 PCM → AVAudioPCMBuffer 변환
+
+### Supertonic ONNX (로컬)
+- ONNX 기반 로컬 TTS. 현재 추론 파이프라인 TODO
+- 폴백: SystemTTSService
+
+### 설정
+- `ttsProvider`: system / googleCloud
+- `ttsSpeed`: Double (0.5~2.0)
+- `ttsPitch`: Double (-10.0~+10.0, Google Cloud만)
+- `googleCloudVoiceName`: 음성 ID
+- `ttsDiffusionSteps`: Int (ONNX용)
+
+---
+
+## TTS (Supertonic ONNX) — 상세
 
 ### 음성
 - `SupertonicVoice`: F1~F5, M1~M5 (한국어 10종)
 - 지원 언어 (모델): en, ko, es, pt, fr
 
 ### 설정
-- `settings.ttsSpeed: Float`
+- `settings.ttsSpeed: Double`
 - `settings.ttsDiffusionSteps: Int`
 
 ### 파이프라인

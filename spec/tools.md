@@ -43,6 +43,82 @@
 | `web_search` | safe | { query } | Tavily API 키 필요 |
 | `generate_image` | safe | { prompt, image_size? } | fal.ai API 키 필요 |
 | `print_image` | safe | { image_path } | - |
+| `calculate` | safe | { expression } | - |
+| `datetime` | safe | {} | 현재 날짜/시간 반환 |
+| `clipboard.read` | safe | {} | - |
+| `clipboard.write` | safe | { text } | - |
+| `set_timer` | safe | { label, seconds } | - |
+| `list_timers` | safe | {} | - |
+| `cancel_timer` | safe | { label } | - |
+| `calendar.list_events` | safe | { days_ahead?, calendar_name? } | EventKit |
+| `contacts.search` | safe | { query } | Contacts.framework |
+| `contacts.get_detail` | safe | { name } | - |
+| `music.now_playing` | safe | {} | Apple Music (AppleScript) |
+| `music.play_pause` | safe | {} | - |
+| `music.next` | safe | {} | - |
+| `music.search_play` | safe | { query } | - |
+| `finder.reveal` | safe | { path } | Finder에서 표시 |
+| `finder.get_selection` | safe | {} | 현재 선택 파일 |
+| `finder.list_dir` | safe | { path } | 디렉토리 목록 |
+| `kanban.create_board` | safe | { name, columns? } | - |
+| `kanban.list_boards` | safe | {} | - |
+| `kanban.list` | safe | { board_id, column?, priority? } | 카드 필터링 |
+| `kanban.add_card` | safe | { board_id, title, column?, description?, priority?, labels?, assignee? } | - |
+| `kanban.move_card` | safe | { board_id, card_id, column } | - |
+| `kanban.update_card` | safe | { board_id, card_id, title?, description?, priority?, labels?, assignee? } | - |
+| `kanban.delete_card` | safe | { board_id, card_id } | - |
+
+### 조건부 — Calendar (sensitive)
+
+| 도구 | 입력 |
+|------|------|
+| `calendar.create_event` | { title, start_date, end_date?, calendar_name?, location?, notes? } |
+| `calendar.delete_event` | { event_id } |
+
+### 조건부 — Git (safe: 읽기 / restricted: 쓰기)
+
+| 도구 | 카테고리 | 입력 |
+|------|---------|------|
+| `git.status` | safe | { path? } |
+| `git.log` | safe | { path?, count? } |
+| `git.diff` | safe | { path?, staged? } |
+| `git.commit` | restricted | { message, path? } |
+| `git.branch` | restricted | { action: "list"\|"create"\|"switch"\|"delete", name? } |
+
+### 조건부 — GitHub (safe/sensitive)
+
+| 도구 | 카테고리 | 입력 |
+|------|---------|------|
+| `github.list_issues` | safe | { repo, state?, labels? } |
+| `github.view` | safe | { repo, number } |
+| `github.create_issue` | sensitive | { repo, title, body?, labels? } |
+| `github.create_pr` | sensitive | { repo, title, body?, head, base? } |
+
+### 조건부 — Agent Orchestration (sensitive)
+
+| 도구 | 입력 |
+|------|------|
+| `agent.delegate_task` | { agent_name, task, context? } |
+| `agent.check_status` | { agent_name } |
+
+### 조건부 — Coding Agent (restricted/sensitive)
+
+| 도구 | 카테고리 | 입력 |
+|------|---------|------|
+| `coding.run_task` | restricted | { task, working_directory? } |
+| `coding.review` | sensitive | { file_path?, diff? } |
+
+### 조건부 — Open URL (sensitive)
+
+| 도구 | 입력 |
+|------|------|
+| `open_url` | { url } |
+
+### 조건부 — Shell (restricted)
+
+| 도구 | 입력 |
+|------|------|
+| `shell_command` | { command, working_directory?, timeout? } |
 
 ### 조건부 — Settings (sensitive)
 

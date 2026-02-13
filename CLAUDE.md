@@ -32,24 +32,33 @@ open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.ap
 
 ```
 Dochi/
-├── App/                          # DochiApp.swift (entry point)
-├── Models/                       # Data models (LLMProvider, Message, Conversation, etc.)
+├── App/                          # DochiApp.swift (entry point + AppDelegate)
+├── Models/                       # Data models (LLMProvider, Message, Conversation, TTSProvider, KanbanBoard, etc.)
 ├── State/                        # State machine enums (InteractionState, SessionState, ProcessingSubState)
 ├── ViewModels/                   # DochiViewModel (orchestrator)
-├── Views/                        # SwiftUI views (ContentView, ConversationView, SettingsView)
+├── Views/                        # SwiftUI views (ContentView, ConversationView, SettingsView, AvatarView, KanbanWorkspaceView)
+│   ├── Settings/                 # 설정 탭 뷰 (VoiceSettingsView, ToolsSettingsView, etc.)
+│   └── Sidebar/                  # 사이드바 관련 뷰 (AgentCreationView, WorkspaceManagementView, etc.)
 ├── Services/
-│   ├── Protocols/                # Service protocols (ContextService, Conversation, Keychain, LLM, BuiltInTool)
-│   ├── LLM/                      # LLMService + provider adapters (P1)
-│   ├── Context/                  # ContextService — file-based context (P1)
-│   ├── Conversation/             # ConversationService — conversation CRUD (P1)
-│   ├── Keychain/                 # KeychainService — API key management (P1)
-│   ├── Tools/                    # BuiltInToolService + individual tools (P1/P3)
-│   ├── Speech/                   # SpeechService — Apple STT + wake word (P2)
-│   ├── TTS/                      # SupertonicService — ONNX TTS (P2)
-│   ├── MCP/                      # MCPService — MCP server proxy (P3)
-│   ├── Telegram/                 # TelegramService — DM + streaming (P4)
-│   └── Cloud/                    # SupabaseService — auth + sync (P4)
-└── Utilities/                    # Log enum (os.Logger)
+│   ├── Protocols/                # Service protocols (10개: Context, Conversation, Keychain, LLM, Speech, TTS, BuiltInTool, MCP, Supabase, Telegram)
+│   ├── LLM/                      # LLMService + provider adapters (OpenAI, Anthropic, Z.AI) + ModelRouter
+│   ├── Context/                  # ContextService — file-based context
+│   ├── Conversation/             # ConversationService — conversation CRUD
+│   ├── Keychain/                 # KeychainService — API key management
+│   ├── Tools/                    # BuiltInToolService + 35개 도구 + ToolRegistry
+│   ├── Speech/                   # SpeechService — Apple STT + wake word
+│   ├── TTS/                      # TTSRouter + SystemTTS + GoogleCloudTTS + SupertonicService (ONNX)
+│   ├── Sound/                    # SoundService — UI 효과음
+│   ├── Avatar/                   # AvatarManager + FaceTrackingService — VRM 3D 아바타
+│   ├── MCP/                      # MCPService — MCP server proxy
+│   ├── Telegram/                 # TelegramService — DM + streaming
+│   ├── Cloud/                    # SupabaseService — auth + sync
+│   ├── HeartbeatService.swift    # 프로액티브 에이전트 (캘린더/칸반/미리알림 주기 점검)
+│   └── MetricsCollector.swift    # LLM 교환 메트릭 수집
+├── Resources/
+│   ├── Assets.xcassets/          # 앱 아이콘
+│   └── Models/                   # VRM 아바타 모델 (gitignored)
+└── Utilities/                    # Log enum, SentenceChunker, JamoMatcher
 
 DochiTests/
 ├── Mocks/                        # Mock service implementations
@@ -73,13 +82,14 @@ DochiUITests/
 
 ## External Dependencies
 
-- `microsoft/onnxruntime-swift-package-manager` v1.20.0 (TTS)
+- `microsoft/onnxruntime-swift-package-manager` v1.20.0 (TTS ONNX)
 - `modelcontextprotocol/swift-sdk` v0.10.2 (MCP)
 - `supabase/supabase-swift` v2.0.0+ (Cloud sync)
+- `tattn/VRMKit` v0.5.0 (3D 아바타 — VRMKit + VRMRealityKit)
 
 ## Logging
 
-Subsystem: `com.dochi.app`. Categories: App, LLM, STT, TTS, MCP, Tool, Storage, Cloud.
+Subsystem: `com.dochi.app`. Categories: App, LLM, STT, TTS, MCP, Tool, Storage, Cloud, Telegram, Avatar.
 
 ```bash
 log show --predicate 'subsystem == "com.dochi.app"' --last 5m --style compact
@@ -94,6 +104,8 @@ log show --predicate 'subsystem == "com.dochi.app" AND category == "Tool"' --las
 ├── profiles.json
 ├── conversations/{id}.json
 ├── memory/{userId}.md
+├── kanban/                       # 칸반 보드 데이터
+│   └── {boardId}.json
 └── workspaces/{wsId}/
     ├── config.json
     ├── memory.md
