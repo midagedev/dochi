@@ -47,7 +47,7 @@ final class GenerateImageTool: BuiltInToolProtocol {
             return ToolResult(toolCallId: "", content: "오류: 지원하지 않는 이미지 크기입니다. 사용 가능: \(Self.validSizes.sorted().joined(separator: ", "))", isError: true)
         }
 
-        let url = URL(string: "https://queue.fal.run/fal-ai/flux/schnell")!
+        let url = URL(string: "https://fal.run/fal-ai/flux/schnell")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

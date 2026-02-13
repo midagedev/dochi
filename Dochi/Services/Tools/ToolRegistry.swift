@@ -66,4 +66,57 @@ final class ToolRegistry {
     var enabledToolNames: Set<String> { enabledNames }
 
     var allToolNames: [String] { Array(allTools.keys).sorted() }
+
+    /// Returns info about all registered tools for UI display
+    var allToolInfos: [ToolInfo] {
+        allTools.values.map { tool in
+            let params = extractParams(from: tool.inputSchema)
+            return ToolInfo(
+                name: tool.name,
+                description: tool.description,
+                category: tool.category,
+                isBaseline: tool.isBaseline,
+                isEnabled: tool.isBaseline || enabledNames.contains(tool.name),
+                parameters: params
+            )
+        }
+        .sorted { $0.name < $1.name }
+    }
+
+    private func extractParams(from schema: [String: Any]) -> [ToolParamInfo] {
+        guard let properties = schema["properties"] as? [String: Any] else { return [] }
+        let required = Set((schema["required"] as? [String]) ?? [])
+
+        return properties.compactMap { key, value in
+            guard let prop = value as? [String: Any] else { return nil }
+            let type = prop["type"] as? String ?? "any"
+            let desc = prop["description"] as? String ?? ""
+            return ToolParamInfo(name: key, type: type, description: desc, isRequired: required.contains(key))
+        }
+        .sorted { $0.name < $1.name }
+    }
+}
+
+// MARK: - Tool Info (for UI)
+
+struct ToolParamInfo: Identifiable, Sendable {
+    var id: String { name }
+    let name: String
+    let type: String
+    let description: String
+    let isRequired: Bool
+}
+
+struct ToolInfo: Identifiable, Sendable {
+    var id: String { name }
+    let name: String
+    let description: String
+    let category: ToolCategory
+    let isBaseline: Bool
+    let isEnabled: Bool
+    let parameters: [ToolParamInfo]
+
+    var group: String {
+        String(name.split(separator: ".").first ?? Substring(name))
+    }
 }

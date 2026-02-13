@@ -1,14 +1,30 @@
 import SwiftUI
+import AppKit
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+    }
+}
 
 @main
 struct DochiApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var viewModel: DochiViewModel
     private let keychainService: KeychainService
     private let settings: AppSettings
-    private let ttsService: SupertonicService
+    private let ttsService: TTSRouter
     private let telegramService: TelegramService
     private let mcpService: MCPService
     private let supabaseService: SupabaseService
+    private let toolService: BuiltInToolService
+    private let heartbeatService: HeartbeatService
 
     init() {
         let settings = AppSettings()
@@ -17,11 +33,12 @@ struct DochiApp: App {
         let conversationService = ConversationService()
         let llmService = LLMService()
         let speechService = SpeechService()
-        let ttsService = SupertonicService()
+        let ttsService = TTSRouter(settings: settings, keychainService: keychainService)
         let soundService = SoundService()
         let supabaseService = SupabaseService()
         let telegramService = TelegramService()
         let mcpService = MCPService()
+        let heartbeatService = HeartbeatService(settings: settings)
 
         self.keychainService = keychainService
         self.settings = settings
@@ -29,6 +46,7 @@ struct DochiApp: App {
         self.telegramService = telegramService
         self.mcpService = mcpService
         self.supabaseService = supabaseService
+        self.heartbeatService = heartbeatService
 
         let workspaceId = UUID(uuidString: settings.currentWorkspaceId)
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
@@ -43,6 +61,7 @@ struct DochiApp: App {
             telegramService: telegramService,
             mcpService: mcpService
         )
+        self.toolService = toolService
 
         _viewModel = State(initialValue: DochiViewModel(
             llmService: llmService,
@@ -58,6 +77,10 @@ struct DochiApp: App {
         ))
 
         contextService.migrateIfNeeded()
+
+        heartbeatService.setProactiveHandler { message in
+            Log.app.info("Heartbeat proactive message: \(message)")
+        }
 
         // Start Telegram polling if enabled
         if settings.telegramEnabled,
@@ -97,6 +120,32 @@ struct DochiApp: App {
                             await viewModel.handleTelegramMessage(update)
                         }
                     }
+
+                    heartbeatService.restart()
+                }
+                .onDisappear {
+                    heartbeatService.stop()
+                }
+                .onChange(of: settings.heartbeatEnabled) { _, _ in
+                    heartbeatService.restart()
+                }
+                .onChange(of: settings.heartbeatIntervalMinutes) { _, _ in
+                    heartbeatService.restart()
+                }
+                .onChange(of: settings.heartbeatCheckCalendar) { _, _ in
+                    heartbeatService.restart()
+                }
+                .onChange(of: settings.heartbeatCheckKanban) { _, _ in
+                    heartbeatService.restart()
+                }
+                .onChange(of: settings.heartbeatCheckReminders) { _, _ in
+                    heartbeatService.restart()
+                }
+                .onChange(of: settings.heartbeatQuietHoursStart) { _, _ in
+                    heartbeatService.restart()
+                }
+                .onChange(of: settings.heartbeatQuietHoursEnd) { _, _ in
+                    heartbeatService.restart()
                 }
                 .sheet(isPresented: $showOnboarding) {
                     OnboardingView(
@@ -115,7 +164,8 @@ struct DochiApp: App {
                 ttsService: ttsService,
                 telegramService: telegramService,
                 mcpService: mcpService,
-                supabaseService: supabaseService
+                supabaseService: supabaseService,
+                toolService: toolService
             )
         }
     }

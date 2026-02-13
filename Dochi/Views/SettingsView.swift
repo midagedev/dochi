@@ -7,6 +7,7 @@ struct SettingsView: View {
     var telegramService: TelegramServiceProtocol?
     var mcpService: MCPServiceProtocol?
     var supabaseService: SupabaseServiceProtocol?
+    var toolService: BuiltInToolService?
 
     var body: some View {
         TabView {
@@ -25,10 +26,17 @@ struct SettingsView: View {
                     Label("API 키", systemImage: "key")
                 }
 
-            VoiceSettingsView(settings: settings, ttsService: ttsService)
+            VoiceSettingsView(settings: settings, keychainService: keychainService, ttsService: ttsService)
                 .tabItem {
                     Label("음성", systemImage: "speaker.wave.2")
                 }
+
+            if let toolService {
+                ToolsSettingsView(toolService: toolService)
+                    .tabItem {
+                        Label("도구", systemImage: "wrench.and.screwdriver")
+                    }
+            }
 
             IntegrationsSettingsView(
                 keychainService: keychainService,
@@ -48,7 +56,7 @@ struct SettingsView: View {
                 Label("계정", systemImage: "person.circle")
             }
         }
-        .frame(width: 540, height: 420)
+        .frame(width: 600, height: 480)
     }
 }
 
@@ -109,6 +117,72 @@ struct GeneralSettingsView: View {
                     set: { settings.wakeWordAlwaysOn = $0 }
                 ))
                 .help("앱이 활성화되어 있는 동안 항상 웨이크워드를 감지합니다")
+            }
+
+            Section("아바타") {
+                Toggle("3D 아바타 표시", isOn: Binding(
+                    get: { settings.avatarEnabled },
+                    set: { settings.avatarEnabled = $0 }
+                ))
+                    .help("VRM 3D 아바타를 대화 영역 위에 표시합니다")
+
+                if settings.avatarEnabled {
+                    Text("Dochi/Resources/Models/ 디렉토리에 default_avatar.vrm 파일을 배치해주세요")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("하트비트") {
+                Toggle("하트비트 활성화", isOn: Binding(
+                    get: { settings.heartbeatEnabled },
+                    set: { settings.heartbeatEnabled = $0 }
+                ))
+
+                HStack {
+                    Text("점검 주기: \(settings.heartbeatIntervalMinutes)분")
+                    Slider(
+                        value: Binding(
+                            get: { Double(settings.heartbeatIntervalMinutes) },
+                            set: { settings.heartbeatIntervalMinutes = Int($0.rounded()) }
+                        ),
+                        in: 5...120,
+                        step: 5
+                    )
+                }
+
+                Toggle("캘린더 점검", isOn: Binding(
+                    get: { settings.heartbeatCheckCalendar },
+                    set: { settings.heartbeatCheckCalendar = $0 }
+                ))
+                Toggle("칸반 점검", isOn: Binding(
+                    get: { settings.heartbeatCheckKanban },
+                    set: { settings.heartbeatCheckKanban = $0 }
+                ))
+                Toggle("미리알림 점검", isOn: Binding(
+                    get: { settings.heartbeatCheckReminders },
+                    set: { settings.heartbeatCheckReminders = $0 }
+                ))
+            }
+
+            Section("하트비트 조용한 시간") {
+                Stepper(
+                    "시작: \(settings.heartbeatQuietHoursStart):00",
+                    value: Binding(
+                        get: { settings.heartbeatQuietHoursStart },
+                        set: { settings.heartbeatQuietHoursStart = min(max($0, 0), 23) }
+                    ),
+                    in: 0...23
+                )
+
+                Stepper(
+                    "종료: \(settings.heartbeatQuietHoursEnd):00",
+                    value: Binding(
+                        get: { settings.heartbeatQuietHoursEnd },
+                        set: { settings.heartbeatQuietHoursEnd = min(max($0, 0), 23) }
+                    ),
+                    in: 0...23
+                )
             }
         }
         .formStyle(.grouped)

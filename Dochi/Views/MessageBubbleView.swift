@@ -39,23 +39,31 @@ struct MessageBubbleView: View {
                 // Image URLs
                 if let imageURLs = message.imageURLs, !imageURLs.isEmpty {
                     ForEach(imageURLs, id: \.absoluteString) { url in
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 300, maxHeight: 300)
-                                    .cornerRadius(8)
-                            case .failure:
-                                Label("이미지 로드 실패", systemImage: "photo.badge.exclamationmark")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            case .empty:
-                                ProgressView()
-                                    .frame(width: 100, height: 100)
-                            @unknown default:
-                                EmptyView()
+                        if url.isFileURL, let nsImage = NSImage(contentsOf: url) {
+                            Image(nsImage: nsImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 300, maxHeight: 300)
+                                .cornerRadius(8)
+                        } else {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(maxWidth: 300, maxHeight: 300)
+                                        .cornerRadius(8)
+                                case .failure:
+                                    Label("이미지 로드 실패", systemImage: "photo.badge.exclamationmark")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                case .empty:
+                                    ProgressView()
+                                        .frame(width: 100, height: 100)
+                                @unknown default:
+                                    EmptyView()
+                                }
                             }
                         }
                     }

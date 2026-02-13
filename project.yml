@@ -15,6 +15,9 @@ packages:
   supabase-swift:
     url: https://github.com/supabase/supabase-swift.git
     from: "2.0.0"
+  VRMKit:
+    url: https://github.com/tattn/VRMKit.git
+    from: "0.5.0"
 
 targets:
   Dochi:
@@ -29,6 +32,9 @@ targets:
         buildPhase: resources
       - path: Dochi/Resources/SupabaseConfig.plist
         buildPhase: resources
+      - path: Dochi/Resources/Models
+        buildPhase: resources
+        optional: true
     info:
       path: Dochi/Info.plist
       properties:
@@ -37,6 +43,7 @@ targets:
         NSMicrophoneUsageDescription: "음성 인식을 위해 마이크 접근이 필요합니다."
         NSSpeechRecognitionUsageDescription: "음성 명령을 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다."
         NSRemindersFullAccessUsageDescription: "미리알림을 생성하고 관리하기 위해 접근이 필요합니다."
+        NSCameraUsageDescription: "아바타가 사용자의 얼굴을 따라가기 위해 카메라 접근이 필요합니다."
     entitlements:
       path: Dochi/Dochi.entitlements
     dependencies:
@@ -46,6 +53,10 @@ targets:
         product: MCP
       - package: supabase-swift
         product: Supabase
+      - package: VRMKit
+        product: VRMKit
+      - package: VRMKit
+        product: VRMRealityKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi

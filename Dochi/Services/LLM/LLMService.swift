@@ -173,7 +173,7 @@ final class LLMService: LLMServiceProtocol {
                 switch error {
                 case .serverError, .timeout, .networkError:
                     // Transient — retry if allowed
-                    Log.llm.warning("Transient LLM error (attempt \(attempt + 1)): \(error.localizedDescription)")
+                    Log.llm.warning("Transient LLM error (attempt \(attempt + 1)): \(error.localizedDescription, privacy: .public)")
                     continue
                 case .rateLimited(let retryAfter):
                     // Rate limited: respect Retry-After or default 5s, 1 retry only
@@ -233,6 +233,15 @@ final class LLMService: LLMServiceProtocol {
         }
 
         // Handle error status codes
+        if !(200..<300).contains(httpResponse.statusCode) {
+            // Read error body for debugging
+            var errorBody = ""
+            for try await line in asyncBytes.lines {
+                errorBody += line
+                if errorBody.count > 500 { break }
+            }
+            Log.llm.error("HTTP \(httpResponse.statusCode, privacy: .public) error body: \(errorBody, privacy: .public)")
+        }
         try Self.checkHTTPStatus(httpResponse)
 
         // Parse SSE stream (use .lines for proper UTF-8 decoding)

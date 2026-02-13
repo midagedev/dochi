@@ -6,106 +6,155 @@ import SwiftUI
 final class AppSettings {
     // MARK: - P1 Settings
 
-    @ObservationIgnored
-    @AppStorage("llmProvider") var llmProvider: String = LLMProvider.openai.rawValue
+    var llmProvider: String = UserDefaults.standard.string(forKey: "llmProvider") ?? LLMProvider.openai.rawValue {
+        didSet { UserDefaults.standard.set(llmProvider, forKey: "llmProvider") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("llmModel") var llmModel: String = "gpt-4o"
+    var llmModel: String = UserDefaults.standard.string(forKey: "llmModel") ?? "gpt-4o" {
+        didSet { UserDefaults.standard.set(llmModel, forKey: "llmModel") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("chatFontSize") var chatFontSize: Double = 14.0
+    var chatFontSize: Double = UserDefaults.standard.object(forKey: "chatFontSize") as? Double ?? 14.0 {
+        didSet { UserDefaults.standard.set(chatFontSize, forKey: "chatFontSize") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("interactionMode") var interactionMode: String = InteractionMode.voiceAndText.rawValue
+    var interactionMode: String = UserDefaults.standard.string(forKey: "interactionMode") ?? InteractionMode.voiceAndText.rawValue {
+        didSet { UserDefaults.standard.set(interactionMode, forKey: "interactionMode") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("contextAutoCompress") var contextAutoCompress: Bool = true
+    var contextAutoCompress: Bool = UserDefaults.standard.object(forKey: "contextAutoCompress") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(contextAutoCompress, forKey: "contextAutoCompress") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("contextMaxSize") var contextMaxSize: Int = 80_000
+    var contextMaxSize: Int = UserDefaults.standard.object(forKey: "contextMaxSize") as? Int ?? 80_000 {
+        didSet { UserDefaults.standard.set(contextMaxSize, forKey: "contextMaxSize") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("activeAgentName") var activeAgentName: String = "도치"
+    var activeAgentName: String = UserDefaults.standard.string(forKey: "activeAgentName") ?? "도치" {
+        didSet { UserDefaults.standard.set(activeAgentName, forKey: "activeAgentName") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("uiDensity") var uiDensity: String = "normal"
+    var uiDensity: String = UserDefaults.standard.string(forKey: "uiDensity") ?? "normal" {
+        didSet { UserDefaults.standard.set(uiDensity, forKey: "uiDensity") }
+    }
 
     // MARK: - P2 Settings
 
-    @ObservationIgnored
-    @AppStorage("wakeWordEnabled") var wakeWordEnabled: Bool = true
+    var wakeWordEnabled: Bool = UserDefaults.standard.object(forKey: "wakeWordEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(wakeWordEnabled, forKey: "wakeWordEnabled") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("wakeWord") var wakeWord: String = "도치야"
+    var wakeWord: String = UserDefaults.standard.string(forKey: "wakeWord") ?? "도치야" {
+        didSet { UserDefaults.standard.set(wakeWord, forKey: "wakeWord") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("sttSilenceTimeout") var sttSilenceTimeout: Double = 2.0
+    var sttSilenceTimeout: Double = UserDefaults.standard.object(forKey: "sttSilenceTimeout") as? Double ?? 2.0 {
+        didSet { UserDefaults.standard.set(sttSilenceTimeout, forKey: "sttSilenceTimeout") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("supertonicVoice") var supertonicVoice: String = SupertonicVoice.F1.rawValue
+    var supertonicVoice: String = UserDefaults.standard.string(forKey: "supertonicVoice") ?? SupertonicVoice.F1.rawValue {
+        didSet { UserDefaults.standard.set(supertonicVoice, forKey: "supertonicVoice") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("ttsSpeed") var ttsSpeed: Double = 1.0
+    var ttsSpeed: Double = UserDefaults.standard.object(forKey: "ttsSpeed") as? Double ?? 1.0 {
+        didSet { UserDefaults.standard.set(ttsSpeed, forKey: "ttsSpeed") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("ttsDiffusionSteps") var ttsDiffusionSteps: Int = 3
+    var ttsPitch: Double = UserDefaults.standard.object(forKey: "ttsPitch") as? Double ?? 0.0 {
+        didSet { UserDefaults.standard.set(ttsPitch, forKey: "ttsPitch") }
+    }
+
+    var ttsDiffusionSteps: Int = UserDefaults.standard.object(forKey: "ttsDiffusionSteps") as? Int ?? 3 {
+        didSet { UserDefaults.standard.set(ttsDiffusionSteps, forKey: "ttsDiffusionSteps") }
+    }
+
+    var ttsProvider: String = UserDefaults.standard.string(forKey: "ttsProvider") ?? TTSProvider.system.rawValue {
+        didSet { UserDefaults.standard.set(ttsProvider, forKey: "ttsProvider") }
+    }
+
+    var googleCloudVoiceName: String = UserDefaults.standard.string(forKey: "googleCloudVoiceName") ?? GoogleCloudVoice.defaultVoiceName {
+        didSet { UserDefaults.standard.set(googleCloudVoiceName, forKey: "googleCloudVoiceName") }
+    }
 
     // MARK: - P4 Settings
 
-    @ObservationIgnored
-    @AppStorage("telegramEnabled") var telegramEnabled: Bool = false
+    var telegramEnabled: Bool = UserDefaults.standard.object(forKey: "telegramEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(telegramEnabled, forKey: "telegramEnabled") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("telegramStreamReplies") var telegramStreamReplies: Bool = true
+    var telegramStreamReplies: Bool = UserDefaults.standard.object(forKey: "telegramStreamReplies") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(telegramStreamReplies, forKey: "telegramStreamReplies") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("currentWorkspaceId") var currentWorkspaceId: String = "00000000-0000-0000-0000-000000000000"
+    var currentWorkspaceId: String = UserDefaults.standard.string(forKey: "currentWorkspaceId") ?? "00000000-0000-0000-0000-000000000000" {
+        didSet { UserDefaults.standard.set(currentWorkspaceId, forKey: "currentWorkspaceId") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("hasSeenPermissionInfo") var hasSeenPermissionInfo: Bool = false
+    var hasSeenPermissionInfo: Bool = UserDefaults.standard.object(forKey: "hasSeenPermissionInfo") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(hasSeenPermissionInfo, forKey: "hasSeenPermissionInfo") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("supabaseURL") var supabaseURL: String = ""
+    var supabaseURL: String = UserDefaults.standard.string(forKey: "supabaseURL") ?? "" {
+        didSet { UserDefaults.standard.set(supabaseURL, forKey: "supabaseURL") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("supabaseAnonKey") var supabaseAnonKey: String = ""
+    var supabaseAnonKey: String = UserDefaults.standard.string(forKey: "supabaseAnonKey") ?? "" {
+        didSet { UserDefaults.standard.set(supabaseAnonKey, forKey: "supabaseAnonKey") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("mcpServersJSON") var mcpServersJSON: String = "[]"
+    var mcpServersJSON: String = UserDefaults.standard.string(forKey: "mcpServersJSON") ?? "[]" {
+        didSet { UserDefaults.standard.set(mcpServersJSON, forKey: "mcpServersJSON") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("wakeWordAlwaysOn") var wakeWordAlwaysOn: Bool = false
+    var wakeWordAlwaysOn: Bool = UserDefaults.standard.object(forKey: "wakeWordAlwaysOn") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(wakeWordAlwaysOn, forKey: "wakeWordAlwaysOn") }
+    }
 
     // MARK: - P5 Settings
 
-    @ObservationIgnored
-    @AppStorage("fallbackLLMProvider") var fallbackLLMProvider: String = ""
+    var fallbackLLMProvider: String = UserDefaults.standard.string(forKey: "fallbackLLMProvider") ?? "" {
+        didSet { UserDefaults.standard.set(fallbackLLMProvider, forKey: "fallbackLLMProvider") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("fallbackLLMModel") var fallbackLLMModel: String = ""
+    var fallbackLLMModel: String = UserDefaults.standard.string(forKey: "fallbackLLMModel") ?? "" {
+        didSet { UserDefaults.standard.set(fallbackLLMModel, forKey: "fallbackLLMModel") }
+    }
+
+    // MARK: - Avatar
+
+    var avatarEnabled: Bool = UserDefaults.standard.object(forKey: "avatarEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(avatarEnabled, forKey: "avatarEnabled") }
+    }
 
     // MARK: - Heartbeat / Proactive Agent
 
-    @ObservationIgnored
-    @AppStorage("heartbeatEnabled") var heartbeatEnabled: Bool = false
+    var heartbeatEnabled: Bool = UserDefaults.standard.object(forKey: "heartbeatEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(heartbeatEnabled, forKey: "heartbeatEnabled") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("heartbeatIntervalMinutes") var heartbeatIntervalMinutes: Int = 30
+    var heartbeatIntervalMinutes: Int = UserDefaults.standard.object(forKey: "heartbeatIntervalMinutes") as? Int ?? 30 {
+        didSet { UserDefaults.standard.set(heartbeatIntervalMinutes, forKey: "heartbeatIntervalMinutes") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("heartbeatCheckCalendar") var heartbeatCheckCalendar: Bool = true
+    var heartbeatCheckCalendar: Bool = UserDefaults.standard.object(forKey: "heartbeatCheckCalendar") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(heartbeatCheckCalendar, forKey: "heartbeatCheckCalendar") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("heartbeatCheckKanban") var heartbeatCheckKanban: Bool = true
+    var heartbeatCheckKanban: Bool = UserDefaults.standard.object(forKey: "heartbeatCheckKanban") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(heartbeatCheckKanban, forKey: "heartbeatCheckKanban") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("heartbeatCheckReminders") var heartbeatCheckReminders: Bool = true
+    var heartbeatCheckReminders: Bool = UserDefaults.standard.object(forKey: "heartbeatCheckReminders") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(heartbeatCheckReminders, forKey: "heartbeatCheckReminders") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("heartbeatQuietHoursStart") var heartbeatQuietHoursStart: Int = 23
+    var heartbeatQuietHoursStart: Int = UserDefaults.standard.object(forKey: "heartbeatQuietHoursStart") as? Int ?? 23 {
+        didSet { UserDefaults.standard.set(heartbeatQuietHoursStart, forKey: "heartbeatQuietHoursStart") }
+    }
 
-    @ObservationIgnored
-    @AppStorage("heartbeatQuietHoursEnd") var heartbeatQuietHoursEnd: Int = 8
+    var heartbeatQuietHoursEnd: Int = UserDefaults.standard.object(forKey: "heartbeatQuietHoursEnd") as? Int ?? 8 {
+        didSet { UserDefaults.standard.set(heartbeatQuietHoursEnd, forKey: "heartbeatQuietHoursEnd") }
+    }
 
     // MARK: - Computed
 
@@ -119,5 +168,9 @@ final class AppSettings {
 
     var currentVoice: SupertonicVoice {
         SupertonicVoice(rawValue: supertonicVoice) ?? .F1
+    }
+
+    var currentTTSProvider: TTSProvider {
+        TTSProvider(rawValue: ttsProvider) ?? .system
     }
 }

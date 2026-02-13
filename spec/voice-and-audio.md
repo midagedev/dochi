@@ -57,6 +57,19 @@
 - Interaction mode: `voiceAndText` | `textOnly`
   - `textOnly` 모드에서 웨이크워드 감지 비활성
 
+### 2026-02-13 안정화 반영
+- partial 결과 병합 시 앞 문장이 사라지는 문제 방지:
+  - 단순 덮어쓰기 대신 `mergeTranscription(previous, current)` 적용
+  - prefix/overlap 기반으로 보수적으로 병합
+- partial 중복 반복 문제 방지:
+  - 유사 prefix가 큰 경우 이어붙이지 않고 더 긴 후보 채택
+  - 모호한 경우 강제 concat 금지
+- 무음 대기 중 시작/종료 루프 방지:
+  - silence timeout 시 `bestTranscription`이 비어 있으면 세션 종료 대신 타이머만 재설정
+- 빈 STT 결과 UX 조정:
+  - 활성 음성 세션에서는 재촉 TTS 없이 조용히 `startListening()` 재진입
+  - 입력 완료 효과음(`playInputComplete`)은 비어있지 않은 결과에서만 재생
+
 ---
 
 ## TTS (Supertonic ONNX)
@@ -85,6 +98,28 @@
 - 최초 사용 시 모델 다운로드 (앱 번들 또는 CDN)
 - 사전 로드: 앱 시작 시 또는 음성 모드 활성화 시 warm-up
 - 메모리: 미사용 시 모델 언로드 가능
+
+### 2026-02-13 안정화 반영
+- ONNX 경로가 파형을 만들지 못할 때 무음이 되는 문제 대응:
+  - `AVSpeechSynthesizer` 시스템 TTS 폴백 추가
+  - ONNX 실패 또는 모델 미존재 시에도 TTS 출력 보장
+- 현재 ONNX 상태:
+  - `runInferencePipeline(...)`는 TODO 상태이며 현재는 `nil` 반환
+  - 실사용 음성은 시스템 TTS 폴백이 담당
+- 모델 경로:
+  - `~/Library/Application Support/Dochi/models`
+  - 이 폴더가 비어 있으면 ONNX는 로드되지 않음
+
+---
+
+## 운영 체크포인트 (런치 직후 종료 오인)
+
+- 증상: "켜자마자 꺼짐"처럼 보이나 crash report가 생성되지 않는 경우
+- 점검 순서:
+  1. `~/Library/Logs/DiagnosticReports`에 최신 `Dochi-*.ips` 생성 여부 확인
+  2. `pgrep -x Dochi`로 프로세스 생존 확인
+  3. 프로세스는 살아있는데 창이 안 보이면 창 복원/포커스 상태(AppKit state restoration) 점검
+- 참고: 이번 이슈 구간에서는 최신 crash report 추가 생성 없이, 프로세스가 살아있는 케이스가 반복 관찰됨
 
 ---
 

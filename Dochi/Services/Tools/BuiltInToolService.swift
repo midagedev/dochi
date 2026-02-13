@@ -182,6 +182,12 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         Log.tool.info("BuiltInToolService initialized with \(toolCount) tools")
     }
 
+    // MARK: - Tool Info (for UI)
+
+    var allToolInfos: [ToolInfo] {
+        registry.allToolInfos
+    }
+
     // MARK: - BuiltInToolServiceProtocol
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]] {
@@ -190,10 +196,12 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         // Built-in tools
         let tools = registry.availableTools(for: permissions)
         for tool in tools {
+            // OpenAI requires tool names to match ^[a-zA-Z0-9_-]+$
+            let sanitizedName = Self.sanitizeToolName(tool.name)
             schemas.append([
                 "type": "function",
                 "function": [
-                    "name": tool.name,
+                    "name": sanitizedName,
                     "description": tool.description,
                     "parameters": tool.inputSchema
                 ] as [String: Any]
@@ -223,7 +231,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
             return await executeMCPTool(name: name, arguments: arguments)
         }
 
-        guard let tool = registry.tool(named: name) else {
+        // Desanitize: LLM returns sanitized name (dots replaced), restore original
+        let resolvedName = Self.desanitizeToolName(name)
+        guard let tool = registry.tool(named: resolvedName) else {
             Log.tool.warning("Tool not found: \(name)")
             return ToolResult(
                 toolCallId: "",
@@ -269,6 +279,20 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
     func resetRegistry() {
         registry.reset()
+    }
+
+    // MARK: - MCP Tool Routing
+
+    // MARK: - Tool Name Sanitization
+
+    /// Replace dots with underscores for OpenAI compatibility (^[a-zA-Z0-9_-]+$)
+    static func sanitizeToolName(_ name: String) -> String {
+        name.replacingOccurrences(of: ".", with: "-_-")
+    }
+
+    /// Restore original tool name from sanitized version
+    static func desanitizeToolName(_ name: String) -> String {
+        name.replacingOccurrences(of: "-_-", with: ".")
     }
 
     // MARK: - MCP Tool Routing

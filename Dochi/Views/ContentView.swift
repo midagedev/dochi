@@ -1,79 +1,107 @@
 import SwiftUI
 
 struct ContentView: View {
+    enum MainSection: String, CaseIterable {
+        case chat = "대화"
+        case kanban = "칸반"
+    }
+
     @Bindable var viewModel: DochiViewModel
     var supabaseService: SupabaseServiceProtocol?
     @State private var showContextInspector = false
+    @State private var selectedSection: MainSection = .chat
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(viewModel: viewModel, supabaseService: supabaseService)
+            SidebarView(
+                viewModel: viewModel,
+                supabaseService: supabaseService,
+                selectedSection: $selectedSection
+            )
         } detail: {
-            VStack(spacing: 0) {
-                // Status bar
-                if viewModel.interactionState != .idle {
-                    StatusBarView(
-                        interactionState: viewModel.interactionState,
-                        sessionState: viewModel.sessionState,
-                        processingSubState: viewModel.processingSubState,
-                        currentToolName: viewModel.currentToolName,
-                        partialTranscript: viewModel.partialTranscript,
-                        lastInputTokens: viewModel.lastInputTokens,
-                        lastOutputTokens: viewModel.lastOutputTokens,
-                        contextWindowTokens: viewModel.contextWindowTokens
-                    )
-                }
+            Group {
+                if selectedSection == .chat {
+                    VStack(spacing: 0) {
+                        // Status bar
+                        if viewModel.interactionState != .idle {
+                            StatusBarView(
+                                interactionState: viewModel.interactionState,
+                                sessionState: viewModel.sessionState,
+                                processingSubState: viewModel.processingSubState,
+                                currentToolName: viewModel.currentToolName,
+                                partialTranscript: viewModel.partialTranscript,
+                                lastInputTokens: viewModel.lastInputTokens,
+                                lastOutputTokens: viewModel.lastOutputTokens,
+                                contextWindowTokens: viewModel.contextWindowTokens
+                            )
+                        }
 
-                // Tool confirmation banner
-                if let confirmation = viewModel.pendingToolConfirmation {
-                    ToolConfirmationBannerView(
-                        toolName: confirmation.toolName,
-                        toolDescription: confirmation.toolDescription,
-                        onApprove: { viewModel.respondToToolConfirmation(approved: true) },
-                        onDeny: { viewModel.respondToToolConfirmation(approved: false) }
-                    )
-                }
+                        // Tool confirmation banner
+                        if let confirmation = viewModel.pendingToolConfirmation {
+                            ToolConfirmationBannerView(
+                                toolName: confirmation.toolName,
+                                toolDescription: confirmation.toolDescription,
+                                onApprove: { viewModel.respondToToolConfirmation(approved: true) },
+                                onDeny: { viewModel.respondToToolConfirmation(approved: false) }
+                            )
+                        }
 
-                // Error banner
-                if let error = viewModel.errorMessage {
-                    ErrorBannerView(message: error) {
-                        viewModel.errorMessage = nil
-                    }
-                }
+                        // Error banner
+                        if let error = viewModel.errorMessage {
+                            ErrorBannerView(message: error) {
+                                viewModel.errorMessage = nil
+                            }
+                        }
 
-                // Conversation area
-                if viewModel.currentConversation == nil || (viewModel.currentConversation?.messages.isEmpty == true) {
-                    EmptyConversationView { prompt in
-                        viewModel.inputText = prompt
-                        viewModel.sendMessage()
+                        // Avatar view
+                        if viewModel.settings.avatarEnabled {
+                            if #available(macOS 15.0, *) {
+                                AvatarView(
+                                    interactionState: viewModel.interactionState
+                                )
+                                .frame(height: 250)
+                            }
+                        }
+
+                        // Conversation area
+                        if viewModel.currentConversation == nil || (viewModel.currentConversation?.messages.isEmpty == true) {
+                            EmptyConversationView { prompt in
+                                viewModel.inputText = prompt
+                                viewModel.sendMessage()
+                            }
+                        } else {
+                            ConversationView(
+                                messages: viewModel.currentConversation?.messages ?? [],
+                                streamingText: viewModel.streamingText,
+                                currentToolName: viewModel.currentToolName,
+                                processingSubState: viewModel.processingSubState,
+                                fontSize: viewModel.settings.chatFontSize
+                            )
+                        }
+
+                        Divider()
+
+                        // Input area
+                        if viewModel.currentConversation?.source == .telegram {
+                            TelegramReadOnlyBarView()
+                        } else {
+                            InputBarView(viewModel: viewModel)
+                        }
                     }
                 } else {
-                    ConversationView(
-                        messages: viewModel.currentConversation?.messages ?? [],
-                        streamingText: viewModel.streamingText,
-                        currentToolName: viewModel.currentToolName,
-                        processingSubState: viewModel.processingSubState,
-                        fontSize: viewModel.settings.chatFontSize
-                    )
-                }
-
-                Divider()
-
-                // Input area
-                if viewModel.currentConversation?.source == .telegram {
-                    TelegramReadOnlyBarView()
-                } else {
-                    InputBarView(viewModel: viewModel)
+                    KanbanWorkspaceView()
                 }
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showContextInspector = true
-                    } label: {
-                        Label("컨텍스트", systemImage: "doc.text.magnifyingglass")
+                    if selectedSection == .chat {
+                        Button {
+                            showContextInspector = true
+                        } label: {
+                            Label("컨텍스트", systemImage: "doc.text.magnifyingglass")
+                        }
+                        .help("컨텍스트 인스펙터")
                     }
-                    .help("컨텍스트 인스펙터")
                 }
             }
         }
@@ -91,7 +119,7 @@ struct ContentView: View {
         }
         // Keyboard shortcut: Escape to cancel
         .onKeyPress(.escape) {
-            if viewModel.interactionState == .processing {
+            if selectedSection == .chat, viewModel.interactionState == .processing {
                 viewModel.cancelRequest()
                 return .handled
             }
@@ -105,6 +133,7 @@ struct ContentView: View {
 struct SidebarView: View {
     @Bindable var viewModel: DochiViewModel
     var supabaseService: SupabaseServiceProtocol?
+    @Binding var selectedSection: ContentView.MainSection
     @State private var searchText: String = ""
 
     private var filteredConversations: [Conversation] {
@@ -124,82 +153,108 @@ struct SidebarView: View {
 
             Divider()
 
-            // Search field
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 12))
-                TextField("대화 검색...", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
+            Picker("", selection: $selectedSection) {
+                ForEach(ContentView.MainSection.allCases, id: \.self) { section in
+                    Text(section.rawValue).tag(section)
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.secondary.opacity(0.06))
+            .padding(.vertical, 8)
+            .pickerStyle(.segmented)
 
-            List(selection: Binding(
-                get: { viewModel.currentConversation?.id },
-                set: { id in
-                    if let id { viewModel.selectConversation(id: id) }
-                }
-            )) {
-                ForEach(filteredConversations) { conversation in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            if conversation.source == .telegram {
-                                Image(systemName: "paperplane.fill")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.blue)
-                            }
-                            Text(conversation.title)
-                                .font(.system(size: 13))
-                                .lineLimit(1)
-                        }
-                        Text(conversation.updatedAt, style: .relative)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    .tag(conversation.id)
-                    .contextMenu {
-                        Button("이름 변경") {
-                            viewModel.renameConversation(id: conversation.id, title: "")
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            viewModel.deleteConversation(id: conversation.id)
+            if selectedSection == .chat {
+                // Search field
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12))
+                    TextField("대화 검색...", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
                         } label: {
-                            Label("삭제", systemImage: "trash")
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.secondary.opacity(0.06))
+
+                List(selection: Binding(
+                    get: { viewModel.currentConversation?.id },
+                    set: { id in
+                        if let id {
+                            selectedSection = .chat
+                            viewModel.selectConversation(id: id)
+                        }
+                    }
+                )) {
+                    ForEach(filteredConversations) { conversation in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 4) {
+                                if conversation.source == .telegram {
+                                    Image(systemName: "paperplane.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.blue)
+                                }
+                                Text(conversation.title)
+                                    .font(.system(size: 13))
+                                    .lineLimit(1)
+                            }
+                            Text(conversation.updatedAt, style: .relative)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .tag(conversation.id)
+                        .contextMenu {
+                            Button("이름 변경") {
+                                viewModel.renameConversation(id: conversation.id, title: "")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                viewModel.deleteConversation(id: conversation.id)
+                            } label: {
+                                Label("삭제", systemImage: "trash")
+                            }
                         }
                     }
                 }
-            }
-            .listStyle(.sidebar)
+                .listStyle(.sidebar)
 
-            // Auth/sync status
-            if let service = supabaseService, service.authState.isSignedIn {
-                Divider()
-                SidebarAuthStatusView(authState: service.authState)
+                // Auth/sync status
+                if let service = supabaseService, service.authState.isSignedIn {
+                    Divider()
+                    SidebarAuthStatusView(authState: service.authState)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("칸반 보드", systemImage: "rectangle.3.group")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("오른쪽 패널에서 보드/카드를 직접 관리할 수 있습니다.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                Spacer()
             }
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    viewModel.newConversation()
-                } label: {
-                    Label("새 대화", systemImage: "plus")
+            if selectedSection == .chat {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        viewModel.newConversation()
+                    } label: {
+                        Label("새 대화", systemImage: "plus")
+                    }
+                    .help("새 대화 (⌘N)")
+                    .keyboardShortcut("n", modifiers: .command)
                 }
-                .help("새 대화 (⌘N)")
-                .keyboardShortcut("n", modifiers: .command)
             }
         }
     }

@@ -19,7 +19,7 @@ final class SpeechService: SpeechServiceProtocol {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var silenceTimer: Task<Void, Never>?
 
-    /// Tracks the last transcription to detect new speech activity.
+    /// Tracks the last raw partial transcription to detect new speech activity.
     private var lastTranscription: String = ""
 
     /// Stores the best transcription obtained so far during a session.
@@ -40,11 +40,7 @@ final class SpeechService: SpeechServiceProtocol {
     // MARK: - Authorization
 
     func requestAuthorization() async -> Bool {
-        let status = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
-        }
+        let status = await Self.requestSpeechAuthorizationStatus()
 
         switch status {
         case .authorized:
@@ -65,6 +61,26 @@ final class SpeechService: SpeechServiceProtocol {
         }
 
         return isAuthorized
+    }
+
+    /// Requests speech authorization outside MainActor isolation because the
+    /// framework callback may arrive on a background queue.
+    nonisolated private static func requestSpeechAuthorizationStatus() async -> SFSpeechRecognizerAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status)
+            }
+        }
+    }
+
+    /// Builds a tap handler outside MainActor isolation because the audio tap is
+    /// invoked on a realtime audio queue.
+    nonisolated private static func makeInputTapHandler(
+        for request: SFSpeechAudioBufferRecognitionRequest
+    ) -> AVAudioNodeTapBlock {
+        { [weak request] buffer, _ in
+            request?.append(buffer)
+        }
     }
 
     // MARK: - Start listening
@@ -112,10 +128,8 @@ final class SpeechService: SpeechServiceProtocol {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) {
-            [weak request] buffer, _ in
-            request?.append(buffer)
-        }
+        let tapHandler = Self.makeInputTapHandler(for: request)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat, block: tapHandler)
 
         do {
             audioEngine.prepare()
@@ -174,12 +188,13 @@ final class SpeechService: SpeechServiceProtocol {
 
         guard let result else { return }
 
-        let text = result.bestTranscription.formattedString
-        bestTranscription = text
-        onPartialResult?(text)
+        let rawText = result.bestTranscription.formattedString
+        let mergedText = mergeTranscription(previous: bestTranscription, current: rawText)
+        bestTranscription = mergedText
+        onPartialResult?(mergedText)
 
-        if text != lastTranscription {
-            lastTranscription = text
+        if rawText != lastTranscription {
+            lastTranscription = rawText
             resetSilenceTimer(timeout: silenceTimeout)
         }
 
@@ -203,6 +218,12 @@ final class SpeechService: SpeechServiceProtocol {
 
             guard let self, self.isListening else { return }
             Log.stt.info("Silence timeout reached (\(timeout)s)")
+            // Keep session open while waiting for first utterance.
+            // Otherwise voice mode can loop stop/start with empty results.
+            if self.bestTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                self.resetSilenceTimer(timeout: timeout)
+                return
+            }
             self.deliverFinalResult()
         }
     }
@@ -222,6 +243,50 @@ final class SpeechService: SpeechServiceProtocol {
             Log.stt.info("No speech detected — delivering empty result")
             callback?("")
         }
+    }
+
+    /// Keeps previously spoken text when recognizer partials shrink/regress.
+    /// This reduces "earlier sentence disappeared" behavior after a short pause.
+    private func mergeTranscription(previous: String, current: String) -> String {
+        let prev = previous.trimmingCharacters(in: .whitespacesAndNewlines)
+        let curr = current.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if prev.isEmpty { return curr }
+        if curr.isEmpty { return prev }
+        if curr == prev { return prev }
+
+        // Normalize spacing for containment checks to avoid false mismatches.
+        let normalizedPrev = prev.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        let normalizedCurr = curr.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+
+        if normalizedCurr.contains(normalizedPrev) { return curr }
+        if normalizedPrev.contains(normalizedCurr) { return prev }
+
+        // If both hypotheses start similarly, prefer the longer one
+        // instead of concatenating (prevents duplicated prefixes).
+        let commonPrefixCount = zip(prev, curr).prefix(while: { $0 == $1 }).count
+        let shortestLength = min(prev.count, curr.count)
+        if shortestLength > 0 && Double(commonPrefixCount) / Double(shortestLength) >= 0.5 {
+            return curr.count >= prev.count ? curr : prev
+        }
+
+        // Append only when we have a meaningful suffix/prefix overlap.
+        let prevChars = Array(prev)
+        let currChars = Array(curr)
+        let maxOverlap = min(prevChars.count, currChars.count)
+
+        if maxOverlap > 0 {
+            for overlap in stride(from: maxOverlap, through: 1, by: -1) {
+                let prevSuffix = prevChars.suffix(overlap)
+                let currPrefix = currChars.prefix(overlap)
+                if prevSuffix.elementsEqual(currPrefix) && overlap >= 4 {
+                    return prev + String(currChars.dropFirst(overlap))
+                }
+            }
+        }
+
+        // Fallback: keep the longer candidate; do not force concatenation.
+        return curr.count >= prev.count ? curr : prev
     }
 
     // MARK: - Continuous Recognition (Wake Word Detection)

@@ -15,3 +15,6 @@ Package.resolved
 SupabaseConfig.plist
 Dochi/Resources/SupabaseConfig.plist
 _backup/
+
+# Large binary assets
+*.vrm

@@ -41,6 +41,7 @@ final class DochiViewModel {
     private var sessionTimeoutTask: Task<Void, Never>?
     private var confirmationTimeoutTask: Task<Void, Never>?
     private var sentenceChunker = SentenceChunker()
+    private var llmStreamActive = false
     private static let maxToolLoopIterations = 10
     private static let maxRecentMessages = 30
     private static let sessionEndingTimeout: TimeInterval = 10
@@ -177,6 +178,7 @@ final class DochiViewModel {
 
         transition(to: .processing)
         processingSubState = .streaming
+        llmStreamActive = true
 
         processingTask = Task {
             await processLLMLoop()
@@ -187,6 +189,7 @@ final class DochiViewModel {
         processingTask?.cancel()
         processingTask = nil
         llmService.cancel()
+        llmStreamActive = false
         ttsService.stopAndClear()
         sentenceChunker = SentenceChunker()
 
@@ -424,19 +427,20 @@ final class DochiViewModel {
 
     private func handleSpeechFinalResult(_ text: String) {
         partialTranscript = ""
-        soundService.playInputComplete()
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            Log.stt.warning("Empty STT result, returning to idle")
+            Log.stt.debug("Empty STT result")
             transition(to: .idle)
-            // Check if we should prompt for retry
             if sessionState == .active {
-                enqueueTTS("잘 못 들었어요, 다시 말해주세요.")
+                // Keep listening silently in active voice session.
+                startListening()
                 return
             }
             return
         }
+
+        soundService.playInputComplete()
 
         // Check for session end commands
         if isSessionEndCommand(trimmed) {
@@ -487,6 +491,10 @@ final class DochiViewModel {
 
     private func handleTTSComplete() {
         guard interactionState == .speaking else { return }
+
+        // LLM is still streaming — TTS queue just temporarily emptied.
+        // More sentences will arrive; don't transition yet.
+        if llmStreamActive { return }
 
         if sessionState == .active {
             // Continuous conversation: speaking → idle → listening
@@ -801,6 +809,8 @@ final class DochiViewModel {
 
             switch response {
             case .text(let text):
+                llmStreamActive = false
+
                 let finalText = text.isEmpty ? streamingText : text
                 if finalText.isEmpty {
                     handleError(LLMError.emptyResponse)
@@ -811,7 +821,7 @@ final class DochiViewModel {
                 conversation = currentConversation!
                 saveConversation()
 
-                // Flush remaining TTS text
+                // Flush remaining TTS text from sentence chunker
                 if isVoiceMode, let remaining = sentenceChunker.flush() {
                     if interactionState == .processing {
                         processingSubState = .complete
@@ -824,9 +834,6 @@ final class DochiViewModel {
 
                 if isVoiceMode && ttsService.isSpeaking {
                     // TTS is playing — stay in speaking, handleTTSComplete will transition
-                    if interactionState != .speaking {
-                        transition(to: .speaking)
-                    }
                 } else if isVoiceMode && sessionState == .active {
                     // No TTS to play, go directly to listening
                     transition(to: .idle)
@@ -1217,10 +1224,40 @@ final class DochiViewModel {
     }
 
     private func appendToolResultMessage(_ result: ToolResult) {
+        let imageURLs = Self.extractImageURLs(from: result.content)
         currentConversation?.messages.append(
-            Message(role: .tool, content: result.content, toolCallId: result.toolCallId)
+            Message(role: .tool, content: result.content, toolCallId: result.toolCallId, imageURLs: imageURLs.isEmpty ? nil : imageURLs)
         )
         currentConversation?.updatedAt = Date()
+    }
+
+    /// Extract image file URLs from tool result content.
+    /// Matches markdown images `![...](path)` and plain file paths to images.
+    private static func extractImageURLs(from content: String) -> [URL] {
+        var urls: [URL] = []
+        let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "tiff", "bmp"]
+
+        // Match markdown image: ![...](path)
+        let mdPattern = /!\[.*?\]\((.+?)\)/
+        for match in content.matches(of: mdPattern) {
+            let path = String(match.1)
+            if imageExtensions.contains((path as NSString).pathExtension.lowercased()),
+               FileManager.default.fileExists(atPath: path) {
+                urls.append(URL(fileURLWithPath: path))
+            }
+        }
+
+        // Match "경로: /path/to/file.ext" pattern from generate_image
+        let pathPattern = /경로:\s*(.+)/
+        for match in content.matches(of: pathPattern) {
+            let path = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
+            if imageExtensions.contains((path as NSString).pathExtension.lowercased()),
+               FileManager.default.fileExists(atPath: path) {
+                urls.append(URL(fileURLWithPath: path))
+            }
+        }
+
+        return urls
     }
 
     private func saveConversation() {
@@ -1270,7 +1307,7 @@ final class DochiViewModel {
         if case .cancelled = llmError {
             // skip logging
         } else {
-            Log.app.error("LLM error: \(error.localizedDescription)")
+            Log.app.error("LLM error: \(error.localizedDescription, privacy: .public)")
         }
 
         if !streamingText.isEmpty {
@@ -1279,6 +1316,7 @@ final class DochiViewModel {
         }
 
         saveConversation()
+        llmStreamActive = false
         ttsService.stopAndClear()
         sentenceChunker = SentenceChunker()
         processingSubState = nil
