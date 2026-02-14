@@ -5,7 +5,14 @@ import os
 final class BuiltInToolService: BuiltInToolServiceProtocol {
     private let registry = ToolRegistry()
     private let sessionContext: SessionContext
-    var confirmationHandler: ToolConfirmationHandler?
+    var confirmationHandler: ToolConfirmationHandler? {
+        didSet {
+            // Forward to ShellCommandTool for its own confirm-level handling
+            if let shellTool = registry.tool(named: "shell.execute") as? ShellCommandTool {
+                shellTool.confirmationHandler = confirmationHandler
+            }
+        }
+    }
 
     private let mcpService: MCPServiceProtocol
 
@@ -133,7 +140,11 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(OpenURLTool())
 
         // Shell command (conditional, restricted)
-        registry.register(ShellCommandTool())
+        registry.register(ShellCommandTool(
+            contextService: contextService,
+            sessionContext: sessionContext,
+            settings: settings
+        ))
 
         // Calendar (baseline: list, conditional: create/delete)
         registry.register(ListCalendarEventsTool())
@@ -259,7 +270,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         }
 
         // Sensitive/restricted tools require user confirmation
-        if tool.category == .sensitive || tool.category == .restricted {
+        // ShellCommandTool handles its own permission flow (allowed/confirm/blocked/default)
+        let skipConfirmation = resolvedName == "shell.execute"
+        if !skipConfirmation && (tool.category == .sensitive || tool.category == .restricted) {
             if let handler = confirmationHandler {
                 let approved = await handler(tool.name, tool.description)
                 if !approved {

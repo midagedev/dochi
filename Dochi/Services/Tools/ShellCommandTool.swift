@@ -10,20 +10,22 @@ final class ShellCommandTool: BuiltInToolProtocol {
     private static let maxOutputSize = 8000
     private static let defaultTimeout = 30
 
-    /// Commands/patterns that are too dangerous to execute.
-    static let blockedPatterns: [String] = [
-        "rm -rf /",
-        "rm -rf /*",
-        "sudo ",
-        "shutdown",
-        "reboot",
-        "mkfs",
-        "dd if=",
-        ":(){:|:&};:",
-        "chmod -R 777 /",
-        "mv /* ",
-        "> /dev/sda",
-    ]
+    private let contextService: ContextServiceProtocol
+    private let sessionContext: SessionContext
+    private let settings: AppSettings
+
+    /// Confirmation handler injected by BuiltInToolService
+    var confirmationHandler: ToolConfirmationHandler?
+
+    init(
+        contextService: ContextServiceProtocol,
+        sessionContext: SessionContext,
+        settings: AppSettings
+    ) {
+        self.contextService = contextService
+        self.sessionContext = sessionContext
+        self.settings = settings
+    }
 
     var inputSchema: [String: Any] {
         [
@@ -42,12 +44,45 @@ final class ShellCommandTool: BuiltInToolProtocol {
             return ToolResult(toolCallId: "", content: "command 파라미터가 필요합니다.", isError: true)
         }
 
-        // Check blocklist
-        let lowered = command.lowercased()
-        for pattern in Self.blockedPatterns {
-            if lowered.contains(pattern) {
-                Log.tool.warning("Blocked dangerous command: \(command)")
-                return ToolResult(toolCallId: "", content: "위험한 명령이 차단되었습니다: \(pattern)", isError: true)
+        // Load the active agent's shell permission config
+        let agentName = settings.activeAgentName
+        let agentConfig = contextService.loadAgentConfig(
+            workspaceId: sessionContext.workspaceId,
+            agentName: agentName
+        )
+        let shellConfig = agentConfig?.effectiveShellPermissions ?? .default
+
+        // Check permission
+        let permissionResult = shellConfig.matchResult(for: command)
+
+        switch permissionResult {
+        case .blocked(let pattern):
+            Log.tool.warning("Blocked dangerous command: \(command) (pattern: \(pattern))")
+            return ToolResult(toolCallId: "", content: "위험한 명령이 차단되었습니다: \(pattern)", isError: true)
+
+        case .confirm(let pattern):
+            Log.tool.info("Command requires confirmation: \(command) (pattern: \(pattern))")
+            if let handler = confirmationHandler {
+                let approved = await handler(name, "셸 명령 실행: \(command)")
+                if !approved {
+                    Log.tool.info("Shell command denied by user: \(command)")
+                    return ToolResult(toolCallId: "", content: "명령 실행이 사용자에 의해 거부되었습니다.", isError: true)
+                }
+            }
+
+        case .allowed:
+            Log.tool.debug("Command allowed by shell permissions: \(command)")
+            // No confirmation needed
+
+        case .defaultCategory:
+            // No pattern matched — ask for confirmation as default restricted behavior
+            Log.tool.debug("Command not in any shell permission list, requesting confirmation: \(command)")
+            if let handler = confirmationHandler {
+                let approved = await handler(name, "셸 명령 실행: \(command)")
+                if !approved {
+                    Log.tool.info("Shell command denied by user: \(command)")
+                    return ToolResult(toolCallId: "", content: "명령 실행이 사용자에 의해 거부되었습니다.", isError: true)
+                }
             }
         }
 
