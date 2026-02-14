@@ -98,6 +98,16 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(ollamaBaseURL, forKey: "ollamaBaseURL") }
     }
 
+    /// JSON mapping of Telegram chat IDs to workspace IDs: {"chatId": "workspaceId", ...}
+    var telegramChatMappingJSON: String = UserDefaults.standard.string(forKey: "telegramChatMappingJSON") ?? "{}" {
+        didSet { UserDefaults.standard.set(telegramChatMappingJSON, forKey: "telegramChatMappingJSON") }
+    }
+
+    /// Whether this device acts as the Telegram host for its workspace.
+    var isTelegramHost: Bool = UserDefaults.standard.object(forKey: "isTelegramHost") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(isTelegramHost, forKey: "isTelegramHost") }
+    }
+
     var hasSeenPermissionInfo: Bool = UserDefaults.standard.object(forKey: "hasSeenPermissionInfo") as? Bool ?? false {
         didSet { UserDefaults.standard.set(hasSeenPermissionInfo, forKey: "hasSeenPermissionInfo") }
     }
