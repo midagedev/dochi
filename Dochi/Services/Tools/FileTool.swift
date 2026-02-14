@@ -2,22 +2,22 @@ import Foundation
 
 // MARK: - Path Validation
 
-private func validatePath(_ path: String) -> (expandedPath: String, error: ToolResult?) {
+private func validatePath(_ path: String) -> (resolvedPath: String, error: ToolResult?) {
     guard !path.isEmpty else {
         return ("", ToolResult(toolCallId: "", content: "path 파라미터가 필요합니다.", isError: true))
     }
 
     let expanded = NSString(string: path).expandingTildeInPath
 
-    // Resolve symlinks and ".." to get the real path for security check
+    // Resolve symlinks and ".." to get the canonical path for security check
     let resolved = (expanded as NSString).resolvingSymlinksInPath
     let home = NSHomeDirectory()
 
-    guard resolved.hasPrefix(home) || resolved == home else {
+    guard resolved == home || resolved.hasPrefix(home + "/") else {
         return ("", ToolResult(toolCallId: "", content: "홈 디렉토리 밖의 경로에는 접근할 수 없습니다: \(path)", isError: true))
     }
 
-    return (expanded, nil)
+    return (resolved, nil)
 }
 
 private let maxReadSize = 100_000 // 100KB text limit

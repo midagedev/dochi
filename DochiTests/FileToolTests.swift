@@ -264,6 +264,21 @@ final class FileToolTests: XCTestCase {
         XCTAssertTrue(result.content.contains("홈 디렉토리 밖"))
     }
 
+    func testDeleteHomeViaTraversalBlocked() async {
+        // ~/Documents/.. resolves to ~ — must be blocked
+        let result = await FileDeleteTool().execute(arguments: ["path": "~/Documents/.."])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("홈 디렉토리"))
+    }
+
+    func testPathWithSimilarPrefixBlocked() async {
+        // /Users/hckim2 should not be allowed when home is /Users/hckim
+        let fakePath = NSHomeDirectory() + "2/secret.txt"
+        let result = await FileReadTool().execute(arguments: ["path": fakePath])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("홈 디렉토리 밖"))
+    }
+
     // MARK: - Registry Integration
 
     func testFileToolsAreNonBaseline() {
