@@ -214,6 +214,13 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(CodingRunTaskTool())
         registry.register(CodingReviewTool())
 
+        // Coding session management (conditional, safe/restricted)
+        let codingSessionManager = CodingSessionManager()
+        registry.register(CodingSessionListTool(sessionManager: codingSessionManager))
+        registry.register(CodingSessionStartTool(sessionManager: codingSessionManager))
+        registry.register(CodingSessionPauseTool(sessionManager: codingSessionManager))
+        registry.register(CodingSessionEndTool(sessionManager: codingSessionManager))
+
         // MCP settings (conditional, sensitive)
         registry.register(MCPAddServerTool(mcpService: mcpService))
         registry.register(MCPUpdateServerTool(mcpService: mcpService))
