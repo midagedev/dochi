@@ -106,6 +106,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(ClipboardReadTool())
         registry.register(ClipboardWriteTool())
 
+        // Screenshot (conditional, sensitive)
+        registry.register(ScreenshotCaptureTool())
+
         // Timer (baseline, safe)
         registry.register(SetTimerTool())
         registry.register(ListTimersTool())
