@@ -26,6 +26,11 @@ struct AgentDetailView: View {
     @State private var permRestricted: Bool = true
     @State private var configSaved: Bool = false
 
+    // Shell permissions
+    @State private var shellBlockedText: String = ""
+    @State private var shellConfirmText: String = ""
+    @State private var shellAllowedText: String = ""
+
     // Persona
     @State private var personaText: String = ""
     @State private var personaSaved: Bool = false
@@ -79,7 +84,7 @@ struct AgentDetailView: View {
                 memoryTab
             }
         }
-        .frame(width: 550, height: 520)
+        .frame(width: 550, height: 620)
         .onAppear {
             loadContent()
         }
@@ -113,6 +118,37 @@ struct AgentDetailView: View {
                         .disabled(true)
                     Toggle("sensitive (확인 필요)", isOn: $permSensitive)
                     Toggle("restricted (위험 도구)", isOn: $permRestricted)
+                }
+
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("셸 명령 권한")
+                            .font(.subheadline.bold())
+                        Text("쉼표로 구분하여 명령 패턴을 입력하세요.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text("차단 명령")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                        TextField("rm -rf /, sudo , shutdown ...", text: $shellBlockedText)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+
+                        Text("확인 필요 명령")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        TextField("rm , mv , kill ...", text: $shellConfirmText)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+
+                        Text("허용 명령")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                        TextField("ls, cat , git status ...", text: $shellAllowedText)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+                    }
                 }
 
                 Section {
@@ -219,6 +255,16 @@ struct AgentDetailView: View {
             permSafe = perms.contains("safe")
             permSensitive = perms.contains("sensitive")
             permRestricted = perms.contains("restricted")
+
+            let shell = config.effectiveShellPermissions
+            shellBlockedText = shell.blockedCommands.joined(separator: ", ")
+            shellConfirmText = shell.confirmCommands.joined(separator: ", ")
+            shellAllowedText = shell.allowedCommands.joined(separator: ", ")
+        } else {
+            let shell = ShellPermissionConfig.default
+            shellBlockedText = shell.blockedCommands.joined(separator: ", ")
+            shellConfirmText = shell.confirmCommands.joined(separator: ", ")
+            shellAllowedText = shell.allowedCommands.joined(separator: ", ")
         }
 
         personaText = contextService.loadAgentPersona(workspaceId: workspaceId, agentName: agentName) ?? ""
@@ -230,12 +276,19 @@ struct AgentDetailView: View {
         if permSensitive { permissions.append("sensitive") }
         if permRestricted { permissions.append("restricted") }
 
+        let shellPermissions = ShellPermissionConfig(
+            blockedCommands: parseCommaSeparated(shellBlockedText),
+            confirmCommands: parseCommaSeparated(shellConfirmText),
+            allowedCommands: parseCommaSeparated(shellAllowedText)
+        )
+
         let config = AgentConfig(
             name: agentName,
             wakeWord: wakeWord.isEmpty ? nil : wakeWord,
             description: agentDescription.isEmpty ? nil : agentDescription,
             defaultModel: defaultModel.isEmpty ? nil : defaultModel,
-            permissions: permissions
+            permissions: permissions,
+            shellPermissions: shellPermissions
         )
 
         contextService.saveAgentConfig(workspaceId: workspaceId, config: config)
@@ -247,5 +300,11 @@ struct AgentDetailView: View {
             try? await Task.sleep(for: .seconds(3))
             configSaved = false
         }
+    }
+
+    private func parseCommaSeparated(_ text: String) -> [String] {
+        text.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 }

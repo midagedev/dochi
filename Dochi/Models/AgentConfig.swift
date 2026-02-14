@@ -6,8 +6,13 @@ struct AgentConfig: Codable, Sendable {
     var description: String?
     var defaultModel: String?
     var permissions: [String]?
+    var shellPermissions: ShellPermissionConfig?
 
     var effectivePermissions: [String] {
         permissions ?? ["safe", "sensitive", "restricted"]
+    }
+
+    var effectiveShellPermissions: ShellPermissionConfig {
+        shellPermissions ?? .default
     }
 }

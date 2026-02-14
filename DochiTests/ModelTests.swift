@@ -119,6 +119,138 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(config3.effectivePermissions, ["safe"])
     }
 
+    func testAgentConfigEffectiveShellPermissions() {
+        // Default: uses ShellPermissionConfig.default
+        let config1 = AgentConfig(name: "도치")
+        let shell1 = config1.effectiveShellPermissions
+        XCTAssertFalse(shell1.blockedCommands.isEmpty)
+        XCTAssertFalse(shell1.confirmCommands.isEmpty)
+        XCTAssertFalse(shell1.allowedCommands.isEmpty)
+
+        // Explicit shell permissions override default
+        let custom = ShellPermissionConfig(
+            blockedCommands: ["dangerous"],
+            confirmCommands: ["risky"],
+            allowedCommands: ["safe"]
+        )
+        let config2 = AgentConfig(name: "custom", shellPermissions: custom)
+        XCTAssertEqual(config2.effectiveShellPermissions.blockedCommands, ["dangerous"])
+        XCTAssertEqual(config2.effectiveShellPermissions.confirmCommands, ["risky"])
+        XCTAssertEqual(config2.effectiveShellPermissions.allowedCommands, ["safe"])
+    }
+
+    func testAgentConfigShellPermissionsCodable() throws {
+        let custom = ShellPermissionConfig(
+            blockedCommands: ["sudo "],
+            confirmCommands: ["rm "],
+            allowedCommands: ["ls"]
+        )
+        let config = AgentConfig(name: "test", shellPermissions: custom)
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(config)
+        let decoded = try JSONDecoder().decode(AgentConfig.self, from: data)
+
+        XCTAssertEqual(decoded.shellPermissions?.blockedCommands, ["sudo "])
+        XCTAssertEqual(decoded.shellPermissions?.confirmCommands, ["rm "])
+        XCTAssertEqual(decoded.shellPermissions?.allowedCommands, ["ls"])
+    }
+
+    func testAgentConfigWithoutShellPermissionsCodable() throws {
+        let config = AgentConfig(name: "legacy")
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(config)
+        let decoded = try JSONDecoder().decode(AgentConfig.self, from: data)
+
+        XCTAssertNil(decoded.shellPermissions)
+        // effectiveShellPermissions should return default
+        XCTAssertFalse(decoded.effectiveShellPermissions.blockedCommands.isEmpty)
+    }
+
+    // MARK: - ShellPermissionConfig
+
+    func testShellPermissionConfigDefault() {
+        let config = ShellPermissionConfig.default
+        XCTAssertTrue(config.blockedCommands.contains("rm -rf /"))
+        XCTAssertTrue(config.blockedCommands.contains("sudo "))
+        XCTAssertTrue(config.confirmCommands.contains("rm "))
+        XCTAssertTrue(config.confirmCommands.contains("mv "))
+        XCTAssertTrue(config.allowedCommands.contains("ls"))
+        XCTAssertTrue(config.allowedCommands.contains("git status"))
+    }
+
+    func testShellPermissionBlockedCommand() {
+        let config = ShellPermissionConfig.default
+        let result = config.matchResult(for: "sudo apt-get install foo")
+        // "sudo " should be matched in blocked list
+        XCTAssertEqual(result, .blocked(pattern: "sudo "))
+    }
+
+    func testShellPermissionBlockedTakesPrecedence() {
+        let config = ShellPermissionConfig.default
+        // "rm -rf /" is in both blocked (as exact pattern) and confirm (rm prefix)
+        // Blocked should win since it's checked first
+        let result = config.matchResult(for: "rm -rf /")
+        if case .blocked = result {
+            // expected
+        } else {
+            XCTFail("Expected .blocked, got \(result)")
+        }
+    }
+
+    func testShellPermissionConfirmCommand() {
+        let config = ShellPermissionConfig.default
+        let result = config.matchResult(for: "rm somefile.txt")
+        XCTAssertEqual(result, .confirm(pattern: "rm "))
+    }
+
+    func testShellPermissionAllowedCommand() {
+        let config = ShellPermissionConfig.default
+        let result = config.matchResult(for: "ls -la")
+        XCTAssertEqual(result, .allowed)
+    }
+
+    func testShellPermissionDefaultCategory() {
+        let config = ShellPermissionConfig.default
+        let result = config.matchResult(for: "python3 script.py")
+        XCTAssertEqual(result, .defaultCategory)
+    }
+
+    func testShellPermissionCaseInsensitive() {
+        let config = ShellPermissionConfig.default
+        let result = config.matchResult(for: "SUDO apt-get install")
+        XCTAssertEqual(result, .blocked(pattern: "sudo "))
+    }
+
+    func testShellPermissionConfigCodable() throws {
+        let config = ShellPermissionConfig(
+            blockedCommands: ["danger"],
+            confirmCommands: ["risky"],
+            allowedCommands: ["safe"]
+        )
+
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(ShellPermissionConfig.self, from: data)
+
+        XCTAssertEqual(decoded.blockedCommands, ["danger"])
+        XCTAssertEqual(decoded.confirmCommands, ["risky"])
+        XCTAssertEqual(decoded.allowedCommands, ["safe"])
+    }
+
+    func testShellPermissionCustomConfig() {
+        let config = ShellPermissionConfig(
+            blockedCommands: ["format c:"],
+            confirmCommands: ["deploy"],
+            allowedCommands: ["status"]
+        )
+
+        XCTAssertEqual(config.matchResult(for: "format c:"), .blocked(pattern: "format c:"))
+        XCTAssertEqual(config.matchResult(for: "deploy production"), .confirm(pattern: "deploy"))
+        XCTAssertEqual(config.matchResult(for: "status check"), .allowed)
+        XCTAssertEqual(config.matchResult(for: "unknown command"), .defaultCategory)
+    }
+
     // MARK: - LLMProvider
 
     func testLLMProviderProperties() {
