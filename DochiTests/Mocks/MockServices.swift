@@ -314,3 +314,38 @@ final class MockSoundService: SoundServiceProtocol {
     func playWakeWordDetected() { wakeWordCount += 1 }
     func playInputComplete() { inputCompleteCount += 1 }
 }
+
+// MARK: - MockTelegramService
+
+@MainActor
+final class MockTelegramService: TelegramServiceProtocol {
+    var isPolling = false
+    var onMessage: (@MainActor @Sendable (TelegramUpdate) -> Void)?
+
+    var sentMessages: [(chatId: Int64, text: String)] = []
+    var editedMessages: [(chatId: Int64, messageId: Int64, text: String)] = []
+    var chatActions: [(chatId: Int64, action: String)] = []
+    var nextMessageId: Int64 = 1000
+
+    func startPolling(token: String) { isPolling = true }
+    func stopPolling() { isPolling = false }
+
+    func sendMessage(chatId: Int64, text: String) async throws -> Int64 {
+        let msgId = nextMessageId
+        nextMessageId += 1
+        sentMessages.append((chatId: chatId, text: text))
+        return msgId
+    }
+
+    func editMessage(chatId: Int64, messageId: Int64, text: String) async throws {
+        editedMessages.append((chatId: chatId, messageId: messageId, text: text))
+    }
+
+    func sendChatAction(chatId: Int64, action: String) async throws {
+        chatActions.append((chatId: chatId, action: action))
+    }
+
+    func getMe(token: String) async throws -> TelegramUser {
+        TelegramUser(id: 1, isBot: true, firstName: "TestBot", username: "test_bot")
+    }
+}

@@ -668,11 +668,41 @@ final class DochiViewModel {
             return
         }
 
+        let useStreaming = settings.telegramStreamReplies
+
         do {
             var accumulatedText = ""
+            var streamMessageId: Int64?
+            var lastEditLength = 0
 
-            let onPartial: @MainActor @Sendable (String) -> Void = { partial in
+            // For non-streaming mode, send typing indicator
+            if !useStreaming, let tg = getTelegramService() {
+                try? await tg.sendChatAction(chatId: update.chatId, action: "typing")
+            }
+
+            let onPartial: @MainActor @Sendable (String) -> Void = { [weak self] partial in
                 accumulatedText += partial
+
+                guard useStreaming, let self, let tg = self.getTelegramService() else { return }
+
+                // Throttle edits: only update every 50+ chars or first chunk
+                let currentLength = accumulatedText.count
+                guard currentLength - lastEditLength >= 50 || streamMessageId == nil else { return }
+
+                let textSnapshot = accumulatedText + " ▍"
+                lastEditLength = currentLength
+
+                Task { @MainActor in
+                    do {
+                        if let msgId = streamMessageId {
+                            try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: textSnapshot)
+                        } else {
+                            streamMessageId = try await tg.sendMessage(chatId: update.chatId, text: textSnapshot)
+                        }
+                    } catch {
+                        Log.telegram.debug("Streaming edit skipped: \(error.localizedDescription)")
+                    }
+                }
             }
 
             let response = try await llmService.send(
@@ -714,10 +744,17 @@ final class DochiViewModel {
             conversationService.save(conversation: conversation)
             loadConversations()
 
-            // Send response via Telegram
+            // Send/finalize response via Telegram
             if let tg = getTelegramService() {
-                _ = try await tg.sendMessage(chatId: update.chatId, text: finalText)
-                Log.telegram.info("Sent Telegram response to chat \(update.chatId)")
+                if useStreaming, let msgId = streamMessageId {
+                    // Final edit to remove cursor and show complete text
+                    try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: finalText)
+                    Log.telegram.info("Finalized streaming response to chat \(update.chatId)")
+                } else {
+                    // Non-streaming: send complete response in single message
+                    _ = try await tg.sendMessage(chatId: update.chatId, text: finalText)
+                    Log.telegram.info("Sent Telegram response to chat \(update.chatId)")
+                }
             }
         } catch {
             Log.telegram.error("Telegram response failed: \(error.localizedDescription)")

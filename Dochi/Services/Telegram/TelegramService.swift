@@ -212,6 +212,25 @@ final class TelegramService: TelegramServiceProtocol {
         Log.telegram.debug("메시지 수정 완료: chatId=\(chatId), messageId=\(messageId)")
     }
 
+    func sendChatAction(chatId: Int64, action: String) async throws {
+        guard let token else { throw TelegramError.invalidToken }
+
+        let params: [String: Any] = [
+            "chat_id": chatId,
+            "action": action
+        ]
+
+        struct BoolResult: Decodable {
+            // sendChatAction returns true on success, wrapped in TelegramResponse
+        }
+
+        let _: Bool = try await callAPI(
+            token: token,
+            method: "sendChatAction",
+            params: params
+        )
+    }
+
     func getMe(token: String) async throws -> TelegramUser {
         let apiUser: APIUser = try await callAPI(
             token: token,
