@@ -489,6 +489,13 @@ struct APIKeySettingsView: View {
     @State private var falKey: String = ""
     @State private var saveStatus: String?
     @State private var showKeys: Bool = false
+    @State private var showTierKeys: Bool = false
+
+    // Tier-specific keys
+    @State private var openaiPremiumKey: String = ""
+    @State private var openaiEconomyKey: String = ""
+    @State private var anthropicPremiumKey: String = ""
+    @State private var anthropicEconomyKey: String = ""
 
     var body: some View {
         Form {
@@ -498,6 +505,33 @@ struct APIKeySettingsView: View {
                 apiKeyRow(label: "OpenAI", key: $openaiKey, account: LLMProvider.openai.keychainAccount)
                 apiKeyRow(label: "Anthropic", key: $anthropicKey, account: LLMProvider.anthropic.keychainAccount)
                 apiKeyRow(label: "Z.AI", key: $zaiKey, account: LLMProvider.zai.keychainAccount)
+            }
+
+            Section("티어별 API 키") {
+                Toggle("티어별 키 관리", isOn: $showTierKeys)
+                    .help("용도별 모델 라우팅 시 프리미엄/경제 티어 전용 키를 사용합니다")
+
+                if showTierKeys {
+                    Group {
+                        Text("OpenAI")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        apiKeyRow(label: "  프리미엄", key: $openaiPremiumKey, account: LLMProvider.openai.keychainAccount + APIKeyTier.premium.keychainSuffix)
+                        apiKeyRow(label: "  경제", key: $openaiEconomyKey, account: LLMProvider.openai.keychainAccount + APIKeyTier.economy.keychainSuffix)
+                    }
+
+                    Group {
+                        Text("Anthropic")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        apiKeyRow(label: "  프리미엄", key: $anthropicPremiumKey, account: LLMProvider.anthropic.keychainAccount + APIKeyTier.premium.keychainSuffix)
+                        apiKeyRow(label: "  경제", key: $anthropicEconomyKey, account: LLMProvider.anthropic.keychainAccount + APIKeyTier.economy.keychainSuffix)
+                    }
+
+                    Text("티어별 키가 없으면 기본 키를 사용합니다")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("도구 API 키") {
@@ -557,17 +591,33 @@ struct APIKeySettingsView: View {
         zaiKey = keychainService.load(account: LLMProvider.zai.keychainAccount) ?? ""
         tavilyKey = keychainService.load(account: "tavily_api_key") ?? ""
         falKey = keychainService.load(account: "fal_api_key") ?? ""
+
+        // Tier keys
+        openaiPremiumKey = keychainService.load(account: LLMProvider.openai.keychainAccount + APIKeyTier.premium.keychainSuffix) ?? ""
+        openaiEconomyKey = keychainService.load(account: LLMProvider.openai.keychainAccount + APIKeyTier.economy.keychainSuffix) ?? ""
+        anthropicPremiumKey = keychainService.load(account: LLMProvider.anthropic.keychainAccount + APIKeyTier.premium.keychainSuffix) ?? ""
+        anthropicEconomyKey = keychainService.load(account: LLMProvider.anthropic.keychainAccount + APIKeyTier.economy.keychainSuffix) ?? ""
     }
 
     private func saveAllKeys() {
         do {
-            let keys: [(String, String)] = [
+            var keys: [(String, String)] = [
                 (LLMProvider.openai.keychainAccount, openaiKey),
                 (LLMProvider.anthropic.keychainAccount, anthropicKey),
                 (LLMProvider.zai.keychainAccount, zaiKey),
                 ("tavily_api_key", tavilyKey),
                 ("fal_api_key", falKey),
             ]
+
+            // Tier keys
+            let tierKeys: [(String, String)] = [
+                (LLMProvider.openai.keychainAccount + APIKeyTier.premium.keychainSuffix, openaiPremiumKey),
+                (LLMProvider.openai.keychainAccount + APIKeyTier.economy.keychainSuffix, openaiEconomyKey),
+                (LLMProvider.anthropic.keychainAccount + APIKeyTier.premium.keychainSuffix, anthropicPremiumKey),
+                (LLMProvider.anthropic.keychainAccount + APIKeyTier.economy.keychainSuffix, anthropicEconomyKey),
+            ]
+            keys.append(contentsOf: tierKeys)
+
             for (account, value) in keys {
                 if !value.isEmpty {
                     try keychainService.save(account: account, value: value)

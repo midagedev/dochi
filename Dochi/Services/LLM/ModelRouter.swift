@@ -63,12 +63,24 @@ struct ModelRouter {
         return ResolvedModel(provider: fallbackProvider, model: fallbackModel, apiKey: apiKey, isFallback: true)
     }
 
-    /// Resolve API key for a provider. Returns empty string for providers that don't require one.
-    private func resolveAPIKey(for provider: LLMProvider) -> String? {
+    /// Resolve API key for a provider with optional tier preference.
+    /// Tries the specified tier first, then falls back to standard tier.
+    /// Returns empty string for providers that don't require one.
+    private func resolveAPIKey(for provider: LLMProvider, tier: APIKeyTier = .standard) -> String? {
         if !provider.requiresAPIKey {
-            // Provider like Ollama doesn't need an API key
             return keychainService.load(account: provider.keychainAccount) ?? ""
         }
+
+        // Try tier-specific key first (if not standard)
+        if tier != .standard {
+            let tieredAccount = provider.keychainAccount + tier.keychainSuffix
+            if let apiKey = keychainService.load(account: tieredAccount), !apiKey.isEmpty {
+                Log.llm.debug("Using \(tier.rawValue) API key for \(provider.displayName)")
+                return apiKey
+            }
+        }
+
+        // Fall back to standard (default) key
         guard let apiKey = keychainService.load(account: provider.keychainAccount),
               !apiKey.isEmpty else {
             return nil
@@ -84,16 +96,18 @@ struct ModelRouter {
             return resolvePrimary(agentConfig: agentConfig)
         }
 
+        let preferredTier = APIKeyTier.preferredTier(for: complexity)
+
         switch complexity {
         case .light:
             if let model = resolveConfiguredModel(
                 providerRaw: settings.lightModelProvider,
                 modelName: settings.lightModelName,
-                label: "light"
+                label: "light",
+                tier: preferredTier
             ) {
                 return model
             }
-            // Fall through to primary if not configured
             return resolvePrimary(agentConfig: agentConfig)
 
         case .standard:
@@ -103,28 +117,29 @@ struct ModelRouter {
             if let model = resolveConfiguredModel(
                 providerRaw: settings.heavyModelProvider,
                 modelName: settings.heavyModelName,
-                label: "heavy"
+                label: "heavy",
+                tier: preferredTier
             ) {
                 return model
             }
-            // Fall through to primary if not configured
             return resolvePrimary(agentConfig: agentConfig)
         }
     }
 
     /// Resolve a model from explicit provider/model strings (used for tier overrides).
-    private func resolveConfiguredModel(providerRaw: String, modelName: String, label: String) -> ResolvedModel? {
+    /// Tries the specified tier first, then falls back to standard tier.
+    private func resolveConfiguredModel(providerRaw: String, modelName: String, label: String, tier: APIKeyTier = .standard) -> ResolvedModel? {
         guard !providerRaw.isEmpty, !modelName.isEmpty,
               let provider = LLMProvider(rawValue: providerRaw) else {
             return nil
         }
 
-        guard let apiKey = resolveAPIKey(for: provider) else {
+        guard let apiKey = resolveAPIKey(for: provider, tier: tier) else {
             Log.llm.warning("Task routing: \(label) model \(modelName) has no API key for \(provider.displayName)")
             return nil
         }
 
-        Log.llm.info("Task routing: using \(label) model \(provider.displayName)/\(modelName)")
+        Log.llm.info("Task routing: using \(label) model \(provider.displayName)/\(modelName) (tier: \(tier.rawValue))")
         return ResolvedModel(provider: provider, model: modelName, apiKey: apiKey, isFallback: false)
     }
 
