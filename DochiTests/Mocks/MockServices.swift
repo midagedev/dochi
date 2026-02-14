@@ -320,6 +320,7 @@ final class MockSoundService: SoundServiceProtocol {
 @MainActor
 final class MockTelegramService: TelegramServiceProtocol {
     var isPolling = false
+    var isWebhookActive = false
     var onMessage: (@MainActor @Sendable (TelegramUpdate) -> Void)?
 
     var sentMessages: [(chatId: Int64, text: String)] = []
@@ -327,10 +328,30 @@ final class MockTelegramService: TelegramServiceProtocol {
     var chatActions: [(chatId: Int64, action: String)] = []
     var sentPhotos: [(chatId: Int64, filePath: String, caption: String?)] = []
     var sentMediaGroups: [(chatId: Int64, items: [TelegramMediaItem])] = []
+    var webhookCalls: [(token: String, url: String)] = []
     var nextMessageId: Int64 = 1000
 
     func startPolling(token: String) { isPolling = true }
     func stopPolling() { isPolling = false }
+
+    func startWebhook(token: String, url: String, port: UInt16) async throws {
+        isWebhookActive = true
+        webhookCalls.append((token: token, url: url))
+    }
+
+    func stopWebhook() async throws {
+        isWebhookActive = false
+    }
+
+    func setWebhook(token: String, url: String) async throws {
+        webhookCalls.append((token: token, url: url))
+    }
+
+    func deleteWebhook(token: String) async throws {}
+
+    func getWebhookInfo(token: String) async throws -> TelegramWebhookInfo {
+        TelegramWebhookInfo(url: "", hasCustomCertificate: false, pendingUpdateCount: 0, lastErrorDate: nil, lastErrorMessage: nil)
+    }
 
     func sendMessage(chatId: Int64, text: String) async throws -> Int64 {
         let msgId = nextMessageId
