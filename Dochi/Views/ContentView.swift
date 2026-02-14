@@ -234,6 +234,19 @@ struct SidebarView: View {
                                 viewModel.renameConversation(id: conversation.id, title: "")
                             }
                             Divider()
+                            Menu("내보내기") {
+                                Button {
+                                    viewModel.exportConversation(id: conversation.id, format: .markdown)
+                                } label: {
+                                    Label("마크다운 (.md)", systemImage: "doc.text")
+                                }
+                                Button {
+                                    viewModel.exportConversation(id: conversation.id, format: .json)
+                                } label: {
+                                    Label("JSON (.json)", systemImage: "doc.badge.gearshape")
+                                }
+                            }
+                            Divider()
                             Button(role: .destructive) {
                                 viewModel.deleteConversation(id: conversation.id)
                             } label: {
