@@ -166,6 +166,7 @@ final class ShellToolTests: XCTestCase {
 
     func testNonZeroExitCode() async {
         let tool = makeTool()
+        tool.confirmationHandler = { _, _ in true }
         let result = await tool.execute(arguments: ["command": "exit 42"])
         XCTAssertFalse(result.isError) // Tool reports result, not error
         XCTAssertTrue(result.content.contains("exit code: 42"))
@@ -279,6 +280,42 @@ final class ShellToolTests: XCTestCase {
         let result = await tool.execute(arguments: ["command": "sudo rm -rf /"])
         XCTAssertTrue(result.isError)
         XCTAssertTrue(result.content.contains("차단"))
+    }
+
+    // MARK: - Nil Handler Safety
+
+    func testConfirmCommandBlockedWhenNoHandler() async {
+        let wsId = sessionContext.workspaceId
+        let customShell = ShellPermissionConfig(
+            blockedCommands: [],
+            confirmCommands: ["deploy"],
+            allowedCommands: []
+        )
+        let config = AgentConfig(name: "도치", shellPermissions: customShell)
+        contextService.saveAgentConfig(workspaceId: wsId, config: config)
+
+        let tool = makeTool()
+        // confirmationHandler is nil — should block, not execute
+        let result = await tool.execute(arguments: ["command": "deploy production"])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("확인 핸들러"))
+    }
+
+    func testDefaultCategoryBlockedWhenNoHandler() async {
+        let wsId = sessionContext.workspaceId
+        let customShell = ShellPermissionConfig(
+            blockedCommands: [],
+            confirmCommands: [],
+            allowedCommands: []
+        )
+        let config = AgentConfig(name: "도치", shellPermissions: customShell)
+        contextService.saveAgentConfig(workspaceId: wsId, config: config)
+
+        let tool = makeTool()
+        // confirmationHandler is nil — should block, not execute
+        let result = await tool.execute(arguments: ["command": "python3 script.py"])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("확인 핸들러"))
     }
 
     // MARK: - Registry Integration
