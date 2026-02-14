@@ -12,6 +12,9 @@ protocol BuiltInToolServiceProtocol {
     /// Returns summaries of non-baseline tools (name, description, category) for system prompt.
     var nonBaselineToolSummaries: [(name: String, description: String, category: ToolCategory)] { get }
 
+    /// Returns info about all registered tools for UI display.
+    var allToolInfos: [ToolInfo] { get }
+
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]]
     func execute(name: String, arguments: [String: Any]) async -> ToolResult
     func enableTools(names: [String])

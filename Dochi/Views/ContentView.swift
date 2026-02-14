@@ -9,6 +9,7 @@ struct ContentView: View {
     @Bindable var viewModel: DochiViewModel
     var supabaseService: SupabaseServiceProtocol?
     @State private var showContextInspector = false
+    @State private var showCapabilityCatalog = false
     @State private var selectedSection: MainSection = .chat
 
     var body: some View {
@@ -65,10 +66,13 @@ struct ContentView: View {
 
                         // Conversation area
                         if viewModel.currentConversation == nil || (viewModel.currentConversation?.messages.isEmpty == true) {
-                            EmptyConversationView { prompt in
-                                viewModel.inputText = prompt
-                                viewModel.sendMessage()
-                            }
+                            EmptyConversationView(
+                                onSelectPrompt: { prompt in
+                                    viewModel.inputText = prompt
+                                    viewModel.sendMessage()
+                                },
+                                onShowCatalog: { showCapabilityCatalog = true }
+                            )
                         } else {
                             ConversationView(
                                 messages: viewModel.currentConversation?.messages ?? [],
@@ -95,12 +99,22 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     if selectedSection == .chat {
-                        Button {
-                            showContextInspector = true
-                        } label: {
-                            Label("컨텍스트", systemImage: "doc.text.magnifyingglass")
+                        HStack(spacing: 4) {
+                            Button {
+                                showCapabilityCatalog = true
+                            } label: {
+                                Label("기능", systemImage: "square.grid.2x2")
+                            }
+                            .help("기능 카탈로그 (⌘⇧F)")
+                            .keyboardShortcut("f", modifiers: [.command, .shift])
+
+                            Button {
+                                showContextInspector = true
+                            } label: {
+                                Label("컨텍스트", systemImage: "doc.text.magnifyingglass")
+                            }
+                            .help("컨텍스트 인스펙터")
                         }
-                        .help("컨텍스트 인스펙터")
                     }
                 }
             }
@@ -115,6 +129,15 @@ struct ContentView: View {
                 contextService: viewModel.contextService,
                 settings: viewModel.settings,
                 sessionContext: viewModel.sessionContext
+            )
+        }
+        .sheet(isPresented: $showCapabilityCatalog) {
+            CapabilityCatalogView(
+                toolInfos: viewModel.allToolInfos,
+                onSelectPrompt: { prompt in
+                    viewModel.inputText = prompt
+                    viewModel.sendMessage()
+                }
             )
         }
         // Keyboard shortcut: Escape to cancel
@@ -521,59 +544,88 @@ struct ErrorBannerView: View {
 
 struct InputBarView: View {
     @Bindable var viewModel: DochiViewModel
+    @State private var showSlashCommands = false
+
+    private var matchingCommands: [SlashCommand] {
+        FeatureCatalog.matchingCommands(for: viewModel.inputText)
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Microphone button (voice mode)
-            if viewModel.isVoiceMode {
-                microphoneButton
-            }
-
-            TextField("메시지를 입력하세요...", text: $viewModel.inputText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .padding(8)
-                .onSubmit {
-                    if !NSEvent.modifierFlags.contains(.shift) {
-                        viewModel.sendMessage()
+        VStack(spacing: 0) {
+            // 슬래시 명령 팝업
+            if showSlashCommands && !matchingCommands.isEmpty {
+                SlashCommandPopoverView(
+                    commands: matchingCommands,
+                    onSelect: { command in
+                        applySlashCommand(command)
                     }
+                )
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            HStack(spacing: 8) {
+                // Microphone button (voice mode)
+                if viewModel.isVoiceMode {
+                    microphoneButton
                 }
 
-            if viewModel.interactionState == .processing {
-                Button {
-                    viewModel.cancelRequest()
-                } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.red.opacity(0.8))
+                TextField("메시지 입력... /로 명령어", text: $viewModel.inputText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...5)
+                    .padding(8)
+                    .onSubmit {
+                        if !NSEvent.modifierFlags.contains(.shift) {
+                            if showSlashCommands && !matchingCommands.isEmpty {
+                                applySlashCommand(matchingCommands[0])
+                            } else {
+                                viewModel.sendMessage()
+                            }
+                        }
+                    }
+                    .onChange(of: viewModel.inputText) { _, newValue in
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            showSlashCommands = newValue.hasPrefix("/") && viewModel.interactionState == .idle
+                        }
+                    }
+
+                if viewModel.interactionState == .processing {
+                    Button {
+                        viewModel.cancelRequest()
+                    } label: {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.red.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .help("취소")
+                } else if viewModel.interactionState == .speaking {
+                    Button {
+                        viewModel.handleBargeIn()
+                    } label: {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.orange.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .help("말하기 중단")
+                } else {
+                    Button {
+                        viewModel.sendMessage()
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(canSend ? Color.accentColor : .secondary.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSend)
+                    .help("전송")
                 }
-                .buttonStyle(.plain)
-                .help("취소")
-            } else if viewModel.interactionState == .speaking {
-                Button {
-                    viewModel.handleBargeIn()
-                } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.orange.opacity(0.8))
-                }
-                .buttonStyle(.plain)
-                .help("말하기 중단")
-            } else {
-                Button {
-                    viewModel.sendMessage()
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(canSend ? Color.accentColor : .secondary.opacity(0.5))
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .help("전송")
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -605,22 +657,33 @@ struct InputBarView: View {
         viewModel.interactionState == .idle &&
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    private func applySlashCommand(_ command: SlashCommand) {
+        showSlashCommands = false
+        if command.name == "/도움말" {
+            // 도움말은 특별 처리 — 카탈로그 열기가 아닌 간단한 안내 메시지
+            viewModel.inputText = "사용 가능한 기능 전체 목록 보여줘"
+        } else if !command.example.isEmpty {
+            viewModel.inputText = command.example
+        } else {
+            viewModel.inputText = command.description
+        }
+        viewModel.sendMessage()
+    }
 }
 
 // MARK: - Empty Conversation View
 
 struct EmptyConversationView: View {
     let onSelectPrompt: (String) -> Void
+    var onShowCatalog: (() -> Void)?
 
-    private let examplePrompts = [
-        "오늘 날씨 알려줘",
-        "일정 관리해줘",
-        "코드 리뷰 도와줘",
-        "오늘 할 일 정리해줘",
-    ]
+    private var contextualSuggestions: [FeatureSuggestion] {
+        FeatureCatalog.contextualSuggestions()
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Spacer()
 
             Image(systemName: "bubble.left.and.bubble.right")
@@ -631,20 +694,59 @@ struct EmptyConversationView: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 8) {
-                ForEach(examplePrompts, id: \.self) { prompt in
-                    Button {
-                        onSelectPrompt(prompt)
-                    } label: {
-                        Text(prompt)
-                            .font(.system(size: 12))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(.quaternary.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+            Text("아래에서 골라보거나, 자유롭게 입력하세요. / 로 시작하면 명령 목록이 나타납니다.")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+
+            // 카테고리별 제안
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(contextualSuggestions) { suggestion in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: suggestion.icon)
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.accentColor)
+                            Text(suggestion.category)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ForEach(suggestion.prompts, id: \.self) { prompt in
+                            Button {
+                                onSelectPrompt(prompt)
+                            } label: {
+                                Text(prompt)
+                                    .font(.system(size: 12))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(.quaternary.opacity(0.5))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: 200)
                 }
+            }
+            .padding(.horizontal, 20)
+
+            // 기능 카탈로그 링크
+            if let onShowCatalog {
+                Button {
+                    onShowCatalog()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 11))
+                        Text("모든 기능 보기")
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
             }
 
             Spacer()

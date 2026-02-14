@@ -28,6 +28,7 @@ final class DochiViewModel {
 
     private let llmService: LLMServiceProtocol
     private var toolService: BuiltInToolServiceProtocol
+    var allToolInfos: [ToolInfo] { toolService.allToolInfos }
     let contextService: ContextServiceProtocol
     private let conversationService: ConversationServiceProtocol
     private let keychainService: KeychainServiceProtocol
