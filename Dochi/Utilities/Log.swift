@@ -2,7 +2,11 @@ import Foundation
 import os
 
 enum Log {
-    private static let subsystem = "com.dochi.app"
+    static let subsystem = "com.dochi.app"
+
+    static let allCategories: [String] = [
+        "App", "LLM", "STT", "TTS", "MCP", "Tool", "Storage", "Cloud", "Telegram", "Avatar"
+    ]
 
     static let app = Logger(subsystem: subsystem, category: "App")
     static let llm = Logger(subsystem: subsystem, category: "LLM")

@@ -152,8 +152,7 @@ final class SpeechService: SpeechServiceProtocol {
             }
         }
 
-        // Start the silence timer
-        resetSilenceTimer(timeout: silenceTimeout)
+        // Silence timer starts only after first speech is detected (in handleRecognitionResult)
     }
 
     // MARK: - Stop listening
@@ -218,12 +217,6 @@ final class SpeechService: SpeechServiceProtocol {
 
             guard let self, self.isListening else { return }
             Log.stt.info("Silence timeout reached (\(timeout)s)")
-            // Keep session open while waiting for first utterance.
-            // Otherwise voice mode can loop stop/start with empty results.
-            if self.bestTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                self.resetSilenceTimer(timeout: timeout)
-                return
-            }
             self.deliverFinalResult()
         }
     }

@@ -190,6 +190,11 @@ struct DochiApp: App {
                 }
         }
 
+        Window("로그 뷰어", id: "log-viewer") {
+            LogViewerView()
+        }
+        .defaultSize(width: 1000, height: 600)
+
         Settings {
             SettingsView(
                 settings: settings,
@@ -202,6 +207,9 @@ struct DochiApp: App {
                 supabaseService: supabaseService,
                 toolService: toolService
             )
+        }
+        .commands {
+            DebugCommands()
         }
     }
 
@@ -219,5 +227,19 @@ struct DochiApp: App {
             }
         }
         Log.app.info("Restored \(servers.count) MCP server(s) from settings")
+    }
+}
+
+struct DebugCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Divider()
+            Button("로그 뷰어") {
+                openWindow(id: "log-viewer")
+            }
+            .keyboardShortcut("L", modifiers: [.command, .shift])
+        }
     }
 }
