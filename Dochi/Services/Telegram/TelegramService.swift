@@ -233,6 +233,175 @@ final class TelegramService: TelegramServiceProtocol {
         )
     }
 
+    func sendPhoto(chatId: Int64, filePath: String, caption: String?) async throws -> Int64 {
+        guard let token else { throw TelegramError.invalidToken }
+
+        let result: APISendMessageResult = try await uploadFile(
+            token: token,
+            method: "sendPhoto",
+            chatId: chatId,
+            fieldName: "photo",
+            filePath: filePath,
+            caption: caption
+        )
+
+        Log.telegram.debug("사진 전송 완료: chatId=\(chatId), messageId=\(result.messageId)")
+        return result.messageId
+    }
+
+    func sendMediaGroup(chatId: Int64, items: [TelegramMediaItem]) async throws {
+        guard let token else { throw TelegramError.invalidToken }
+        guard !items.isEmpty else { return }
+
+        // Telegram limits media groups to 2-10 items
+        let limited = Array(items.prefix(10))
+
+        // If only 1 item, use sendPhoto instead
+        if limited.count == 1 {
+            _ = try await sendPhoto(chatId: chatId, filePath: limited[0].filePath, caption: limited[0].caption)
+            return
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let urlString = "\(TelegramConstants.baseURL)\(token)/sendMediaGroup"
+        guard let url = URL(string: urlString) else {
+            throw TelegramError.invalidToken
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        var mediaArray: [[String: Any]] = []
+
+        for (index, item) in limited.enumerated() {
+            let fieldName = "photo\(index)"
+            mediaArray.append({
+                var m: [String: Any] = [
+                    "type": "photo",
+                    "media": "attach://\(fieldName)",
+                ]
+                if let caption = item.caption {
+                    m["caption"] = caption
+                }
+                return m
+            }())
+
+            // Attach file data
+            guard let fileData = FileManager.default.contents(atPath: item.filePath) else {
+                Log.telegram.warning("미디어 그룹: 파일 읽기 실패 \(item.filePath)")
+                continue
+            }
+            let fileName = (item.filePath as NSString).lastPathComponent
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+            body.append(fileData)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+
+        // Add chat_id field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(chatId)\r\n".data(using: .utf8)!)
+
+        // Add media JSON array field
+        let mediaJSON = try JSONSerialization.data(withJSONObject: mediaArray)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"media\"\r\n\r\n".data(using: .utf8)!)
+        body.append(mediaJSON)
+        body.append("\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        request.httpBody = body
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            let errorBody = String(data: data, encoding: .utf8) ?? ""
+            Log.telegram.error("미디어 그룹 전송 실패: \(errorBody)")
+            throw TelegramError.apiError((response as? HTTPURLResponse)?.statusCode ?? 0, errorBody)
+        }
+
+        Log.telegram.info("미디어 그룹 전송 완료: chatId=\(chatId), \(limited.count)장")
+    }
+
+    // MARK: - Private: File Upload
+
+    private nonisolated func uploadFile(
+        token: String,
+        method: String,
+        chatId: Int64,
+        fieldName: String,
+        filePath: String,
+        caption: String?
+    ) async throws -> APISendMessageResult {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let urlString = "\(TelegramConstants.baseURL)\(token)/\(method)"
+        guard let url = URL(string: urlString) else {
+            throw TelegramError.invalidToken
+        }
+
+        guard let fileData = FileManager.default.contents(atPath: filePath) else {
+            throw TelegramError.networkError("파일을 읽을 수 없습니다: \(filePath)")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+
+        // chat_id field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(chatId)\r\n".data(using: .utf8)!)
+
+        // File field
+        let fileName = (filePath as NSString).lastPathComponent
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        // Caption field (optional)
+        if let caption, !caption.isEmpty {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"caption\"\r\n\r\n".data(using: .utf8)!)
+            body.append(caption.data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        request.httpBody = body
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw TelegramError.networkError("잘못된 HTTP 응답")
+        }
+
+        let decoded: TelegramResponse<APISendMessageResult>
+        do {
+            decoded = try JSONDecoder().decode(TelegramResponse<APISendMessageResult>.self, from: data)
+        } catch {
+            throw TelegramError.networkError("JSON 파싱 실패: \(error.localizedDescription)")
+        }
+
+        guard decoded.ok, let result = decoded.result else {
+            let code = decoded.errorCode ?? httpResponse.statusCode
+            let desc = decoded.description ?? "알 수 없는 오류"
+            throw TelegramError.apiError(code, desc)
+        }
+
+        return result
+    }
+
     func getMe(token: String) async throws -> TelegramUser {
         let apiUser: APIUser = try await callAPI(
             token: token,

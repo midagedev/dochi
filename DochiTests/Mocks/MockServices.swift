@@ -325,6 +325,8 @@ final class MockTelegramService: TelegramServiceProtocol {
     var sentMessages: [(chatId: Int64, text: String)] = []
     var editedMessages: [(chatId: Int64, messageId: Int64, text: String)] = []
     var chatActions: [(chatId: Int64, action: String)] = []
+    var sentPhotos: [(chatId: Int64, filePath: String, caption: String?)] = []
+    var sentMediaGroups: [(chatId: Int64, items: [TelegramMediaItem])] = []
     var nextMessageId: Int64 = 1000
 
     func startPolling(token: String) { isPolling = true }
@@ -343,6 +345,17 @@ final class MockTelegramService: TelegramServiceProtocol {
 
     func sendChatAction(chatId: Int64, action: String) async throws {
         chatActions.append((chatId: chatId, action: action))
+    }
+
+    func sendPhoto(chatId: Int64, filePath: String, caption: String?) async throws -> Int64 {
+        let msgId = nextMessageId
+        nextMessageId += 1
+        sentPhotos.append((chatId: chatId, filePath: filePath, caption: caption))
+        return msgId
+    }
+
+    func sendMediaGroup(chatId: Int64, items: [TelegramMediaItem]) async throws {
+        sentMediaGroups.append((chatId: chatId, items: items))
     }
 
     func getMe(token: String) async throws -> TelegramUser {
