@@ -101,10 +101,26 @@ struct DochiApp: App {
             viewModel.injectProactiveMessage(message)
         }
 
-        // Start Telegram polling if enabled
+        // Start Telegram connection if enabled
         if settings.telegramEnabled,
            let token = keychainService.load(account: "telegram_bot_token"), !token.isEmpty {
-            telegramService.startPolling(token: token)
+            let mode = TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling
+            if mode == .webhook, !settings.telegramWebhookURL.isEmpty {
+                Task {
+                    do {
+                        try await telegramService.startWebhook(
+                            token: token,
+                            url: settings.telegramWebhookURL,
+                            port: UInt16(settings.telegramWebhookPort)
+                        )
+                    } catch {
+                        Log.telegram.error("웹훅 시작 실패: \(error.localizedDescription)")
+                        telegramService.startPolling(token: token)
+                    }
+                }
+            } else {
+                telegramService.startPolling(token: token)
+            }
         }
 
         // Restore MCP servers from AppStorage

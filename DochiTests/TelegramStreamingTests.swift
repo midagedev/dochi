@@ -210,6 +210,124 @@ final class TelegramStreamingTests: XCTestCase {
         XCTAssertTrue(settings.isTelegramHost)
     }
 
+    // MARK: - Connection Mode
+
+    func testConnectionModeDefaultsToPolling() {
+        let settings = AppSettings()
+        XCTAssertEqual(
+            TelegramConnectionMode(rawValue: settings.telegramConnectionMode),
+            .polling
+        )
+    }
+
+    func testConnectionModeDisplayNames() {
+        XCTAssertEqual(TelegramConnectionMode.polling.displayName, "폴링")
+        XCTAssertEqual(TelegramConnectionMode.webhook.displayName, "웹훅")
+    }
+
+    func testConnectionModeCodable() throws {
+        for mode in TelegramConnectionMode.allCases {
+            let data = try JSONEncoder().encode(mode)
+            let decoded = try JSONDecoder().decode(TelegramConnectionMode.self, from: data)
+            XCTAssertEqual(decoded, mode)
+        }
+    }
+
+    // MARK: - Webhook Mock
+
+    func testMockStartWebhook() async throws {
+        let tg = MockTelegramService()
+        XCTAssertFalse(tg.isWebhookActive)
+        try await tg.startWebhook(token: "test", url: "https://example.com/webhook", port: 8443)
+        XCTAssertTrue(tg.isWebhookActive)
+        XCTAssertEqual(tg.webhookCalls.count, 1)
+        XCTAssertEqual(tg.webhookCalls[0].url, "https://example.com/webhook")
+    }
+
+    func testMockStopWebhook() async throws {
+        let tg = MockTelegramService()
+        try await tg.startWebhook(token: "test", url: "https://example.com/webhook", port: 8443)
+        try await tg.stopWebhook()
+        XCTAssertFalse(tg.isWebhookActive)
+    }
+
+    func testMockSetWebhook() async throws {
+        let tg = MockTelegramService()
+        try await tg.setWebhook(token: "test", url: "https://example.com/webhook")
+        XCTAssertEqual(tg.webhookCalls.count, 1)
+    }
+
+    func testMockDeleteWebhook() async throws {
+        let tg = MockTelegramService()
+        try await tg.deleteWebhook(token: "test") // Should not throw
+    }
+
+    func testMockGetWebhookInfo() async throws {
+        let tg = MockTelegramService()
+        let info = try await tg.getWebhookInfo(token: "test")
+        XCTAssertEqual(info.url, "")
+        XCTAssertEqual(info.pendingUpdateCount, 0)
+    }
+
+    // MARK: - Webhook Settings
+
+    func testWebhookSettingsDefaults() {
+        let settings = AppSettings()
+        XCTAssertEqual(settings.telegramWebhookPort, 8443)
+        XCTAssertEqual(settings.telegramWebhookURL, "")
+    }
+
+    // MARK: - WebhookInfo Model
+
+    func testWebhookInfoInit() {
+        let info = TelegramWebhookInfo(
+            url: "https://example.com/webhook",
+            hasCustomCertificate: false,
+            pendingUpdateCount: 5,
+            lastErrorDate: 1234567890,
+            lastErrorMessage: "Connection refused"
+        )
+        XCTAssertEqual(info.url, "https://example.com/webhook")
+        XCTAssertFalse(info.hasCustomCertificate)
+        XCTAssertEqual(info.pendingUpdateCount, 5)
+        XCTAssertEqual(info.lastErrorDate, 1234567890)
+        XCTAssertEqual(info.lastErrorMessage, "Connection refused")
+    }
+
+    func testWebhookInfoNilErrors() {
+        let info = TelegramWebhookInfo(
+            url: "",
+            hasCustomCertificate: false,
+            pendingUpdateCount: 0,
+            lastErrorDate: nil,
+            lastErrorMessage: nil
+        )
+        XCTAssertNil(info.lastErrorDate)
+        XCTAssertNil(info.lastErrorMessage)
+    }
+
+    // MARK: - HTTP Body Extraction
+
+    func testExtractHTTPBody() {
+        let httpData = "POST /webhook HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"update_id\":123}".data(using: .utf8)!
+        let body = TelegramService.extractHTTPBody(from: httpData)
+        XCTAssertNotNil(body)
+        let bodyStr = String(data: body!, encoding: .utf8)
+        XCTAssertEqual(bodyStr, "{\"update_id\":123}")
+    }
+
+    func testExtractHTTPBodyNoSeparator() {
+        let data = "no separator here".data(using: .utf8)!
+        let body = TelegramService.extractHTTPBody(from: data)
+        XCTAssertNil(body)
+    }
+
+    func testExtractHTTPBodyEmptyBody() {
+        let data = "HTTP/1.1 200 OK\r\n\r\n".data(using: .utf8)!
+        let body = TelegramService.extractHTTPBody(from: data)
+        XCTAssertNil(body)
+    }
+
     // Helper: replicates TelegramService.offsetKey logic for testing
     private func offsetKey(for token: String) -> String {
         let hash = SHA256.hash(data: Data(token.utf8))

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Network
 import os
 
 // MARK: - Models
@@ -61,7 +62,7 @@ private struct TelegramResponse<T: Decodable>: Decodable {
     }
 }
 
-private struct APIUpdate: Decodable {
+struct APIUpdate: Decodable {
     let updateId: Int64
     let message: APIMessage?
 
@@ -71,7 +72,7 @@ private struct APIUpdate: Decodable {
     }
 }
 
-private struct APIMessage: Decodable {
+struct APIMessage: Decodable {
     let messageId: Int64
     let from: APIUser?
     let chat: APIChat
@@ -85,7 +86,7 @@ private struct APIMessage: Decodable {
     }
 }
 
-private struct APIUser: Decodable {
+struct APIUser: Decodable {
     let id: Int64
     let isBot: Bool
     let firstName: String
@@ -99,7 +100,7 @@ private struct APIUser: Decodable {
     }
 }
 
-private struct APIChat: Decodable {
+struct APIChat: Decodable {
     let id: Int64
     let type: String
 }
@@ -109,6 +110,22 @@ private struct APISendMessageResult: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case messageId = "message_id"
+    }
+}
+
+private struct WebhookInfoResult: Decodable {
+    let url: String
+    let hasCustomCertificate: Bool
+    let pendingUpdateCount: Int
+    let lastErrorDate: Int?
+    let lastErrorMessage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url
+        case hasCustomCertificate = "has_custom_certificate"
+        case pendingUpdateCount = "pending_update_count"
+        case lastErrorDate = "last_error_date"
+        case lastErrorMessage = "last_error_message"
     }
 }
 
@@ -128,11 +145,13 @@ final class TelegramService: TelegramServiceProtocol {
     // MARK: - Properties
 
     private(set) var isPolling = false
+    private(set) var isWebhookActive = false
     var onMessage: (@MainActor @Sendable (TelegramUpdate) -> Void)?
 
     private var token: String?
     private var pollingTask: Task<Void, Never>?
     private var lastUpdateId: Int64?
+    private var webhookListener: NWListener?
 
     private let session: URLSession
 
@@ -417,6 +436,134 @@ final class TelegramService: TelegramServiceProtocol {
             firstName: apiUser.firstName,
             username: apiUser.username
         )
+    }
+
+    // MARK: - Webhook API
+
+    func setWebhook(token: String, url: String) async throws {
+        let params: [String: Any] = [
+            "url": url,
+            "allowed_updates": ["message"],
+        ]
+        let _: Bool = try await callAPI(token: token, method: "setWebhook", params: params)
+        Log.telegram.info("웹훅 설정 완료: \(url)")
+    }
+
+    func deleteWebhook(token: String) async throws {
+        let _: Bool = try await callAPI(token: token, method: "deleteWebhook", params: nil)
+        Log.telegram.info("웹훅 삭제 완료")
+    }
+
+    func getWebhookInfo(token: String) async throws -> TelegramWebhookInfo {
+        let info: WebhookInfoResult = try await callAPI(token: token, method: "getWebhookInfo", params: nil)
+        return TelegramWebhookInfo(
+            url: info.url,
+            hasCustomCertificate: info.hasCustomCertificate,
+            pendingUpdateCount: info.pendingUpdateCount,
+            lastErrorDate: info.lastErrorDate,
+            lastErrorMessage: info.lastErrorMessage
+        )
+    }
+
+    // MARK: - Webhook Server
+
+    func startWebhook(token: String, url: String, port: UInt16) async throws {
+        guard !isWebhookActive else {
+            Log.telegram.warning("웹훅 서버가 이미 실행 중")
+            return
+        }
+
+        // Stop polling if active
+        if isPolling { stopPolling() }
+
+        self.token = token
+
+        // Set webhook on Telegram's side
+        try await setWebhook(token: token, url: url)
+
+        // Start local HTTP listener
+        let params = NWParameters.tcp
+        let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+        self.webhookListener = listener
+
+        listener.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor in
+                switch state {
+                case .ready:
+                    Log.telegram.info("웹훅 서버 시작: 포트 \(port)")
+                    self?.isWebhookActive = true
+                case .failed(let error):
+                    Log.telegram.error("웹훅 서버 실패: \(error.localizedDescription)")
+                    self?.isWebhookActive = false
+                case .cancelled:
+                    Log.telegram.info("웹훅 서버 중지")
+                    self?.isWebhookActive = false
+                default:
+                    break
+                }
+            }
+        }
+
+        listener.newConnectionHandler = { [weak self] connection in
+            self?.handleWebhookConnection(connection)
+        }
+
+        listener.start(queue: .global(qos: .userInteractive))
+        isWebhookActive = true
+    }
+
+    func stopWebhook() async throws {
+        webhookListener?.cancel()
+        webhookListener = nil
+        isWebhookActive = false
+
+        if let token {
+            try await deleteWebhook(token: token)
+        }
+
+        Log.telegram.info("웹훅 중지 완료")
+    }
+
+    private nonisolated func handleWebhookConnection(_ connection: NWConnection) {
+        connection.start(queue: .global(qos: .userInteractive))
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
+            defer {
+                // Send 200 OK response
+                let response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+                connection.send(content: response.data(using: .utf8), completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+            }
+
+            guard let data, error == nil else {
+                Log.telegram.warning("웹훅 연결 오류: \(error?.localizedDescription ?? "데이터 없음")")
+                return
+            }
+
+            // Parse HTTP body from raw TCP data
+            guard let bodyData = Self.extractHTTPBody(from: data) else {
+                return
+            }
+
+            // Decode Telegram update
+            let decoder = JSONDecoder()
+            guard let apiUpdate = try? decoder.decode(APIUpdate.self, from: bodyData) else {
+                Log.telegram.warning("웹훅 JSON 파싱 실패")
+                return
+            }
+
+            Task { @MainActor in
+                self?.handleUpdate(apiUpdate)
+            }
+        }
+    }
+
+    /// Extracts the HTTP body from raw TCP data by finding the \r\n\r\n separator.
+    nonisolated static func extractHTTPBody(from data: Data) -> Data? {
+        let separator = "\r\n\r\n".data(using: .utf8)!
+        guard let range = data.range(of: separator) else { return nil }
+        let body = data[range.upperBound...]
+        return body.isEmpty ? nil : Data(body)
     }
 
     // MARK: - Private: Poll Loop

@@ -55,10 +55,22 @@ struct IntegrationsSettingsView: View {
                     settings.telegramEnabled = newValue
                     if newValue {
                         if let token = keychainService.load(account: "telegram_bot_token"), !token.isEmpty {
-                            telegramService?.startPolling(token: token)
+                            let mode = TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling
+                            if mode == .webhook, !settings.telegramWebhookURL.isEmpty {
+                                Task {
+                                    try? await telegramService?.startWebhook(
+                                        token: token,
+                                        url: settings.telegramWebhookURL,
+                                        port: UInt16(settings.telegramWebhookPort)
+                                    )
+                                }
+                            } else {
+                                telegramService?.startPolling(token: token)
+                            }
                         }
                     } else {
                         telegramService?.stopPolling()
+                        Task { try? await telegramService?.stopWebhook() }
                     }
                 }
             ))
@@ -117,6 +129,48 @@ struct IntegrationsSettingsView: View {
                 get: { settings.telegramStreamReplies },
                 set: { settings.telegramStreamReplies = $0 }
             ))
+
+            Picker("연결 모드", selection: Binding(
+                get: { TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling },
+                set: { settings.telegramConnectionMode = $0.rawValue }
+            )) {
+                ForEach(TelegramConnectionMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+
+            if TelegramConnectionMode(rawValue: settings.telegramConnectionMode) == .webhook {
+                HStack {
+                    TextField("웹훅 URL", text: Binding(
+                        get: { settings.telegramWebhookURL },
+                        set: { settings.telegramWebhookURL = $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                }
+
+                HStack {
+                    Text("포트")
+                        .font(.caption)
+                    TextField("포트", value: Binding(
+                        get: { settings.telegramWebhookPort },
+                        set: { settings.telegramWebhookPort = $0 }
+                    ), format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                }
+
+                if let tg = telegramService {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(tg.isWebhookActive ? .green : .gray)
+                            .frame(width: 6, height: 6)
+                        Text(tg.isWebhookActive ? "웹훅 활성" : "웹훅 비활성")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
     }
 

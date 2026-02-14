@@ -86,6 +86,18 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(telegramStreamReplies, forKey: "telegramStreamReplies") }
     }
 
+    var telegramConnectionMode: String = UserDefaults.standard.string(forKey: "telegramConnectionMode") ?? TelegramConnectionMode.polling.rawValue {
+        didSet { UserDefaults.standard.set(telegramConnectionMode, forKey: "telegramConnectionMode") }
+    }
+
+    var telegramWebhookURL: String = UserDefaults.standard.string(forKey: "telegramWebhookURL") ?? "" {
+        didSet { UserDefaults.standard.set(telegramWebhookURL, forKey: "telegramWebhookURL") }
+    }
+
+    var telegramWebhookPort: Int = UserDefaults.standard.object(forKey: "telegramWebhookPort") as? Int ?? 8443 {
+        didSet { UserDefaults.standard.set(telegramWebhookPort, forKey: "telegramWebhookPort") }
+    }
+
     var currentWorkspaceId: String = UserDefaults.standard.string(forKey: "currentWorkspaceId") ?? "00000000-0000-0000-0000-000000000000" {
         didSet { UserDefaults.standard.set(currentWorkspaceId, forKey: "currentWorkspaceId") }
     }
