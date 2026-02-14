@@ -46,6 +46,14 @@ protocol ContextServiceProtocol {
     func saveAgentMemorySnapshot(workspaceId: UUID, agentName: String, content: String)
     func saveUserMemorySnapshot(userId: String, content: String)
 
+    // Conversation tags
+    func loadTags() -> [ConversationTag]
+    func saveTags(_ tags: [ConversationTag])
+
+    // Conversation folders
+    func loadFolders() -> [ConversationFolder]
+    func saveFolders(_ folders: [ConversationFolder])
+
     // Migration
     func migrateIfNeeded()
 }

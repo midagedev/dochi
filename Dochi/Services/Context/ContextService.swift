@@ -244,6 +244,52 @@ final class ContextService: ContextServiceProtocol {
         }
     }
 
+    // MARK: - Conversation Tags
+
+    func loadTags() -> [ConversationTag] {
+        let url = baseURL.appendingPathComponent("conversation_tags.json")
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([ConversationTag].self, from: data)) ?? []
+    }
+
+    func saveTags(_ tags: [ConversationTag]) {
+        let url = baseURL.appendingPathComponent("conversation_tags.json")
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(tags)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            Log.storage.error("Failed to save conversation tags: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Conversation Folders
+
+    func loadFolders() -> [ConversationFolder] {
+        let url = baseURL.appendingPathComponent("conversation_folders.json")
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([ConversationFolder].self, from: data)) ?? []
+    }
+
+    func saveFolders(_ folders: [ConversationFolder]) {
+        let url = baseURL.appendingPathComponent("conversation_folders.json")
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(folders)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            Log.storage.error("Failed to save conversation folders: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Migration
 
     func migrateIfNeeded() {

@@ -31,6 +31,8 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case openShortcutHelp
         case exportConversation
         case toggleKanban
+        case openTagManagement
+        case toggleMultiSelect
         case custom(id: String)
     }
 }
@@ -159,6 +161,22 @@ enum CommandPaletteRegistry {
             subtitle: "⌘⇧K",
             category: .navigation,
             action: .toggleKanban
+        ),
+        CommandPaletteItem(
+            id: "tag-management",
+            icon: "tag",
+            title: "태그 관리",
+            subtitle: "",
+            category: .navigation,
+            action: .openTagManagement
+        ),
+        CommandPaletteItem(
+            id: "toggle-multi-select",
+            icon: "checklist",
+            title: "일괄 선택 모드",
+            subtitle: "⌘⇧M",
+            category: .navigation,
+            action: .toggleMultiSelect
         ),
     ]
 
