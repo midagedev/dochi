@@ -109,6 +109,15 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         // Screenshot (conditional, sensitive)
         registry.register(ScreenshotCaptureTool())
 
+        // File management (conditional: read/list/search=safe, write/move/copy=sensitive, delete=restricted)
+        registry.register(FileReadTool())
+        registry.register(FileWriteTool())
+        registry.register(FileListTool())
+        registry.register(FileSearchTool())
+        registry.register(FileMoveTool())
+        registry.register(FileCopyTool())
+        registry.register(FileDeleteTool())
+
         // Timer (baseline, safe)
         registry.register(SetTimerTool())
         registry.register(ListTimersTool())
