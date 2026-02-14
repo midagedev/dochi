@@ -1276,7 +1276,7 @@ final class DochiViewModel {
 
         switch format {
         case .markdown:
-            panel.allowedContentTypes = [.plainText]
+            panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         case .json:
             panel.allowedContentTypes = [.json]
         }
