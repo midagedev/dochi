@@ -6,19 +6,22 @@ struct ConversationView: View {
     let currentToolName: String?
     let processingSubState: ProcessingSubState?
     let fontSize: Double
+    let toolExecutions: [ToolExecution]
 
     init(
         messages: [Message],
         streamingText: String,
         currentToolName: String? = nil,
         processingSubState: ProcessingSubState? = nil,
-        fontSize: Double = 14.0
+        fontSize: Double = 14.0,
+        toolExecutions: [ToolExecution] = []
     ) {
         self.messages = messages
         self.streamingText = streamingText
         self.currentToolName = currentToolName
         self.processingSubState = processingSubState
         self.fontSize = fontSize
+        self.toolExecutions = toolExecutions
     }
 
     var body: some View {
@@ -66,10 +69,20 @@ struct ConversationView: View {
                             .id("streaming")
                     }
 
-                    // Tool progress indicator
-                    if processingSubState == .toolCalling, let toolName = currentToolName {
-                        toolProgressView(toolName)
-                            .id("tool-progress")
+                    // UX-7: Tool execution cards (replaces old toolProgressView)
+                    if !toolExecutions.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(toolExecutions) { execution in
+                                ToolExecutionCardView(execution: execution)
+                            }
+
+                            // Chain progress (2+ tools)
+                            if toolExecutions.count >= 2 {
+                                ToolChainProgressView(executions: toolExecutions)
+                            }
+                        }
+                        .padding(.leading, 4)
+                        .id("tool-executions")
                     }
 
                     // Scroll anchor
@@ -86,23 +99,10 @@ struct ConversationView: View {
             .onChange(of: streamingText) { _, _ in
                 scrollToBottom(proxy: proxy)
             }
+            .onChange(of: toolExecutions.count) { _, _ in
+                scrollToBottom(proxy: proxy)
+            }
         }
-    }
-
-    // MARK: - Tool Progress
-
-    private func toolProgressView(_ toolName: String) -> some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text("\(toolName) 실행 중...")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.green.opacity(0.08))
-        .cornerRadius(8)
     }
 
     // MARK: - Helpers
@@ -114,7 +114,9 @@ struct ConversationView: View {
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
         withAnimation(.easeOut(duration: 0.15)) {
-            if !streamingText.isEmpty {
+            if !toolExecutions.isEmpty {
+                proxy.scrollTo("tool-executions", anchor: .bottom)
+            } else if !streamingText.isEmpty {
                 proxy.scrollTo("streaming", anchor: .bottom)
             } else if let last = visibleMessages.last {
                 proxy.scrollTo(last.id, anchor: .bottom)

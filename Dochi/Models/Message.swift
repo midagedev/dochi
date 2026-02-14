@@ -43,8 +43,9 @@ struct Message: Codable, Identifiable, Sendable {
     var toolCallId: String?
     var imageURLs: [URL]?
     var metadata: MessageMetadata?
+    var toolExecutionRecords: [ToolExecutionRecord]?
 
-    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCalls: [CodableToolCall]? = nil, toolCallId: String? = nil, imageURLs: [URL]? = nil, metadata: MessageMetadata? = nil) {
+    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCalls: [CodableToolCall]? = nil, toolCallId: String? = nil, imageURLs: [URL]? = nil, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -53,5 +54,19 @@ struct Message: Codable, Identifiable, Sendable {
         self.toolCallId = toolCallId
         self.imageURLs = imageURLs
         self.metadata = metadata
+        self.toolExecutionRecords = toolExecutionRecords
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        role = try container.decode(MessageRole.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        toolCalls = try container.decodeIfPresent([CodableToolCall].self, forKey: .toolCalls)
+        toolCallId = try container.decodeIfPresent(String.self, forKey: .toolCallId)
+        imageURLs = try container.decodeIfPresent([URL].self, forKey: .imageURLs)
+        metadata = try container.decodeIfPresent(MessageMetadata.self, forKey: .metadata)
+        toolExecutionRecords = try container.decodeIfPresent([ToolExecutionRecord].self, forKey: .toolExecutionRecords)
     }
 }

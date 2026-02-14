@@ -24,6 +24,10 @@ final class DochiViewModel {
     var userProfiles: [UserProfile] = []
     var currentUserName: String = "(사용자 없음)"
 
+    // MARK: - Tool Execution Tracking (UX-7)
+    var toolExecutions: [ToolExecution] = []
+    var allToolCardsCollapsed: Bool = true
+
     // MARK: - Conversation Organization
     var conversationTags: [ConversationTag] = []
     var conversationFolders: [ConversationFolder] = []
@@ -561,6 +565,14 @@ final class DochiViewModel {
         }
         loadConversations()
         Log.app.info("Bulk added tag '\(tagName)' to \(self.selectedConversationIds.count) conversations")
+    }
+
+    // MARK: - Tool Execution (UX-7)
+
+    /// Toggle all tool cards collapsed/expanded state.
+    func toggleAllToolCards() {
+        allToolCardsCollapsed.toggle()
+        Log.app.info("Tool cards all \(self.allToolCardsCollapsed ? "collapsed" : "expanded")")
     }
 
     // MARK: - Voice Actions
@@ -1133,6 +1145,9 @@ final class DochiViewModel {
         // Reset sentence chunker for TTS streaming
         sentenceChunker = SentenceChunker()
 
+        // Clear tool executions from previous turn (UX-7)
+        toolExecutions = []
+
         var toolLoopCount = 0
 
         while toolLoopCount <= Self.maxToolLoopIterations + 1 {
@@ -1171,7 +1186,10 @@ final class DochiViewModel {
                     return
                 }
                 streamingText = ""
-                appendAssistantMessage(finalText, metadata: buildMessageMetadata())
+
+                // UX-7: Archive tool execution records to the message
+                let records = toolExecutions.isEmpty ? nil : toolExecutions.map { $0.toRecord() }
+                appendAssistantMessage(finalText, metadata: buildMessageMetadata(), toolExecutionRecords: records)
                 conversation = currentConversation!
                 saveConversation()
 
@@ -1237,10 +1255,31 @@ final class DochiViewModel {
                         arguments: codableCall.arguments
                     )
 
+                    // UX-7: Create live ToolExecution for UI tracking
+                    let info = toolService.toolInfo(named: call.name)
+                    let inputSummary = ToolExecutionSummary.generateInputSummary(from: call.arguments)
+                    let execution = ToolExecution(
+                        toolName: call.name,
+                        toolCallId: call.id,
+                        displayName: info?.description ?? call.name,
+                        category: info?.category ?? .safe,
+                        inputSummary: inputSummary,
+                        loopIndex: toolLoopCount
+                    )
+                    toolExecutions.append(execution)
+
                     let result = await toolService.execute(
                         name: call.name,
                         arguments: call.arguments
                     )
+
+                    // UX-7: Update execution with result
+                    let resultSummary = ToolExecutionSummary.generateResultSummary(from: result.content, isError: result.isError)
+                    if result.isError {
+                        execution.fail(errorSummary: resultSummary, errorFull: result.content)
+                    } else {
+                        execution.complete(resultSummary: resultSummary, resultFull: result.content)
+                    }
 
                     let toolResult = ToolResult(
                         toolCallId: call.id,
@@ -1675,8 +1714,8 @@ final class DochiViewModel {
         currentConversation?.updatedAt = Date()
     }
 
-    private func appendAssistantMessage(_ text: String, metadata: MessageMetadata? = nil) {
-        currentConversation?.messages.append(Message(role: .assistant, content: text, metadata: metadata))
+    private func appendAssistantMessage(_ text: String, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil) {
+        currentConversation?.messages.append(Message(role: .assistant, content: text, metadata: metadata, toolExecutionRecords: toolExecutionRecords))
         currentConversation?.updatedAt = Date()
     }
 

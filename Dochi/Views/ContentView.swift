@@ -112,14 +112,27 @@ struct ContentView: View {
         }
         // Hidden buttons for keyboard shortcuts
         .background { hiddenShortcutButtons }
-        // Keyboard shortcut: Escape to cancel or close palette
+        // Keyboard shortcut: Escape to cancel, deny confirmation, or close palette
         .onKeyPress(.escape) {
             if showCommandPalette {
                 showCommandPalette = false
                 return .handled
             }
+            // UX-7: Escape to deny tool confirmation
+            if viewModel.pendingToolConfirmation != nil {
+                viewModel.respondToToolConfirmation(approved: false)
+                return .handled
+            }
             if selectedSection == .chat, viewModel.interactionState == .processing {
                 viewModel.cancelRequest()
+                return .handled
+            }
+            return .ignored
+        }
+        // UX-7: Enter/Return to approve tool confirmation
+        .onKeyPress(.return) {
+            if viewModel.pendingToolConfirmation != nil {
+                viewModel.respondToToolConfirmation(approved: true)
                 return .handled
             }
             return .ignored
@@ -264,7 +277,8 @@ struct ContentView: View {
                     streamingText: viewModel.streamingText,
                     currentToolName: viewModel.currentToolName,
                     processingSubState: viewModel.processingSubState,
-                    fontSize: viewModel.settings.chatFontSize
+                    fontSize: viewModel.settings.chatFontSize,
+                    toolExecutions: viewModel.toolExecutions
                 )
             }
 
@@ -310,6 +324,13 @@ struct ContentView: View {
                 showWorkspaceSwitcher = true
             }
             .keyboardShortcut("w", modifiers: [.command, .shift])
+            .hidden()
+
+            // ⌘⇧T: Toggle all tool cards (UX-7)
+            Button("") {
+                viewModel.toggleAllToolCards()
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
             .hidden()
 
             // ⌘⇧U: User switcher
@@ -798,8 +819,33 @@ struct ToolConfirmationBannerView: View {
     let toolDescription: String
     let onApprove: () -> Void
     let onDeny: () -> Void
+    let timeoutSeconds: TimeInterval
+
+    @State private var remainingSeconds: Int
+    @State private var timerActive = true
+    @State private var showTimeoutMessage = false
+
+    init(toolName: String, toolDescription: String, onApprove: @escaping () -> Void, onDeny: @escaping () -> Void, timeoutSeconds: TimeInterval = 30) {
+        self.toolName = toolName
+        self.toolDescription = toolDescription
+        self.onApprove = onApprove
+        self.onDeny = onDeny
+        self.timeoutSeconds = timeoutSeconds
+        self._remainingSeconds = State(initialValue: Int(timeoutSeconds))
+    }
+
+    private var isUrgent: Bool { remainingSeconds <= 10 }
+    private var progress: Double { Double(remainingSeconds) / timeoutSeconds }
 
     var body: some View {
+        if showTimeoutMessage {
+            timeoutMessageView
+        } else {
+            bannerContent
+        }
+    }
+
+    private var bannerContent: some View {
         HStack(spacing: 8) {
             Image(systemName: "shield.lefthalf.filled")
                 .foregroundStyle(.orange)
@@ -815,7 +861,24 @@ struct ToolConfirmationBannerView: View {
 
             Spacer()
 
+            // Countdown timer badge
+            ZStack {
+                Circle()
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 2)
+                    .frame(width: 28, height: 28)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(isUrgent ? Color.red : Color.orange, lineWidth: 2)
+                    .frame(width: 28, height: 28)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 1), value: remainingSeconds)
+                Text("\(remainingSeconds)")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(isUrgent ? .red : .secondary)
+            }
+
             Button {
+                timerActive = false
                 onDeny()
             } label: {
                 Text("거부")
@@ -826,6 +889,7 @@ struct ToolConfirmationBannerView: View {
             .buttonStyle(.bordered)
 
             Button {
+                timerActive = false
                 onApprove()
             } label: {
                 Text("허용")
@@ -837,7 +901,45 @@ struct ToolConfirmationBannerView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.08))
+        .background(isUrgent ? Color.red.opacity(0.12) : Color.orange.opacity(0.08))
+        .animation(.easeInOut(duration: 0.3), value: isUrgent)
+        .onAppear {
+            startCountdown()
+        }
+    }
+
+    private var timeoutMessageView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "clock.badge.xmark")
+                .foregroundStyle(.red)
+            Text("시간 초과로 자동 거부됨")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.red)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.08))
+        .transition(.opacity)
+    }
+
+    private func startCountdown() {
+        Task { @MainActor in
+            while timerActive && remainingSeconds > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                guard timerActive else { return }
+                remainingSeconds -= 1
+            }
+
+            guard timerActive else { return }
+
+            // Timeout reached
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showTimeoutMessage = true
+            }
+
+            // Auto-dismiss after 2 seconds
+            try? await Task.sleep(for: .seconds(2))
+        }
     }
 }
 
