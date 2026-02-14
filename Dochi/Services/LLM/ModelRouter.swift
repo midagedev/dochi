@@ -25,8 +25,7 @@ struct ModelRouter {
         // Check agent-level model override
         if let agentModel = agentConfig?.defaultModel, !agentModel.isEmpty,
            let agentProvider = LLMProvider.provider(forModel: agentModel) {
-            if let apiKey = keychainService.load(account: agentProvider.keychainAccount),
-               !apiKey.isEmpty {
+            if let apiKey = resolveAPIKey(for: agentProvider) {
                 Log.llm.info("Using agent model: \(agentProvider.displayName)/\(agentModel)")
                 return ResolvedModel(provider: agentProvider, model: agentModel, apiKey: apiKey, isFallback: false)
             }
@@ -36,8 +35,7 @@ struct ModelRouter {
         // Fall back to app-level settings
         let provider = settings.currentProvider
         let model = settings.llmModel
-        guard let apiKey = keychainService.load(account: provider.keychainAccount),
-              !apiKey.isEmpty else {
+        guard let apiKey = resolveAPIKey(for: provider) else {
             return nil
         }
         return ResolvedModel(provider: provider, model: model, apiKey: apiKey, isFallback: false)
@@ -58,12 +56,24 @@ struct ModelRouter {
             return nil
         }
 
-        guard let apiKey = keychainService.load(account: fallbackProvider.keychainAccount),
-              !apiKey.isEmpty else {
+        guard let apiKey = resolveAPIKey(for: fallbackProvider) else {
             return nil
         }
 
         return ResolvedModel(provider: fallbackProvider, model: fallbackModel, apiKey: apiKey, isFallback: true)
+    }
+
+    /// Resolve API key for a provider. Returns empty string for providers that don't require one.
+    private func resolveAPIKey(for provider: LLMProvider) -> String? {
+        if !provider.requiresAPIKey {
+            // Provider like Ollama doesn't need an API key
+            return keychainService.load(account: provider.keychainAccount) ?? ""
+        }
+        guard let apiKey = keychainService.load(account: provider.keychainAccount),
+              !apiKey.isEmpty else {
+            return nil
+        }
+        return apiKey
     }
 
     /// Whether a given error should trigger fallback to an alternate model.

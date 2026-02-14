@@ -289,14 +289,24 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(LLMProvider.openai.displayName, "OpenAI")
         XCTAssertEqual(LLMProvider.anthropic.displayName, "Anthropic")
         XCTAssertEqual(LLMProvider.zai.displayName, "Z.AI")
+        XCTAssertEqual(LLMProvider.ollama.displayName, "Ollama")
 
         XCTAssertFalse(LLMProvider.openai.models.isEmpty)
         XCTAssertFalse(LLMProvider.anthropic.models.isEmpty)
         XCTAssertFalse(LLMProvider.zai.models.isEmpty)
+        XCTAssertTrue(LLMProvider.ollama.models.isEmpty) // Dynamic
 
         XCTAssertTrue(LLMProvider.openai.apiURL.absoluteString.contains("openai.com"))
         XCTAssertTrue(LLMProvider.anthropic.apiURL.absoluteString.contains("anthropic.com"))
         XCTAssertTrue(LLMProvider.zai.apiURL.absoluteString.contains("z.ai"))
+        XCTAssertTrue(LLMProvider.ollama.apiURL.absoluteString.contains("localhost:11434"))
+    }
+
+    func testLLMProviderRequiresAPIKey() {
+        XCTAssertTrue(LLMProvider.openai.requiresAPIKey)
+        XCTAssertTrue(LLMProvider.anthropic.requiresAPIKey)
+        XCTAssertTrue(LLMProvider.zai.requiresAPIKey)
+        XCTAssertFalse(LLMProvider.ollama.requiresAPIKey)
     }
 
     // MARK: - State Enums
@@ -461,5 +471,60 @@ final class ModelRouterTests: XCTestCase {
         XCTAssertNotNil(resolved)
         XCTAssertEqual(resolved?.provider, .openai)
         XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
+
+    // MARK: - Ollama (no API key required)
+
+    func testResolvePrimaryOllamaWithoutAPIKey() {
+        settings.llmProvider = LLMProvider.ollama.rawValue
+        settings.llmModel = "llama3"
+        // No Ollama API key in keychain
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary()
+
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .ollama)
+        XCTAssertEqual(resolved?.model, "llama3")
+        XCTAssertEqual(resolved?.apiKey, "") // Empty is fine for Ollama
+    }
+
+    func testResolvePrimaryOllamaWithAPIKey() {
+        settings.llmProvider = LLMProvider.ollama.rawValue
+        settings.llmModel = "llama3"
+        keychainService.store["ollama"] = "custom-key"
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary()
+
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .ollama)
+        XCTAssertEqual(resolved?.apiKey, "custom-key")
+    }
+
+    func testResolveFallbackOllama() {
+        settings.fallbackLLMProvider = LLMProvider.ollama.rawValue
+        settings.fallbackLLMModel = "mistral"
+        // No Ollama API key
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolveFallback()
+
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .ollama)
+        XCTAssertEqual(resolved?.model, "mistral")
+        XCTAssertTrue(resolved?.isFallback ?? false)
+    }
+
+    func testResolvePrimaryReturnsNilWithoutAPIKeyForRequiredProvider() {
+        // Ensure non-Ollama providers still fail without API key
+        settings.llmProvider = LLMProvider.zai.rawValue
+        settings.llmModel = "glm-5"
+        // No Z.AI key in keychain
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary()
+
+        XCTAssertNil(resolved)
     }
 }

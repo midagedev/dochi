@@ -4,12 +4,14 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
     case openai
     case anthropic
     case zai
+    case ollama
 
     var displayName: String {
         switch self {
         case .openai: "OpenAI"
         case .anthropic: "Anthropic"
         case .zai: "Z.AI"
+        case .ollama: "Ollama"
         }
     }
 
@@ -18,6 +20,7 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
         case .openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3-mini"]
         case .anthropic: ["claude-sonnet-4-5-20250514", "claude-3-5-haiku-20241022"]
         case .zai: ["glm-5", "glm-4.7"]
+        case .ollama: [] // Dynamic — fetched from running Ollama instance
         }
     }
 
@@ -26,11 +29,20 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
         case .openai: URL(string: "https://api.openai.com/v1/chat/completions")!
         case .anthropic: URL(string: "https://api.anthropic.com/v1/messages")!
         case .zai: URL(string: "https://api.z.ai/api/paas/v4/chat/completions")!
+        case .ollama: URL(string: "http://localhost:11434/v1/chat/completions")!
         }
     }
 
     var keychainAccount: String {
         rawValue
+    }
+
+    /// Whether this provider requires an API key.
+    var requiresAPIKey: Bool {
+        switch self {
+        case .ollama: false
+        default: true
+        }
     }
 
     /// Find the provider that offers a given model name, or nil if unknown.
@@ -54,6 +66,8 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
             return 200_000
         case .zai:
             return 200_000
+        case .ollama:
+            return 128_000 // Conservative default; actual varies by model
         }
     }
 }

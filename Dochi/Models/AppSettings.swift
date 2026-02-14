@@ -94,6 +94,10 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(deviceId, forKey: "deviceId") }
     }
 
+    var ollamaBaseURL: String = UserDefaults.standard.string(forKey: "ollamaBaseURL") ?? "http://localhost:11434" {
+        didSet { UserDefaults.standard.set(ollamaBaseURL, forKey: "ollamaBaseURL") }
+    }
+
     var hasSeenPermissionInfo: Bool = UserDefaults.standard.object(forKey: "hasSeenPermissionInfo") as? Bool ?? false {
         didSet { UserDefaults.standard.set(hasSeenPermissionInfo, forKey: "hasSeenPermissionInfo") }
     }
