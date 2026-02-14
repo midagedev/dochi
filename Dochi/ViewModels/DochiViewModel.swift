@@ -235,6 +235,16 @@ final class DochiViewModel {
         }
     }
 
+    /// 대화 목록에서 인덱스(1-based)로 대화 선택 (⌘1~9)
+    func selectConversationByIndex(_ index: Int) {
+        let zeroIndex = index - 1
+        guard zeroIndex >= 0 && zeroIndex < conversations.count else {
+            Log.app.debug("Conversation index \(index) out of range (count: \(self.conversations.count))")
+            return
+        }
+        selectConversation(id: conversations[zeroIndex].id)
+    }
+
     // MARK: - Workspace / Agent Switching
 
     func switchWorkspace(id: UUID) {

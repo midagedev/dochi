@@ -14,7 +14,98 @@ struct ContentView: View {
     @State private var showSystemStatusSheet = false
     @State private var selectedSection: MainSection = .chat
 
+    // UX-3: 키보드 단축키 체계
+    @State private var showCommandPalette = false
+    @State private var showShortcutHelp = false
+    @State private var showAgentSwitcher = false
+    @State private var showWorkspaceSwitcher = false
+    @State private var showUserSwitcher = false
+
     var body: some View {
+        mainContent
+            .onAppear {
+                viewModel.loadConversations()
+            }
+            .sheet(isPresented: $showContextInspector) {
+                ContextInspectorView(
+                    contextService: viewModel.contextService,
+                    settings: viewModel.settings,
+                    sessionContext: viewModel.sessionContext
+                )
+            }
+            .sheet(isPresented: $showCapabilityCatalog) {
+                CapabilityCatalogView(
+                    toolInfos: viewModel.allToolInfos,
+                    onSelectPrompt: { prompt in
+                        viewModel.inputText = prompt
+                        viewModel.sendMessage()
+                    }
+                )
+            }
+            .sheet(isPresented: $showSystemStatusSheet) {
+                SystemStatusSheetView(
+                    metricsCollector: viewModel.metricsCollector,
+                    settings: viewModel.settings,
+                    heartbeatService: heartbeatService,
+                    supabaseService: supabaseService
+                )
+            }
+            .sheet(isPresented: $showShortcutHelp) {
+                KeyboardShortcutHelpView()
+            }
+            .sheet(isPresented: $showAgentSwitcher) {
+                agentSwitcherSheet
+            }
+            .sheet(isPresented: $showWorkspaceSwitcher) {
+                workspaceSwitcherSheet
+            }
+            .sheet(isPresented: $showUserSwitcher) {
+                userSwitcherSheet
+            }
+    }
+
+    // MARK: - Main Content (split to help type checker)
+
+    @ViewBuilder
+    private var mainContent: some View {
+        ZStack {
+            navigationContent
+
+            // Command palette overlay (ZStack)
+            if showCommandPalette {
+                CommandPaletteView(
+                    items: paletteItems,
+                    onExecute: { item in
+                        executePaletteAction(item.action)
+                        showCommandPalette = false
+                    },
+                    onDismiss: { showCommandPalette = false }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
+        // Hidden buttons for keyboard shortcuts
+        .background { hiddenShortcutButtons }
+        // Keyboard shortcut: Escape to cancel or close palette
+        .onKeyPress(.escape) {
+            if showCommandPalette {
+                showCommandPalette = false
+                return .handled
+            }
+            if selectedSection == .chat, viewModel.interactionState == .processing {
+                viewModel.cancelRequest()
+                return .handled
+            }
+            return .ignored
+        }
+        // ⌘K: Command palette, ⌘⇧K: Toggle kanban/chat, ⌘1~9: conversation switch
+        .onKeyPress(phases: .down) { press in
+            handleKeyPress(press)
+        }
+    }
+
+    @ViewBuilder
+    private var navigationContent: some View {
         NavigationSplitView {
             SidebarView(
                 viewModel: viewModel,
@@ -22,159 +113,325 @@ struct ContentView: View {
                 selectedSection: $selectedSection
             )
         } detail: {
-            Group {
-                if selectedSection == .chat {
-                    VStack(spacing: 0) {
-                        // Status bar
-                        if viewModel.interactionState != .idle {
-                            StatusBarView(
-                                interactionState: viewModel.interactionState,
-                                sessionState: viewModel.sessionState,
-                                processingSubState: viewModel.processingSubState,
-                                currentToolName: viewModel.currentToolName,
-                                partialTranscript: viewModel.partialTranscript,
-                                lastInputTokens: viewModel.lastInputTokens,
-                                lastOutputTokens: viewModel.lastOutputTokens,
-                                contextWindowTokens: viewModel.contextWindowTokens
-                            )
-                        }
+            detailContent
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        if selectedSection == .chat {
+                            HStack(spacing: 4) {
+                                Button {
+                                    showSystemStatusSheet = true
+                                } label: {
+                                    Label("상태", systemImage: "heart.text.square")
+                                }
+                                .help("시스템 상태 (⌘⇧S)")
+                                .keyboardShortcut("s", modifiers: [.command, .shift])
 
-                        // System health bar (always visible)
-                        SystemHealthBarView(
-                            settings: viewModel.settings,
-                            metricsCollector: viewModel.metricsCollector,
-                            heartbeatService: heartbeatService,
-                            supabaseService: supabaseService,
-                            onTap: { showSystemStatusSheet = true }
-                        )
+                                Button {
+                                    showCapabilityCatalog = true
+                                } label: {
+                                    Label("기능", systemImage: "square.grid.2x2")
+                                }
+                                .help("기능 카탈로그 (⌘⇧F)")
+                                .keyboardShortcut("f", modifiers: [.command, .shift])
 
-                        // Tool confirmation banner
-                        if let confirmation = viewModel.pendingToolConfirmation {
-                            ToolConfirmationBannerView(
-                                toolName: confirmation.toolName,
-                                toolDescription: confirmation.toolDescription,
-                                onApprove: { viewModel.respondToToolConfirmation(approved: true) },
-                                onDeny: { viewModel.respondToToolConfirmation(approved: false) }
-                            )
-                        }
-
-                        // Error banner
-                        if let error = viewModel.errorMessage {
-                            ErrorBannerView(message: error) {
-                                viewModel.errorMessage = nil
+                                Button {
+                                    showContextInspector = true
+                                } label: {
+                                    Label("컨텍스트", systemImage: "doc.text.magnifyingglass")
+                                }
+                                .help("컨텍스트 인스펙터 (⌘I)")
+                                .keyboardShortcut("i", modifiers: .command)
                             }
-                        }
-
-                        // Avatar view
-                        if viewModel.settings.avatarEnabled {
-                            if #available(macOS 15.0, *) {
-                                AvatarView(
-                                    interactionState: viewModel.interactionState
-                                )
-                                .frame(height: 250)
-                            }
-                        }
-
-                        // Conversation area
-                        if viewModel.currentConversation == nil || (viewModel.currentConversation?.messages.isEmpty == true) {
-                            EmptyConversationView(
-                                onSelectPrompt: { prompt in
-                                    viewModel.inputText = prompt
-                                    viewModel.sendMessage()
-                                },
-                                onShowCatalog: { showCapabilityCatalog = true }
-                            )
-                        } else {
-                            ConversationView(
-                                messages: viewModel.currentConversation?.messages ?? [],
-                                streamingText: viewModel.streamingText,
-                                currentToolName: viewModel.currentToolName,
-                                processingSubState: viewModel.processingSubState,
-                                fontSize: viewModel.settings.chatFontSize
-                            )
-                        }
-
-                        Divider()
-
-                        // Input area
-                        if viewModel.currentConversation?.source == .telegram {
-                            TelegramReadOnlyBarView()
-                        } else {
-                            InputBarView(viewModel: viewModel)
-                        }
-                    }
-                } else {
-                    KanbanWorkspaceView()
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    if selectedSection == .chat {
-                        HStack(spacing: 4) {
-                            Button {
-                                showSystemStatusSheet = true
-                            } label: {
-                                Label("상태", systemImage: "heart.text.square")
-                            }
-                            .help("시스템 상태 (⌘⇧S)")
-                            .keyboardShortcut("s", modifiers: [.command, .shift])
-
-                            Button {
-                                showCapabilityCatalog = true
-                            } label: {
-                                Label("기능", systemImage: "square.grid.2x2")
-                            }
-                            .help("기능 카탈로그 (⌘⇧F)")
-                            .keyboardShortcut("f", modifiers: [.command, .shift])
-
-                            Button {
-                                showContextInspector = true
-                            } label: {
-                                Label("컨텍스트", systemImage: "doc.text.magnifyingglass")
-                            }
-                            .help("컨텍스트 인스펙터")
                         }
                     }
                 }
-            }
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
         .frame(minWidth: 600, minHeight: 500)
-        .onAppear {
-            viewModel.loadConversations()
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        if selectedSection == .chat {
+            chatDetailView
+        } else {
+            KanbanWorkspaceView()
         }
-        .sheet(isPresented: $showContextInspector) {
-            ContextInspectorView(
-                contextService: viewModel.contextService,
-                settings: viewModel.settings,
-                sessionContext: viewModel.sessionContext
-            )
-        }
-        .sheet(isPresented: $showCapabilityCatalog) {
-            CapabilityCatalogView(
-                toolInfos: viewModel.allToolInfos,
-                onSelectPrompt: { prompt in
-                    viewModel.inputText = prompt
-                    viewModel.sendMessage()
-                }
-            )
-        }
-        .sheet(isPresented: $showSystemStatusSheet) {
-            SystemStatusSheetView(
-                metricsCollector: viewModel.metricsCollector,
-                settings: viewModel.settings,
-                heartbeatService: heartbeatService,
-                supabaseService: supabaseService
-            )
-        }
-        // Keyboard shortcut: Escape to cancel
-        .onKeyPress(.escape) {
-            if selectedSection == .chat, viewModel.interactionState == .processing {
-                viewModel.cancelRequest()
-                return .handled
+    }
+
+    @ViewBuilder
+    private var chatDetailView: some View {
+        VStack(spacing: 0) {
+            // Status bar
+            if viewModel.interactionState != .idle {
+                StatusBarView(
+                    interactionState: viewModel.interactionState,
+                    sessionState: viewModel.sessionState,
+                    processingSubState: viewModel.processingSubState,
+                    currentToolName: viewModel.currentToolName,
+                    partialTranscript: viewModel.partialTranscript,
+                    lastInputTokens: viewModel.lastInputTokens,
+                    lastOutputTokens: viewModel.lastOutputTokens,
+                    contextWindowTokens: viewModel.contextWindowTokens
+                )
             }
-            return .ignored
+
+            // System health bar (always visible)
+            SystemHealthBarView(
+                settings: viewModel.settings,
+                metricsCollector: viewModel.metricsCollector,
+                heartbeatService: heartbeatService,
+                supabaseService: supabaseService,
+                onTap: { showSystemStatusSheet = true }
+            )
+
+            // Tool confirmation banner
+            if let confirmation = viewModel.pendingToolConfirmation {
+                ToolConfirmationBannerView(
+                    toolName: confirmation.toolName,
+                    toolDescription: confirmation.toolDescription,
+                    onApprove: { viewModel.respondToToolConfirmation(approved: true) },
+                    onDeny: { viewModel.respondToToolConfirmation(approved: false) }
+                )
+            }
+
+            // Error banner
+            if let error = viewModel.errorMessage {
+                ErrorBannerView(message: error) {
+                    viewModel.errorMessage = nil
+                }
+            }
+
+            // Avatar view
+            if viewModel.settings.avatarEnabled {
+                if #available(macOS 15.0, *) {
+                    AvatarView(
+                        interactionState: viewModel.interactionState
+                    )
+                    .frame(height: 250)
+                }
+            }
+
+            // Conversation area
+            if viewModel.currentConversation == nil || (viewModel.currentConversation?.messages.isEmpty == true) {
+                EmptyConversationView(
+                    onSelectPrompt: { prompt in
+                        viewModel.inputText = prompt
+                        viewModel.sendMessage()
+                    },
+                    onShowCatalog: { showCapabilityCatalog = true }
+                )
+            } else {
+                ConversationView(
+                    messages: viewModel.currentConversation?.messages ?? [],
+                    streamingText: viewModel.streamingText,
+                    currentToolName: viewModel.currentToolName,
+                    processingSubState: viewModel.processingSubState,
+                    fontSize: viewModel.settings.chatFontSize
+                )
+            }
+
+            Divider()
+
+            // Input area
+            if viewModel.currentConversation?.source == .telegram {
+                TelegramReadOnlyBarView()
+            } else {
+                InputBarView(viewModel: viewModel)
+            }
         }
+    }
+
+    @ViewBuilder
+    private var hiddenShortcutButtons: some View {
+        Group {
+            // ⌘E: Export conversation
+            Button("") {
+                if let id = viewModel.currentConversation?.id {
+                    viewModel.exportConversation(id: id, format: .markdown)
+                }
+            }
+            .keyboardShortcut("e", modifiers: .command)
+            .hidden()
+
+            // ⌘/: Shortcut help
+            Button("") {
+                showShortcutHelp.toggle()
+            }
+            .keyboardShortcut("/", modifiers: .command)
+            .hidden()
+
+            // ⌘⇧A: Agent switcher
+            Button("") {
+                showAgentSwitcher = true
+            }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
+            .hidden()
+
+            // ⌘⇧W: Workspace switcher
+            Button("") {
+                showWorkspaceSwitcher = true
+            }
+            .keyboardShortcut("w", modifiers: [.command, .shift])
+            .hidden()
+
+            // ⌘⇧U: User switcher
+            Button("") {
+                showUserSwitcher = true
+            }
+            .keyboardShortcut("u", modifiers: [.command, .shift])
+            .hidden()
+        }
+    }
+
+    // MARK: - Key Press Handler
+
+    private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        let hasCommand = press.modifiers.contains(.command)
+        let hasShift = press.modifiers.contains(.shift)
+        let chars = press.characters
+
+        // ⌘⇧K: Toggle kanban/chat (check before ⌘K)
+        if hasCommand && hasShift && chars == "k" {
+            selectedSection = selectedSection == .chat ? .kanban : .chat
+            return .handled
+        }
+
+        // ⌘K: Command palette
+        if hasCommand && !hasShift && chars == "k" {
+            withAnimation(.easeOut(duration: 0.15)) {
+                showCommandPalette.toggle()
+            }
+            return .handled
+        }
+
+        // ⌘1~9: Switch conversation by index
+        if hasCommand && !hasShift, chars.count == 1,
+           let digit = Int(chars), digit >= 1, digit <= 9 {
+            viewModel.selectConversationByIndex(digit)
+            return .handled
+        }
+
+        return .ignored
+    }
+
+    // MARK: - Palette Items
+
+    private var paletteItems: [CommandPaletteItem] {
+        let wsId = viewModel.sessionContext.workspaceId
+        return CommandPaletteRegistry.allItems(
+            conversations: viewModel.conversations,
+            agents: viewModel.contextService.listAgents(workspaceId: wsId),
+            workspaceIds: viewModel.contextService.listLocalWorkspaces(),
+            profiles: viewModel.userProfiles,
+            currentAgentName: viewModel.settings.activeAgentName,
+            currentWorkspaceId: wsId,
+            currentUserId: viewModel.sessionContext.currentUserId
+        )
+    }
+
+    // MARK: - Palette Action Execution
+
+    private func executePaletteAction(_ action: CommandPaletteItem.PaletteAction) {
+        switch action {
+        case .newConversation:
+            viewModel.newConversation()
+        case .selectConversation(let id):
+            selectedSection = .chat
+            viewModel.selectConversation(id: id)
+        case .switchAgent(let name):
+            viewModel.switchAgent(name: name)
+        case .openSettings:
+            // macOS handles ⌘, natively via Settings scene
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        case .openContextInspector:
+            showContextInspector = true
+        case .openCapabilityCatalog:
+            showCapabilityCatalog = true
+        case .openSystemStatus:
+            showSystemStatusSheet = true
+        case .openShortcutHelp:
+            showShortcutHelp = true
+        case .exportConversation:
+            if let id = viewModel.currentConversation?.id {
+                viewModel.exportConversation(id: id, format: .markdown)
+            }
+        case .toggleKanban:
+            selectedSection = selectedSection == .chat ? .kanban : .chat
+        case .custom(let id):
+            if id.hasPrefix("switchUser-") {
+                let userIdStr = String(id.dropFirst("switchUser-".count))
+                if let profile = viewModel.userProfiles.first(where: { $0.id.uuidString == userIdStr }) {
+                    viewModel.switchUser(profile: profile)
+                }
+            }
+        }
+    }
+
+    // MARK: - Quick Switcher Sheets
+
+    /// Helper struct for workspace items in QuickSwitcher
+    private struct WorkspaceItem: Identifiable {
+        let id: UUID
+        var displayName: String {
+            if id == UUID(uuidString: "00000000-0000-0000-0000-000000000000") {
+                return "기본 워크스페이스"
+            }
+            return String(id.uuidString.prefix(8)) + "..."
+        }
+    }
+
+    /// Helper struct for agent items in QuickSwitcher
+    private struct AgentItem: Identifiable {
+        let id: String
+        let name: String
+    }
+
+    @ViewBuilder
+    private var agentSwitcherSheet: some View {
+        let wsId = viewModel.sessionContext.workspaceId
+        let agents = viewModel.contextService.listAgents(workspaceId: wsId)
+            .map { AgentItem(id: $0, name: $0) }
+
+        QuickSwitcherView(
+            title: "에이전트 전환",
+            items: agents,
+            currentId: viewModel.settings.activeAgentName,
+            label: { $0.name },
+            icon: { $0.name == viewModel.settings.activeAgentName ? "person.fill.checkmark" : "person.fill" },
+            onSelect: { viewModel.switchAgent(name: $0.name) }
+        )
+    }
+
+    @ViewBuilder
+    private var workspaceSwitcherSheet: some View {
+        let workspaces = viewModel.contextService.listLocalWorkspaces()
+            .map { WorkspaceItem(id: $0) }
+
+        QuickSwitcherView(
+            title: "워크스페이스 전환",
+            items: workspaces,
+            currentId: viewModel.sessionContext.workspaceId,
+            label: { $0.displayName },
+            icon: { $0.id == viewModel.sessionContext.workspaceId ? "square.grid.2x2.fill" : "square.grid.2x2" },
+            onSelect: { viewModel.switchWorkspace(id: $0.id) }
+        )
+    }
+
+    @ViewBuilder
+    private var userSwitcherSheet: some View {
+        QuickSwitcherView(
+            title: "사용자 전환",
+            items: viewModel.userProfiles,
+            currentId: viewModel.sessionContext.currentUserId.flatMap { UUID(uuidString: $0) },
+            label: { $0.name },
+            icon: { profile in
+                profile.id.uuidString == viewModel.sessionContext.currentUserId
+                    ? "person.crop.circle.fill.badge.checkmark"
+                    : "person.crop.circle"
+            },
+            onSelect: { viewModel.switchUser(profile: $0) }
+        )
     }
 }
 
@@ -598,7 +855,7 @@ struct InputBarView: View {
                     microphoneButton
                 }
 
-                TextField("메시지 입력... /로 명령어", text: $viewModel.inputText, axis: .vertical)
+                TextField("메시지 입력... \u{2318}K 빠른 명령 \u{00B7} /로 명령어", text: $viewModel.inputText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
                     .padding(8)
@@ -760,20 +1017,26 @@ struct EmptyConversationView: View {
             }
             .padding(.horizontal, 20)
 
-            // 기능 카탈로그 링크
-            if let onShowCatalog {
-                Button {
-                    onShowCatalog()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "square.grid.2x2")
-                            .font(.system(size: 11))
-                        Text("모든 기능 보기")
-                            .font(.system(size: 12))
+            // 기능 카탈로그 링크 + 단축키 힌트
+            VStack(spacing: 6) {
+                if let onShowCatalog {
+                    Button {
+                        onShowCatalog()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "square.grid.2x2")
+                                .font(.system(size: 11))
+                            Text("모든 기능 보기")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundStyle(Color.accentColor)
                     }
-                    .foregroundStyle(Color.accentColor)
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+
+                Text("\u{2318}K로 빠른 명령, \u{2318}/로 모든 단축키를 확인하세요.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.quaternary)
             }
 
             Spacer()
