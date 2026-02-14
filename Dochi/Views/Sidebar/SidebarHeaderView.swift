@@ -206,7 +206,7 @@ struct SidebarHeaderView: View {
             )
         }
         .sheet(isPresented: $showAgentCreation) {
-            AgentCreationView(viewModel: viewModel)
+            AgentWizardView(viewModel: viewModel)
         }
         .sheet(isPresented: $showFamilySettings) {
             FamilySettingsView(

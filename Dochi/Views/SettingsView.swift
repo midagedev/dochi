@@ -11,6 +11,7 @@ struct SettingsView: View {
     var supabaseService: SupabaseServiceProtocol?
     var toolService: BuiltInToolService?
     var heartbeatService: HeartbeatService?
+    var viewModel: DochiViewModel?
 
     var body: some View {
         TabView {
@@ -47,7 +48,8 @@ struct SettingsView: View {
                 AgentSettingsView(
                     contextService: contextService,
                     settings: settings,
-                    sessionContext: sessionContext
+                    sessionContext: sessionContext,
+                    viewModel: viewModel
                 )
                 .tabItem {
                     Label("에이전트", systemImage: "person.crop.rectangle.stack")

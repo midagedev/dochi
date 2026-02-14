@@ -225,7 +225,8 @@ struct DochiApp: App {
                 mcpService: mcpService,
                 supabaseService: supabaseService,
                 toolService: toolService,
-                heartbeatService: heartbeatService
+                heartbeatService: heartbeatService,
+                viewModel: viewModel
             )
         }
         .commands {
