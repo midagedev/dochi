@@ -395,6 +395,87 @@ final class LLMAdapterTests: XCTestCase {
         XCTAssertTrue(acc.completedToolCalls.isEmpty)
     }
 
+    // MARK: - Ollama Request Building
+
+    @MainActor
+    func testOllamaRequestNoAuthHeader() throws {
+        let adapter = OllamaAdapter()
+        let request = try adapter.buildRequest(
+            messages: [],
+            systemPrompt: "System",
+            model: "llama3",
+            tools: nil,
+            apiKey: ""
+        )
+
+        XCTAssertEqual(request.httpMethod, "POST")
+        // No auth header when API key is empty
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertTrue(request.url?.absoluteString.contains("localhost:11434") ?? false)
+    }
+
+    @MainActor
+    func testOllamaRequestWithOptionalAuthHeader() throws {
+        let adapter = OllamaAdapter()
+        let request = try adapter.buildRequest(
+            messages: [],
+            systemPrompt: "",
+            model: "mistral",
+            tools: nil,
+            apiKey: "custom-key"
+        )
+
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer custom-key")
+    }
+
+    @MainActor
+    func testOllamaRequestBody() throws {
+        let adapter = OllamaAdapter()
+        let messages = [Message(role: .user, content: "Hello")]
+        let request = try adapter.buildRequest(
+            messages: messages,
+            systemPrompt: "Be helpful",
+            model: "llama3",
+            tools: nil,
+            apiKey: ""
+        )
+
+        let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+        XCTAssertEqual(body["model"] as? String, "llama3")
+        XCTAssertEqual(body["stream"] as? Bool, true)
+
+        let apiMessages = body["messages"] as! [[String: Any]]
+        XCTAssertEqual(apiMessages[0]["role"] as? String, "system")
+        XCTAssertEqual(apiMessages[1]["role"] as? String, "user")
+    }
+
+    func testOllamaUsesOpenAIParsing() {
+        let adapter = OllamaAdapter()
+        var acc = StreamAccumulator()
+
+        let line = #"data: {"choices":[{"delta":{"content":"Hello"},"index":0}]}"#
+        let event = adapter.parseSSELine(line, accumulated: &acc)
+
+        if case .partial(let text) = event {
+            XCTAssertEqual(text, "Hello")
+        } else {
+            XCTFail("Expected .partial")
+        }
+    }
+
+    func testOllamaParseDone() {
+        let adapter = OllamaAdapter()
+        var acc = StreamAccumulator()
+
+        let event = adapter.parseSSELine("data: [DONE]", accumulated: &acc)
+        if case .done = event {
+            // success
+        } else {
+            XCTFail("Expected .done")
+        }
+    }
+
     // MARK: - LLMError
 
     func testLLMErrorDescriptions() {

@@ -297,6 +297,7 @@ struct OnboardingView: View {
         case .openai: "gpt-4o"
         case .anthropic: "claude-sonnet-4-5-20250929"
         case .zai: "glm-4-plus"
+        case .ollama: "llama3"
         }
     }
 

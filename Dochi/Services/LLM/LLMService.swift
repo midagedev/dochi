@@ -19,6 +19,7 @@ final class LLMService: LLMServiceProtocol {
         .openai: OpenAIAdapter(),
         .anthropic: AnthropicAdapter(),
         .zai: ZAIAdapter(),
+        .ollama: OllamaAdapter(),
     ]
 
     /// Max retries for transient errors (5xx, timeout).
@@ -46,7 +47,7 @@ final class LLMService: LLMServiceProtocol {
         tools: [[String: Any]]?,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> LLMResponse {
-        guard !apiKey.isEmpty else {
+        guard !apiKey.isEmpty || !provider.requiresAPIKey else {
             throw LLMError.noAPIKey
         }
 

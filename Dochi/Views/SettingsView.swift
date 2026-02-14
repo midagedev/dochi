@@ -279,9 +279,20 @@ struct ModelSettingsView: View {
 
     @State private var selectedProviderRaw: String = ""
     @State private var selectedModel: String = ""
+    @State private var ollamaModels: [String] = []
+    @State private var ollamaAvailable: Bool? = nil
+    @State private var ollamaURL: String = ""
 
     private var selectedProvider: LLMProvider {
         LLMProvider(rawValue: selectedProviderRaw) ?? .openai
+    }
+
+    /// Combined model list: static for most providers, dynamic for Ollama.
+    private var availableModels: [String] {
+        if selectedProvider == .ollama {
+            return ollamaModels
+        }
+        return selectedProvider.models
     }
 
     var body: some View {
@@ -295,19 +306,71 @@ struct ModelSettingsView: View {
                 .onChange(of: selectedProviderRaw) { _, newValue in
                     settings.llmProvider = newValue
                     let provider = LLMProvider(rawValue: newValue) ?? .openai
-                    if !provider.models.contains(selectedModel) {
+                    if provider == .ollama {
+                        fetchOllamaModels()
+                    } else if !provider.models.contains(selectedModel) {
                         selectedModel = provider.models.first ?? ""
                         settings.llmModel = selectedModel
                     }
                 }
 
-                Picker("모델", selection: $selectedModel) {
-                    ForEach(selectedProvider.models, id: \.self) { model in
-                        Text(model).tag(model)
+                if selectedProvider == .ollama {
+                    Picker("모델", selection: $selectedModel) {
+                        if ollamaModels.isEmpty {
+                            Text("모델 없음").tag("")
+                        }
+                        ForEach(ollamaModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .onChange(of: selectedModel) { _, newValue in
+                        settings.llmModel = newValue
+                    }
+                } else {
+                    Picker("모델", selection: $selectedModel) {
+                        ForEach(selectedProvider.models, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .onChange(of: selectedModel) { _, newValue in
+                        settings.llmModel = newValue
                     }
                 }
-                .onChange(of: selectedModel) { _, newValue in
-                    settings.llmModel = newValue
+            }
+
+            if selectedProvider == .ollama {
+                Section("Ollama 설정") {
+                    HStack {
+                        Text("Base URL")
+                        TextField("http://localhost:11434", text: $ollamaURL)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                            .onSubmit {
+                                settings.ollamaBaseURL = ollamaURL
+                                fetchOllamaModels()
+                            }
+                    }
+
+                    HStack {
+                        Text("상태")
+                        Spacer()
+                        if let available = ollamaAvailable {
+                            if available {
+                                Label("연결됨", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            } else {
+                                Label("연결 불가", systemImage: "xmark.circle.fill")
+                                    .foregroundStyle(.red)
+                            }
+                        } else {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+
+                    Button("모델 새로고침") {
+                        fetchOllamaModels()
+                    }
                 }
             }
 
@@ -327,6 +390,25 @@ struct ModelSettingsView: View {
         .onAppear {
             selectedProviderRaw = settings.llmProvider
             selectedModel = settings.llmModel
+            ollamaURL = settings.ollamaBaseURL
+            if selectedProvider == .ollama {
+                fetchOllamaModels()
+            }
+        }
+    }
+
+    private func fetchOllamaModels() {
+        ollamaAvailable = nil
+        Task {
+            let baseURL = URL(string: settings.ollamaBaseURL) ?? URL(string: "http://localhost:11434")!
+            let models = await OllamaModelFetcher.fetchModels(baseURL: baseURL)
+            let available = await OllamaModelFetcher.isAvailable(baseURL: baseURL)
+            ollamaModels = models
+            ollamaAvailable = available
+            if !models.contains(selectedModel) {
+                selectedModel = models.first ?? ""
+                settings.llmModel = selectedModel
+            }
         }
     }
 }
