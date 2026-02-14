@@ -15,8 +15,11 @@ struct Conversation: Codable, Identifiable, Sendable {
     var summary: String?
     var source: ConversationSource
     var telegramChatId: Int64?
+    var isFavorite: Bool
+    var tags: [String]
+    var folderId: UUID?
 
-    init(id: UUID = UUID(), title: String = "새 대화", messages: [Message] = [], createdAt: Date = Date(), updatedAt: Date = Date(), userId: String? = nil, summary: String? = nil, source: ConversationSource = .local, telegramChatId: Int64? = nil) {
+    init(id: UUID = UUID(), title: String = "새 대화", messages: [Message] = [], createdAt: Date = Date(), updatedAt: Date = Date(), userId: String? = nil, summary: String? = nil, source: ConversationSource = .local, telegramChatId: Int64? = nil, isFavorite: Bool = false, tags: [String] = [], folderId: UUID? = nil) {
         self.id = id
         self.title = title
         self.messages = messages
@@ -26,6 +29,9 @@ struct Conversation: Codable, Identifiable, Sendable {
         self.summary = summary
         self.source = source
         self.telegramChatId = telegramChatId
+        self.isFavorite = isFavorite
+        self.tags = tags
+        self.folderId = folderId
     }
 
     init(from decoder: Decoder) throws {
@@ -39,5 +45,8 @@ struct Conversation: Codable, Identifiable, Sendable {
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
         source = try container.decodeIfPresent(ConversationSource.self, forKey: .source) ?? .local
         telegramChatId = try container.decodeIfPresent(Int64.self, forKey: .telegramChatId)
+        isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        folderId = try container.decodeIfPresent(UUID.self, forKey: .folderId)
     }
 }

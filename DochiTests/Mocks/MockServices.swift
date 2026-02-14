@@ -70,6 +70,8 @@ final class MockContextService: ContextServiceProtocol {
     var agentMemorySnapshots: [String: String] = [:]
     var userMemorySnapshots: [String: String] = [:]
     var localWorkspaces: [UUID] = [UUID(uuidString: "00000000-0000-0000-0000-000000000000")!]
+    var conversationTags: [ConversationTag] = []
+    var conversationFolders: [ConversationFolder] = []
 
     func loadBaseSystemPrompt() -> String? { baseSystemPrompt }
     func saveBaseSystemPrompt(_ content: String) { baseSystemPrompt = content }
@@ -147,6 +149,12 @@ final class MockContextService: ContextServiceProtocol {
     func saveUserMemorySnapshot(userId: String, content: String) {
         userMemorySnapshots[userId] = content
     }
+
+    func loadTags() -> [ConversationTag] { conversationTags }
+    func saveTags(_ tags: [ConversationTag]) { conversationTags = tags }
+
+    func loadFolders() -> [ConversationFolder] { conversationFolders }
+    func saveFolders(_ folders: [ConversationFolder]) { conversationFolders = folders }
 
     func migrateIfNeeded() { migrateCallCount += 1 }
 }

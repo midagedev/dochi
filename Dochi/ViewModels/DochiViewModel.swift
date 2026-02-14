@@ -24,6 +24,13 @@ final class DochiViewModel {
     var userProfiles: [UserProfile] = []
     var currentUserName: String = "(사용자 없음)"
 
+    // MARK: - Conversation Organization
+    var conversationTags: [ConversationTag] = []
+    var conversationFolders: [ConversationFolder] = []
+    var conversationFilter: ConversationFilter = ConversationFilter()
+    var isMultiSelectMode: Bool = false
+    var selectedConversationIds: Set<UUID> = []
+
     // MARK: - Services
 
     private let llmService: LLMServiceProtocol
@@ -335,6 +342,225 @@ final class DochiViewModel {
             currentConversation = conversation
         }
         loadConversations()
+    }
+
+    // MARK: - Conversation Organization
+
+    func loadOrganizationData() {
+        conversationTags = contextService.loadTags()
+        conversationFolders = contextService.loadFolders()
+        Log.app.debug("Loaded \(self.conversationTags.count) tags, \(self.conversationFolders.count) folders")
+    }
+
+    // Favorites
+
+    func toggleFavorite(id: UUID) {
+        guard var conversation = conversationService.load(id: id) else { return }
+        conversation.isFavorite.toggle()
+        conversationService.save(conversation: conversation)
+        if currentConversation?.id == id {
+            currentConversation?.isFavorite = conversation.isFavorite
+        }
+        loadConversations()
+        Log.app.info("Toggled favorite for \(id): \(conversation.isFavorite)")
+    }
+
+    // Tags
+
+    func addTag(_ tag: ConversationTag) {
+        conversationTags.append(tag)
+        contextService.saveTags(conversationTags)
+        Log.app.info("Added tag: \(tag.name)")
+    }
+
+    func deleteTag(id: UUID) {
+        let tagName = conversationTags.first(where: { $0.id == id })?.name
+        conversationTags.removeAll { $0.id == id }
+        contextService.saveTags(conversationTags)
+
+        // Remove tag from all conversations that have it
+        if let name = tagName {
+            for conversation in conversations where conversation.tags.contains(name) {
+                var updated = conversation
+                updated.tags.removeAll { $0 == name }
+                conversationService.save(conversation: updated)
+            }
+            loadConversations()
+        }
+        Log.app.info("Deleted tag: \(tagName ?? "unknown")")
+    }
+
+    func updateTag(_ tag: ConversationTag) {
+        guard let index = conversationTags.firstIndex(where: { $0.id == tag.id }) else { return }
+        let oldName = conversationTags[index].name
+        conversationTags[index] = tag
+        contextService.saveTags(conversationTags)
+
+        // If name changed, update all conversations
+        if oldName != tag.name {
+            for conversation in conversations where conversation.tags.contains(oldName) {
+                var updated = conversation
+                updated.tags.removeAll { $0 == oldName }
+                updated.tags.append(tag.name)
+                conversationService.save(conversation: updated)
+            }
+            loadConversations()
+        }
+        Log.app.info("Updated tag: \(tag.name)")
+    }
+
+    func toggleTagOnConversation(conversationId: UUID, tagName: String) {
+        guard var conversation = conversationService.load(id: conversationId) else { return }
+        if conversation.tags.contains(tagName) {
+            conversation.tags.removeAll { $0 == tagName }
+        } else {
+            conversation.tags.append(tagName)
+        }
+        conversationService.save(conversation: conversation)
+        if currentConversation?.id == conversationId {
+            currentConversation?.tags = conversation.tags
+        }
+        loadConversations()
+        Log.app.info("Toggled tag '\(tagName)' on conversation \(conversationId)")
+    }
+
+    // Folders
+
+    func addFolder(_ folder: ConversationFolder) {
+        var newFolder = folder
+        newFolder.sortOrder = conversationFolders.count
+        conversationFolders.append(newFolder)
+        contextService.saveFolders(conversationFolders)
+        Log.app.info("Added folder: \(folder.name)")
+    }
+
+    func deleteFolder(id: UUID) {
+        let folderName = conversationFolders.first(where: { $0.id == id })?.name
+        conversationFolders.removeAll { $0.id == id }
+        contextService.saveFolders(conversationFolders)
+
+        // Unassign conversations from deleted folder
+        for conversation in conversations where conversation.folderId == id {
+            var updated = conversation
+            updated.folderId = nil
+            conversationService.save(conversation: updated)
+        }
+        loadConversations()
+        Log.app.info("Deleted folder: \(folderName ?? "unknown")")
+    }
+
+    func renameFolder(id: UUID, name: String) {
+        guard let index = conversationFolders.firstIndex(where: { $0.id == id }) else { return }
+        conversationFolders[index].name = name
+        contextService.saveFolders(conversationFolders)
+        Log.app.info("Renamed folder to: \(name)")
+    }
+
+    func moveConversationToFolder(conversationId: UUID, folderId: UUID?) {
+        guard var conversation = conversationService.load(id: conversationId) else { return }
+        conversation.folderId = folderId
+        conversationService.save(conversation: conversation)
+        if currentConversation?.id == conversationId {
+            currentConversation?.folderId = folderId
+        }
+        loadConversations()
+        Log.app.info("Moved conversation \(conversationId) to folder \(folderId?.uuidString ?? "none")")
+    }
+
+    // Filter
+
+    func toggleFavoritesFilter() {
+        conversationFilter.showFavoritesOnly.toggle()
+        Log.app.info("Favorites filter toggled: \(self.conversationFilter.showFavoritesOnly)")
+    }
+
+    func resetFilter() {
+        conversationFilter.reset()
+        Log.app.info("Conversation filter reset")
+    }
+
+    // Multi-select
+
+    func toggleMultiSelectMode() {
+        isMultiSelectMode.toggle()
+        if !isMultiSelectMode {
+            selectedConversationIds.removeAll()
+        }
+        Log.app.info("Multi-select mode: \(self.isMultiSelectMode)")
+    }
+
+    func toggleConversationSelection(id: UUID) {
+        if selectedConversationIds.contains(id) {
+            selectedConversationIds.remove(id)
+        } else {
+            selectedConversationIds.insert(id)
+        }
+    }
+
+    func selectAllConversations() {
+        selectedConversationIds = Set(conversations.map(\.id))
+    }
+
+    func deselectAllConversations() {
+        selectedConversationIds.removeAll()
+    }
+
+    // Bulk actions
+
+    func bulkDelete() {
+        for id in selectedConversationIds {
+            conversationService.delete(id: id)
+            if currentConversation?.id == id {
+                currentConversation = nil
+                streamingText = ""
+            }
+        }
+        let count = selectedConversationIds.count
+        selectedConversationIds.removeAll()
+        isMultiSelectMode = false
+        loadConversations()
+        Log.app.info("Bulk deleted \(count) conversations")
+    }
+
+    func bulkMoveToFolder(folderId: UUID?) {
+        for id in selectedConversationIds {
+            guard var conversation = conversationService.load(id: id) else { continue }
+            conversation.folderId = folderId
+            conversationService.save(conversation: conversation)
+            if currentConversation?.id == id {
+                currentConversation?.folderId = folderId
+            }
+        }
+        loadConversations()
+        Log.app.info("Bulk moved \(self.selectedConversationIds.count) conversations to folder \(folderId?.uuidString ?? "none")")
+    }
+
+    func bulkSetFavorite(_ isFavorite: Bool) {
+        for id in selectedConversationIds {
+            guard var conversation = conversationService.load(id: id) else { continue }
+            conversation.isFavorite = isFavorite
+            conversationService.save(conversation: conversation)
+            if currentConversation?.id == id {
+                currentConversation?.isFavorite = isFavorite
+            }
+        }
+        loadConversations()
+        Log.app.info("Bulk set favorite=\(isFavorite) for \(self.selectedConversationIds.count) conversations")
+    }
+
+    func bulkAddTag(tagName: String) {
+        for id in selectedConversationIds {
+            guard var conversation = conversationService.load(id: id) else { continue }
+            if !conversation.tags.contains(tagName) {
+                conversation.tags.append(tagName)
+                conversationService.save(conversation: conversation)
+                if currentConversation?.id == id {
+                    currentConversation?.tags = conversation.tags
+                }
+            }
+        }
+        loadConversations()
+        Log.app.info("Bulk added tag '\(tagName)' to \(self.selectedConversationIds.count) conversations")
     }
 
     // MARK: - Voice Actions

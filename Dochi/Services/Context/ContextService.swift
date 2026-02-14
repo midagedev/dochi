@@ -244,6 +244,66 @@ final class ContextService: ContextServiceProtocol {
         }
     }
 
+    // MARK: - Conversation Tags
+
+    func loadTags() -> [ConversationTag] {
+        let url = baseURL.appendingPathComponent("conversation_tags.json")
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode([ConversationTag].self, from: data)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            return []
+        } catch {
+            Log.storage.error("Failed to load conversation tags: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func saveTags(_ tags: [ConversationTag]) {
+        let url = baseURL.appendingPathComponent("conversation_tags.json")
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(tags)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            Log.storage.error("Failed to save conversation tags: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Conversation Folders
+
+    func loadFolders() -> [ConversationFolder] {
+        let url = baseURL.appendingPathComponent("conversation_folders.json")
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode([ConversationFolder].self, from: data)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            return []
+        } catch {
+            Log.storage.error("Failed to load conversation folders: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func saveFolders(_ folders: [ConversationFolder]) {
+        let url = baseURL.appendingPathComponent("conversation_folders.json")
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(folders)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            Log.storage.error("Failed to save conversation folders: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Migration
 
     func migrateIfNeeded() {

@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var showAgentSwitcher = false
     @State private var showWorkspaceSwitcher = false
     @State private var showUserSwitcher = false
+    @State private var showTagManagementFromPalette = false
 
     var body: some View {
         mainContent
@@ -61,6 +62,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showUserSwitcher) {
                 userSwitcherSheet
+            }
+            .sheet(isPresented: $showTagManagementFromPalette) {
+                TagManagementView(viewModel: viewModel)
             }
     }
 
@@ -297,6 +301,18 @@ struct ContentView: View {
             return .handled
         }
 
+        // ⌘⇧L: Toggle favorites filter
+        if hasCommand && hasShift && chars == "l" {
+            viewModel.toggleFavoritesFilter()
+            return .handled
+        }
+
+        // ⌘⇧M: Toggle multi-select mode
+        if hasCommand && hasShift && chars == "m" {
+            viewModel.toggleMultiSelectMode()
+            return .handled
+        }
+
         // ⌘K: Command palette
         if hasCommand && !hasShift && chars == "k" {
             withAnimation(.easeOut(duration: 0.15)) {
@@ -358,6 +374,10 @@ struct ContentView: View {
             }
         case .toggleKanban:
             selectedSection = selectedSection == .chat ? .kanban : .chat
+        case .openTagManagement:
+            showTagManagementFromPalette = true
+        case .toggleMultiSelect:
+            viewModel.toggleMultiSelectMode()
         case .custom(let id):
             if id.hasPrefix("switchUser-") {
                 let userIdStr = String(id.dropFirst("switchUser-".count))
@@ -442,23 +462,29 @@ struct SidebarView: View {
     var supabaseService: SupabaseServiceProtocol?
     @Binding var selectedSection: ContentView.MainSection
     @State private var searchText: String = ""
-
-    private var profileMap: [String: String] {
-        Dictionary(
-            uniqueKeysWithValues: viewModel.contextService.loadProfiles()
-                .map { ($0.id.uuidString, $0.name) }
-        )
-    }
+    @State private var showFilterPopover = false
+    @State private var showNewFolderAlert = false
+    @State private var newFolderName = ""
+    @State private var showTagManagement = false
 
     private var filteredConversations: [Conversation] {
-        if searchText.isEmpty {
-            return viewModel.conversations
+        var result = viewModel.conversations
+
+        // Text search
+        if !searchText.isEmpty {
+            let query = searchText.lowercased()
+            result = result.filter { conversation in
+                conversation.title.lowercased().contains(query) ||
+                conversation.messages.contains { $0.content.lowercased().contains(query) }
+            }
         }
-        let query = searchText.lowercased()
-        return viewModel.conversations.filter { conversation in
-            conversation.title.lowercased().contains(query) ||
-            conversation.messages.contains { $0.content.lowercased().contains(query) }
+
+        // Filter
+        if viewModel.conversationFilter.isActive {
+            result = result.filter { viewModel.conversationFilter.matches($0) }
         }
+
+        return result
     }
 
     var body: some View {
@@ -477,92 +503,72 @@ struct SidebarView: View {
             .pickerStyle(.segmented)
 
             if selectedSection == .chat {
-                // Search field
+                // Header with search + filter + multi-select
+                ConversationListHeaderView(
+                    searchText: $searchText,
+                    filter: $viewModel.conversationFilter,
+                    showFilterPopover: $showFilterPopover,
+                    viewModel: viewModel
+                )
+                .popover(isPresented: $showFilterPopover) {
+                    ConversationFilterView(
+                        filter: $viewModel.conversationFilter,
+                        tags: viewModel.conversationTags
+                    )
+                }
+
+                // Active filter chips
+                ConversationFilterChipsView(filter: $viewModel.conversationFilter)
+
+                // Conversation list
+                ConversationListView(
+                    viewModel: viewModel,
+                    conversations: filteredConversations,
+                    filter: $viewModel.conversationFilter,
+                    selectedSection: $selectedSection
+                )
+
+                // Bulk action toolbar
+                BulkActionToolbarView(viewModel: viewModel)
+
+                // Folder creation / Tag management
                 HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                        .font(.system(size: 12))
-                    TextField("대화 검색...", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                                .font(.system(size: 11))
-                        }
-                        .buttonStyle(.plain)
+                    Button {
+                        showNewFolderAlert = true
+                    } label: {
+                        Label("폴더", systemImage: "folder.badge.plus")
+                            .font(.system(size: 11))
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+
+                    Button {
+                        showTagManagement = true
+                    } label: {
+                        Label("태그", systemImage: "tag")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+
+                    Spacer()
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.secondary.opacity(0.06))
-
-                List(selection: Binding(
-                    get: { viewModel.currentConversation?.id },
-                    set: { id in
-                        if let id {
-                            selectedSection = .chat
-                            viewModel.selectConversation(id: id)
+                .padding(.vertical, 4)
+                .alert("새 폴더", isPresented: $showNewFolderAlert) {
+                    TextField("폴더 이름", text: $newFolderName)
+                    Button("취소", role: .cancel) { newFolderName = "" }
+                    Button("생성") {
+                        let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !name.isEmpty {
+                            viewModel.addFolder(ConversationFolder(name: name))
                         }
-                    }
-                )) {
-                    ForEach(filteredConversations) { conversation in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 4) {
-                                if conversation.source == .telegram {
-                                    Image(systemName: "paperplane.fill")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.blue)
-                                }
-                                Text(conversation.title)
-                                    .font(.system(size: 13))
-                                    .lineLimit(1)
-
-                                if let userId = conversation.userId,
-                                   let userName = profileMap[userId] {
-                                    Text(userName)
-                                        .font(.system(size: 9, weight: .medium))
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 1)
-                                        .background(Color.accentColor.opacity(0.12))
-                                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                                }
-                            }
-                            Text(conversation.updatedAt, style: .relative)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-                        .tag(conversation.id)
-                        .contextMenu {
-                            Button("이름 변경") {
-                                viewModel.renameConversation(id: conversation.id, title: "")
-                            }
-                            Divider()
-                            Menu("내보내기") {
-                                Button {
-                                    viewModel.exportConversation(id: conversation.id, format: .markdown)
-                                } label: {
-                                    Label("마크다운 (.md)", systemImage: "doc.text")
-                                }
-                                Button {
-                                    viewModel.exportConversation(id: conversation.id, format: .json)
-                                } label: {
-                                    Label("JSON (.json)", systemImage: "doc.badge.gearshape")
-                                }
-                            }
-                            Divider()
-                            Button(role: .destructive) {
-                                viewModel.deleteConversation(id: conversation.id)
-                            } label: {
-                                Label("삭제", systemImage: "trash")
-                            }
-                        }
+                        newFolderName = ""
                     }
                 }
-                .listStyle(.sidebar)
+                .sheet(isPresented: $showTagManagement) {
+                    TagManagementView(viewModel: viewModel)
+                }
 
                 // Auth/sync status
                 if let service = supabaseService, service.authState.isSignedIn {
@@ -593,6 +599,9 @@ struct SidebarView: View {
                     .keyboardShortcut("n", modifiers: .command)
                 }
             }
+        }
+        .onAppear {
+            viewModel.loadOrganizationData()
         }
     }
 }
