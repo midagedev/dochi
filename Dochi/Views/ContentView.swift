@@ -25,6 +25,9 @@ struct ContentView: View {
     // UX-5: 내보내기/공유
     @State private var showExportOptions = false
 
+    // UX-6: 에이전트 위저드
+    @State private var showAgentWizard = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -81,6 +84,9 @@ struct ContentView: View {
                         }
                     )
                 }
+            }
+            .sheet(isPresented: $showAgentWizard) {
+                AgentWizardView(viewModel: viewModel)
             }
     }
 
@@ -248,7 +254,9 @@ struct ContentView: View {
                         viewModel.inputText = prompt
                         viewModel.sendMessage()
                     },
-                    onShowCatalog: { showCapabilityCatalog = true }
+                    onShowCatalog: { showCapabilityCatalog = true },
+                    onCreateAgent: { showAgentWizard = true },
+                    agentCount: viewModel.contextService.listAgents(workspaceId: viewModel.sessionContext.workspaceId).count
                 )
             } else {
                 ConversationView(
@@ -407,6 +415,8 @@ struct ContentView: View {
             showTagManagementFromPalette = true
         case .toggleMultiSelect:
             viewModel.toggleMultiSelectMode()
+        case .createAgent:
+            showAgentWizard = true
         case .custom(let id):
             if id.hasPrefix("switchUser-") {
                 let userIdStr = String(id.dropFirst("switchUser-".count))
@@ -999,6 +1009,8 @@ struct InputBarView: View {
 struct EmptyConversationView: View {
     let onSelectPrompt: (String) -> Void
     var onShowCatalog: (() -> Void)?
+    var onCreateAgent: (() -> Void)?
+    var agentCount: Int = 1
 
     private var contextualSuggestions: [FeatureSuggestion] {
         FeatureCatalog.contextualSuggestions()
@@ -1021,6 +1033,11 @@ struct EmptyConversationView: View {
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+
+            // Agent hint card (when no agents)
+            if agentCount == 0, let onCreateAgent {
+                agentHintCard(onCreateAgent: onCreateAgent)
+            }
 
             // 카테고리별 제안
             HStack(alignment: .top, spacing: 12) {
@@ -1080,6 +1097,39 @@ struct EmptyConversationView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func agentHintCard(onCreateAgent: @escaping () -> Void) -> some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.badge.plus")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.blue)
+                Text("에이전트를 만들어보세요")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            Text("템플릿으로 코딩, 리서치, 일정 관리 등 특화된 AI 비서를 빠르게 구성할 수 있습니다.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button {
+                onCreateAgent()
+            } label: {
+                Text("에이전트 만들기")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(12)
+        .background(Color.blue.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.blue.opacity(0.15), lineWidth: 1)
+        )
+        .padding(.horizontal, 40)
     }
 }
 

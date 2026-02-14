@@ -54,6 +54,10 @@ protocol ContextServiceProtocol {
     func loadFolders() -> [ConversationFolder]
     func saveFolders(_ folders: [ConversationFolder])
 
+    // Agent templates
+    func loadCustomTemplates() -> [AgentTemplate]
+    func saveCustomTemplates(_ templates: [AgentTemplate])
+
     // Migration
     func migrateIfNeeded()
 }

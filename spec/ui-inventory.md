@@ -27,7 +27,7 @@ DochiApp (entry point)
     │   │   ├── ToolConfirmationBannerView — 민감 도구 승인
     │   │   ├── ErrorBannerView — 에러 표시
     │   │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
-    │   │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크 + 단축키 힌트)
+    │   │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크 + 단축키 힌트 + 에이전트 힌트 카드)
     │   │   │   또는 ConversationView — 메시지 목록
     │   │   │       └── MessageBubbleView — 개별 메시지 버블 (호버 시 복사 버튼)
     │   │   │           └── MessageMetadataBadgeView — 모델/응답시간 배지 (assistant만, 호버 팝오버)
@@ -58,7 +58,7 @@ DochiApp (entry point)
 | BulkActionToolbarView | `Views/Sidebar/ConversationListView.swift` | 일괄선택 모드 활성 시 | N개 선택 + 폴더/태그/내보내기/즐겨찾기/삭제 |
 | ConversationView | `Views/ConversationView.swift` | 대화 선택 시 | 메시지 스크롤 뷰 |
 | MessageBubbleView | `Views/MessageBubbleView.swift` | 자동 | 개별 메시지 렌더링 (역할별 스타일), 호버 시 복사 버튼 오버레이 |
-| EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트 |
+| EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트, 에이전트 0개 시 생성 힌트 카드 |
 | InputBarView | `Views/ContentView.swift` | 항상 표시 | 텍스트 입력, 마이크, 전송/취소 버튼, 슬래시 명령 |
 | SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 현재 모델, 동기화 상태, 하트비트, 세션 토큰 (클릭 → 상세 시트) |
 | MessageMetadataBadgeView | `Views/MessageBubbleView.swift` | assistant 메시지 자동 | 모델명·응답시간 배지, 호버 시 상세 팝오버 (토큰/프로바이더/폴백) |
@@ -85,8 +85,10 @@ DochiApp (entry point)
 | TagManagementView | `Views/Sidebar/TagManagementView.swift` | 사이드바 "태그" 버튼 또는 컨텍스트 메뉴 "태그 관리" | 태그 CRUD 시트 (360x400pt), 9색 팔레트, 사용 수 |
 | OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 |
 | WorkspaceManagementView | `Views/Sidebar/WorkspaceManagementView.swift` | SidebarHeader 메뉴 | 워크스페이스 생성/삭제 |
-| AgentCreationView | `Views/Sidebar/AgentCreationView.swift` | SidebarHeader 메뉴 | 에이전트 생성 폼 |
-| AgentDetailView | `Views/Sidebar/AgentDetailView.swift` | SidebarHeader 메뉴 | 에이전트 편집 (설정/페르소나/메모리 3탭) |
+| AgentCreationView | `Views/Sidebar/AgentCreationView.swift` | (레거시 — AgentWizardView로 대체) | 에이전트 생성 폼 |
+| AgentWizardView | `Views/Agent/AgentWizardView.swift` | SidebarHeader [+], 커맨드 팔레트, EmptyConversationView 힌트 카드 | 5단계 에이전트 생성 위저드 (560x520pt), 템플릿 선택 → 기본 정보 → 페르소나 → 모델/권한 → 요약 |
+| AgentCardGridView | `Views/Agent/AgentCardGridView.swift` | 설정 > 에이전트 탭 | 2열 카드 그리드 (편집/복제/템플릿저장/삭제 메뉴), 빈 상태 안내 |
+| AgentDetailView | `Views/Sidebar/AgentDetailView.swift` | SidebarHeader 메뉴, AgentCardGridView 편집 | 에이전트 편집 (설정/페르소나/메모리 3탭) |
 | ExportOptionsView | `Views/ExportOptionsView.swift` | 툴바 "내보내기" 버튼 (⌘⇧E) 또는 커맨드 팔레트 | 4형식 선택(Md/JSON/PDF/텍스트), 3옵션 토글, 3액션(클립보드/공유/파일 저장), 400x480pt |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
@@ -99,7 +101,7 @@ DochiApp (entry point)
 | API 키 | `Views/SettingsView.swift` 내 | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
 | 음성 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더, 음성, 속도/피치 |
 | 가족 | `Views/Settings/FamilySettingsView.swift` | 사용자 프로필 CRUD |
-| 에이전트 | `Views/Settings/AgentSettingsView.swift` | 에이전트 목록 + 인라인 생성 |
+| 에이전트 | `Views/Settings/AgentSettingsView.swift` → `Views/Agent/AgentCardGridView.swift` | 에이전트 카드 그리드 (편집/복제/템플릿저장/삭제 + 위저드로 생성) |
 | 도구 | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
 | 통합 | `Views/Settings/IntegrationsSettingsView.swift` | 텔레그램, MCP, 채팅 매핑 |
 | 계정 | `Views/Settings/AccountSettingsView.swift` | Supabase 인증, 동기화 |
@@ -215,6 +217,20 @@ CommandPaletteView (⌘K) -> executePaletteAction() -> 동일 흐름
 필터: 필터 버튼 -> ConversationFilterView 팝오버 -> filter 바인딩 -> filteredConversations 업데이트
 ```
 
+### 에이전트 생성 (UX-6 추가)
+```
+SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyConversationView 힌트 카드
+  -> AgentWizardView 시트 열기
+  -> Step 0: 템플릿 선택 (5종 기본 + blank + 커스텀)
+  -> Step 1: 이름 + 웨이크워드 + 설명 (이름 중복 검사)
+  -> Step 2: 페르소나 (TextEditor + 추천 칩)
+  -> Step 3: 모델 선택 + 권한 토글 (safe/sensitive/restricted)
+  -> Step 4: 요약 확인 + "커스텀 템플릿으로 저장" 체크박스
+  -> "생성" -> contextService.saveAgentConfig() + 페르소나 저장 + switchAgent()
+설정 > 에이전트 탭 -> AgentCardGridView (2열 카드 그리드)
+  -> 더보기 메뉴: 편집(AgentDetailView) / 복제 / 템플릿으로 저장 / 삭제
+```
+
 ### 내보내기/공유 (UX-5 추가)
 ```
 빠른 내보내기: ⌘E -> viewModel.exportConversation(format: .markdown) -> NSSavePanel
@@ -260,7 +276,7 @@ CommandPaletteView (⌘K) -> executePaletteAction() -> 동일 흐름
 | 패턴 | 사용처 | 설명 |
 |------|--------|------|
 | 배너 (HStack + 배경색) | StatusBar, ToolConfirmation, ErrorBanner, SystemHealthBar | 화면 상단 가로 바 |
-| 시트 (sheet modifier) | ContextInspector, CapabilityCatalog, SystemStatus, AgentDetail, ShortcutHelp, QuickSwitcher, TagManagement, ExportOptions 등 | 모달 오버레이 |
+| 시트 (sheet modifier) | ContextInspector, CapabilityCatalog, SystemStatus, AgentDetail, AgentWizard, ShortcutHelp, QuickSwitcher, TagManagement, ExportOptions 등 | 모달 오버레이 |
 | 오버레이 (ZStack) | CommandPaletteView | 앱 위에 떠오르는 팔레트 (배경 딤 + 검색 + 목록) |
 | 팝오버 (popover modifier) | SlashCommandPopover, ConversationFilterView | 컨트롤 근처에 떠오르는 패널 |
 | 배지 (Text + padding + 배경) | StatusBar 토큰, 연속대화 배지, 태그 칩 | 작은 정보 칩 |
@@ -280,6 +296,8 @@ CommandPaletteView (⌘K) -> executePaletteAction() -> 동일 흐름
 | 폴더 안 대화 0개 | "대화를 여기로 드래그하세요" | ConversationListView 폴더 섹션 |
 | 태그 0개 | "태그를 추가하여 대화를 분류하세요" | TagManagementView |
 | 필터 결과 0개 | "조건에 맞는 대화가 없습니다" + 필터 초기화 | ConversationListView |
+| 에이전트 0개 | "에이전트가 없습니다" + 생성 버튼 | AgentCardGridView |
+| 에이전트 0개 (대화) | 에이전트 생성 힌트 카드 | EmptyConversationView |
 
 ---
 
@@ -295,7 +313,30 @@ CommandPaletteView (⌘K) -> executePaletteAction() -> 동일 흐름
 | 대화 폴더 | `~/Library/Application Support/Dochi/conversation_folders.json` | 폴더 정의 |
 | 칸반 보드 | `~/Library/Application Support/Dochi/kanban/{boardId}.json` | 칸반 데이터 |
 | 워크스페이스 | `~/Library/Application Support/Dochi/workspaces/{wsId}/` | 워크스페이스 데이터 |
+| 에이전트 템플릿 | `~/Library/Application Support/Dochi/agent_templates.json` | 커스텀 에이전트 템플릿 |
 
 ---
 
-*최종 업데이트: 2026-02-15 (UX-5 머지 후)*
+## 모델
+
+### AgentTemplate (UX-6 추가)
+
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `id` | `String` | 고유 ID |
+| `name` | `String` | 템플릿 이름 |
+| `icon` | `String` | SF Symbols 아이콘 |
+| `description` | `String` | 짧은 설명 |
+| `detailedDescription` | `String` | 상세 설명 |
+| `suggestedPersona` | `String` | 추천 페르소나 |
+| `suggestedModel` | `String?` | 추천 모델 |
+| `suggestedPermissions` | `[String]` | 추천 권한 |
+| `suggestedTools` | `[String]` | 추천 도구 |
+| `isBuiltIn` | `Bool` | 기본 제공 여부 |
+| `accentColor` | `String` | 강조 색상 |
+
+기본 제공: coding-assistant, researcher, scheduler, writer, kanban-manager + blank
+
+---
+
+*최종 업데이트: 2026-02-15 (UX-6 머지 후)*

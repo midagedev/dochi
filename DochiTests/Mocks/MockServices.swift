@@ -72,6 +72,7 @@ final class MockContextService: ContextServiceProtocol {
     var localWorkspaces: [UUID] = [UUID(uuidString: "00000000-0000-0000-0000-000000000000")!]
     var conversationTags: [ConversationTag] = []
     var conversationFolders: [ConversationFolder] = []
+    var customTemplates: [AgentTemplate] = []
 
     func loadBaseSystemPrompt() -> String? { baseSystemPrompt }
     func saveBaseSystemPrompt(_ content: String) { baseSystemPrompt = content }
@@ -155,6 +156,9 @@ final class MockContextService: ContextServiceProtocol {
 
     func loadFolders() -> [ConversationFolder] { conversationFolders }
     func saveFolders(_ folders: [ConversationFolder]) { conversationFolders = folders }
+
+    func loadCustomTemplates() -> [AgentTemplate] { customTemplates }
+    func saveCustomTemplates(_ templates: [AgentTemplate]) { customTemplates = templates }
 
     func migrateIfNeeded() { migrateCallCount += 1 }
 }

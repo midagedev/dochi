@@ -34,6 +34,7 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case toggleKanban
         case openTagManagement
         case toggleMultiSelect
+        case createAgent
         case custom(id: String)
     }
 }
@@ -186,6 +187,14 @@ enum CommandPaletteRegistry {
             subtitle: "⌘⇧M",
             category: .navigation,
             action: .toggleMultiSelect
+        ),
+        CommandPaletteItem(
+            id: "create-agent",
+            icon: "person.badge.plus",
+            title: "새 에이전트 생성",
+            subtitle: "",
+            category: .agent,
+            action: .createAgent
         ),
     ]
 

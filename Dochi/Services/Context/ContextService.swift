@@ -304,6 +304,35 @@ final class ContextService: ContextServiceProtocol {
         }
     }
 
+    // MARK: - Agent Templates
+
+    func loadCustomTemplates() -> [AgentTemplate] {
+        let url = baseURL.appendingPathComponent("agent_templates.json")
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            return try decoder.decode([AgentTemplate].self, from: data)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            return []
+        } catch {
+            Log.storage.error("Failed to load custom templates: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func saveCustomTemplates(_ templates: [AgentTemplate]) {
+        let url = baseURL.appendingPathComponent("agent_templates.json")
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(templates)
+            try data.write(to: url, options: .atomic)
+            Log.storage.info("Saved \(templates.count) custom templates")
+        } catch {
+            Log.storage.error("Failed to save custom templates: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Migration
 
     func migrateIfNeeded() {
