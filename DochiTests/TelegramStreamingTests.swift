@@ -98,6 +98,49 @@ final class TelegramStreamingTests: XCTestCase {
         XCTAssertEqual(hexPart.count, 16) // 8 bytes = 16 hex chars
     }
 
+    // MARK: - Media Group
+
+    func testMockSendPhotoTracked() async throws {
+        let tg = MockTelegramService()
+        let msgId = try await tg.sendPhoto(chatId: 42, filePath: "/tmp/test.png", caption: "테스트")
+        XCTAssertEqual(tg.sentPhotos.count, 1)
+        XCTAssertEqual(tg.sentPhotos[0].chatId, 42)
+        XCTAssertEqual(tg.sentPhotos[0].filePath, "/tmp/test.png")
+        XCTAssertEqual(tg.sentPhotos[0].caption, "테스트")
+        XCTAssertEqual(msgId, 1000)
+    }
+
+    func testMockSendPhotoNilCaption() async throws {
+        let tg = MockTelegramService()
+        _ = try await tg.sendPhoto(chatId: 1, filePath: "/tmp/a.png", caption: nil)
+        XCTAssertNil(tg.sentPhotos[0].caption)
+    }
+
+    func testMockSendMediaGroupTracked() async throws {
+        let tg = MockTelegramService()
+        let items = [
+            TelegramMediaItem(filePath: "/tmp/a.png", caption: "A"),
+            TelegramMediaItem(filePath: "/tmp/b.png", caption: nil),
+        ]
+        try await tg.sendMediaGroup(chatId: 99, items: items)
+        XCTAssertEqual(tg.sentMediaGroups.count, 1)
+        XCTAssertEqual(tg.sentMediaGroups[0].chatId, 99)
+        XCTAssertEqual(tg.sentMediaGroups[0].items.count, 2)
+        XCTAssertEqual(tg.sentMediaGroups[0].items[0].caption, "A")
+        XCTAssertNil(tg.sentMediaGroups[0].items[1].caption)
+    }
+
+    func testTelegramMediaItemInit() {
+        let item = TelegramMediaItem(filePath: "/tmp/photo.jpg", caption: "테스트 캡션")
+        XCTAssertEqual(item.filePath, "/tmp/photo.jpg")
+        XCTAssertEqual(item.caption, "테스트 캡션")
+    }
+
+    func testTelegramMediaItemNilCaption() {
+        let item = TelegramMediaItem(filePath: "/tmp/photo.jpg", caption: nil)
+        XCTAssertNil(item.caption)
+    }
+
     // Helper: replicates TelegramService.offsetKey logic for testing
     private func offsetKey(for token: String) -> String {
         let hash = SHA256.hash(data: Data(token.utf8))

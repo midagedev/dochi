@@ -108,6 +108,8 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(TelegramSetTokenTool(keychainService: keychainService, telegramService: telegramService, settings: settings))
         registry.register(TelegramGetMeTool(keychainService: keychainService, telegramService: telegramService, settings: settings))
         registry.register(TelegramSendMessageTool(keychainService: keychainService, telegramService: telegramService, settings: settings))
+        registry.register(TelegramSendPhotoTool(telegramService: telegramService))
+        registry.register(TelegramSendMediaGroupTool(telegramService: telegramService))
 
         // Clipboard (conditional: read=safe, write=sensitive)
         registry.register(ClipboardReadTool())

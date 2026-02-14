@@ -210,3 +210,128 @@ final class TelegramSendMessageTool: BuiltInToolProtocol {
         }
     }
 }
+
+// MARK: - telegram.send_photo
+
+@MainActor
+final class TelegramSendPhotoTool: BuiltInToolProtocol {
+    let name = "telegram.send_photo"
+    let category: ToolCategory = .sensitive
+    let description = "텔레그램 채팅에 사진을 전송합니다."
+    let isBaseline = false
+
+    private let telegramService: TelegramServiceProtocol
+
+    init(telegramService: TelegramServiceProtocol) {
+        self.telegramService = telegramService
+    }
+
+    var inputSchema: [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "chat_id": ["type": "integer", "description": "텔레그램 채팅 ID"],
+                "file_path": ["type": "string", "description": "전송할 이미지 파일 경로"],
+                "caption": ["type": "string", "description": "사진 캡션 (선택)"],
+            ],
+            "required": ["chat_id", "file_path"]
+        ]
+    }
+
+    func execute(arguments: [String: Any]) async -> ToolResult {
+        guard let chatId = arguments["chat_id"] as? Int64 ?? (arguments["chat_id"] as? Int).map({ Int64($0) }) else {
+            return ToolResult(toolCallId: "", content: "오류: chat_id는 필수입니다.", isError: true)
+        }
+
+        guard let filePath = arguments["file_path"] as? String, !filePath.isEmpty else {
+            return ToolResult(toolCallId: "", content: "오류: file_path는 필수입니다.", isError: true)
+        }
+
+        guard FileManager.default.fileExists(atPath: filePath) else {
+            return ToolResult(toolCallId: "", content: "오류: 파일을 찾을 수 없습니다: \(filePath)", isError: true)
+        }
+
+        let caption = arguments["caption"] as? String
+
+        do {
+            let messageId = try await telegramService.sendPhoto(chatId: chatId, filePath: filePath, caption: caption)
+            Log.tool.info("Sent Telegram photo to chat \(chatId), messageId: \(messageId)")
+            return ToolResult(toolCallId: "", content: "사진을 전송했습니다. (message_id: \(messageId))")
+        } catch {
+            Log.tool.error("Failed to send Telegram photo: \(error.localizedDescription)")
+            return ToolResult(toolCallId: "", content: "오류: 사진 전송 실패 — \(error.localizedDescription)", isError: true)
+        }
+    }
+}
+
+// MARK: - telegram.send_media_group
+
+@MainActor
+final class TelegramSendMediaGroupTool: BuiltInToolProtocol {
+    let name = "telegram.send_media_group"
+    let category: ToolCategory = .sensitive
+    let description = "텔레그램 채팅에 여러 장의 사진을 미디어 그룹으로 전송합니다 (최대 10장)."
+    let isBaseline = false
+
+    private let telegramService: TelegramServiceProtocol
+
+    init(telegramService: TelegramServiceProtocol) {
+        self.telegramService = telegramService
+    }
+
+    var inputSchema: [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "chat_id": ["type": "integer", "description": "텔레그램 채팅 ID"],
+                "images": [
+                    "type": "array",
+                    "description": "전송할 이미지 목록 (최대 10개)",
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "file_path": ["type": "string", "description": "이미지 파일 경로"],
+                            "caption": ["type": "string", "description": "이미지 캡션 (선택)"],
+                        ],
+                        "required": ["file_path"]
+                    ] as [String: Any]
+                ] as [String: Any],
+            ],
+            "required": ["chat_id", "images"]
+        ]
+    }
+
+    func execute(arguments: [String: Any]) async -> ToolResult {
+        guard let chatId = arguments["chat_id"] as? Int64 ?? (arguments["chat_id"] as? Int).map({ Int64($0) }) else {
+            return ToolResult(toolCallId: "", content: "오류: chat_id는 필수입니다.", isError: true)
+        }
+
+        guard let imagesRaw = arguments["images"] as? [[String: Any]], !imagesRaw.isEmpty else {
+            return ToolResult(toolCallId: "", content: "오류: images는 비어 있을 수 없습니다.", isError: true)
+        }
+
+        var items: [TelegramMediaItem] = []
+        for imageDict in imagesRaw {
+            guard let filePath = imageDict["file_path"] as? String else { continue }
+            guard FileManager.default.fileExists(atPath: filePath) else {
+                Log.tool.warning("미디어 그룹: 파일 없음 \(filePath)")
+                continue
+            }
+            let caption = imageDict["caption"] as? String
+            items.append(TelegramMediaItem(filePath: filePath, caption: caption))
+        }
+
+        guard !items.isEmpty else {
+            return ToolResult(toolCallId: "", content: "오류: 유효한 이미지가 없습니다.", isError: true)
+        }
+
+        do {
+            try await telegramService.sendMediaGroup(chatId: chatId, items: items)
+            Log.tool.info("Sent Telegram media group to chat \(chatId), \(items.count) photos")
+            return ToolResult(toolCallId: "", content: "미디어 그룹을 전송했습니다. (\(items.count)장)")
+        } catch {
+            Log.tool.error("Failed to send Telegram media group: \(error.localizedDescription)")
+            return ToolResult(toolCallId: "", content: "오류: 미디어 그룹 전송 실패 — \(error.localizedDescription)", isError: true)
+        }
+    }
+}
