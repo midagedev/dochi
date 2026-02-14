@@ -443,3 +443,45 @@ final class MockSupabaseService: SupabaseServiceProtocol {
     func releaseLock(resource: String, workspaceId: UUID) async throws {}
     func refreshLock(resource: String, workspaceId: UUID) async throws {}
 }
+
+// MARK: - MockSlackService
+
+@MainActor
+final class MockSlackService: SlackServiceProtocol {
+    var isConnected = false
+    var onMessage: (@MainActor @Sendable (SlackMessage) -> Void)?
+
+    var connectCalls: [(botToken: String, appToken: String)] = []
+    var sentMessages: [(channelId: String, text: String, threadTs: String?)] = []
+    var updatedMessages: [(channelId: String, ts: String, text: String)] = []
+    var typingCalls: [String] = []
+    var nextMessageTs: Int = 1000
+
+    func connect(botToken: String, appToken: String) async throws {
+        connectCalls.append((botToken: botToken, appToken: appToken))
+        isConnected = true
+    }
+
+    func disconnect() {
+        isConnected = false
+    }
+
+    func sendMessage(channelId: String, text: String, threadTs: String?) async throws -> String {
+        let ts = "\(nextMessageTs)"
+        nextMessageTs += 1
+        sentMessages.append((channelId: channelId, text: text, threadTs: threadTs))
+        return ts
+    }
+
+    func updateMessage(channelId: String, ts: String, text: String) async throws {
+        updatedMessages.append((channelId: channelId, ts: ts, text: text))
+    }
+
+    func sendTyping(channelId: String) async throws {
+        typingCalls.append(channelId)
+    }
+
+    func authTest(botToken: String) async throws -> SlackUser {
+        SlackUser(id: "U123BOT", name: "test-bot", isBot: true)
+    }
+}
