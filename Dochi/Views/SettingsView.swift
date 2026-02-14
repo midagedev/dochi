@@ -384,6 +384,70 @@ struct ModelSettingsView: View {
                         .monospacedDigit()
                 }
             }
+
+            Section("용도별 모델 라우팅") {
+                Toggle("자동 모델 선택", isOn: Binding(
+                    get: { settings.taskRoutingEnabled },
+                    set: { settings.taskRoutingEnabled = $0 }
+                ))
+                .help("메시지 복잡도에 따라 경량/고급 모델을 자동 선택합니다")
+
+                if settings.taskRoutingEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("경량 모델 (일상 대화)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            Picker("프로바이더", selection: Binding(
+                                get: { settings.lightModelProvider },
+                                set: { settings.lightModelProvider = $0 }
+                            )) {
+                                Text("기본 모델 사용").tag("")
+                                ForEach(LLMProvider.allCases, id: \.self) { p in
+                                    Text(p.displayName).tag(p.rawValue)
+                                }
+                            }
+                            .frame(width: 140)
+
+                            TextField("모델명", text: Binding(
+                                get: { settings.lightModelName },
+                                set: { settings.lightModelName = $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("고급 모델 (코딩, 분석)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            Picker("프로바이더", selection: Binding(
+                                get: { settings.heavyModelProvider },
+                                set: { settings.heavyModelProvider = $0 }
+                            )) {
+                                Text("기본 모델 사용").tag("")
+                                ForEach(LLMProvider.allCases, id: \.self) { p in
+                                    Text(p.displayName).tag(p.rawValue)
+                                }
+                            }
+                            .frame(width: 140)
+
+                            TextField("모델명", text: Binding(
+                                get: { settings.heavyModelName },
+                                set: { settings.heavyModelName = $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                        }
+                    }
+
+                    Text("표준 복잡도 메시지는 위에서 선택한 기본 모델을 사용합니다")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()

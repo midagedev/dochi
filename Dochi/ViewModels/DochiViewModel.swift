@@ -857,7 +857,12 @@ final class DochiViewModel {
             workspaceId: sessionContext.workspaceId,
             agentName: settings.activeAgentName
         )
-        guard let primaryModel = router.resolvePrimary(agentConfig: agentConfig) else {
+
+        // Classify task complexity from last user message
+        let lastUserText = conversation.messages.last(where: { $0.role == .user })?.content ?? ""
+        let complexity = TaskComplexityClassifier.classify(lastUserText)
+
+        guard let primaryModel = router.resolveForComplexity(complexity, agentConfig: agentConfig) else {
             handleError(LLMError.noAPIKey)
             return
         }

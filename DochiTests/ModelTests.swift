@@ -376,6 +376,60 @@ final class ModelTests: XCTestCase {
     }
 }
 
+// MARK: - TaskComplexityClassifier Tests
+
+final class TaskComplexityTests: XCTestCase {
+
+    func testLightClassification() {
+        XCTAssertEqual(TaskComplexityClassifier.classify("안녕"), .light)
+        XCTAssertEqual(TaskComplexityClassifier.classify("ㅋㅋ"), .light)
+        XCTAssertEqual(TaskComplexityClassifier.classify("hi"), .light)
+        XCTAssertEqual(TaskComplexityClassifier.classify("고마워"), .light)
+        XCTAssertEqual(TaskComplexityClassifier.classify("응"), .light)
+    }
+
+    func testHeavyClassification() {
+        XCTAssertEqual(TaskComplexityClassifier.classify("이 코드를 분석해줘"), .heavy)
+        XCTAssertEqual(TaskComplexityClassifier.classify("함수를 구현해줘"), .heavy)
+        XCTAssertEqual(TaskComplexityClassifier.classify("debug this code please"), .heavy)
+        XCTAssertEqual(TaskComplexityClassifier.classify("SQL 쿼리를 작성해줘"), .heavy)
+    }
+
+    func testStandardClassification() {
+        XCTAssertEqual(TaskComplexityClassifier.classify("내일 회의 일정이 어떻게 돼?"), .standard)
+        XCTAssertEqual(TaskComplexityClassifier.classify("점심 메뉴 추천해줘"), .standard)
+    }
+
+    func testShortHeavyKeyword() {
+        // Short message with heavy keyword should still be heavy
+        XCTAssertEqual(TaskComplexityClassifier.classify("코드 짜줘"), .heavy)
+    }
+
+    func testLongMessageBias() {
+        // Long messages with heavy keywords get extra weight
+        let longText = String(repeating: "이것은 긴 메시지입니다. ", count: 30) + "코드를 분석하고"
+        XCTAssertEqual(TaskComplexityClassifier.classify(longText), .heavy)
+    }
+
+    func testEmptyString() {
+        // Empty string is very short, should be light
+        XCTAssertEqual(TaskComplexityClassifier.classify(""), .light)
+    }
+
+    func testAllCases() {
+        XCTAssertEqual(TaskComplexity.allCases.count, 3)
+        XCTAssertEqual(TaskComplexity.light.rawValue, "light")
+        XCTAssertEqual(TaskComplexity.standard.rawValue, "standard")
+        XCTAssertEqual(TaskComplexity.heavy.rawValue, "heavy")
+    }
+
+    func testDisplayNames() {
+        XCTAssertEqual(TaskComplexity.light.displayName, "경량")
+        XCTAssertEqual(TaskComplexity.standard.displayName, "표준")
+        XCTAssertEqual(TaskComplexity.heavy.displayName, "고급")
+    }
+}
+
 // MARK: - ModelRouter Tests
 
 @MainActor
@@ -526,5 +580,75 @@ final class ModelRouterTests: XCTestCase {
         let resolved = router.resolvePrimary()
 
         XCTAssertNil(resolved)
+    }
+
+    // MARK: - resolveForComplexity
+
+    func testResolveForComplexityDisabledReturnsPrimary() {
+        settings.taskRoutingEnabled = false
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+
+        let resolved = router.resolveForComplexity(.heavy)
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
+
+    func testResolveForComplexityStandardReturnsPrimary() {
+        settings.taskRoutingEnabled = true
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+
+        let resolved = router.resolveForComplexity(.standard)
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
+
+    func testResolveForComplexityLightModel() {
+        settings.taskRoutingEnabled = true
+        settings.lightModelProvider = LLMProvider.openai.rawValue
+        settings.lightModelName = "gpt-4o-mini"
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolveForComplexity(.light)
+
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o-mini")
+    }
+
+    func testResolveForComplexityHeavyModel() {
+        settings.taskRoutingEnabled = true
+        settings.heavyModelProvider = LLMProvider.anthropic.rawValue
+        settings.heavyModelName = "claude-sonnet-4-5-20250514"
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolveForComplexity(.heavy)
+
+        XCTAssertEqual(resolved?.provider, .anthropic)
+        XCTAssertEqual(resolved?.model, "claude-sonnet-4-5-20250514")
+        XCTAssertEqual(resolved?.apiKey, "sk-test-anthropic")
+    }
+
+    func testResolveForComplexityFallsToPrimaryWhenNotConfigured() {
+        settings.taskRoutingEnabled = true
+        // lightModelProvider/Name are empty
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolveForComplexity(.light)
+
+        // Should fall back to primary (openai/gpt-4o)
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
+
+    func testResolveForComplexityFallsToPrimaryWhenNoAPIKey() {
+        settings.taskRoutingEnabled = true
+        settings.heavyModelProvider = LLMProvider.zai.rawValue
+        settings.heavyModelName = "glm-5"
+        // No Z.AI key → should fall back to primary
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolveForComplexity(.heavy)
+
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
     }
 }
