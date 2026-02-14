@@ -21,6 +21,13 @@ protocol SupabaseServiceProtocol {
     func listWorkspaces() async throws -> [Workspace]
     func regenerateInviteCode(workspaceId: UUID) async throws -> String
 
+    // Devices
+    func registerDevice(name: String, workspaceIds: [UUID]) async throws -> Device
+    func updateDeviceHeartbeat(deviceId: UUID) async throws
+    func updateDeviceWorkspaces(deviceId: UUID, workspaceIds: [UUID]) async throws
+    func listDevices() async throws -> [Device]
+    func removeDevice(id: UUID) async throws
+
     // Sync
     func syncContext() async throws
     func syncConversations() async throws
