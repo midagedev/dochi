@@ -13,6 +13,7 @@ struct ExportOptionsView: View {
     @State private var options = ExportOptions()
     @State private var showCopiedFeedback = false
     @State private var showShareError = false
+    @State private var shareErrorMessage: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -253,6 +254,15 @@ struct ExportOptionsView: View {
             }
             .buttonStyle(.bordered)
 
+            .alert("공유 실패", isPresented: Binding(
+                get: { shareErrorMessage != nil },
+                set: { if !$0 { shareErrorMessage = nil } }
+            )) {
+                Button("확인", role: .cancel) {}
+            } message: {
+                Text(shareErrorMessage ?? "")
+            }
+
             // Save to file
             Button {
                 onExportFile(selectedFormat, options)
@@ -277,6 +287,8 @@ struct ExportOptionsView: View {
 
     private func shareViaService() {
         guard let data = ConversationExporter.exportToData(conversation, format: selectedFormat, options: options) else {
+            Log.app.error("공유 실패: 내보내기 데이터 생성 실패 (format: \(selectedFormat.rawValue))")
+            shareErrorMessage = "내보내기 데이터를 생성할 수 없습니다."
             return
         }
 
@@ -286,13 +298,16 @@ struct ExportOptionsView: View {
         do {
             try data.write(to: tempURL, options: .atomic)
         } catch {
+            Log.app.error("공유 실패: 임시 파일 쓰기 실패 — \(error.localizedDescription)")
+            shareErrorMessage = "임시 파일을 생성할 수 없습니다: \(error.localizedDescription)"
             return
         }
 
         guard let window = NSApp.keyWindow else { return }
+        guard let contentView = window.contentView else { return }
 
         let picker = NSSharingServicePicker(items: [tempURL])
         let buttonFrame = CGRect(x: window.frame.width / 2, y: 40, width: 1, height: 1)
-        picker.show(relativeTo: buttonFrame, of: window.contentView!, preferredEdge: .maxY)
+        picker.show(relativeTo: buttonFrame, of: contentView, preferredEdge: .maxY)
     }
 }
