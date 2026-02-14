@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import os
 
@@ -153,9 +154,10 @@ final class TelegramService: TelegramServiceProtocol {
 
         self.token = token
         isPolling = true
-        lastUpdateId = nil
+        lastUpdateId = Self.loadOffset(for: token)
 
-        Log.telegram.info("Telegram 폴링 시작")
+        let offsetStr = lastUpdateId.map(String.init) ?? "nil"
+        Log.telegram.info("Telegram 폴링 시작 (offset: \(offsetStr))")
 
         pollingTask = Task.detached { [weak self] in
             await self?.pollLoop()
@@ -310,8 +312,11 @@ final class TelegramService: TelegramServiceProtocol {
 
     @MainActor
     private func handleUpdate(_ apiUpdate: APIUpdate) {
-        // offset 갱신
+        // offset 갱신 및 영속화
         lastUpdateId = apiUpdate.updateId
+        if let token {
+            Self.saveOffset(apiUpdate.updateId, for: token)
+        }
 
         // 텍스트 메시지만 처리 (DM)
         guard let message = apiUpdate.message,
@@ -388,5 +393,27 @@ final class TelegramService: TelegramServiceProtocol {
         }
 
         return result
+    }
+
+    // MARK: - Offset Persistence
+
+    private static func offsetKey(for token: String) -> String {
+        let hash = SHA256.hash(data: Data(token.utf8))
+        let prefix = hash.prefix(8).map { String(format: "%02x", $0) }.joined()
+        return "telegram_offset_\(prefix)"
+    }
+
+    private static func loadOffset(for token: String) -> Int64? {
+        let key = offsetKey(for: token)
+        let value = UserDefaults.standard.object(forKey: key) as? Int64
+        if let value {
+            Log.telegram.debug("Loaded persisted offset \(value) for token")
+        }
+        return value
+    }
+
+    private static func saveOffset(_ offset: Int64, for token: String) {
+        let key = offsetKey(for: token)
+        UserDefaults.standard.set(offset, forKey: key)
     }
 }
