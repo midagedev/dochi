@@ -319,7 +319,7 @@ private struct KanbanCardFormSheet: View {
 
         _title = State(initialValue: card?.title ?? "")
         _description = State(initialValue: card?.description ?? "")
-        _selectedColumn = State(initialValue: card?.column ?? board.columns.first ?? "할 일")
+        _selectedColumn = State(initialValue: card?.column ?? board.columns.first ?? "백로그")
         _selectedPriority = State(initialValue: card?.priority ?? .medium)
         _labelsText = State(initialValue: (card?.labels ?? []).joined(separator: ", "))
         _assignee = State(initialValue: card?.assignee ?? "")
@@ -416,7 +416,7 @@ private struct CreateBoardSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
-    @State private var columnsRaw = "할 일, 진행 중, 완료"
+    @State private var columnsRaw = "백로그, 준비, 진행 중, 검토, 완료"
 
     let onCreate: (String, [String]?) -> Void
 
