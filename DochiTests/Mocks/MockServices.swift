@@ -207,6 +207,7 @@ final class MockBuiltInToolService: BuiltInToolServiceProtocol {
     var resetCallCount = 0
 
     var nonBaselineToolSummaries: [(name: String, description: String, category: ToolCategory)] = []
+    var allToolInfos: [ToolInfo] = []
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]] {
         stubbedSchemas
