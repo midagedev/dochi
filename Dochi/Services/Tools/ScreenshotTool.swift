@@ -68,32 +68,38 @@ final class ScreenshotCaptureTool: BuiltInToolProtocol {
 
     private func runScreencapture(args: [String]) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            process.arguments = args
+            Task.detached {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                process.arguments = args
 
-            let errPipe = Pipe()
-            process.standardError = errPipe
+                let errPipe = Pipe()
+                process.standardError = errPipe
 
-            let timeoutItem = DispatchWorkItem {
-                if process.isRunning { process.terminate() }
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 10, execute: timeoutItem)
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-                timeoutItem.cancel()
-
-                if process.terminationStatus != 0 {
-                    let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                    throw NSError(domain: "ScreenshotTool", code: Int(process.terminationStatus),
-                                  userInfo: [NSLocalizedDescriptionKey: "screencapture exit \(process.terminationStatus): \(stderr)"])
+                let timeoutItem = DispatchWorkItem {
+                    if process.isRunning { process.terminate() }
                 }
-                continuation.resume()
-            } catch {
-                timeoutItem.cancel()
-                continuation.resume(throwing: error)
+                DispatchQueue.global().asyncAfter(deadline: .now() + 10, execute: timeoutItem)
+
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    timeoutItem.cancel()
+
+                    if process.terminationStatus != 0 {
+                        let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                        continuation.resume(throwing: NSError(
+                            domain: "ScreenshotTool",
+                            code: Int(process.terminationStatus),
+                            userInfo: [NSLocalizedDescriptionKey: "screencapture exit \(process.terminationStatus): \(stderr)"]
+                        ))
+                        return
+                    }
+                    continuation.resume()
+                } catch {
+                    timeoutItem.cancel()
+                    continuation.resume(throwing: error)
+                }
             }
         }
     }
