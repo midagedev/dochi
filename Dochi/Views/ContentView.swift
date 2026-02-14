@@ -545,7 +545,6 @@ struct ErrorBannerView: View {
 struct InputBarView: View {
     @Bindable var viewModel: DochiViewModel
     @State private var showSlashCommands = false
-    @State private var slashSelectedIndex = 0
 
     private var matchingCommands: [SlashCommand] {
         FeatureCatalog.matchingCommands(for: viewModel.inputText)
@@ -572,15 +571,14 @@ struct InputBarView: View {
                     microphoneButton
                 }
 
-                TextField("메시지를 입력하세요... ( / 로 명령어 목록)", text: $viewModel.inputText, axis: .vertical)
+                TextField("메시지 입력... /로 명령어", text: $viewModel.inputText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
                     .padding(8)
                     .onSubmit {
                         if !NSEvent.modifierFlags.contains(.shift) {
                             if showSlashCommands && !matchingCommands.isEmpty {
-                                let index = min(slashSelectedIndex, matchingCommands.count - 1)
-                                applySlashCommand(matchingCommands[index])
+                                applySlashCommand(matchingCommands[0])
                             } else {
                                 viewModel.sendMessage()
                             }
@@ -589,7 +587,6 @@ struct InputBarView: View {
                     .onChange(of: viewModel.inputText) { _, newValue in
                         withAnimation(.easeOut(duration: 0.15)) {
                             showSlashCommands = newValue.hasPrefix("/") && viewModel.interactionState == .idle
-                            slashSelectedIndex = 0
                         }
                     }
 

@@ -127,6 +127,23 @@ struct ToolInfo: Identifiable, Sendable {
     let parameters: [ToolParamInfo]
 
     var group: String {
-        String(name.split(separator: ".").first ?? Substring(name))
+        let base = String(name.split(separator: ".").first ?? Substring(name))
+        // 레거시 도구명을 논리적 그룹으로 정규화
+        switch base {
+        case "create_reminder", "list_reminders", "complete_reminder": return "reminders"
+        case "set_timer", "list_timers", "cancel_timer": return "timer"
+        case "set_alarm", "list_alarms", "cancel_alarm": return "alarm"
+        case "save_memory", "update_memory": return "memory"
+        case "set_current_user": return "profile"
+        case "list_calendar_events", "create_calendar_event", "delete_calendar_event": return "calendar"
+        case "web_search": return "search"
+        case "generate_image": return "image"
+        case "print_image": return "image"
+        case "open_url": return "url"
+        case "calculate": return "calculator"
+        case "datetime": return "datetime"
+        case "update_base_system_prompt": return "context"
+        default: return base
+        }
     }
 }

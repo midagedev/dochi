@@ -78,7 +78,7 @@ struct CapabilityCatalogView: View {
                         .frame(width: 16)
                     Text("전체 보기")
                     Spacer()
-                    Text("\(toolInfos.count)")
+                    Text("\(filteredTools.count)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -255,79 +255,52 @@ struct CapabilityCatalogView: View {
             .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 
-    // MARK: - Helpers
+    // MARK: - Group Metadata
+
+    private struct GroupMeta {
+        let icon: String
+        let displayName: String
+    }
+
+    private static let groupMetadata: [String: GroupMeta] = [
+        "calendar": GroupMeta(icon: "calendar", displayName: "캘린더"),
+        "kanban": GroupMeta(icon: "rectangle.3.group", displayName: "칸반"),
+        "file": GroupMeta(icon: "doc", displayName: "파일 관리"),
+        "search": GroupMeta(icon: "magnifyingglass", displayName: "웹 검색"),
+        "shell": GroupMeta(icon: "terminal", displayName: "터미널"),
+        "clipboard": GroupMeta(icon: "doc.on.clipboard", displayName: "클립보드"),
+        "screenshot": GroupMeta(icon: "camera.viewfinder", displayName: "스크린샷"),
+        "git": GroupMeta(icon: "arrow.triangle.branch", displayName: "Git"),
+        "github": GroupMeta(icon: "chevron.left.forwardslash.chevron.right", displayName: "GitHub"),
+        "music": GroupMeta(icon: "music.note", displayName: "음악"),
+        "contacts": GroupMeta(icon: "person.2", displayName: "연락처"),
+        "image": GroupMeta(icon: "photo", displayName: "이미지"),
+        "reminders": GroupMeta(icon: "checklist", displayName: "미리알림"),
+        "timer": GroupMeta(icon: "timer", displayName: "타이머"),
+        "alarm": GroupMeta(icon: "alarm", displayName: "알람"),
+        "calculator": GroupMeta(icon: "function", displayName: "계산기"),
+        "datetime": GroupMeta(icon: "clock", displayName: "날짜/시간"),
+        "memory": GroupMeta(icon: "brain", displayName: "기억"),
+        "tools": GroupMeta(icon: "wrench.and.screwdriver", displayName: "도구 관리"),
+        "settings": GroupMeta(icon: "gear", displayName: "설정"),
+        "agent": GroupMeta(icon: "person.badge.key", displayName: "에이전트"),
+        "workspace": GroupMeta(icon: "building.2", displayName: "워크스페이스"),
+        "telegram": GroupMeta(icon: "paperplane", displayName: "텔레그램"),
+        "workflow": GroupMeta(icon: "arrow.triangle.2.circlepath", displayName: "워크플로우"),
+        "coding": GroupMeta(icon: "chevron.left.forwardslash.chevron.right", displayName: "코딩 에이전트"),
+        "finder": GroupMeta(icon: "folder", displayName: "Finder"),
+        "url": GroupMeta(icon: "link", displayName: "URL 열기"),
+        "mcp": GroupMeta(icon: "server.rack", displayName: "MCP 서버"),
+        "profile": GroupMeta(icon: "person.crop.circle", displayName: "사용자 전환"),
+        "context": GroupMeta(icon: "doc.text", displayName: "시스템 프롬프트"),
+    ]
 
     private func groupIcon(for group: String) -> String {
-        switch group {
-        case "calendar", "list_calendar_events", "create_calendar_event", "delete_calendar_event": return "calendar"
-        case "kanban": return "rectangle.3.group"
-        case "file": return "doc"
-        case "web_search": return "magnifyingglass"
-        case "shell": return "terminal"
-        case "clipboard": return "doc.on.clipboard"
-        case "screenshot": return "camera.viewfinder"
-        case "git": return "arrow.triangle.branch"
-        case "github": return "chevron.left.forwardslash.chevron.right"
-        case "music": return "music.note"
-        case "contacts": return "person.2"
-        case "generate_image", "print_image": return "photo"
-        case "create_reminder", "list_reminders", "complete_reminder": return "checklist"
-        case "timer", "set_timer", "list_timers", "cancel_timer": return "timer"
-        case "alarm", "set_alarm", "list_alarms", "cancel_alarm": return "alarm"
-        case "calculate": return "function"
-        case "datetime": return "clock"
-        case "memory", "save_memory", "update_memory": return "brain"
-        case "tools": return "wrench.and.screwdriver"
-        case "settings": return "gear"
-        case "agent": return "person.badge.key"
-        case "workspace": return "building.2"
-        case "telegram": return "paperplane"
-        case "workflow": return "arrow.triangle.2.circlepath"
-        case "coding": return "chevron.left.forwardslash.chevron.right"
-        case "finder": return "folder"
-        case "open_url": return "link"
-        case "mcp": return "server.rack"
-        case "profile", "set_current_user": return "person.crop.circle"
-        case "context", "update_base_system_prompt": return "doc.text"
-        default: return "square.grid.2x2"
-        }
+        Self.groupMetadata[group]?.icon ?? "square.grid.2x2"
     }
 
     private func groupDisplayName(for group: String) -> String {
-        switch group {
-        case "kanban": return "칸반"
-        case "file": return "파일 관리"
-        case "web_search": return "웹 검색"
-        case "shell": return "터미널"
-        case "clipboard": return "클립보드"
-        case "screenshot": return "스크린샷"
-        case "git": return "Git"
-        case "github": return "GitHub"
-        case "music": return "음악"
-        case "contacts": return "연락처"
-        case "generate_image": return "이미지 생성"
-        case "print_image": return "이미지 표시"
-        case "create_reminder", "list_reminders", "complete_reminder": return "미리알림"
-        case "set_timer", "list_timers", "cancel_timer": return "타이머"
-        case "set_alarm", "list_alarms", "cancel_alarm": return "알람"
-        case "calculate": return "계산기"
-        case "datetime": return "날짜/시간"
-        case "save_memory", "update_memory": return "기억"
-        case "tools": return "도구 관리"
-        case "settings": return "설정"
-        case "agent": return "에이전트"
-        case "workspace": return "워크스페이스"
-        case "telegram": return "텔레그램"
-        case "workflow": return "워크플로우"
-        case "coding": return "코딩 에이전트"
-        case "finder": return "Finder"
-        case "open_url": return "URL 열기"
-        case "mcp": return "MCP 서버"
-        case "set_current_user": return "사용자 전환"
-        case "update_base_system_prompt": return "시스템 프롬프트"
-        case "list_calendar_events", "create_calendar_event", "delete_calendar_event": return "캘린더"
-        default: return group
-        }
+        Self.groupMetadata[group]?.displayName ?? group
     }
 
     private func examplePrompt(for tool: ToolInfo) -> String? {
