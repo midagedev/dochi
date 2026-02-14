@@ -62,12 +62,14 @@ final class ShellCommandTool: BuiltInToolProtocol {
 
         case .confirm(let pattern):
             Log.tool.info("Command requires confirmation: \(command) (pattern: \(pattern))")
-            if let handler = confirmationHandler {
-                let approved = await handler(name, "셸 명령 실행: \(command)")
-                if !approved {
-                    Log.tool.info("Shell command denied by user: \(command)")
-                    return ToolResult(toolCallId: "", content: "명령 실행이 사용자에 의해 거부되었습니다.", isError: true)
-                }
+            guard let confirmHandler = confirmationHandler else {
+                Log.tool.warning("No confirmation handler for confirm-level command: \(command)")
+                return ToolResult(toolCallId: "", content: "사용자 확인이 필요하지만 확인 핸들러가 없습니다.", isError: true)
+            }
+            let confirmApproved = await confirmHandler(name, "셸 명령 실행: \(command)")
+            if !confirmApproved {
+                Log.tool.info("Shell command denied by user: \(command)")
+                return ToolResult(toolCallId: "", content: "명령 실행이 사용자에 의해 거부되었습니다.", isError: true)
             }
 
         case .allowed:
@@ -77,12 +79,14 @@ final class ShellCommandTool: BuiltInToolProtocol {
         case .defaultCategory:
             // No pattern matched — ask for confirmation as default restricted behavior
             Log.tool.debug("Command not in any shell permission list, requesting confirmation: \(command)")
-            if let handler = confirmationHandler {
-                let approved = await handler(name, "셸 명령 실행: \(command)")
-                if !approved {
-                    Log.tool.info("Shell command denied by user: \(command)")
-                    return ToolResult(toolCallId: "", content: "명령 실행이 사용자에 의해 거부되었습니다.", isError: true)
-                }
+            guard let defaultHandler = confirmationHandler else {
+                Log.tool.warning("No confirmation handler for unclassified command: \(command)")
+                return ToolResult(toolCallId: "", content: "사용자 확인이 필요하지만 확인 핸들러가 없습니다.", isError: true)
+            }
+            let defaultApproved = await defaultHandler(name, "셸 명령 실행: \(command)")
+            if !defaultApproved {
+                Log.tool.info("Shell command denied by user: \(command)")
+                return ToolResult(toolCallId: "", content: "명령 실행이 사용자에 의해 거부되었습니다.", isError: true)
             }
         }
 

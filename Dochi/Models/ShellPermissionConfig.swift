@@ -59,7 +59,8 @@ struct ShellPermissionConfig: Codable, Sendable, Equatable {
     }
 
     /// Check if a command matches any pattern in a list.
-    /// Matching is case-insensitive and uses prefix/contains matching.
+    /// blockedCommands uses contains (conservative — blocks even embedded patterns).
+    /// confirmCommands/allowedCommands use hasPrefix only (prevents false matches like "false" matching "ls").
     func matchResult(for command: String) -> ShellPermissionResult {
         let lowered = command.lowercased()
 
@@ -70,13 +71,13 @@ struct ShellPermissionConfig: Codable, Sendable, Equatable {
         }
 
         for pattern in confirmCommands {
-            if lowered.hasPrefix(pattern.lowercased()) || lowered.contains(pattern.lowercased()) {
+            if lowered.hasPrefix(pattern.lowercased()) {
                 return .confirm(pattern: pattern)
             }
         }
 
         for pattern in allowedCommands {
-            if lowered.hasPrefix(pattern.lowercased()) || lowered.contains(pattern.lowercased()) {
+            if lowered.hasPrefix(pattern.lowercased()) {
                 return .allowed
             }
         }

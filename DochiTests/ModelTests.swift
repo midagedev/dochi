@@ -238,6 +238,38 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(decoded.allowedCommands, ["safe"])
     }
 
+    func testShellPermissionPrefixOnlyForAllowed() {
+        // "false" should NOT match allowed "ls" — hasPrefix prevents this
+        let config = ShellPermissionConfig(
+            blockedCommands: [],
+            confirmCommands: [],
+            allowedCommands: ["ls"]
+        )
+        XCTAssertEqual(config.matchResult(for: "false"), .defaultCategory)
+        XCTAssertEqual(config.matchResult(for: "ls -la"), .allowed)
+    }
+
+    func testShellPermissionPrefixOnlyForConfirm() {
+        // "harmless" should NOT match confirm "rm" — hasPrefix prevents this
+        let config = ShellPermissionConfig(
+            blockedCommands: [],
+            confirmCommands: ["rm"],
+            allowedCommands: []
+        )
+        XCTAssertEqual(config.matchResult(for: "harmless"), .defaultCategory)
+        XCTAssertEqual(config.matchResult(for: "rm file.txt"), .confirm(pattern: "rm"))
+    }
+
+    func testShellPermissionBlockedUsesContains() {
+        // blocked uses contains — "echo foo && sudo rm" should still be blocked
+        let config = ShellPermissionConfig(
+            blockedCommands: ["sudo "],
+            confirmCommands: [],
+            allowedCommands: []
+        )
+        XCTAssertEqual(config.matchResult(for: "echo foo && sudo rm -rf /"), .blocked(pattern: "sudo "))
+    }
+
     func testShellPermissionCustomConfig() {
         let config = ShellPermissionConfig(
             blockedCommands: ["format c:"],
