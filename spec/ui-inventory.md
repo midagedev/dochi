@@ -10,29 +10,30 @@
 
 ```
 DochiApp (entry point)
-└── ContentView (NavigationSplitView)
+└── ContentView (NavigationSplitView + ZStack)
     ├── [Sidebar] SidebarView
     │   ├── SidebarHeaderView — 워크스페이스/에이전트/사용자 전환
     │   ├── Section Picker — 대화 / 칸반 탭
     │   ├── 대화 검색 + 대화 목록 (List)
     │   └── SidebarAuthStatusView — Supabase 로그인 상태
-    └── [Detail]
-        ├── [대화 탭]
-        │   ├── SystemHealthBarView — 시스템 상태 바 (모델/동기화/하트비트/토큰) [항상 표시]
-        │   ├── StatusBarView — 상태/토큰 (처리 중에만 표시)
-        │   ├── ToolConfirmationBannerView — 민감 도구 승인
-        │   ├── ErrorBannerView — 에러 표시
-        │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
-        │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크)
-        │   │   또는 ConversationView — 메시지 목록
-        │   │       └── MessageBubbleView — 개별 메시지 버블
-        │   │           └── MessageMetadataBadgeView — 모델/응답시간 배지 (assistant만, 호버 팝오버)
-        │   ├── Divider
-        │   └── InputBarView — 텍스트 입력 + 마이크 + 슬래시 명령
-        │       └── SlashCommandPopoverView — / 자동완성 팝업
-        └── [칸반 탭]
-            └── KanbanWorkspaceView
-                └── KanbanBoardView → KanbanColumnView → KanbanCardView
+    ├── [Detail]
+    │   ├── [대화 탭]
+    │   │   ├── SystemHealthBarView — 시스템 상태 바 (모델/동기화/하트비트/토큰) [항상 표시]
+    │   │   ├── StatusBarView — 상태/토큰 (처리 중에만 표시)
+    │   │   ├── ToolConfirmationBannerView — 민감 도구 승인
+    │   │   ├── ErrorBannerView — 에러 표시
+    │   │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
+    │   │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크 + 단축키 힌트)
+    │   │   │   또는 ConversationView — 메시지 목록
+    │   │   │       └── MessageBubbleView — 개별 메시지 버블
+    │   │   │           └── MessageMetadataBadgeView — 모델/응답시간 배지 (assistant만, 호버 팝오버)
+    │   │   ├── Divider
+    │   │   └── InputBarView — 텍스트 입력 + 마이크 + 슬래시 명령
+    │   │       └── SlashCommandPopoverView — / 자동완성 팝업
+    │   └── [칸반 탭]
+    │       └── KanbanWorkspaceView
+    │           └── KanbanBoardView → KanbanColumnView → KanbanCardView
+    └── [Overlay] CommandPaletteView — ⌘K 커맨드 팔레트 (ZStack 오버레이)
 ```
 
 ---
@@ -43,12 +44,12 @@ DochiApp (entry point)
 
 | 화면 | 파일 | 접근 방법 | 설명 |
 |------|------|-----------|------|
-| ContentView | `Views/ContentView.swift` | 앱 시작 | 메인 레이아웃 (사이드바 + 디테일) |
+| ContentView | `Views/ContentView.swift` | 앱 시작 | 메인 레이아웃 (사이드바 + 디테일 + 커맨드 팔레트 오버레이) |
 | SidebarView | `Views/ContentView.swift` | 항상 표시 | 대화 목록, 검색, 섹션 탭 |
 | SidebarHeaderView | `Views/Sidebar/SidebarHeaderView.swift` | 사이드바 상단 | 워크스페이스/에이전트/사용자 드롭다운 |
 | ConversationView | `Views/ConversationView.swift` | 대화 선택 시 | 메시지 스크롤 뷰 |
 | MessageBubbleView | `Views/MessageBubbleView.swift` | 자동 | 개별 메시지 렌더링 (역할별 스타일) |
-| EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크 |
+| EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트 |
 | InputBarView | `Views/ContentView.swift` | 항상 표시 | 텍스트 입력, 마이크, 전송/취소 버튼, 슬래시 명령 |
 | SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 현재 모델, 동기화 상태, 하트비트, 세션 토큰 (클릭 → 상세 시트) |
 | MessageMetadataBadgeView | `Views/MessageBubbleView.swift` | assistant 메시지 자동 | 모델명·응답시간 배지, 호버 시 상세 팝오버 (토큰/프로바이더/폴백) |
@@ -68,7 +69,10 @@ DochiApp (entry point)
 |------|------|-----------|------|
 | SystemStatusSheetView | `Views/SystemStatusSheetView.swift` | 툴바 "상태" 버튼 (⌘⇧S) 또는 SystemHealthBar 클릭 | 3탭 상세: LLM 교환 이력, 하트비트 틱 기록, 클라우드 동기화 |
 | CapabilityCatalogView | `Views/CapabilityCatalogView.swift` | 툴바 "기능" 버튼 (⌘⇧F) | 전체 도구 그룹별 카탈로그 |
-| ContextInspectorView | `Views/ContextInspectorView.swift` | 툴바 "컨텍스트" 버튼 | 시스템 프롬프트 / 에이전트 / 메모리 탭 |
+| ContextInspectorView | `Views/ContextInspectorView.swift` | 툴바 "컨텍스트" 버튼 (⌘I) | 시스템 프롬프트 / 에이전트 / 메모리 탭 |
+| KeyboardShortcutHelpView | `Views/KeyboardShortcutHelpView.swift` | ⌘/ 또는 커맨드 팔레트 | 4섹션 키보드 단축키 도움말 (480x520) |
+| CommandPaletteView | `Views/CommandPaletteView.swift` | ⌘K | VS Code 스타일 커맨드 팔레트 오버레이 (퍼지 검색, 그룹 섹션) |
+| QuickSwitcherView | `Views/QuickSwitcherView.swift` | ⌘⇧A / ⌘⇧W / ⌘⇧U | 에이전트/워크스페이스/사용자 빠른 전환 시트 |
 | OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 |
 | WorkspaceManagementView | `Views/Sidebar/WorkspaceManagementView.swift` | SidebarHeader 메뉴 | 워크스페이스 생성/삭제 |
 | AgentCreationView | `Views/Sidebar/AgentCreationView.swift` | SidebarHeader 메뉴 | 에이전트 생성 폼 |
@@ -167,6 +171,10 @@ InputBarView 마이크 → viewModel.startListening() → interactionState=.list
 ```
 SidebarHeaderView 드롭다운 → viewModel.switchWorkspace/User/Agent()
 → sessionContext 업데이트 → conversations 재로드 → toolRegistry 리셋
+또는
+QuickSwitcherView (⌘⇧A/W/U) → 동일 흐름
+또는
+CommandPaletteView (⌘K) → executePaletteAction() → 동일 흐름
 ```
 
 ---
@@ -175,12 +183,22 @@ SidebarHeaderView 드롭다운 → viewModel.switchWorkspace/User/Agent()
 
 | 단축키 | 동작 | 위치 |
 |--------|------|------|
+| ⌘K | 커맨드 팔레트 열기/닫기 | ContentView (onKeyPress) |
+| ⌘/ | 키보드 단축키 도움말 | ContentView (hidden button) |
 | ⌘N | 새 대화 | SidebarView 툴바 |
+| ⌘1~9 | N번째 대화 선택 | ContentView (onKeyPress) |
+| ⌘E | 현재 대화 내보내기 (Markdown) | ContentView (hidden button) |
+| ⌘I | 컨텍스트 인스펙터 | ContentView 툴바 |
+| ⌘, | 설정 | macOS 자동 (Settings scene) |
 | ⌘⇧S | 시스템 상태 시트 | ContentView 툴바 |
 | ⌘⇧F | 기능 카탈로그 | ContentView 툴바 |
-| Escape | 요청 취소 | ContentView |
+| ⌘⇧A | 에이전트 빠른 전환 | ContentView (hidden button) |
+| ⌘⇧W | 워크스페이스 빠른 전환 | ContentView (hidden button) |
+| ⌘⇧U | 사용자 빠른 전환 | ContentView (hidden button) |
+| ⌘⇧K | 칸반/대화 전환 | ContentView (onKeyPress) |
+| Escape | 요청 취소 / 팔레트 닫기 | ContentView (onKeyPress) |
 | Enter | 메시지 전송 | InputBarView |
-| Shift+Enter | 줄바꿈 | InputBarView |
+| ⇧Enter | 줄바꿈 | InputBarView |
 
 ---
 
@@ -189,12 +207,14 @@ SidebarHeaderView 드롭다운 → viewModel.switchWorkspace/User/Agent()
 | 패턴 | 사용처 | 설명 |
 |------|--------|------|
 | 배너 (HStack + 배경색) | StatusBar, ToolConfirmation, ErrorBanner, SystemHealthBar | 화면 상단 가로 바 |
-| 시트 (sheet modifier) | ContextInspector, CapabilityCatalog, SystemStatus, AgentDetail 등 | 모달 오버레이 |
+| 시트 (sheet modifier) | ContextInspector, CapabilityCatalog, SystemStatus, AgentDetail, ShortcutHelp, QuickSwitcher 등 | 모달 오버레이 |
+| 오버레이 (ZStack) | CommandPaletteView | 앱 위에 떠오르는 팔레트 (배경 딤 + 검색 + 목록) |
 | 팝오버 (조건부 VStack) | SlashCommandPopover | 입력창 위에 떠오르는 리스트 |
 | 배지 (Text + padding + 배경) | StatusBar 토큰, 연속대화 배지 | 작은 정보 칩 |
 | 카드 (VStack + padding + 배경 + 라운드) | CapabilityCatalog 도구 카드, 칸반 카드 | 정보 블록 |
 | 분할 뷰 (HSplitView / HStack) | CapabilityCatalog (목록+상세), ToolsSettings | 좌우 2패널 |
+| 키캡 (Text + 둥근 테두리) | KeyboardShortcutHelpView | 단축키 키 표시 |
 
 ---
 
-*최종 업데이트: 2026-02-15 (UX-2 머지 후)*
+*최종 업데이트: 2026-02-15 (UX-3 머지 후)*
