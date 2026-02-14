@@ -301,6 +301,78 @@ final class SupabaseService: SupabaseServiceProtocol {
         return newCode
     }
 
+    // MARK: - Devices
+
+    func registerDevice(name: String, workspaceIds: [UUID]) async throws -> Device {
+        let client = try requireClient()
+        let userId = try requireUserId()
+
+        let device = Device(
+            userId: userId,
+            name: name,
+            workspaceIds: workspaceIds
+        )
+
+        try await client.from("devices")
+            .upsert(device)
+            .execute()
+
+        Log.cloud.info("Registered device '\(name)' (\(device.id))")
+        return device
+    }
+
+    func updateDeviceHeartbeat(deviceId: UUID) async throws {
+        let client = try requireClient()
+        _ = try requireUserId()
+
+        try await client.from("devices")
+            .update(["last_heartbeat": ISO8601DateFormatter().string(from: Date())])
+            .eq("id", value: deviceId.uuidString)
+            .execute()
+
+        Log.cloud.debug("Updated device heartbeat for \(deviceId)")
+    }
+
+    func updateDeviceWorkspaces(deviceId: UUID, workspaceIds: [UUID]) async throws {
+        let client = try requireClient()
+        _ = try requireUserId()
+
+        let ids = workspaceIds.map(\.uuidString)
+        try await client.from("devices")
+            .update(["workspace_ids": ids])
+            .eq("id", value: deviceId.uuidString)
+            .execute()
+
+        Log.cloud.info("Updated device workspaces for \(deviceId): \(ids.count) workspace(s)")
+    }
+
+    func listDevices() async throws -> [Device] {
+        let client = try requireClient()
+        let userId = try requireUserId()
+
+        let devices: [Device] = try await client.from("devices")
+            .select()
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+            .value
+
+        Log.cloud.debug("Listed \(devices.count) device(s)")
+        return devices
+    }
+
+    func removeDevice(id: UUID) async throws {
+        let client = try requireClient()
+        let userId = try requireUserId()
+
+        try await client.from("devices")
+            .delete()
+            .eq("id", value: id.uuidString)
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+
+        Log.cloud.info("Removed device \(id)")
+    }
+
     // MARK: - Sync
 
     func syncContext() async throws {

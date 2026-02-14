@@ -90,6 +90,10 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(currentWorkspaceId, forKey: "currentWorkspaceId") }
     }
 
+    var deviceId: String = UserDefaults.standard.string(forKey: "deviceId") ?? "" {
+        didSet { UserDefaults.standard.set(deviceId, forKey: "deviceId") }
+    }
+
     var hasSeenPermissionInfo: Bool = UserDefaults.standard.object(forKey: "hasSeenPermissionInfo") as? Bool ?? false {
         didSet { UserDefaults.standard.set(hasSeenPermissionInfo, forKey: "hasSeenPermissionInfo") }
     }

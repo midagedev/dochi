@@ -349,3 +349,63 @@ final class MockTelegramService: TelegramServiceProtocol {
         TelegramUser(id: 1, isBot: true, firstName: "TestBot", username: "test_bot")
     }
 }
+
+// MARK: - MockSupabaseService
+
+@MainActor
+final class MockSupabaseService: SupabaseServiceProtocol {
+    var isConfigured: Bool = true
+    var authState: AuthState = .signedIn(userId: UUID(), email: "test@test.com")
+
+    var registeredDevices: [Device] = []
+    var heartbeatCalls: [UUID] = []
+    var removedDeviceIds: [UUID] = []
+
+    func configure(url: URL, anonKey: String) {}
+    func signInWithApple() async throws {}
+    func signInWithEmail(email: String, password: String) async throws {}
+    func signUpWithEmail(email: String, password: String) async throws {}
+    func signOut() async throws { authState = .signedOut }
+    func restoreSession() async {}
+
+    func createWorkspace(name: String) async throws -> Workspace {
+        Workspace(name: name, inviteCode: "ABC123", ownerId: authState.userId!)
+    }
+    func joinWorkspace(inviteCode: String) async throws -> Workspace {
+        Workspace(name: "Joined", inviteCode: inviteCode, ownerId: UUID())
+    }
+    func leaveWorkspace(id: UUID) async throws {}
+    func listWorkspaces() async throws -> [Workspace] { [] }
+    func regenerateInviteCode(workspaceId: UUID) async throws -> String { "NEW123" }
+
+    func registerDevice(name: String, workspaceIds: [UUID]) async throws -> Device {
+        let device = Device(userId: authState.userId!, name: name, workspaceIds: workspaceIds)
+        registeredDevices.append(device)
+        return device
+    }
+
+    func updateDeviceHeartbeat(deviceId: UUID) async throws {
+        heartbeatCalls.append(deviceId)
+    }
+
+    func updateDeviceWorkspaces(deviceId: UUID, workspaceIds: [UUID]) async throws {
+        if let idx = registeredDevices.firstIndex(where: { $0.id == deviceId }) {
+            registeredDevices[idx].workspaceIds = workspaceIds
+        }
+    }
+
+    func listDevices() async throws -> [Device] {
+        registeredDevices
+    }
+
+    func removeDevice(id: UUID) async throws {
+        removedDeviceIds.append(id)
+        registeredDevices.removeAll { $0.id == id }
+    }
+
+    func syncContext() async throws {}
+    func syncConversations() async throws {}
+    func acquireLock(resource: String, workspaceId: UUID) async throws -> Bool { true }
+    func releaseLock(resource: String, workspaceId: UUID) async throws {}
+    func refreshLock(resource: String, workspaceId: UUID) async throws {}
+}
