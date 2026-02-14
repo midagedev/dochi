@@ -329,6 +329,26 @@ struct ConversationListView: View {
                 } label: {
                     Label("JSON (.json)", systemImage: "doc.badge.gearshape")
                 }
+                Button {
+                    viewModel.exportConversation(id: conversation.id, format: .pdf)
+                } label: {
+                    Label("PDF (.pdf)", systemImage: "doc.richtext")
+                }
+                Button {
+                    viewModel.exportConversation(id: conversation.id, format: .plainText)
+                } label: {
+                    Label("텍스트 (.txt)", systemImage: "doc.plaintext")
+                }
+
+                Divider()
+
+                Button {
+                    if let conv = viewModel.conversations.first(where: { $0.id == conversation.id }) {
+                        viewModel.exportConversationToClipboard(conv, format: .markdown)
+                    }
+                } label: {
+                    Label("클립보드 복사", systemImage: "doc.on.clipboard")
+                }
             }
 
             Divider()
@@ -445,6 +465,38 @@ struct BulkActionToolbarView: View {
                         .frame(width: 24)
                         .help("태그 추가")
                     }
+
+                    Menu {
+                        Button {
+                            for id in viewModel.selectedConversationIds {
+                                viewModel.exportConversation(id: id, format: .markdown)
+                            }
+                        } label: {
+                            Label("마크다운 개별 저장", systemImage: "doc.text")
+                        }
+                        Button {
+                            for id in viewModel.selectedConversationIds {
+                                viewModel.exportConversation(id: id, format: .json)
+                            }
+                        } label: {
+                            Label("JSON 개별 저장", systemImage: "doc.badge.gearshape")
+                        }
+
+                        Divider()
+
+                        Button {
+                            viewModel.bulkExportMerged()
+                        } label: {
+                            Label("마크다운 합치기", systemImage: "doc.on.doc")
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 13))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .frame(width: 24)
+                    .help("내보내기")
+                    .disabled(viewModel.selectedConversationIds.isEmpty)
 
                     Button {
                         viewModel.bulkSetFavorite(true)

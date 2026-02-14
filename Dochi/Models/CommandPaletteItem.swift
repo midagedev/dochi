@@ -30,6 +30,7 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case openSystemStatus
         case openShortcutHelp
         case exportConversation
+        case openExportOptions
         case toggleKanban
         case openTagManagement
         case toggleMultiSelect
@@ -149,10 +150,18 @@ enum CommandPaletteRegistry {
         CommandPaletteItem(
             id: "export-conversation",
             icon: "square.and.arrow.up",
-            title: "대화 내보내기",
+            title: "대화 빠른 내보내기 (Markdown)",
             subtitle: "⌘E",
             category: .navigation,
             action: .exportConversation
+        ),
+        CommandPaletteItem(
+            id: "export-options",
+            icon: "square.and.arrow.up.on.square",
+            title: "내보내기 옵션...",
+            subtitle: "⌘⇧E",
+            category: .navigation,
+            action: .openExportOptions
         ),
         CommandPaletteItem(
             id: "toggle-kanban",

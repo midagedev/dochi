@@ -29,7 +29,7 @@ DochiApp (entry point)
     │   │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
     │   │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크 + 단축키 힌트)
     │   │   │   또는 ConversationView — 메시지 목록
-    │   │   │       └── MessageBubbleView — 개별 메시지 버블
+    │   │   │       └── MessageBubbleView — 개별 메시지 버블 (호버 시 복사 버튼)
     │   │   │           └── MessageMetadataBadgeView — 모델/응답시간 배지 (assistant만, 호버 팝오버)
     │   │   ├── Divider
     │   │   └── InputBarView — 텍스트 입력 + 마이크 + 슬래시 명령
@@ -55,9 +55,9 @@ DochiApp (entry point)
 | ConversationFilterView | `Views/Sidebar/ConversationFilterView.swift` | 필터 버튼 팝오버 | 즐겨찾기/태그/소스 필터 |
 | ConversationFilterChipsView | `Views/Sidebar/ConversationFilterView.swift` | 활성 필터 시 자동 | 활성 필터 칩 가로 스크롤, 개별 제거 |
 | ConversationListView | `Views/Sidebar/ConversationListView.swift` | 대화 탭 | 즐겨찾기/폴더/미분류 섹션별 대화 목록, 드래그앤드롭 |
-| BulkActionToolbarView | `Views/Sidebar/ConversationListView.swift` | 일괄선택 모드 활성 시 | N개 선택 + 폴더/태그/즐겨찾기/삭제 |
+| BulkActionToolbarView | `Views/Sidebar/ConversationListView.swift` | 일괄선택 모드 활성 시 | N개 선택 + 폴더/태그/내보내기/즐겨찾기/삭제 |
 | ConversationView | `Views/ConversationView.swift` | 대화 선택 시 | 메시지 스크롤 뷰 |
-| MessageBubbleView | `Views/MessageBubbleView.swift` | 자동 | 개별 메시지 렌더링 (역할별 스타일) |
+| MessageBubbleView | `Views/MessageBubbleView.swift` | 자동 | 개별 메시지 렌더링 (역할별 스타일), 호버 시 복사 버튼 오버레이 |
 | EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트 |
 | InputBarView | `Views/ContentView.swift` | 항상 표시 | 텍스트 입력, 마이크, 전송/취소 버튼, 슬래시 명령 |
 | SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 현재 모델, 동기화 상태, 하트비트, 세션 토큰 (클릭 → 상세 시트) |
@@ -87,6 +87,7 @@ DochiApp (entry point)
 | WorkspaceManagementView | `Views/Sidebar/WorkspaceManagementView.swift` | SidebarHeader 메뉴 | 워크스페이스 생성/삭제 |
 | AgentCreationView | `Views/Sidebar/AgentCreationView.swift` | SidebarHeader 메뉴 | 에이전트 생성 폼 |
 | AgentDetailView | `Views/Sidebar/AgentDetailView.swift` | SidebarHeader 메뉴 | 에이전트 편집 (설정/페르소나/메모리 3탭) |
+| ExportOptionsView | `Views/ExportOptionsView.swift` | 툴바 "내보내기" 버튼 (⌘⇧E) 또는 커맨드 팔레트 | 4형식 선택(Md/JSON/PDF/텍스트), 3옵션 토글, 3액션(클립보드/공유/파일 저장), 400x480pt |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
 ### 설정 (SettingsView — 9개 탭)
@@ -214,6 +215,18 @@ CommandPaletteView (⌘K) -> executePaletteAction() -> 동일 흐름
 필터: 필터 버튼 -> ConversationFilterView 팝오버 -> filter 바인딩 -> filteredConversations 업데이트
 ```
 
+### 내보내기/공유 (UX-5 추가)
+```
+빠른 내보내기: ⌘E -> viewModel.exportConversation(format: .markdown) -> NSSavePanel
+내보내기 시트: ⌘⇧E / 툴바 / 커맨드 팔레트 -> ExportOptionsView 시트
+  -> 형식 선택 (Markdown/JSON/PDF/텍스트)
+  -> 옵션 (시스템 메시지/도구 호출/메타데이터 포함 여부)
+  -> 클립보드 복사 / macOS 공유 / 파일 저장
+메시지 복사: 호버 -> 복사 버튼 클릭 -> NSPasteboard -> 체크마크 피드백 1초
+사이드바 내보내기: 컨텍스트 메뉴 -> Md/JSON/PDF/텍스트 파일 저장 또는 클립보드 복사
+일괄 내보내기: BulkActionToolbar 내보내기 메뉴 -> 개별 파일 / 합치기(Markdown)
+```
+
 ---
 
 ## 키보드 단축키
@@ -224,7 +237,8 @@ CommandPaletteView (⌘K) -> executePaletteAction() -> 동일 흐름
 | ⌘/ | 키보드 단축키 도움말 | ContentView (hidden button) |
 | ⌘N | 새 대화 | SidebarView 툴바 |
 | ⌘1~9 | N번째 대화 선택 | ContentView (onKeyPress) |
-| ⌘E | 현재 대화 내보내기 (Markdown) | ContentView (hidden button) |
+| ⌘E | 현재 대화 빠른 내보내기 (Markdown) | ContentView (hidden button) |
+| ⌘⇧E | 내보내기 옵션 시트 | ContentView 툴바 |
 | ⌘I | 컨텍스트 인스펙터 | ContentView 툴바 |
 | ⌘, | 설정 | macOS 자동 (Settings scene) |
 | ⌘⇧S | 시스템 상태 시트 | ContentView 툴바 |
@@ -246,11 +260,12 @@ CommandPaletteView (⌘K) -> executePaletteAction() -> 동일 흐름
 | 패턴 | 사용처 | 설명 |
 |------|--------|------|
 | 배너 (HStack + 배경색) | StatusBar, ToolConfirmation, ErrorBanner, SystemHealthBar | 화면 상단 가로 바 |
-| 시트 (sheet modifier) | ContextInspector, CapabilityCatalog, SystemStatus, AgentDetail, ShortcutHelp, QuickSwitcher, TagManagement 등 | 모달 오버레이 |
+| 시트 (sheet modifier) | ContextInspector, CapabilityCatalog, SystemStatus, AgentDetail, ShortcutHelp, QuickSwitcher, TagManagement, ExportOptions 등 | 모달 오버레이 |
 | 오버레이 (ZStack) | CommandPaletteView | 앱 위에 떠오르는 팔레트 (배경 딤 + 검색 + 목록) |
 | 팝오버 (popover modifier) | SlashCommandPopover, ConversationFilterView | 컨트롤 근처에 떠오르는 패널 |
 | 배지 (Text + padding + 배경) | StatusBar 토큰, 연속대화 배지, 태그 칩 | 작은 정보 칩 |
-| 카드 (VStack + padding + 배경 + 라운드) | CapabilityCatalog 도구 카드, 칸반 카드 | 정보 블록 |
+| 카드 (VStack + padding + 배경 + 라운드) | CapabilityCatalog 도구 카드, 칸반 카드, ExportOptions 형식 카드 | 정보 블록 |
+| 호버 오버레이 (overlay + onHover) | MessageBubbleView 복사 버튼 | 호버 시 나타나는 액션 버튼 |
 | 분할 뷰 (HSplitView / HStack) | CapabilityCatalog (목록+상세), ToolsSettings | 좌우 2패널 |
 | 키캡 (Text + 둥근 테두리) | KeyboardShortcutHelpView | 단축키 키 표시 |
 | FlowLayout (커스텀 Layout) | ConversationFilterView 태그 칩 | 줄바꿈 가능한 가로 배치 |
@@ -283,4 +298,4 @@ CommandPaletteView (⌘K) -> executePaletteAction() -> 동일 흐름
 
 ---
 
-*최종 업데이트: 2026-02-15 (UX-4 머지 후)*
+*최종 업데이트: 2026-02-15 (UX-5 머지 후)*
