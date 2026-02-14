@@ -4,7 +4,6 @@ import Foundation
 struct ConversationFilter: Sendable {
     var showFavoritesOnly: Bool = false
     var selectedTags: Set<String> = []
-    var agentName: String?
     var source: ConversationSource?
     var dateFrom: Date?
     var dateTo: Date?
@@ -12,7 +11,6 @@ struct ConversationFilter: Sendable {
     var isActive: Bool {
         showFavoritesOnly
             || !selectedTags.isEmpty
-            || agentName != nil
             || source != nil
             || dateFrom != nil
             || dateTo != nil
@@ -22,7 +20,6 @@ struct ConversationFilter: Sendable {
         var count = 0
         if showFavoritesOnly { count += 1 }
         count += selectedTags.count
-        if agentName != nil { count += 1 }
         if source != nil { count += 1 }
         if dateFrom != nil || dateTo != nil { count += 1 }
         return count
@@ -43,7 +40,6 @@ struct ConversationFilter: Sendable {
     mutating func reset() {
         showFavoritesOnly = false
         selectedTags.removeAll()
-        agentName = nil
         source = nil
         dateFrom = nil
         dateTo = nil

@@ -248,10 +248,17 @@ final class ContextService: ContextServiceProtocol {
 
     func loadTags() -> [ConversationTag] {
         let url = baseURL.appendingPathComponent("conversation_tags.json")
-        guard let data = try? Data(contentsOf: url) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([ConversationTag].self, from: data)) ?? []
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode([ConversationTag].self, from: data)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            return []
+        } catch {
+            Log.storage.error("Failed to load conversation tags: \(error.localizedDescription)")
+            return []
+        }
     }
 
     func saveTags(_ tags: [ConversationTag]) {
@@ -271,10 +278,17 @@ final class ContextService: ContextServiceProtocol {
 
     func loadFolders() -> [ConversationFolder] {
         let url = baseURL.appendingPathComponent("conversation_folders.json")
-        guard let data = try? Data(contentsOf: url) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([ConversationFolder].self, from: data)) ?? []
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode([ConversationFolder].self, from: data)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            return []
+        } catch {
+            Log.storage.error("Failed to load conversation folders: \(error.localizedDescription)")
+            return []
+        }
     }
 
     func saveFolders(_ folders: [ConversationFolder]) {

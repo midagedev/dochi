@@ -231,10 +231,25 @@ final class ConversationFilterTests: XCTestCase {
         filter.source = .telegram
 
         XCTAssertTrue(filter.isActive)
+        XCTAssertEqual(filter.activeCount, 3) // favorites + 1 tag + source
 
         filter.reset()
         XCTAssertFalse(filter.isActive)
         XCTAssertEqual(filter.activeCount, 0)
+    }
+
+    func testNoAgentNameField() {
+        // C-4: agentName was removed because Conversation has no agentName property.
+        // Verify filter works without it.
+        var filter = ConversationFilter()
+        filter.showFavoritesOnly = true
+        filter.source = .local
+
+        XCTAssertEqual(filter.activeCount, 2)
+        XCTAssertTrue(filter.isActive)
+
+        let conv = Conversation(title: "테스트", source: .local, isFavorite: true)
+        XCTAssertTrue(filter.matches(conv))
     }
 }
 
@@ -534,6 +549,30 @@ final class ViewModelOrganizationTests: XCTestCase {
         XCTAssertTrue(conversationService.load(id: c1.id)!.tags.contains("긴급"))
         // Should not duplicate
         XCTAssertEqual(conversationService.load(id: c2.id)!.tags.filter { $0 == "긴급" }.count, 1)
+    }
+
+    // MARK: - Filter (C-1, C-2)
+
+    func testToggleFavoritesFilter() {
+        XCTAssertFalse(viewModel.conversationFilter.showFavoritesOnly)
+
+        viewModel.toggleFavoritesFilter()
+        XCTAssertTrue(viewModel.conversationFilter.showFavoritesOnly)
+
+        viewModel.toggleFavoritesFilter()
+        XCTAssertFalse(viewModel.conversationFilter.showFavoritesOnly)
+    }
+
+    func testResetFilter() {
+        viewModel.conversationFilter.showFavoritesOnly = true
+        viewModel.conversationFilter.selectedTags = ["중요"]
+        viewModel.conversationFilter.source = .telegram
+
+        XCTAssertTrue(viewModel.conversationFilter.isActive)
+
+        viewModel.resetFilter()
+        XCTAssertFalse(viewModel.conversationFilter.isActive)
+        XCTAssertEqual(viewModel.conversationFilter.activeCount, 0)
     }
 
     // MARK: - Load Organization Data

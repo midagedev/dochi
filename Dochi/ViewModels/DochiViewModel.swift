@@ -27,6 +27,7 @@ final class DochiViewModel {
     // MARK: - Conversation Organization
     var conversationTags: [ConversationTag] = []
     var conversationFolders: [ConversationFolder] = []
+    var conversationFilter: ConversationFilter = ConversationFilter()
     var isMultiSelectMode: Bool = false
     var selectedConversationIds: Set<UUID> = []
 
@@ -464,6 +465,18 @@ final class DochiViewModel {
         }
         loadConversations()
         Log.app.info("Moved conversation \(conversationId) to folder \(folderId?.uuidString ?? "none")")
+    }
+
+    // Filter
+
+    func toggleFavoritesFilter() {
+        conversationFilter.showFavoritesOnly.toggle()
+        Log.app.info("Favorites filter toggled: \(self.conversationFilter.showFavoritesOnly)")
+    }
+
+    func resetFilter() {
+        conversationFilter.reset()
+        Log.app.info("Conversation filter reset")
     }
 
     // Multi-select

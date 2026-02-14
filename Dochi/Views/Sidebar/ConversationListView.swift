@@ -4,9 +4,11 @@ import SwiftUI
 struct ConversationListView: View {
     @Bindable var viewModel: DochiViewModel
     let conversations: [Conversation]
-    let filter: ConversationFilter
+    @Binding var filter: ConversationFilter
     @Binding var selectedSection: ContentView.MainSection
     @State private var showTagManagement = false
+    @State private var renamingFolderId: UUID?
+    @State private var renamingFolderName: String = ""
 
     private var profileMap: [String: String] {
         Dictionary(
@@ -23,8 +25,16 @@ struct ConversationListView: View {
         !viewModel.conversationFolders.isEmpty
     }
 
+    /// 즐겨찾기 섹션이 표시될 때는 폴더 내 즐겨찾기 대화 중복 방지
+    private var showFavoritesSection: Bool {
+        !favoriteConversations.isEmpty && !filter.showFavoritesOnly
+    }
+
     private func conversationsInFolder(_ folderId: UUID) -> [Conversation] {
-        conversations.filter { $0.folderId == folderId }
+        conversations.filter { conversation in
+            conversation.folderId == folderId
+            && !(showFavoritesSection && conversation.isFavorite)
+        }
     }
 
     private var uncategorizedConversations: [Conversation] {
@@ -90,7 +100,8 @@ struct ConversationListView: View {
                             }
                             .contextMenu {
                                 Button("이름 변경") {
-                                    // Inline rename handled via alert or edit in place
+                                    renamingFolderName = folder.name
+                                    renamingFolderId = folder.id
                                 }
                                 Button(role: .destructive) {
                                     viewModel.deleteFolder(id: folder.id)
@@ -136,6 +147,24 @@ struct ConversationListView: View {
             .sheet(isPresented: $showTagManagement) {
                 TagManagementView(viewModel: viewModel)
             }
+            .alert("폴더 이름 변경", isPresented: Binding(
+                get: { renamingFolderId != nil },
+                set: { if !$0 { renamingFolderId = nil } }
+            )) {
+                TextField("폴더 이름", text: $renamingFolderName)
+                Button("취소", role: .cancel) {
+                    renamingFolderId = nil
+                    renamingFolderName = ""
+                }
+                Button("변경") {
+                    let name = renamingFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let folderId = renamingFolderId, !name.isEmpty {
+                        viewModel.renameFolder(id: folderId, name: name)
+                    }
+                    renamingFolderId = nil
+                    renamingFolderName = ""
+                }
+            }
         }
     }
 
@@ -151,7 +180,7 @@ struct ConversationListView: View {
                 .foregroundStyle(.secondary)
             if filter.isActive {
                 Button("필터 초기화") {
-                    // handled by parent via binding
+                    filter.reset()
                 }
                 .font(.system(size: 12))
             }

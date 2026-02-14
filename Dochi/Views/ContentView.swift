@@ -301,6 +301,12 @@ struct ContentView: View {
             return .handled
         }
 
+        // ⌘⇧L: Toggle favorites filter
+        if hasCommand && hasShift && chars == "l" {
+            viewModel.toggleFavoritesFilter()
+            return .handled
+        }
+
         // ⌘⇧M: Toggle multi-select mode
         if hasCommand && hasShift && chars == "m" {
             viewModel.toggleMultiSelectMode()
@@ -456,7 +462,6 @@ struct SidebarView: View {
     var supabaseService: SupabaseServiceProtocol?
     @Binding var selectedSection: ContentView.MainSection
     @State private var searchText: String = ""
-    @State private var filter: ConversationFilter = ConversationFilter()
     @State private var showFilterPopover = false
     @State private var showNewFolderAlert = false
     @State private var newFolderName = ""
@@ -475,8 +480,8 @@ struct SidebarView: View {
         }
 
         // Filter
-        if filter.isActive {
-            result = result.filter { filter.matches($0) }
+        if viewModel.conversationFilter.isActive {
+            result = result.filter { viewModel.conversationFilter.matches($0) }
         }
 
         return result
@@ -501,25 +506,25 @@ struct SidebarView: View {
                 // Header with search + filter + multi-select
                 ConversationListHeaderView(
                     searchText: $searchText,
-                    filter: $filter,
+                    filter: $viewModel.conversationFilter,
                     showFilterPopover: $showFilterPopover,
                     viewModel: viewModel
                 )
                 .popover(isPresented: $showFilterPopover) {
                     ConversationFilterView(
-                        filter: $filter,
+                        filter: $viewModel.conversationFilter,
                         tags: viewModel.conversationTags
                     )
                 }
 
                 // Active filter chips
-                ConversationFilterChipsView(filter: $filter)
+                ConversationFilterChipsView(filter: $viewModel.conversationFilter)
 
                 // Conversation list
                 ConversationListView(
                     viewModel: viewModel,
                     conversations: filteredConversations,
-                    filter: filter,
+                    filter: $viewModel.conversationFilter,
                     selectedSection: $selectedSection
                 )
 
