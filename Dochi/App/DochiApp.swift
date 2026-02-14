@@ -19,6 +19,8 @@ struct DochiApp: App {
     @State private var viewModel: DochiViewModel
     private let keychainService: KeychainService
     private let settings: AppSettings
+    private let contextService: ContextService
+    private let sessionContext: SessionContext
     private let ttsService: TTSRouter
     private let telegramService: TelegramService
     private let mcpService: MCPService
@@ -42,6 +44,7 @@ struct DochiApp: App {
 
         self.keychainService = keychainService
         self.settings = settings
+        self.contextService = contextService
         self.ttsService = ttsService
         self.telegramService = telegramService
         self.mcpService = mcpService
@@ -50,7 +53,20 @@ struct DochiApp: App {
 
         let workspaceId = UUID(uuidString: settings.currentWorkspaceId)
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        let sessionContext = SessionContext(workspaceId: workspaceId)
+
+        // Restore last active user
+        var restoredUserId: String? = nil
+        if !settings.defaultUserId.isEmpty {
+            let profiles = contextService.loadProfiles()
+            if profiles.contains(where: { $0.id.uuidString == settings.defaultUserId }) {
+                restoredUserId = settings.defaultUserId
+            } else {
+                settings.defaultUserId = ""
+            }
+        }
+
+        let sessionContext = SessionContext(workspaceId: workspaceId, currentUserId: restoredUserId)
+        self.sessionContext = sessionContext
 
         let toolService = BuiltInToolService(
             contextService: contextService,
@@ -122,6 +138,16 @@ struct DochiApp: App {
                     }
 
                     heartbeatService.restart()
+
+                    // Smoke test: write app state for automated verification
+                    SmokeTestReporter.report(
+                        profileCount: viewModel.userProfiles.count,
+                        currentUserId: sessionContext.currentUserId,
+                        currentUserName: viewModel.currentUserName == "(사용자 없음)" ? nil : viewModel.currentUserName,
+                        conversationCount: viewModel.conversations.count,
+                        workspaceId: sessionContext.workspaceId.uuidString,
+                        agentName: settings.activeAgentName
+                    )
                 }
                 .onDisappear {
                     heartbeatService.stop()
@@ -151,7 +177,14 @@ struct DochiApp: App {
                     OnboardingView(
                         settings: settings,
                         keychainService: keychainService,
-                        onComplete: { showOnboarding = false }
+                        contextService: contextService,
+                        onComplete: {
+                            // Sync newly created user to sessionContext
+                            if !settings.defaultUserId.isEmpty {
+                                sessionContext.currentUserId = settings.defaultUserId
+                            }
+                            showOnboarding = false
+                        }
                     )
                     .interactiveDismissDisabled()
                 }
@@ -161,6 +194,8 @@ struct DochiApp: App {
             SettingsView(
                 settings: settings,
                 keychainService: keychainService,
+                contextService: contextService,
+                sessionContext: sessionContext,
                 ttsService: ttsService,
                 telegramService: telegramService,
                 mcpService: mcpService,

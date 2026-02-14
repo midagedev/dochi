@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     var settings: AppSettings
     var keychainService: KeychainServiceProtocol
+    var contextService: ContextServiceProtocol?
+    var sessionContext: SessionContext?
     var ttsService: TTSServiceProtocol?
     var telegramService: TelegramServiceProtocol?
     var mcpService: MCPServiceProtocol?
@@ -30,6 +32,17 @@ struct SettingsView: View {
                 .tabItem {
                     Label("음성", systemImage: "speaker.wave.2")
                 }
+
+            if let contextService, let sessionContext {
+                FamilySettingsView(
+                    contextService: contextService,
+                    settings: settings,
+                    sessionContext: sessionContext
+                )
+                .tabItem {
+                    Label("가족", systemImage: "person.2")
+                }
+            }
 
             if let toolService {
                 ToolsSettingsView(toolService: toolService)

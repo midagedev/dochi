@@ -4,6 +4,7 @@ struct SidebarHeaderView: View {
     @Bindable var viewModel: DochiViewModel
     @State private var showWorkspaceManagement = false
     @State private var showAgentCreation = false
+    @State private var showFamilySettings = false
 
     private var workspaceIds: [UUID] {
         viewModel.contextService.listLocalWorkspaces()
@@ -15,6 +16,10 @@ struct SidebarHeaderView: View {
 
     private var agents: [String] {
         viewModel.contextService.listAgents(workspaceId: currentWorkspaceId)
+    }
+
+    private var profiles: [UserProfile] {
+        viewModel.userProfiles
     }
 
     var body: some View {
@@ -119,6 +124,59 @@ struct SidebarHeaderView: View {
                 .buttonStyle(.plain)
                 .help("에이전트 추가")
             }
+
+            // User picker row
+            HStack(spacing: 4) {
+                Menu {
+                    ForEach(profiles) { profile in
+                        Button {
+                            viewModel.switchUser(profile: profile)
+                        } label: {
+                            HStack {
+                                Text(profile.name)
+                                if viewModel.sessionContext.currentUserId == profile.id.uuidString {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+
+                    if profiles.isEmpty {
+                        Text("등록된 사용자 없음")
+                            .foregroundStyle(.secondary)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text(viewModel.currentUserName)
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.quaternary.opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                Spacer()
+
+                Button {
+                    showFamilySettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("가족 설정")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -127,6 +185,15 @@ struct SidebarHeaderView: View {
         }
         .sheet(isPresented: $showAgentCreation) {
             AgentCreationView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showFamilySettings) {
+            FamilySettingsView(
+                contextService: viewModel.contextService,
+                settings: viewModel.settings,
+                sessionContext: viewModel.sessionContext,
+                onProfilesChanged: { viewModel.reloadProfiles() }
+            )
+            .frame(width: 500, height: 400)
         }
     }
 }

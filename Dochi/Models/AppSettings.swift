@@ -110,6 +110,12 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(wakeWordAlwaysOn, forKey: "wakeWordAlwaysOn") }
     }
 
+    // MARK: - Family
+
+    var defaultUserId: String = UserDefaults.standard.string(forKey: "defaultUserId") ?? "" {
+        didSet { UserDefaults.standard.set(defaultUserId, forKey: "defaultUserId") }
+    }
+
     // MARK: - P5 Settings
 
     var fallbackLLMProvider: String = UserDefaults.standard.string(forKey: "fallbackLLMProvider") ?? "" {

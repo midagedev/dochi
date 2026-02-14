@@ -50,7 +50,9 @@ final class ContextService: ContextServiceProtocol {
     func loadProfiles() -> [UserProfile] {
         let url = baseURL.appendingPathComponent("profiles.json")
         guard let data = try? Data(contentsOf: url) else { return [] }
-        return (try? JSONDecoder().decode([UserProfile].self, from: data)) ?? []
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([UserProfile].self, from: data)) ?? []
     }
 
     func saveProfiles(_ profiles: [UserProfile]) {
@@ -58,6 +60,7 @@ final class ContextService: ContextServiceProtocol {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(profiles)
             try data.write(to: url, options: .atomic)
         } catch {

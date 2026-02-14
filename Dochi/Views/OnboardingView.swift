@@ -5,6 +5,7 @@ import SwiftUI
 struct OnboardingView: View {
     let settings: AppSettings
     let keychainService: KeychainServiceProtocol
+    let contextService: ContextServiceProtocol
     let onComplete: () -> Void
 
     @State private var step: OnboardingStep = .welcome
@@ -305,6 +306,15 @@ struct OnboardingView: View {
         settings.llmModel = defaultModel(for: selectedProvider)
         settings.activeAgentName = agentName.isEmpty ? "도치" : agentName
         settings.interactionMode = interactionMode.rawValue
+
+        // Create first user profile if name provided
+        let trimmedName = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            let profile = UserProfile(name: trimmedName)
+            contextService.saveProfiles([profile])
+            settings.defaultUserId = profile.id.uuidString
+            Log.app.info("Created initial user profile: \(trimmedName)")
+        }
 
         // Mark onboarding complete
         UserDefaults.standard.set(true, forKey: "onboardingCompleted")

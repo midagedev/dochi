@@ -136,6 +136,13 @@ struct SidebarView: View {
     @Binding var selectedSection: ContentView.MainSection
     @State private var searchText: String = ""
 
+    private var profileMap: [String: String] {
+        Dictionary(
+            uniqueKeysWithValues: viewModel.contextService.loadProfiles()
+                .map { ($0.id.uuidString, $0.name) }
+        )
+    }
+
     private var filteredConversations: [Conversation] {
         if searchText.isEmpty {
             return viewModel.conversations
@@ -206,6 +213,16 @@ struct SidebarView: View {
                                 Text(conversation.title)
                                     .font(.system(size: 13))
                                     .lineLimit(1)
+
+                                if let userId = conversation.userId,
+                                   let userName = profileMap[userId] {
+                                    Text(userName)
+                                        .font(.system(size: 9, weight: .medium))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Color.accentColor.opacity(0.12))
+                                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                                }
                             }
                             Text(conversation.updatedAt, style: .relative)
                                 .font(.system(size: 11))

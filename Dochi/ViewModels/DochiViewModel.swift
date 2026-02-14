@@ -20,6 +20,8 @@ final class DochiViewModel {
     var currentToolName: String?
     var partialTranscript: String = ""
     var pendingToolConfirmation: ToolConfirmation?
+    var userProfiles: [UserProfile] = []
+    var currentUserName: String = "(사용자 없음)"
 
     // MARK: - Services
 
@@ -111,6 +113,9 @@ final class DochiViewModel {
             guard let self else { return false }
             return await self.requestToolConfirmation(toolName: toolName, toolDescription: toolDescription)
         }
+
+        // Load user profiles
+        reloadProfiles()
 
         Log.app.info("DochiViewModel initialized")
     }
@@ -249,6 +254,23 @@ final class DochiViewModel {
         newConversation()
         loadConversations()
         Log.app.info("Switched workspace to \(id)")
+    }
+
+    func switchUser(profile: UserProfile) {
+        sessionContext.currentUserId = profile.id.uuidString
+        settings.defaultUserId = profile.id.uuidString
+        currentUserName = profile.name
+        Log.app.info("Switched user to: \(profile.name)")
+    }
+
+    func reloadProfiles() {
+        userProfiles = contextService.loadProfiles()
+        if let userId = sessionContext.currentUserId,
+           let profile = userProfiles.first(where: { $0.id.uuidString == userId }) {
+            currentUserName = profile.name
+        } else {
+            currentUserName = "(사용자 없음)"
+        }
     }
 
     func switchAgent(name: String) {
@@ -1132,17 +1154,27 @@ final class DochiViewModel {
         formatter.locale = Locale(identifier: "ko_KR")
         parts.append("현재 시각: \(formatter.string(from: Date()))")
 
-        // 4. Workspace memory
+        // 4. Current user info or identification prompt
+        let profiles = contextService.loadProfiles()
+        if let userId = sessionContext.currentUserId,
+           let currentProfile = profiles.first(where: { $0.id.uuidString == userId }) {
+            parts.append("## 현재 사용자\n현재 대화 중인 사용자: \(currentProfile.name)")
+        } else if !profiles.isEmpty {
+            let nameList = profiles.map(\.name).joined(separator: ", ")
+            parts.append("## 사용자 식별\n현재 사용자가 설정되지 않았습니다. 대화 시작 시 자연스러운 방식으로 사용자를 식별하고, set_current_user 도구를 사용하세요.\n등록된 사용자: \(nameList)")
+        }
+
+        // 5. Workspace memory
         if let wsMem = contextService.loadWorkspaceMemory(workspaceId: wsId), !wsMem.isEmpty {
             parts.append("## 워크스페이스 메모리\n\(wsMem)")
         }
 
-        // 5. Agent memory
+        // 6. Agent memory
         if let agentMem = contextService.loadAgentMemory(workspaceId: wsId, agentName: agentName), !agentMem.isEmpty {
             parts.append("## 에이전트 메모리\n\(agentMem)")
         }
 
-        // 6. Personal memory
+        // 7. Personal memory
         if let userId = sessionContext.currentUserId,
            let personalMem = contextService.loadUserMemory(userId: userId), !personalMem.isEmpty {
             parts.append("## 개인 메모리\n\(personalMem)")
