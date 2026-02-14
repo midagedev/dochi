@@ -22,6 +22,9 @@ struct ContentView: View {
     @State private var showUserSwitcher = false
     @State private var showTagManagementFromPalette = false
 
+    // UX-5: 내보내기/공유
+    @State private var showExportOptions = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -65,6 +68,19 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showTagManagementFromPalette) {
                 TagManagementView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $showExportOptions) {
+                if let conversation = viewModel.currentConversation {
+                    ExportOptionsView(
+                        conversation: conversation,
+                        onExportFile: { format, options in
+                            viewModel.exportConversationToFile(conversation, format: format, options: options)
+                        },
+                        onCopyClipboard: { format, options in
+                            viewModel.exportConversationToClipboard(conversation, format: format, options: options)
+                        }
+                    )
+                }
             }
     }
 
@@ -122,6 +138,15 @@ struct ContentView: View {
                     ToolbarItem(placement: .primaryAction) {
                         if selectedSection == .chat {
                             HStack(spacing: 4) {
+                                Button {
+                                    showExportOptions = true
+                                } label: {
+                                    Label("내보내기", systemImage: "square.and.arrow.up")
+                                }
+                                .help("내보내기 옵션 (⌘⇧E)")
+                                .keyboardShortcut("e", modifiers: [.command, .shift])
+                                .disabled(viewModel.currentConversation == nil)
+
                                 Button {
                                     showSystemStatusSheet = true
                                 } label: {
@@ -371,6 +396,10 @@ struct ContentView: View {
         case .exportConversation:
             if let id = viewModel.currentConversation?.id {
                 viewModel.exportConversation(id: id, format: .markdown)
+            }
+        case .openExportOptions:
+            if viewModel.currentConversation != nil {
+                showExportOptions = true
             }
         case .toggleKanban:
             selectedSection = selectedSection == .chat ? .kanban : .chat

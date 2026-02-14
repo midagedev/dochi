@@ -1,8 +1,11 @@
 import SwiftUI
+import AppKit
 
 struct MessageBubbleView: View {
     let message: Message
     let fontSize: Double
+    @State private var isHovering = false
+    @State private var showCopied = false
 
     init(message: Message, fontSize: Double = 14.0) {
         self.message = message
@@ -28,6 +31,12 @@ struct MessageBubbleView: View {
                     .background(backgroundColor)
                     .cornerRadius(12)
                     .foregroundStyle(foregroundColor)
+                    .overlay(alignment: .topTrailing) {
+                        copyButton
+                    }
+                    .onHover { hovering in
+                        isHovering = hovering
+                    }
 
                 // Tool calls display (for assistant messages that include tool calls)
                 if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
@@ -81,6 +90,38 @@ struct MessageBubbleView: View {
             }
 
             if message.role != .user { Spacer(minLength: 60) }
+        }
+    }
+
+    // MARK: - Copy Button
+
+    @ViewBuilder
+    private var copyButton: some View {
+        if !message.content.isEmpty {
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(message.content, forType: .string)
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showCopied = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCopied = false
+                    }
+                }
+            } label: {
+                Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 10))
+                    .foregroundStyle(showCopied ? .green : (message.role == .user ? .white.opacity(0.7) : .secondary))
+                    .padding(4)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .padding(4)
+            .opacity(isHovering || showCopied ? 1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: isHovering)
+            .help("메시지 복사")
         }
     }
 

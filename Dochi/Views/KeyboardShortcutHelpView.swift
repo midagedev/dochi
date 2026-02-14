@@ -17,7 +17,8 @@ struct KeyboardShortcutHelpView: View {
             entries: [
                 ShortcutEntry(keys: "⌘N", description: "새 대화"),
                 ShortcutEntry(keys: "⌘1~9", description: "대화 목록에서 N번째 대화 선택"),
-                ShortcutEntry(keys: "⌘E", description: "현재 대화 내보내기"),
+                ShortcutEntry(keys: "⌘E", description: "현재 대화 빠른 내보내기 (Markdown)"),
+                ShortcutEntry(keys: "⌘⇧E", description: "내보내기 옵션 시트"),
                 ShortcutEntry(keys: "⌘⇧L", description: "즐겨찾기 필터 토글"),
                 ShortcutEntry(keys: "⌘⇧M", description: "일괄 선택 모드 토글"),
                 ShortcutEntry(keys: "Esc", description: "요청 취소"),

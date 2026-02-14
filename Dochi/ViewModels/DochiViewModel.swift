@@ -1571,12 +1571,15 @@ final class DochiViewModel {
 
     // MARK: - Export
 
-    func exportConversation(id: UUID, format: ExportFormat) {
+    func exportConversation(id: UUID, format: ExportFormat, options: ExportOptions = .default) {
         guard let conversation = conversationService.load(id: id) else {
             Log.app.warning("Export failed: conversation not found \(id)")
             return
         }
+        exportConversationToFile(conversation, format: format, options: options)
+    }
 
+    func exportConversationToFile(_ conversation: Conversation, format: ExportFormat, options: ExportOptions = .default) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = ConversationExporter.suggestedFileName(for: conversation, format: format)
         panel.canCreateDirectories = true
@@ -1586,22 +1589,64 @@ final class DochiViewModel {
             panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         case .json:
             panel.allowedContentTypes = [.json]
+        case .pdf:
+            panel.allowedContentTypes = [.pdf]
+        case .plainText:
+            panel.allowedContentTypes = [.plainText]
         }
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         do {
-            switch format {
-            case .markdown:
-                let markdown = ConversationExporter.toMarkdown(conversation)
-                try markdown.write(to: url, atomically: true, encoding: .utf8)
-            case .json:
-                let data = try ConversationExporter.toJSON(conversation)
-                try data.write(to: url, options: .atomic)
+            guard let data = ConversationExporter.exportToData(conversation, format: format, options: options) else {
+                errorMessage = "내보내기 실패: 데이터 생성 실패"
+                return
             }
-            Log.app.info("Exported conversation \(id) as \(format == .markdown ? "markdown" : "json")")
+            try data.write(to: url, options: .atomic)
+            Log.app.info("Exported conversation \(conversation.id) as \(format.rawValue)")
         } catch {
             Log.app.error("Export failed: \(error.localizedDescription)")
+            errorMessage = "내보내기 실패: \(error.localizedDescription)"
+        }
+    }
+
+    func exportConversationToClipboard(_ conversation: Conversation, format: ExportFormat, options: ExportOptions = .default) {
+        if let text = ConversationExporter.exportToString(conversation, format: format, options: options) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            Log.app.info("Copied conversation \(conversation.id) to clipboard as \(format.rawValue)")
+        } else if format == .pdf {
+            errorMessage = "PDF는 클립보드에 복사할 수 없습니다"
+        }
+    }
+
+    func bulkExportConversations(format: ExportFormat, options: ExportOptions = .default) {
+        let selected = conversations.filter { selectedConversationIds.contains($0.id) }
+        guard !selected.isEmpty else { return }
+
+        for conversation in selected {
+            exportConversationToFile(conversation, format: format, options: options)
+        }
+    }
+
+    func bulkExportMerged(options: ExportOptions = .default) {
+        let selected = conversations.filter { selectedConversationIds.contains($0.id) }
+        guard !selected.isEmpty else { return }
+
+        let merged = ConversationExporter.mergeToMarkdown(selected, options: options)
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "대화모음_\(selected.count)개.md"
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try merged.write(to: url, atomically: true, encoding: .utf8)
+            Log.app.info("Exported \(selected.count) conversations merged")
+        } catch {
+            Log.app.error("Merged export failed: \(error.localizedDescription)")
             errorMessage = "내보내기 실패: \(error.localizedDescription)"
         }
     }
