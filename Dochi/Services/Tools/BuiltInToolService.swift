@@ -178,6 +178,21 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(KanbanDeleteCardTool())
         registry.register(KanbanCardHistoryTool())
 
+        // Workflow (baseline, safe/sensitive)
+        registry.register(WorkflowCreateTool())
+        registry.register(WorkflowListTool())
+        registry.register(WorkflowRunTool(toolExecutor: { [weak self] name, args in
+            guard let self else {
+                return ToolResult(toolCallId: "", content: "서비스를 사용할 수 없습니다.", isError: true)
+            }
+            // Convert [String: String] to [String: Any] for tool execution
+            let toolArgs: [String: Any] = Dictionary(uniqueKeysWithValues: args.map { ($0.key, $0.value as Any) })
+            return await self.execute(name: name, arguments: toolArgs)
+        }))
+        registry.register(WorkflowDeleteTool())
+        registry.register(WorkflowAddStepTool())
+        registry.register(WorkflowHistoryTool())
+
         // Git (conditional, safe/restricted)
         registry.register(GitStatusTool())
         registry.register(GitLogTool())
