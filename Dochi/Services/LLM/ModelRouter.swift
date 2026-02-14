@@ -76,6 +76,58 @@ struct ModelRouter {
         return apiKey
     }
 
+    /// Resolve a model based on task complexity.
+    /// Returns nil if task routing is disabled or no model is configured for the tier.
+    /// Falls through to primary model for `.standard` complexity.
+    func resolveForComplexity(_ complexity: TaskComplexity, agentConfig: AgentConfig? = nil) -> ResolvedModel? {
+        guard settings.taskRoutingEnabled else {
+            return resolvePrimary(agentConfig: agentConfig)
+        }
+
+        switch complexity {
+        case .light:
+            if let model = resolveConfiguredModel(
+                providerRaw: settings.lightModelProvider,
+                modelName: settings.lightModelName,
+                label: "light"
+            ) {
+                return model
+            }
+            // Fall through to primary if not configured
+            return resolvePrimary(agentConfig: agentConfig)
+
+        case .standard:
+            return resolvePrimary(agentConfig: agentConfig)
+
+        case .heavy:
+            if let model = resolveConfiguredModel(
+                providerRaw: settings.heavyModelProvider,
+                modelName: settings.heavyModelName,
+                label: "heavy"
+            ) {
+                return model
+            }
+            // Fall through to primary if not configured
+            return resolvePrimary(agentConfig: agentConfig)
+        }
+    }
+
+    /// Resolve a model from explicit provider/model strings (used for tier overrides).
+    private func resolveConfiguredModel(providerRaw: String, modelName: String, label: String) -> ResolvedModel? {
+        guard !providerRaw.isEmpty, !modelName.isEmpty,
+              let provider = LLMProvider(rawValue: providerRaw) else {
+            return nil
+        }
+
+        guard let apiKey = resolveAPIKey(for: provider) else {
+            Log.llm.warning("Task routing: \(label) model \(modelName) has no API key for \(provider.displayName)")
+            return nil
+        }
+
+        Log.llm.info("Task routing: using \(label) model \(provider.displayName)/\(modelName)")
+        return ResolvedModel(provider: provider, model: modelName, apiKey: apiKey, isFallback: false)
+    }
+
     /// Whether a given error should trigger fallback to an alternate model.
     static func shouldFallback(for error: Error) -> Bool {
         guard let llmError = error as? LLMError else { return false }

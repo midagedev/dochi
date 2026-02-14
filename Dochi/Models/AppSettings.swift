@@ -134,6 +134,28 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(fallbackLLMModel, forKey: "fallbackLLMModel") }
     }
 
+    // MARK: - Task Complexity Routing
+
+    var taskRoutingEnabled: Bool = UserDefaults.standard.object(forKey: "taskRoutingEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(taskRoutingEnabled, forKey: "taskRoutingEnabled") }
+    }
+
+    var lightModelProvider: String = UserDefaults.standard.string(forKey: "lightModelProvider") ?? "" {
+        didSet { UserDefaults.standard.set(lightModelProvider, forKey: "lightModelProvider") }
+    }
+
+    var lightModelName: String = UserDefaults.standard.string(forKey: "lightModelName") ?? "" {
+        didSet { UserDefaults.standard.set(lightModelName, forKey: "lightModelName") }
+    }
+
+    var heavyModelProvider: String = UserDefaults.standard.string(forKey: "heavyModelProvider") ?? "" {
+        didSet { UserDefaults.standard.set(heavyModelProvider, forKey: "heavyModelProvider") }
+    }
+
+    var heavyModelName: String = UserDefaults.standard.string(forKey: "heavyModelName") ?? "" {
+        didSet { UserDefaults.standard.set(heavyModelName, forKey: "heavyModelName") }
+    }
+
     // MARK: - Avatar
 
     var avatarEnabled: Bool = UserDefaults.standard.object(forKey: "avatarEnabled") as? Bool ?? false {
