@@ -181,4 +181,121 @@ final class ModelTests: XCTestCase {
             XCTFail("Expected .toolCalls")
         }
     }
+
+    // MARK: - LLMProvider.provider(forModel:)
+
+    func testProviderForModelOpenAI() {
+        XCTAssertEqual(LLMProvider.provider(forModel: "gpt-4o"), .openai)
+        XCTAssertEqual(LLMProvider.provider(forModel: "gpt-4o-mini"), .openai)
+    }
+
+    func testProviderForModelAnthropic() {
+        XCTAssertEqual(LLMProvider.provider(forModel: "claude-sonnet-4-5-20250514"), .anthropic)
+    }
+
+    func testProviderForModelZAI() {
+        XCTAssertEqual(LLMProvider.provider(forModel: "glm-5"), .zai)
+    }
+
+    func testProviderForModelUnknown() {
+        XCTAssertNil(LLMProvider.provider(forModel: "unknown-model"))
+    }
+}
+
+// MARK: - ModelRouter Tests
+
+@MainActor
+final class ModelRouterTests: XCTestCase {
+
+    private var settings: AppSettings!
+    private var keychainService: MockKeychainService!
+
+    override func setUp() {
+        super.setUp()
+        settings = AppSettings()
+        settings.llmProvider = LLMProvider.openai.rawValue
+        settings.llmModel = "gpt-4o"
+        keychainService = MockKeychainService()
+        keychainService.store["openai"] = "sk-test-openai"
+        keychainService.store["anthropic"] = "sk-test-anthropic"
+    }
+
+    // MARK: - resolvePrimary without agent config (existing behavior)
+
+    func testResolvePrimaryWithoutAgentConfig() {
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary()
+
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
+        XCTAssertEqual(resolved?.apiKey, "sk-test-openai")
+        XCTAssertFalse(resolved?.isFallback ?? true)
+    }
+
+    // MARK: - resolvePrimary with agent config
+
+    func testResolvePrimaryWithAgentModel() {
+        let config = AgentConfig(name: "claude-agent", defaultModel: "claude-sonnet-4-5-20250514")
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary(agentConfig: config)
+
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .anthropic)
+        XCTAssertEqual(resolved?.model, "claude-sonnet-4-5-20250514")
+        XCTAssertEqual(resolved?.apiKey, "sk-test-anthropic")
+    }
+
+    func testResolvePrimaryAgentModelFallsBackWhenNoAPIKey() {
+        // Agent wants Z.AI model but no Z.AI API key is stored
+        let config = AgentConfig(name: "zai-agent", defaultModel: "glm-5")
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary(agentConfig: config)
+
+        // Should fall back to app-level settings (OpenAI)
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
+
+    func testResolvePrimaryAgentModelNilFallsBackToAppSettings() {
+        let config = AgentConfig(name: "default-agent", defaultModel: nil)
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary(agentConfig: config)
+
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
+
+    func testResolvePrimaryAgentModelEmptyFallsBackToAppSettings() {
+        let config = AgentConfig(name: "default-agent", defaultModel: "")
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary(agentConfig: config)
+
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
+
+    func testResolvePrimaryAgentModelUnknownFallsBackToAppSettings() {
+        let config = AgentConfig(name: "bad-agent", defaultModel: "nonexistent-model")
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary(agentConfig: config)
+
+        // Unknown model can't be resolved to a provider, falls back to app settings
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
+
+    func testResolvePrimaryNoAgentConfigParameter() {
+        // Calling without agentConfig parameter (default nil) should work as before
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolvePrimary()
+
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
 }

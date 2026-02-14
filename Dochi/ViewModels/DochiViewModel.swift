@@ -656,9 +656,13 @@ final class DochiViewModel {
         let systemPrompt = composeSystemPrompt()
         let messages = prepareMessages(from: conversation)
 
-        // Resolve model
+        // Resolve model (agent config applies to Telegram too)
         let router = ModelRouter(settings: settings, keychainService: keychainService)
-        guard let model = router.resolvePrimary() else {
+        let telegramAgentConfig = contextService.loadAgentConfig(
+            workspaceId: sessionContext.workspaceId,
+            agentName: settings.activeAgentName
+        )
+        guard let model = router.resolvePrimary(agentConfig: telegramAgentConfig) else {
             Log.telegram.error("No API key configured for Telegram response")
             return
         }
@@ -798,7 +802,11 @@ final class DochiViewModel {
 
         // Resolve model via router (primary + optional fallback)
         let router = ModelRouter(settings: settings, keychainService: keychainService)
-        guard let primaryModel = router.resolvePrimary() else {
+        let agentConfig = contextService.loadAgentConfig(
+            workspaceId: sessionContext.workspaceId,
+            agentName: settings.activeAgentName
+        )
+        guard let primaryModel = router.resolvePrimary(agentConfig: agentConfig) else {
             handleError(LLMError.noAPIKey)
             return
         }

@@ -33,6 +33,11 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
         rawValue
     }
 
+    /// Find the provider that offers a given model name, or nil if unknown.
+    static func provider(forModel model: String) -> LLMProvider? {
+        allCases.first { $0.models.contains(model) }
+    }
+
     /// Context window size (max input tokens) per model.
     func contextWindowTokens(for model: String) -> Int {
         switch self {
