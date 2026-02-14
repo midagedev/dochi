@@ -8,7 +8,7 @@ final class ClipboardReadTool: BuiltInToolProtocol {
     let name = "clipboard.read"
     let category: ToolCategory = .safe
     let description = "클립보드(복사된 텍스트)를 읽어옵니다."
-    let isBaseline = true
+    let isBaseline = false
 
     var inputSchema: [String: Any] {
         [
@@ -32,9 +32,9 @@ final class ClipboardReadTool: BuiltInToolProtocol {
 @MainActor
 final class ClipboardWriteTool: BuiltInToolProtocol {
     let name = "clipboard.write"
-    let category: ToolCategory = .safe
+    let category: ToolCategory = .sensitive
     let description = "텍스트를 클립보드에 복사합니다."
-    let isBaseline = true
+    let isBaseline = false
 
     var inputSchema: [String: Any] {
         [
