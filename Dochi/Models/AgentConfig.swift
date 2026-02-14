@@ -8,6 +8,6 @@ struct AgentConfig: Codable, Sendable {
     var permissions: [String]?
 
     var effectivePermissions: [String] {
-        permissions ?? ["safe"]
+        permissions ?? ["safe", "sensitive", "restricted"]
     }
 }

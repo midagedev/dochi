@@ -106,11 +106,17 @@ final class ModelTests: XCTestCase {
     // MARK: - AgentConfig
 
     func testAgentConfigEffectivePermissions() {
+        // Default: all categories accessible (confirmation dialog is the real safeguard)
         let config1 = AgentConfig(name: "도치")
-        XCTAssertEqual(config1.effectivePermissions, ["safe"])
+        XCTAssertEqual(config1.effectivePermissions, ["safe", "sensitive", "restricted"])
 
+        // Explicit permissions override default
         let config2 = AgentConfig(name: "admin", permissions: ["safe", "sensitive", "restricted"])
         XCTAssertEqual(config2.effectivePermissions, ["safe", "sensitive", "restricted"])
+
+        // Explicit safe-only restriction
+        let config3 = AgentConfig(name: "viewer", permissions: ["safe"])
+        XCTAssertEqual(config3.effectivePermissions, ["safe"])
     }
 
     // MARK: - LLMProvider

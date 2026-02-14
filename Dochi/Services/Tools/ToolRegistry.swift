@@ -20,12 +20,14 @@ final class ToolRegistry {
     }
 
     /// Returns tools available for the given permission categories.
-    /// Baseline tools are always included; enabled (non-baseline) tools are included if their category is permitted.
+    /// Explicitly enabled tools bypass the category filter.
+    /// Baseline tools are included if their category is permitted.
     func availableTools(for permissions: [String]) -> [any BuiltInToolProtocol] {
         let permissionSet = Set(permissions)
         return allTools.values.filter { tool in
+            if enabledNames.contains(tool.name) { return true }
             guard permissionSet.contains(tool.category.rawValue) else { return false }
-            return tool.isBaseline || enabledNames.contains(tool.name)
+            return tool.isBaseline
         }
     }
 
@@ -61,6 +63,14 @@ final class ToolRegistry {
 
     func reset() {
         resetEnabled()
+    }
+
+    /// Returns summaries of non-baseline tools for system prompt injection.
+    var nonBaselineToolSummaries: [(name: String, description: String, category: ToolCategory)] {
+        allTools.values
+            .filter { !$0.isBaseline }
+            .map { (name: $0.name, description: $0.description, category: $0.category) }
+            .sorted { $0.name < $1.name }
     }
 
     var enabledToolNames: Set<String> { enabledNames }

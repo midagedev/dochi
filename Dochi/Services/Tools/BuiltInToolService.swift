@@ -190,6 +190,10 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
     // MARK: - BuiltInToolServiceProtocol
 
+    var nonBaselineToolSummaries: [(name: String, description: String, category: ToolCategory)] {
+        registry.nonBaselineToolSummaries
+    }
+
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]] {
         var schemas: [[String: Any]] = []
 

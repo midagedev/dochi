@@ -105,6 +105,60 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertEqual(all.count, 3)
     }
 
+    // MARK: - Enable Bypasses Category Filter
+
+    func testEnabledToolBypassesCategoryFilter() {
+        // Restricted tool, but safe-only permissions
+        registry.register(StubTool(name: "coding.run_task", category: .restricted, isBaseline: false))
+        registry.register(StubTool(name: "safe.base", category: .safe, isBaseline: true))
+
+        // Before enable: restricted tool not visible with safe-only permissions
+        let before = registry.availableTools(for: ["safe"])
+        XCTAssertEqual(before.count, 1)
+        XCTAssertEqual(before[0].name, "safe.base")
+
+        // After enable: restricted tool visible regardless of permissions
+        registry.enable(names: ["coding.run_task"])
+        let after = registry.availableTools(for: ["safe"])
+        XCTAssertEqual(after.count, 2)
+        let names = Set(after.map(\.name))
+        XCTAssertTrue(names.contains("coding.run_task"))
+        XCTAssertTrue(names.contains("safe.base"))
+    }
+
+    func testEnabledSensitiveToolBypassesCategoryFilter() {
+        registry.register(StubTool(name: "agent.config_get", category: .sensitive, isBaseline: false))
+
+        // Safe-only permissions, but explicitly enabled
+        registry.enable(names: ["agent.config_get"])
+        let available = registry.availableTools(for: ["safe"])
+        XCTAssertEqual(available.count, 1)
+        XCTAssertEqual(available[0].name, "agent.config_get")
+    }
+
+    func testNonEnabledNonBaselineToolNotExposed() {
+        // Non-baseline, not enabled → not available even with matching permissions
+        registry.register(StubTool(name: "coding.run_task", category: .restricted, isBaseline: false))
+
+        let available = registry.availableTools(for: ["safe", "sensitive", "restricted"])
+        XCTAssertEqual(available.count, 0)
+    }
+
+    // MARK: - Non-Baseline Tool Summaries
+
+    func testNonBaselineToolSummaries() {
+        registry.register(StubTool(name: "safe.base", category: .safe, isBaseline: true))
+        registry.register(StubTool(name: "coding.run_task", category: .restricted, isBaseline: false))
+        registry.register(StubTool(name: "agent.config_get", category: .sensitive, isBaseline: false))
+
+        let summaries = registry.nonBaselineToolSummaries
+        XCTAssertEqual(summaries.count, 2)
+        // Sorted by name
+        XCTAssertEqual(summaries[0].name, "agent.config_get")
+        XCTAssertEqual(summaries[1].name, "coding.run_task")
+        XCTAssertEqual(summaries[1].category, .restricted)
+    }
+
     // MARK: - Enable / Disable
 
     func testEnableNonExistentToolIgnored() {

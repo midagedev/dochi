@@ -80,7 +80,7 @@ struct ContextInspectorView: View {
 
     private var systemPromptTab: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionEditor(
+            SectionEditorView(
                 title: "기본 시스템 프롬프트",
                 subtitle: "system_prompt.md",
                 text: $systemPromptText,
@@ -111,7 +111,7 @@ struct ContextInspectorView: View {
                         .fontWeight(.medium)
                 }
 
-                sectionEditor(
+                SectionEditorView(
                     title: "페르소나",
                     subtitle: "persona.md",
                     text: $agentPersonaText,
@@ -128,7 +128,7 @@ struct ContextInspectorView: View {
                     }
                 )
 
-                sectionEditor(
+                SectionEditorView(
                     title: "에이전트 메모리",
                     subtitle: "memory.md",
                     text: $agentMemoryText,
@@ -154,7 +154,7 @@ struct ContextInspectorView: View {
     private var memoryTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                sectionEditor(
+                SectionEditorView(
                     title: "워크스페이스 메모리",
                     subtitle: "workspace memory.md",
                     text: $workspaceMemoryText,
@@ -171,7 +171,7 @@ struct ContextInspectorView: View {
                 )
 
                 if sessionContext.currentUserId != nil {
-                    sectionEditor(
+                    SectionEditorView(
                         title: "개인 메모리",
                         subtitle: "user memory",
                         text: $userMemoryText,
@@ -199,72 +199,7 @@ struct ContextInspectorView: View {
         }
     }
 
-    // MARK: - Reusable Section Editor
-
-    @ViewBuilder
-    private func sectionEditor(
-        title: String,
-        subtitle: String,
-        text: Binding<String>,
-        placeholder: String,
-        saved: Binding<Bool>,
-        onSave: @escaping () -> Void
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                Spacer()
-                Text("\(text.wrappedValue.count)자")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: text)
-                    .font(.system(size: 12, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(4)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-                    )
-                    .onChange(of: text.wrappedValue) {
-                        saved.wrappedValue = false
-                    }
-
-                if text.wrappedValue.isEmpty {
-                    Text(placeholder)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .padding(8)
-                        .allowsHitTesting(false)
-                }
-            }
-            .frame(minHeight: 100)
-
-            HStack {
-                Spacer()
-                if saved.wrappedValue {
-                    Text("저장됨")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-                Button("저장") {
-                    onSave()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-        }
-    }
+    // MARK: - Section Editor (delegated to SectionEditorView)
 
     // MARK: - Data Loading
 

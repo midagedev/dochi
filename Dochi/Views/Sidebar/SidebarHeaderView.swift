@@ -4,6 +4,7 @@ struct SidebarHeaderView: View {
     @Bindable var viewModel: DochiViewModel
     @State private var showWorkspaceManagement = false
     @State private var showAgentCreation = false
+    @State private var showAgentDetail = false
     @State private var showFamilySettings = false
 
     private var workspaceIds: [UUID] {
@@ -115,6 +116,16 @@ struct SidebarHeaderView: View {
                 Spacer()
 
                 Button {
+                    showAgentDetail = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("에이전트 설정")
+
+                Button {
                     showAgentCreation = true
                 } label: {
                     Image(systemName: "plus")
@@ -182,6 +193,17 @@ struct SidebarHeaderView: View {
         .padding(.vertical, 8)
         .sheet(isPresented: $showWorkspaceManagement) {
             WorkspaceManagementView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showAgentDetail) {
+            AgentDetailView(
+                agentName: viewModel.settings.activeAgentName,
+                contextService: viewModel.contextService,
+                settings: viewModel.settings,
+                sessionContext: viewModel.sessionContext,
+                onDelete: {
+                    viewModel.deleteAgent(name: viewModel.settings.activeAgentName)
+                }
+            )
         }
         .sheet(isPresented: $showAgentCreation) {
             AgentCreationView(viewModel: viewModel)

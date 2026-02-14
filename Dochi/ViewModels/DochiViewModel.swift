@@ -283,6 +283,22 @@ final class DochiViewModel {
         Log.app.info("Switched agent to \(name)")
     }
 
+    func deleteAgent(name: String) {
+        let wsId = sessionContext.workspaceId
+        contextService.deleteAgent(workspaceId: wsId, name: name)
+
+        // If deleted agent was active, switch to another
+        if settings.activeAgentName == name {
+            let remaining = contextService.listAgents(workspaceId: wsId)
+            let newAgent = remaining.first ?? "도치"
+            settings.activeAgentName = newAgent
+            toolService.resetRegistry()
+            newConversation()
+        }
+
+        Log.app.info("Deleted agent: \(name)")
+    }
+
     func deleteConversation(id: UUID) {
         conversationService.delete(id: id)
         if currentConversation?.id == id {
@@ -1178,6 +1194,17 @@ final class DochiViewModel {
         if let userId = sessionContext.currentUserId,
            let personalMem = contextService.loadUserMemory(userId: userId), !personalMem.isEmpty {
             parts.append("## 개인 메모리\n\(personalMem)")
+        }
+
+        // 8. Non-baseline tool listing for LLM awareness
+        let nonBaseline = toolService.nonBaselineToolSummaries
+        if !nonBaseline.isEmpty {
+            var lines: [String] = ["## 추가 도구", "필요 시 tools.enable으로 활성화할 수 있는 도구:"]
+            for tool in nonBaseline {
+                lines.append("- \(tool.name): \(tool.description) (\(tool.category.rawValue))")
+            }
+            lines.append("사용자가 관련 작업을 요청하면 tools.enable으로 먼저 활성화하세요.")
+            parts.append(lines.joined(separator: "\n"))
         }
 
         return parts.joined(separator: "\n\n")

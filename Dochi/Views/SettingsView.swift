@@ -42,6 +42,15 @@ struct SettingsView: View {
                 .tabItem {
                     Label("가족", systemImage: "person.2")
                 }
+
+                AgentSettingsView(
+                    contextService: contextService,
+                    settings: settings,
+                    sessionContext: sessionContext
+                )
+                .tabItem {
+                    Label("에이전트", systemImage: "person.crop.rectangle.stack")
+                }
             }
 
             if let toolService {

@@ -618,6 +618,11 @@ final class AgentConfigUpdateTool: BuiltInToolProtocol {
             "properties": [
                 "wake_word": ["type": "string", "description": "새 호출어"],
                 "description": ["type": "string", "description": "새 설명"],
+                "permissions": [
+                    "type": "array",
+                    "items": ["type": "string", "enum": ["safe", "sensitive", "restricted"]],
+                    "description": "에이전트 권한 목록"
+                ],
                 "name": ["type": "string", "description": "에이전트 이름 (미지정 시 활성 에이전트)"]
             ]
         ]
@@ -626,9 +631,10 @@ final class AgentConfigUpdateTool: BuiltInToolProtocol {
     func execute(arguments: [String: Any]) async -> ToolResult {
         let newWakeWord = arguments["wake_word"] as? String
         let newDescription = arguments["description"] as? String
+        let newPermissions = arguments["permissions"] as? [String]
 
-        if newWakeWord == nil && newDescription == nil {
-            return ToolResult(toolCallId: "", content: "오류: 수정할 필드가 없습니다. wake_word 또는 description을 지정해주세요.", isError: true)
+        if newWakeWord == nil && newDescription == nil && newPermissions == nil {
+            return ToolResult(toolCallId: "", content: "오류: 수정할 필드가 없습니다. wake_word, description, 또는 permissions를 지정해주세요.", isError: true)
         }
 
         switch resolveAgentName(arguments: arguments, settings: settings, contextService: contextService, sessionContext: sessionContext) {
@@ -648,6 +654,12 @@ final class AgentConfigUpdateTool: BuiltInToolProtocol {
             if let description = newDescription {
                 config.description = description
                 changes.append("설명: \(description)")
+            }
+            if let permissions = newPermissions {
+                let validValues: Set<String> = ["safe", "sensitive", "restricted"]
+                let validated = permissions.filter { validValues.contains($0) }
+                config.permissions = validated
+                changes.append("권한: \(validated.joined(separator: ", "))")
             }
 
             contextService.saveAgentConfig(workspaceId: sessionContext.workspaceId, config: config)

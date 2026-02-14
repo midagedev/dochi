@@ -9,6 +9,9 @@ protocol BuiltInToolServiceProtocol {
     /// Called before executing sensitive tools to get user confirmation.
     var confirmationHandler: ToolConfirmationHandler? { get set }
 
+    /// Returns summaries of non-baseline tools (name, description, category) for system prompt.
+    var nonBaselineToolSummaries: [(name: String, description: String, category: ToolCategory)] { get }
+
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]]
     func execute(name: String, arguments: [String: Any]) async -> ToolResult
     func enableTools(names: [String])
