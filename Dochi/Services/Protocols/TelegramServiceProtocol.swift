@@ -7,6 +7,7 @@ protocol TelegramServiceProtocol {
     func stopPolling()
     func sendMessage(chatId: Int64, text: String) async throws -> Int64
     func editMessage(chatId: Int64, messageId: Int64, text: String) async throws
+    func sendChatAction(chatId: Int64, action: String) async throws
     func getMe(token: String) async throws -> TelegramUser
     var onMessage: (@MainActor @Sendable (TelegramUpdate) -> Void)? { get set }
 }
