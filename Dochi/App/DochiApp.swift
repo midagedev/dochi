@@ -94,8 +94,11 @@ struct DochiApp: App {
 
         contextService.migrateIfNeeded()
 
-        heartbeatService.setProactiveHandler { message in
+        heartbeatService.configure(contextService: contextService, sessionContext: sessionContext)
+        heartbeatService.setProactiveHandler { [weak viewModel] message in
+            guard let viewModel else { return }
             Log.app.info("Heartbeat proactive message: \(message)")
+            viewModel.injectProactiveMessage(message)
         }
 
         // Start Telegram polling if enabled
@@ -205,7 +208,8 @@ struct DochiApp: App {
                 telegramService: telegramService,
                 mcpService: mcpService,
                 supabaseService: supabaseService,
-                toolService: toolService
+                toolService: toolService,
+                heartbeatService: heartbeatService
             )
         }
         .commands {

@@ -10,10 +10,11 @@ struct SettingsView: View {
     var mcpService: MCPServiceProtocol?
     var supabaseService: SupabaseServiceProtocol?
     var toolService: BuiltInToolService?
+    var heartbeatService: HeartbeatService?
 
     var body: some View {
         TabView {
-            GeneralSettingsView(settings: settings)
+            GeneralSettingsView(settings: settings, heartbeatService: heartbeatService)
                 .tabItem {
                     Label("일반", systemImage: "gear")
                 }
@@ -86,6 +87,7 @@ struct SettingsView: View {
 
 struct GeneralSettingsView: View {
     var settings: AppSettings
+    var heartbeatService: HeartbeatService?
 
     var body: some View {
         Form {
@@ -205,6 +207,64 @@ struct GeneralSettingsView: View {
                     ),
                     in: 0...23
                 )
+            }
+
+            if let heartbeatService {
+                Section("하트비트 상태") {
+                    if let lastTick = heartbeatService.lastTickDate {
+                        HStack {
+                            Text("마지막 실행")
+                            Spacer()
+                            Text(lastTick, style: .relative)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("아직 실행되지 않음")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let result = heartbeatService.lastTickResult {
+                        HStack {
+                            Text("점검 항목")
+                            Spacer()
+                            Text(result.checksPerformed.joined(separator: ", "))
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                        }
+                        HStack {
+                            Text("발견 항목")
+                            Spacer()
+                            Text("\(result.itemsFound)건")
+                                .foregroundStyle(result.itemsFound > 0 ? .primary : .secondary)
+                        }
+                        if result.notificationSent {
+                            Text("알림 전송됨")
+                                .foregroundStyle(.green)
+                                .font(.caption)
+                        }
+                        if let error = result.error {
+                            Text("오류: \(error)")
+                                .foregroundStyle(.red)
+                                .font(.caption)
+                        }
+                    }
+
+                    HStack {
+                        Text("실행 이력")
+                        Spacer()
+                        Text("\(heartbeatService.tickHistory.count)건")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if heartbeatService.consecutiveErrors > 0 {
+                        HStack {
+                            Text("연속 오류")
+                            Spacer()
+                            Text("\(heartbeatService.consecutiveErrors)회")
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
             }
         }
         .formStyle(.grouped)

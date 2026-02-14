@@ -638,6 +638,19 @@ final class DochiViewModel {
         return stripped
     }
 
+    // MARK: - Proactive Message Injection
+
+    /// Inject a proactive message from the heartbeat service into the current conversation.
+    func injectProactiveMessage(_ message: String) {
+        guard var conversation = currentConversation else { return }
+        let systemMessage = Message(role: .assistant, content: message)
+        conversation.messages.append(systemMessage)
+        conversation.updatedAt = Date()
+        currentConversation = conversation
+        conversationService.save(conversation: conversation)
+        Log.app.info("Injected proactive message into conversation")
+    }
+
     // MARK: - Telegram Message Handling
 
     func handleTelegramMessage(_ update: TelegramUpdate) async {

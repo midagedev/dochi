@@ -2,17 +2,42 @@ import Foundation
 import UserNotifications
 import os
 
+/// Result of a single heartbeat tick.
+struct HeartbeatTickResult: Sendable {
+    let timestamp: Date
+    let checksPerformed: [String]
+    let itemsFound: Int
+    let notificationSent: Bool
+    let error: String?
+}
+
 /// Heartbeat-based proactive agent service.
-/// Periodically checks calendar, kanban, reminders and decides if it should
-/// proactively notify the user via a macOS notification.
+/// Periodically checks calendar, kanban, reminders, memory size and decides if it should
+/// proactively notify the user via a macOS notification or inject a message into conversation.
 @MainActor
-final class HeartbeatService {
+final class HeartbeatService: Observable {
     private var heartbeatTask: Task<Void, Never>?
     private let settings: AppSettings
+    private var contextService: ContextServiceProtocol?
+    private var sessionContext: SessionContext?
     private var onProactiveMessage: ((String) -> Void)?
+
+    // Observable state
+    private(set) var lastTickDate: Date?
+    private(set) var lastTickResult: HeartbeatTickResult?
+    private(set) var tickHistory: [HeartbeatTickResult] = []
+    private(set) var consecutiveErrors: Int = 0
+
+    static let maxHistoryCount = 20
 
     init(settings: AppSettings) {
         self.settings = settings
+    }
+
+    /// Inject context dependencies for memory checks.
+    func configure(contextService: ContextServiceProtocol, sessionContext: SessionContext) {
+        self.contextService = contextService
+        self.sessionContext = sessionContext
     }
 
     /// Set a callback for when the heartbeat decides to proactively message the user.
@@ -24,6 +49,7 @@ final class HeartbeatService {
         stop()
         guard settings.heartbeatEnabled else { return }
 
+        consecutiveErrors = 0
         Log.app.info("HeartbeatService started (interval: \(self.settings.heartbeatIntervalMinutes)min)")
 
         heartbeatTask = Task { [weak self] in
@@ -57,53 +83,96 @@ final class HeartbeatService {
         let quietStart = settings.heartbeatQuietHoursStart
         let quietEnd = settings.heartbeatQuietHoursEnd
         if quietStart > quietEnd {
-            // e.g., 23~8: quiet if hour >= 23 or hour < 8
             if hour >= quietStart || hour < quietEnd { return }
-        } else {
+        } else if quietStart < quietEnd {
             if hour >= quietStart && hour < quietEnd { return }
         }
 
         Log.app.debug("HeartbeatService tick")
 
         var contextParts: [String] = []
+        var checksPerformed: [String] = []
+        var errorMessage: String?
 
-        // 1. Calendar — upcoming events
-        if settings.heartbeatCheckCalendar {
-            let calendarContext = await gatherCalendarContext()
-            if !calendarContext.isEmpty {
-                contextParts.append("📅 다가오는 일정:\n\(calendarContext)")
+        do {
+            // 1. Calendar — upcoming events
+            if settings.heartbeatCheckCalendar {
+                checksPerformed.append("calendar")
+                let calendarContext = await gatherCalendarContext()
+                if !calendarContext.isEmpty {
+                    contextParts.append("📅 다가오는 일정:\n\(calendarContext)")
+                }
             }
+
+            // 2. Kanban — cards in progress
+            if settings.heartbeatCheckKanban {
+                checksPerformed.append("kanban")
+                let kanbanContext = gatherKanbanContext()
+                if !kanbanContext.isEmpty {
+                    contextParts.append("📋 칸반 진행 중:\n\(kanbanContext)")
+                }
+            }
+
+            // 3. Reminders — due soon
+            if settings.heartbeatCheckReminders {
+                checksPerformed.append("reminders")
+                let reminderContext = await gatherReminderContext()
+                if !reminderContext.isEmpty {
+                    contextParts.append("⏰ 마감 임박 미리알림:\n\(reminderContext)")
+                }
+            }
+
+            // 4. Memory size check
+            if let contextService, let sessionContext {
+                checksPerformed.append("memory")
+                let memoryWarning = checkMemorySize(
+                    contextService: contextService,
+                    workspaceId: sessionContext.workspaceId
+                )
+                if let memoryWarning {
+                    contextParts.append("💾 메모리:\n\(memoryWarning)")
+                }
+            }
+
+            consecutiveErrors = 0
+        } catch {
+            consecutiveErrors += 1
+            errorMessage = error.localizedDescription
+            Log.app.error("HeartbeatService tick error: \(error.localizedDescription)")
         }
 
-        // 2. Kanban — cards in progress
-        if settings.heartbeatCheckKanban {
-            let kanbanContext = gatherKanbanContext()
-            if !kanbanContext.isEmpty {
-                contextParts.append("📋 칸반 진행 중:\n\(kanbanContext)")
-            }
-        }
+        let notificationSent: Bool
+        let itemsFound = contextParts.count
 
-        // 3. Reminders — due soon
-        if settings.heartbeatCheckReminders {
-            let reminderContext = await gatherReminderContext()
-            if !reminderContext.isEmpty {
-                contextParts.append("⏰ 마감 임박 미리알림:\n\(reminderContext)")
+        if !contextParts.isEmpty {
+            let fullContext = contextParts.joined(separator: "\n\n")
+            let message = composeProactiveMessage(context: fullContext)
+            if let message {
+                Log.app.info("HeartbeatService: sending proactive notification")
+                sendNotification(message: message)
+                onProactiveMessage?(message)
+                notificationSent = true
+            } else {
+                notificationSent = false
             }
-        }
-
-        guard !contextParts.isEmpty else {
+        } else {
+            notificationSent = false
             Log.app.debug("HeartbeatService: no actionable context found")
-            return
         }
 
-        let fullContext = contextParts.joined(separator: "\n\n")
-
-        // Decide whether to notify
-        let message = composeProactiveMessage(context: fullContext)
-        if let message {
-            Log.app.info("HeartbeatService: sending proactive notification")
-            sendNotification(message: message)
-            onProactiveMessage?(message)
+        // Record result
+        let result = HeartbeatTickResult(
+            timestamp: Date(),
+            checksPerformed: checksPerformed,
+            itemsFound: itemsFound,
+            notificationSent: notificationSent,
+            error: errorMessage
+        )
+        lastTickDate = result.timestamp
+        lastTickResult = result
+        tickHistory.append(result)
+        if tickHistory.count > Self.maxHistoryCount {
+            tickHistory.removeFirst(tickHistory.count - Self.maxHistoryCount)
         }
     }
 
@@ -170,11 +239,33 @@ final class HeartbeatService {
         }
     }
 
+    /// Check if agent memory files are getting large and suggest compression.
+    private func checkMemorySize(
+        contextService: ContextServiceProtocol,
+        workspaceId: UUID
+    ) -> String? {
+        let warningThreshold = 3000 // characters
+        var warnings: [String] = []
+
+        // Check workspace memory
+        if let memory = contextService.loadWorkspaceMemory(workspaceId: workspaceId),
+           memory.count > warningThreshold {
+            warnings.append("워크스페이스 메모리가 \(memory.count)자로 커졌습니다.")
+        }
+
+        // Check active agent memory
+        let agentName = settings.activeAgentName
+        if let agentMemory = contextService.loadAgentMemory(workspaceId: workspaceId, agentName: agentName),
+           agentMemory.count > warningThreshold {
+            warnings.append("\(agentName) 에이전트 메모리가 \(agentMemory.count)자로 커졌습니다.")
+        }
+
+        return warnings.isEmpty ? nil : warnings.joined(separator: "\n")
+    }
+
     // MARK: - Message Composition
 
     private func composeProactiveMessage(context: String) -> String? {
-        // Simple rule-based decision for now.
-        // TODO: Replace with LLM-based decision in future.
         let lines = context.split(separator: "\n").filter { !$0.isEmpty }
         guard !lines.isEmpty else { return nil }
 
@@ -194,6 +285,9 @@ final class HeartbeatService {
         }
         if context.contains("⏰") {
             parts.append("마감 임박한 미리알림이 있습니다.")
+        }
+        if context.contains("💾") {
+            parts.append("메모리 정리가 필요합니다.")
         }
 
         parts.append("자세한 내용은 대화를 시작해주세요.")
