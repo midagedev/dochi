@@ -443,6 +443,13 @@ final class ModelRouterTests: XCTestCase {
         settings = AppSettings()
         settings.llmProvider = LLMProvider.openai.rawValue
         settings.llmModel = "gpt-4o"
+        settings.taskRoutingEnabled = false
+        settings.lightModelProvider = ""
+        settings.lightModelName = ""
+        settings.heavyModelProvider = ""
+        settings.heavyModelName = ""
+        settings.fallbackLLMProvider = ""
+        settings.fallbackLLMModel = ""
         keychainService = MockKeychainService()
         keychainService.store["openai"] = "sk-test-openai"
         keychainService.store["anthropic"] = "sk-test-anthropic"
@@ -650,5 +657,59 @@ final class ModelRouterTests: XCTestCase {
 
         XCTAssertEqual(resolved?.provider, .openai)
         XCTAssertEqual(resolved?.model, "gpt-4o")
+    }
+
+    // MARK: - API Key Tier
+
+    func testAPIKeyTierSuffix() {
+        XCTAssertEqual(APIKeyTier.standard.keychainSuffix, "")
+        XCTAssertEqual(APIKeyTier.premium.keychainSuffix, "_premium")
+        XCTAssertEqual(APIKeyTier.economy.keychainSuffix, "_economy")
+    }
+
+    func testAPIKeyTierPreferredForComplexity() {
+        XCTAssertEqual(APIKeyTier.preferredTier(for: .heavy), .premium)
+        XCTAssertEqual(APIKeyTier.preferredTier(for: .standard), .standard)
+        XCTAssertEqual(APIKeyTier.preferredTier(for: .light), .economy)
+    }
+
+    func testResolveForComplexityUsesPremiumKey() {
+        settings.taskRoutingEnabled = true
+        settings.heavyModelProvider = LLMProvider.openai.rawValue
+        settings.heavyModelName = "gpt-4o"
+        // Store a premium-tier key for OpenAI
+        keychainService.store["openai_premium"] = "sk-premium-openai"
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolveForComplexity(.heavy)
+
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.apiKey, "sk-premium-openai")
+    }
+
+    func testResolveForComplexityUsesEconomyKey() {
+        settings.taskRoutingEnabled = true
+        settings.lightModelProvider = LLMProvider.openai.rawValue
+        settings.lightModelName = "gpt-4o-mini"
+        keychainService.store["openai_economy"] = "sk-economy-openai"
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolveForComplexity(.light)
+
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.apiKey, "sk-economy-openai")
+    }
+
+    func testResolveForComplexityFallsToStandardKeyWhenTierMissing() {
+        settings.taskRoutingEnabled = true
+        settings.heavyModelProvider = LLMProvider.openai.rawValue
+        settings.heavyModelName = "gpt-4o"
+        // No premium key, only standard key exists
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        let resolved = router.resolveForComplexity(.heavy)
+
+        XCTAssertEqual(resolved?.provider, .openai)
+        XCTAssertEqual(resolved?.apiKey, "sk-test-openai") // Falls back to standard
     }
 }
