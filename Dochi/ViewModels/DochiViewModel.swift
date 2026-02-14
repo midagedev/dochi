@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 @Observable
@@ -1259,6 +1260,43 @@ final class DochiViewModel {
             return ""
         }
         return "\(key.prefix(6))****"
+    }
+
+    // MARK: - Export
+
+    func exportConversation(id: UUID, format: ExportFormat) {
+        guard let conversation = conversationService.load(id: id) else {
+            Log.app.warning("Export failed: conversation not found \(id)")
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = ConversationExporter.suggestedFileName(for: conversation, format: format)
+        panel.canCreateDirectories = true
+
+        switch format {
+        case .markdown:
+            panel.allowedContentTypes = [.plainText]
+        case .json:
+            panel.allowedContentTypes = [.json]
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            switch format {
+            case .markdown:
+                let markdown = ConversationExporter.toMarkdown(conversation)
+                try markdown.write(to: url, atomically: true, encoding: .utf8)
+            case .json:
+                let data = try ConversationExporter.toJSON(conversation)
+                try data.write(to: url, options: .atomic)
+            }
+            Log.app.info("Exported conversation \(id) as \(format == .markdown ? "markdown" : "json")")
+        } catch {
+            Log.app.error("Export failed: \(error.localizedDescription)")
+            errorMessage = "내보내기 실패: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Agent Permissions
