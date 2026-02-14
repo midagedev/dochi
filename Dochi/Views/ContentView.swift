@@ -8,8 +8,10 @@ struct ContentView: View {
 
     @Bindable var viewModel: DochiViewModel
     var supabaseService: SupabaseServiceProtocol?
+    var heartbeatService: HeartbeatService?
     @State private var showContextInspector = false
     @State private var showCapabilityCatalog = false
+    @State private var showSystemStatusSheet = false
     @State private var selectedSection: MainSection = .chat
 
     var body: some View {
@@ -36,6 +38,15 @@ struct ContentView: View {
                                 contextWindowTokens: viewModel.contextWindowTokens
                             )
                         }
+
+                        // System health bar (always visible)
+                        SystemHealthBarView(
+                            settings: viewModel.settings,
+                            metricsCollector: viewModel.metricsCollector,
+                            heartbeatService: heartbeatService,
+                            supabaseService: supabaseService,
+                            onTap: { showSystemStatusSheet = true }
+                        )
 
                         // Tool confirmation banner
                         if let confirmation = viewModel.pendingToolConfirmation {
@@ -101,6 +112,14 @@ struct ContentView: View {
                     if selectedSection == .chat {
                         HStack(spacing: 4) {
                             Button {
+                                showSystemStatusSheet = true
+                            } label: {
+                                Label("상태", systemImage: "heart.text.square")
+                            }
+                            .help("시스템 상태 (⌘⇧S)")
+                            .keyboardShortcut("s", modifiers: [.command, .shift])
+
+                            Button {
                                 showCapabilityCatalog = true
                             } label: {
                                 Label("기능", systemImage: "square.grid.2x2")
@@ -138,6 +157,14 @@ struct ContentView: View {
                     viewModel.inputText = prompt
                     viewModel.sendMessage()
                 }
+            )
+        }
+        .sheet(isPresented: $showSystemStatusSheet) {
+            SystemStatusSheetView(
+                metricsCollector: viewModel.metricsCollector,
+                settings: viewModel.settings,
+                heartbeatService: heartbeatService,
+                supabaseService: supabaseService
             )
         }
         // Keyboard shortcut: Escape to cancel

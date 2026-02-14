@@ -69,6 +69,11 @@ struct MessageBubbleView: View {
                     }
                 }
 
+                // Metadata badge (assistant messages only)
+                if message.role == .assistant, let metadata = message.metadata {
+                    MessageMetadataBadgeView(metadata: metadata)
+                }
+
                 // Timestamp
                 Text(relativeTimestamp)
                     .font(.caption2)
@@ -150,5 +155,81 @@ struct MessageBubbleView: View {
 
     private var foregroundColor: Color {
         message.role == .user ? .white : .primary
+    }
+}
+
+// MARK: - Message Metadata Badge
+
+struct MessageMetadataBadgeView: View {
+    let metadata: MessageMetadata
+    @State private var showPopover = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if metadata.wasFallback {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.orange)
+            }
+
+            Text(metadata.shortDisplay)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .onHover { hovering in
+            showPopover = hovering
+        }
+        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
+            metadataPopover
+        }
+    }
+
+    private var metadataPopover: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("응답 상세")
+                .font(.system(size: 12, weight: .semibold))
+
+            Divider()
+
+            metadataRow("프로바이더", metadata.provider)
+            metadataRow("모델", metadata.model)
+
+            if let input = metadata.inputTokens {
+                metadataRow("입력 토큰", "\(input)")
+            }
+            if let output = metadata.outputTokens {
+                metadataRow("출력 토큰", "\(output)")
+            }
+            if let latency = metadata.totalLatency {
+                metadataRow("응답 시간", String(format: "%.1f초", latency))
+            }
+            if metadata.wasFallback {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                    Text("폴백 모델 사용됨")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(10)
+        .frame(minWidth: 180)
+    }
+
+    private func metadataRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 11, design: .monospaced))
+        }
     }
 }

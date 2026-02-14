@@ -935,7 +935,7 @@ final class DochiViewModel {
                     return
                 }
                 streamingText = ""
-                appendAssistantMessage(finalText)
+                appendAssistantMessage(finalText, metadata: buildMessageMetadata())
                 conversation = currentConversation!
                 saveConversation()
 
@@ -1394,9 +1394,22 @@ final class DochiViewModel {
         currentConversation?.updatedAt = Date()
     }
 
-    private func appendAssistantMessage(_ text: String) {
-        currentConversation?.messages.append(Message(role: .assistant, content: text))
+    private func appendAssistantMessage(_ text: String, metadata: MessageMetadata? = nil) {
+        currentConversation?.messages.append(Message(role: .assistant, content: text, metadata: metadata))
         currentConversation?.updatedAt = Date()
+    }
+
+    /// Build MessageMetadata from the most recent LLM exchange metrics.
+    private func buildMessageMetadata() -> MessageMetadata? {
+        guard let metrics = llmService.lastMetrics else { return nil }
+        return MessageMetadata(
+            provider: metrics.provider,
+            model: metrics.model,
+            inputTokens: metrics.inputTokens,
+            outputTokens: metrics.outputTokens,
+            totalLatency: metrics.totalLatency,
+            wasFallback: metrics.wasFallback
+        )
     }
 
     private func appendToolResultMessage(_ result: ToolResult) {
