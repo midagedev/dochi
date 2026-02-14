@@ -18,7 +18,7 @@ final class KanbanCreateBoardTool: BuiltInToolProtocol {
                 "columns": [
                     "type": "array",
                     "items": ["type": "string"],
-                    "description": "컬럼 목록 (기본: [할 일, 진행 중, 완료])",
+                    "description": "컬럼 목록 (기본: [백로그, 준비, 진행 중, 검토, 완료])",
                 ] as [String: Any],
             ] as [String: Any],
             "required": ["name"],
@@ -375,6 +375,66 @@ final class KanbanDeleteCardTool: BuiltInToolProtocol {
 
         Log.tool.info("Deleted kanban card: \(card.title)")
         return ToolResult(toolCallId: "", content: "카드 삭제: \(card.title)")
+    }
+}
+
+// MARK: - Card History
+
+@MainActor
+final class KanbanCardHistoryTool: BuiltInToolProtocol {
+    let name = "kanban.card_history"
+    let category: ToolCategory = .safe
+    let description = "칸반 카드의 상태 전이 히스토리를 조회합니다."
+    let isBaseline = true
+
+    var inputSchema: [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "board_name": ["type": "string", "description": "보드 이름"],
+                "card_title": ["type": "string", "description": "카드 제목 (부분 일치)"],
+                "card_id": ["type": "string", "description": "카드 ID (8자 prefix)"],
+            ] as [String: Any],
+            "required": ["board_name"],
+        ]
+    }
+
+    func execute(arguments: [String: Any]) async -> ToolResult {
+        guard let boardName = arguments["board_name"] as? String else {
+            return ToolResult(toolCallId: "", content: "board_name 파라미터가 필요합니다.", isError: true)
+        }
+        guard let board = KanbanManager.shared.board(name: boardName) else {
+            return ToolResult(toolCallId: "", content: "'\(boardName)' 보드를 찾을 수 없습니다.", isError: true)
+        }
+
+        let card: KanbanCard?
+        if let cardIdPrefix = arguments["card_id"] as? String {
+            card = board.cards.first { $0.id.uuidString.lowercased().hasPrefix(cardIdPrefix.lowercased()) }
+        } else if let cardTitle = arguments["card_title"] as? String {
+            card = board.cards.first { $0.title.localizedCaseInsensitiveContains(cardTitle) }
+        } else {
+            return ToolResult(toolCallId: "", content: "card_title 또는 card_id가 필요합니다.", isError: true)
+        }
+
+        guard let card else {
+            return ToolResult(toolCallId: "", content: "카드를 찾을 수 없습니다.", isError: true)
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd HH:mm"
+
+        var output = "📋 \(card.title) 히스토리\n현재: \(card.column)\n"
+
+        if card.transitions.isEmpty {
+            output += "(상태 변경 기록 없음)"
+        } else {
+            for transition in card.transitions {
+                let time = formatter.string(from: transition.timestamp)
+                output += "  \(time) \(transition.fromColumn) → \(transition.toColumn)\n"
+            }
+        }
+
+        return ToolResult(toolCallId: "", content: output)
     }
 }
 

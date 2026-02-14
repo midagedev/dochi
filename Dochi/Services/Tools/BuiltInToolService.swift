@@ -176,6 +176,7 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(KanbanMoveCardTool())
         registry.register(KanbanUpdateCardTool())
         registry.register(KanbanDeleteCardTool())
+        registry.register(KanbanCardHistoryTool())
 
         // Git (conditional, safe/restricted)
         registry.register(GitStatusTool())
