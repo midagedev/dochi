@@ -776,6 +776,21 @@ final class DochiViewModel {
 
     /// Find an existing telegram conversation by chatId, or create a new one.
     private func findOrCreateTelegramConversation(chatId: Int64, username: String?) -> Conversation {
+        // Auto-register chat mapping
+        let label = username.map { "@\($0)" } ?? "Chat \(chatId)"
+        TelegramChatMappingStore.upsert(
+            chatId: chatId,
+            label: label,
+            workspaceId: UUID(uuidString: settings.currentWorkspaceId),
+            in: settings
+        )
+
+        // Check if mapping is disabled
+        let mappings = TelegramChatMappingStore.loadMappings(from: settings)
+        if let mapping = mappings.first(where: { $0.chatId == chatId }), !mapping.enabled {
+            Log.telegram.info("Chat \(chatId) is disabled in mapping, skipping")
+        }
+
         // Search existing conversations for matching telegramChatId
         if let existing = conversations.first(where: { $0.source == .telegram && $0.telegramChatId == chatId }) {
             // Load the full conversation (with all messages)
@@ -785,7 +800,7 @@ final class DochiViewModel {
         }
 
         // Create new telegram conversation
-        let displayName = username.map { "@\($0)" } ?? "Chat \(chatId)"
+        let displayName = label
         let conversation = Conversation(
             title: "\(displayName) 텔레그램 DM",
             source: .telegram,

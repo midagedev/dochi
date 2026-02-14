@@ -141,6 +141,75 @@ final class TelegramStreamingTests: XCTestCase {
         XCTAssertNil(item.caption)
     }
 
+    // MARK: - Chat Mapping
+
+    func testChatMappingStoreUpsertAndLoad() {
+        let settings = AppSettings()
+        settings.telegramChatMappingJSON = "[]" // Reset
+
+        TelegramChatMappingStore.upsert(chatId: 123, label: "@user1", workspaceId: nil, in: settings)
+        let mappings = TelegramChatMappingStore.loadMappings(from: settings)
+
+        XCTAssertEqual(mappings.count, 1)
+        XCTAssertEqual(mappings[0].chatId, 123)
+        XCTAssertEqual(mappings[0].label, "@user1")
+        XCTAssertTrue(mappings[0].enabled)
+
+        // Clean up
+        settings.telegramChatMappingJSON = "{}"
+    }
+
+    func testChatMappingStoreUpsertUpdatesExisting() {
+        let settings = AppSettings()
+        settings.telegramChatMappingJSON = "[]"
+
+        TelegramChatMappingStore.upsert(chatId: 456, label: "old", workspaceId: nil, in: settings)
+        TelegramChatMappingStore.upsert(chatId: 456, label: "new", workspaceId: nil, in: settings)
+
+        let mappings = TelegramChatMappingStore.loadMappings(from: settings)
+        XCTAssertEqual(mappings.count, 1)
+        XCTAssertEqual(mappings[0].label, "new")
+
+        settings.telegramChatMappingJSON = "{}"
+    }
+
+    func testChatMappingStoreRemove() {
+        let settings = AppSettings()
+        settings.telegramChatMappingJSON = "[]"
+
+        TelegramChatMappingStore.upsert(chatId: 100, label: "a", workspaceId: nil, in: settings)
+        TelegramChatMappingStore.upsert(chatId: 200, label: "b", workspaceId: nil, in: settings)
+        TelegramChatMappingStore.remove(chatId: 100, from: settings)
+
+        let mappings = TelegramChatMappingStore.loadMappings(from: settings)
+        XCTAssertEqual(mappings.count, 1)
+        XCTAssertEqual(mappings[0].chatId, 200)
+
+        settings.telegramChatMappingJSON = "{}"
+    }
+
+    func testChatMappingCodable() throws {
+        let mapping = TelegramChatMapping(
+            chatId: 42,
+            workspaceId: UUID(),
+            label: "@test",
+            enabled: false
+        )
+
+        let data = try JSONEncoder().encode(mapping)
+        let decoded = try JSONDecoder().decode(TelegramChatMapping.self, from: data)
+
+        XCTAssertEqual(decoded.chatId, 42)
+        XCTAssertEqual(decoded.label, "@test")
+        XCTAssertFalse(decoded.enabled)
+        XCTAssertEqual(decoded.workspaceId, mapping.workspaceId)
+    }
+
+    func testIsTelegramHostDefault() {
+        let settings = AppSettings()
+        XCTAssertTrue(settings.isTelegramHost)
+    }
+
     // Helper: replicates TelegramService.offsetKey logic for testing
     private func offsetKey(for token: String) -> String {
         let hash = SHA256.hash(data: Data(token.utf8))

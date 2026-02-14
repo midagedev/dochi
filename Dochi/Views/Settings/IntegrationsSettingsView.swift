@@ -18,15 +18,20 @@ struct IntegrationsSettingsView: View {
     @State private var serverToDelete: UUID?
     @State private var showDeleteConfirmation = false
 
+    // Telegram mapping state
+    @State private var chatMappings: [TelegramChatMapping] = []
+
     var body: some View {
         Form {
             telegramSection
+            telegramMappingSection
             mcpSection
         }
         .formStyle(.grouped)
         .padding()
         .onAppear {
             botToken = keychainService.load(account: "telegram_bot_token") ?? ""
+            chatMappings = TelegramChatMappingStore.loadMappings(from: settings)
         }
         .sheet(isPresented: $showMCPServerEdit) {
             MCPServerEditView(
@@ -154,6 +159,71 @@ struct IntegrationsSettingsView: View {
             }
             isCheckingBot = false
         }
+    }
+
+    // MARK: - Telegram Mapping Section
+
+    @ViewBuilder
+    private var telegramMappingSection: some View {
+        Section("텔레그램 채팅 매핑") {
+            Toggle("이 디바이스를 텔레그램 호스트로 사용", isOn: Binding(
+                get: { settings.isTelegramHost },
+                set: { settings.isTelegramHost = $0 }
+            ))
+            .help("활성화하면 이 디바이스가 텔레그램 메시지를 처리합니다")
+
+            if chatMappings.isEmpty {
+                Text("등록된 채팅 매핑이 없습니다. 텔레그램 대화가 시작되면 자동으로 추가됩니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(chatMappings) { mapping in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(mapping.label.isEmpty ? "Chat #\(mapping.chatId)" : mapping.label)
+                                .font(.system(size: 13, weight: .medium))
+                            Text("ID: \(mapping.chatId)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: Binding(
+                            get: { mapping.enabled },
+                            set: { newValue in
+                                updateMappingEnabled(chatId: mapping.chatId, enabled: newValue)
+                            }
+                        ))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .help(mapping.enabled ? "활성" : "비활성")
+
+                        Button {
+                            removeMappingChat(chatId: mapping.chatId)
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.red.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+                        .help("삭제")
+                    }
+                }
+            }
+        }
+    }
+
+    private func updateMappingEnabled(chatId: Int64, enabled: Bool) {
+        if let idx = chatMappings.firstIndex(where: { $0.chatId == chatId }) {
+            chatMappings[idx].enabled = enabled
+            TelegramChatMappingStore.saveMappings(chatMappings, to: settings)
+        }
+    }
+
+    private func removeMappingChat(chatId: Int64) {
+        chatMappings.removeAll { $0.chatId == chatId }
+        TelegramChatMappingStore.saveMappings(chatMappings, to: settings)
     }
 
     // MARK: - MCP Section
