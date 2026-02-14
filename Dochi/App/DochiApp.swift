@@ -142,7 +142,7 @@ struct DochiApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(viewModel: viewModel, supabaseService: supabaseService)
+            ContentView(viewModel: viewModel, supabaseService: supabaseService, heartbeatService: heartbeatService)
                 .onAppear {
                     if viewModel.isVoiceMode {
                         viewModel.prepareTTSEngine()
