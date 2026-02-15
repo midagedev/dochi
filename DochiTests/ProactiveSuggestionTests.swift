@@ -282,3 +282,267 @@ final class ProactiveSuggestionTests: XCTestCase {
         XCTAssertEqual(sorted[1], .kanbanCheck)
     }
 }
+
+// MARK: - Real ProactiveSuggestionService Tests (C-4)
+
+@MainActor
+final class ProactiveSuggestionServiceTests: XCTestCase {
+
+    private func makeService(
+        enabled: Bool = true,
+        idleMinutes: Int = 30,
+        cooldownMinutes: Int = 60
+    ) -> (ProactiveSuggestionService, AppSettings, MockContextService, MockConversationService) {
+        let settings = AppSettings()
+        settings.proactiveSuggestionEnabled = enabled
+        settings.proactiveSuggestionIdleMinutes = idleMinutes
+        settings.proactiveSuggestionCooldownMinutes = cooldownMinutes
+        // Enable all suggestion types
+        settings.suggestionTypeNewsEnabled = true
+        settings.suggestionTypeDeepDiveEnabled = true
+        settings.suggestionTypeResearchEnabled = true
+        settings.suggestionTypeKanbanEnabled = true
+        settings.suggestionTypeMemoryEnabled = true
+        settings.suggestionTypeCostEnabled = true
+
+        let contextService = MockContextService()
+        let conversationService = MockConversationService()
+        let sessionContext = SessionContext(
+            workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
+            currentUserId: nil
+        )
+
+        let service = ProactiveSuggestionService(
+            settings: settings,
+            contextService: contextService,
+            conversationService: conversationService,
+            sessionContext: sessionContext
+        )
+
+        return (service, settings, contextService, conversationService)
+    }
+
+    // MARK: - start / stop
+
+    func testStartSetsStateToIdleWhenEnabled() {
+        let (service, _, _, _) = makeService(enabled: true)
+
+        service.start()
+
+        XCTAssertEqual(service.state, .idle)
+    }
+
+    func testStartSetsStateToDisabledWhenNotEnabled() {
+        let (service, _, _, _) = makeService(enabled: false)
+
+        service.start()
+
+        XCTAssertEqual(service.state, .disabled)
+    }
+
+    func testStopSetsStateToIdle() {
+        let (service, _, _, _) = makeService(enabled: true)
+
+        service.start()
+        XCTAssertEqual(service.state, .idle)
+
+        service.stop()
+        XCTAssertEqual(service.state, .idle)
+    }
+
+    // MARK: - acceptSuggestion
+
+    func testAcceptSuggestionClearsCurrentAndAddsToHistory() {
+        let (service, _, _, _) = makeService()
+
+        let suggestion = ProactiveSuggestion(
+            type: .newsTrend,
+            title: "테스트 제안",
+            body: "본문",
+            suggestedPrompt: "프롬프트"
+        )
+
+        service.acceptSuggestion(suggestion)
+
+        XCTAssertNil(service.currentSuggestion)
+        XCTAssertEqual(service.suggestionHistory.count, 1)
+        XCTAssertEqual(service.suggestionHistory[0].status, .accepted)
+        XCTAssertEqual(service.suggestionHistory[0].id, suggestion.id)
+        XCTAssertEqual(service.state, .cooldown)
+    }
+
+    // MARK: - deferSuggestion
+
+    func testDeferSuggestionClearsCurrentAndAddsToHistory() {
+        let (service, _, _, _) = makeService()
+
+        let suggestion = ProactiveSuggestion(
+            type: .deepDive,
+            title: "심화 제안",
+            body: "본문",
+            suggestedPrompt: "프롬프트"
+        )
+
+        service.deferSuggestion(suggestion)
+
+        XCTAssertNil(service.currentSuggestion)
+        XCTAssertEqual(service.suggestionHistory.count, 1)
+        XCTAssertEqual(service.suggestionHistory[0].status, .deferred)
+        XCTAssertEqual(service.suggestionHistory[0].id, suggestion.id)
+        XCTAssertEqual(service.state, .cooldown)
+    }
+
+    // MARK: - dismissSuggestionType
+
+    func testDismissSuggestionTypeDisablesTypeInSettings() {
+        let (service, settings, _, _) = makeService()
+
+        // Verify all types are enabled initially
+        XCTAssertTrue(settings.suggestionTypeNewsEnabled)
+        XCTAssertTrue(settings.suggestionTypeCostEnabled)
+        XCTAssertTrue(settings.suggestionTypeKanbanEnabled)
+
+        let newsSuggestion = ProactiveSuggestion(
+            type: .newsTrend,
+            title: "뉴스",
+            body: "본문",
+            suggestedPrompt: "프롬프트"
+        )
+        service.dismissSuggestionType(newsSuggestion)
+
+        XCTAssertFalse(settings.suggestionTypeNewsEnabled)
+        XCTAssertNil(service.currentSuggestion)
+        XCTAssertEqual(service.suggestionHistory.count, 1)
+        XCTAssertEqual(service.suggestionHistory[0].status, .dismissed)
+        XCTAssertEqual(service.state, .cooldown)
+
+        // Verify other types remain enabled
+        XCTAssertTrue(settings.suggestionTypeCostEnabled)
+        XCTAssertTrue(settings.suggestionTypeKanbanEnabled)
+    }
+
+    func testDismissSuggestionTypeAllTypes() {
+        let (service, settings, _, _) = makeService()
+
+        // Test each suggestion type disables its corresponding setting
+        let typeSettingPairs: [(SuggestionType, KeyPath<AppSettings, Bool>)] = [
+            (.newsTrend, \.suggestionTypeNewsEnabled),
+            (.deepDive, \.suggestionTypeDeepDiveEnabled),
+            (.relatedResearch, \.suggestionTypeResearchEnabled),
+            (.kanbanCheck, \.suggestionTypeKanbanEnabled),
+            (.memoryRemind, \.suggestionTypeMemoryEnabled),
+            (.costReport, \.suggestionTypeCostEnabled),
+        ]
+
+        for (type, keyPath) in typeSettingPairs {
+            // Re-enable for next iteration
+            settings.suggestionTypeNewsEnabled = true
+            settings.suggestionTypeDeepDiveEnabled = true
+            settings.suggestionTypeResearchEnabled = true
+            settings.suggestionTypeKanbanEnabled = true
+            settings.suggestionTypeMemoryEnabled = true
+            settings.suggestionTypeCostEnabled = true
+
+            let suggestion = ProactiveSuggestion(
+                type: type,
+                title: "test",
+                body: "body",
+                suggestedPrompt: "prompt"
+            )
+            service.dismissSuggestionType(suggestion)
+
+            XCTAssertFalse(settings[keyPath: keyPath], "Dismissing \(type.rawValue) should disable its setting")
+        }
+    }
+
+    // MARK: - History Capping
+
+    func testHistoryCappedAt20Items() {
+        let (service, _, _, _) = makeService()
+
+        for i in 0..<25 {
+            let suggestion = ProactiveSuggestion(
+                type: .costReport,
+                title: "제안 \(i)",
+                body: "본문",
+                suggestedPrompt: "프롬프트"
+            )
+            service.acceptSuggestion(suggestion)
+        }
+
+        XCTAssertEqual(service.suggestionHistory.count, 20)
+        // Most recent should be first
+        XCTAssertEqual(service.suggestionHistory[0].title, "제안 24")
+    }
+
+    // MARK: - recordActivity
+
+    func testRecordActivityResetsIdleTimer() {
+        let (service, _, _, _) = makeService()
+        service.start()
+
+        // recordActivity should not crash and should be callable
+        service.recordActivity()
+        service.recordActivity()
+
+        // State should remain idle (not analyzing, since idle threshold hasn't been reached)
+        XCTAssertEqual(service.state, .idle)
+    }
+
+    // MARK: - isPaused
+
+    func testIsPausedToggle() {
+        let (service, _, _, _) = makeService()
+
+        XCTAssertFalse(service.isPaused)
+
+        service.isPaused = true
+        XCTAssertTrue(service.isPaused)
+
+        service.isPaused = false
+        XCTAssertFalse(service.isPaused)
+    }
+
+    // MARK: - dismissToast
+
+    func testDismissToast() {
+        let (service, _, _, _) = makeService()
+
+        let suggestion = ProactiveSuggestion(
+            type: .kanbanCheck,
+            title: "칸반",
+            body: "본문",
+            suggestedPrompt: "프롬프트"
+        )
+        // Manually add a toast event (since we can't easily trigger generation in unit test)
+        // toastEvents is private(set), so we test via dismissToast behavior
+        let toastId = UUID()
+        service.dismissToast(id: toastId)
+
+        // Should not crash even with non-existent ID
+        XCTAssertTrue(service.toastEvents.isEmpty)
+    }
+
+    // MARK: - Multiple accept/defer interleaved
+
+    func testInterleavedAcceptAndDefer() {
+        let (service, _, _, _) = makeService()
+
+        let s1 = ProactiveSuggestion(type: .newsTrend, title: "S1", body: "b", suggestedPrompt: "p")
+        let s2 = ProactiveSuggestion(type: .deepDive, title: "S2", body: "b", suggestedPrompt: "p")
+        let s3 = ProactiveSuggestion(type: .costReport, title: "S3", body: "b", suggestedPrompt: "p")
+
+        service.acceptSuggestion(s1)
+        service.deferSuggestion(s2)
+        service.acceptSuggestion(s3)
+
+        XCTAssertEqual(service.suggestionHistory.count, 3)
+        // Most recent first
+        XCTAssertEqual(service.suggestionHistory[0].title, "S3")
+        XCTAssertEqual(service.suggestionHistory[0].status, .accepted)
+        XCTAssertEqual(service.suggestionHistory[1].title, "S2")
+        XCTAssertEqual(service.suggestionHistory[1].status, .deferred)
+        XCTAssertEqual(service.suggestionHistory[2].title, "S1")
+        XCTAssertEqual(service.suggestionHistory[2].status, .accepted)
+    }
+}
