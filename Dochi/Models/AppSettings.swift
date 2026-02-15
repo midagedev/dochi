@@ -358,6 +358,24 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(spotlightIndexWorkspaceMemory, forKey: "spotlightIndexWorkspaceMemory") }
     }
 
+    // MARK: - Device Policy (J-1)
+
+    var deviceSelectionPolicy: String = UserDefaults.standard.string(forKey: "deviceSelectionPolicy") ?? "priorityBased" {
+        didSet { UserDefaults.standard.set(deviceSelectionPolicy, forKey: "deviceSelectionPolicy") }
+    }
+
+    var manualResponderDeviceId: String = UserDefaults.standard.string(forKey: "manualResponderDeviceId") ?? "" {
+        didSet { UserDefaults.standard.set(manualResponderDeviceId, forKey: "manualResponderDeviceId") }
+    }
+
+    var deviceCloudSyncEnabled: Bool = UserDefaults.standard.object(forKey: "deviceCloudSyncEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(deviceCloudSyncEnabled, forKey: "deviceCloudSyncEnabled") }
+    }
+
+    var currentDeviceName: String = UserDefaults.standard.string(forKey: "currentDeviceName") ?? "" {
+        didSet { UserDefaults.standard.set(currentDeviceName, forKey: "currentDeviceName") }
+    }
+
     // MARK: - Computed
 
     var currentProvider: LLMProvider {

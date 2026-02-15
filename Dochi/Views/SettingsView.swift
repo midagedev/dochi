@@ -14,6 +14,7 @@ struct SettingsView: View {
     var mcpService: MCPServiceProtocol?
     var supabaseService: SupabaseServiceProtocol?
     var toolService: BuiltInToolService?
+    var devicePolicyService: DevicePolicyServiceProtocol?
     var heartbeatService: HeartbeatService?
     var notificationManager: NotificationManager?
     var metricsCollector: MetricsCollector?
@@ -137,6 +138,17 @@ struct SettingsView: View {
 
         case .shortcuts:
             ShortcutsSettingsView()
+
+        case .devices:
+            if let devicePolicyService {
+                DeviceSettingsView(
+                    devicePolicyService: devicePolicyService,
+                    settings: settings,
+                    supabaseService: supabaseService
+                )
+            } else {
+                unavailableView(title: "디바이스", message: "디바이스 정책 서비스가 초기화되지 않았습니다.")
+            }
 
         case .account:
             AccountSettingsView(

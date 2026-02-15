@@ -603,6 +603,97 @@ final class MockSpotlightIndexer: SpotlightIndexerProtocol {
     }
 }
 
+// MARK: - MockDevicePolicyService (J-1)
+
+@MainActor
+final class MockDevicePolicyService: DevicePolicyServiceProtocol {
+    var registeredDevices: [DeviceInfo] = []
+    var currentDevice: DeviceInfo?
+    var currentPolicy: DeviceSelectionPolicy = .priorityBased
+    var manualDeviceId: UUID?
+
+    var registerCallCount = 0
+    var updateActivityCallCount = 0
+    var removedIds: [UUID] = []
+    var renamedDevices: [(id: UUID, name: String)] = []
+    var reorderedIds: [[UUID]] = []
+
+    func registerCurrentDevice() async {
+        registerCallCount += 1
+    }
+
+    func updateCurrentDeviceActivity() {
+        updateActivityCallCount += 1
+    }
+
+    func removeDevice(id: UUID) {
+        removedIds.append(id)
+        registeredDevices.removeAll { $0.id == id }
+    }
+
+    func renameDevice(id: UUID, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let finalName = String(trimmed.prefix(64))
+        renamedDevices.append((id: id, name: finalName))
+        if let idx = registeredDevices.firstIndex(where: { $0.id == id }) {
+            registeredDevices[idx].name = finalName
+        }
+    }
+
+    func reorderPriority(deviceIds: [UUID]) {
+        reorderedIds.append(deviceIds)
+        for (index, id) in deviceIds.enumerated() {
+            if let idx = registeredDevices.firstIndex(where: { $0.id == id }) {
+                registeredDevices[idx].priority = index
+            }
+        }
+    }
+
+    func evaluateResponder() -> DeviceNegotiationResult {
+        let onlineDevices = registeredDevices.filter { $0.isOnline || $0.isCurrentDevice }
+        guard !onlineDevices.isEmpty else { return .noDeviceAvailable }
+        if onlineDevices.count == 1 { return .singleDevice }
+
+        switch currentPolicy {
+        case .priorityBased:
+            let sorted = onlineDevices.sorted { $0.priority < $1.priority }
+            guard let winner = sorted.first else { return .noDeviceAvailable }
+            return winner.isCurrentDevice ? .thisDevice : .otherDevice(winner)
+        case .lastActive:
+            let sorted = onlineDevices.sorted { $0.lastSeen > $1.lastSeen }
+            guard let winner = sorted.first else { return .noDeviceAvailable }
+            return winner.isCurrentDevice ? .thisDevice : .otherDevice(winner)
+        case .manual:
+            if let manualId = manualDeviceId,
+               let device = onlineDevices.first(where: { $0.id == manualId }) {
+                return device.isCurrentDevice ? .thisDevice : .otherDevice(device)
+            }
+            // Fallback to current device if manual device not found online
+            if onlineDevices.contains(where: { $0.isCurrentDevice }) {
+                return .thisDevice
+            }
+            return .noDeviceAvailable
+        }
+    }
+
+    func shouldThisDeviceRespond() -> Bool {
+        let result = evaluateResponder()
+        switch result {
+        case .thisDevice, .singleDevice: return true
+        case .otherDevice, .noDeviceAvailable: return false
+        }
+    }
+
+    func setPolicy(_ policy: DeviceSelectionPolicy) {
+        currentPolicy = policy
+    }
+
+    func setManualDevice(id: UUID) {
+        manualDeviceId = id
+    }
+}
+
 // MARK: - MockFeedbackStore (I-4)
 
 @MainActor

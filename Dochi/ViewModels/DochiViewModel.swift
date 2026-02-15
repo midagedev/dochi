@@ -55,6 +55,10 @@ final class DochiViewModel {
     // MARK: - Feedback (I-4)
     private(set) var feedbackStore: FeedbackStoreProtocol?
 
+    // MARK: - Device Policy (J-1)
+    var devicePolicyService: DevicePolicyServiceProtocol?
+    var showConnectedDevicesPopover: Bool = false
+
     /// @Observable 관찰 추적을 위해 구체 타입으로 캐스팅하여 반환
     var concreteSpotlightIndexer: SpotlightIndexer? {
         spotlightIndexer as? SpotlightIndexer
@@ -241,6 +245,11 @@ final class DochiViewModel {
     func configureFeedbackStore(_ store: FeedbackStoreProtocol) {
         self.feedbackStore = store
         Log.app.info("FeedbackStore configured")
+    }
+
+    func configureDevicePolicyService(_ service: DevicePolicyServiceProtocol) {
+        self.devicePolicyService = service
+        Log.app.info("DevicePolicyService configured")
     }
 
     /// 피드백 제출 (I-4)
