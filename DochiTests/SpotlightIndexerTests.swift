@@ -230,6 +230,49 @@ final class SpotlightIndexerTests: XCTestCase {
         XCTAssertEqual(mockIndexer.removedConversationIds, [uuid])
     }
 
+    // MARK: - concreteSpotlightIndexer (C-1 fix)
+
+    func testConcreteSpotlightIndexerReturnsNilForMock() {
+        let vm = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: MockKeychainService(),
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: AppSettings(),
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        // Mock 인덱서는 SpotlightIndexer 구체 타입이 아니므로 nil 반환
+        let mockIndexer = MockSpotlightIndexer()
+        vm.configureSpotlightIndexer(mockIndexer)
+        XCTAssertNil(vm.concreteSpotlightIndexer)
+    }
+
+    func testConcreteSpotlightIndexerReturnsConcreteType() {
+        let settings = AppSettings()
+        let vm = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: MockKeychainService(),
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        let realIndexer = SpotlightIndexer(settings: settings)
+        vm.configureSpotlightIndexer(realIndexer)
+        XCTAssertNotNil(vm.concreteSpotlightIndexer)
+        XCTAssertTrue(vm.concreteSpotlightIndexer === realIndexer)
+    }
+
     // MARK: - AppSettings Defaults
 
     func testSpotlightSettingsDefaults() {

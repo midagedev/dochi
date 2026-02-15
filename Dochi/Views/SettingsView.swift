@@ -59,7 +59,7 @@ struct SettingsView: View {
 
         case .interface:
             Form {
-                InterfaceSettingsContent(settings: settings, viewModel: viewModel)
+                InterfaceSettingsContent(settings: settings, viewModel: viewModel, spotlightIndexer: viewModel?.concreteSpotlightIndexer)
             }
             .formStyle(.grouped)
             .padding()
@@ -158,6 +158,7 @@ struct SettingsView: View {
 struct InterfaceSettingsContent: View {
     var settings: AppSettings
     var viewModel: DochiViewModel?
+    var spotlightIndexer: SpotlightIndexer?
 
     var body: some View {
         Section {
@@ -253,8 +254,8 @@ struct InterfaceSettingsContent: View {
             ))
 
             if settings.spotlightIndexingEnabled {
-                // 인덱싱 상태
-                if let indexer = viewModel?.spotlightIndexer {
+                // 인덱싱 상태 — spotlightIndexer는 @Observable 구체 타입으로 직접 받아 관찰 추적 가능
+                if let indexer = spotlightIndexer {
                     HStack {
                         Text("인덱싱된 항목")
                             .foregroundStyle(.secondary)

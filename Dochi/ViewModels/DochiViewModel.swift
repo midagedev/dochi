@@ -40,6 +40,11 @@ final class DochiViewModel {
     // MARK: - Spotlight (H-4)
     private(set) var spotlightIndexer: SpotlightIndexerProtocol?
 
+    /// @Observable 관찰 추적을 위해 구체 타입으로 캐스팅하여 반환
+    var concreteSpotlightIndexer: SpotlightIndexer? {
+        spotlightIndexer as? SpotlightIndexer
+    }
+
     // MARK: - Sync (G-3)
     private(set) var syncEngine: SyncEngine?
 
@@ -247,6 +252,41 @@ final class DochiViewModel {
     private func indexCurrentConversationIfNeeded() {
         guard let conversation = currentConversation else { return }
         spotlightIndexer?.indexConversation(conversation)
+    }
+
+    /// 메모리 저장/수정 시 Spotlight 인크리멘탈 인덱싱 (H-4)
+    private func indexMemoryForSpotlight(scope: MemoryToastEvent.Scope, content: String) {
+        guard let indexer = spotlightIndexer else { return }
+
+        switch scope {
+        case .personal:
+            guard let userId = sessionContext.currentUserId else { return }
+            let profiles = contextService.loadProfiles()
+            let userName = profiles.first(where: { $0.id.uuidString == userId })?.name ?? "사용자"
+            indexer.indexMemory(
+                scope: "personal",
+                identifier: "user-\(userId)",
+                title: "\(userName)의 개인 메모리",
+                content: content
+            )
+        case .workspace:
+            let wsId = sessionContext.workspaceId
+            indexer.indexMemory(
+                scope: "workspace",
+                identifier: "workspace-\(wsId.uuidString)",
+                title: "워크스페이스 메모리",
+                content: content
+            )
+        case .agent:
+            let wsId = sessionContext.workspaceId
+            let agentName = settings.activeAgentName
+            indexer.indexMemory(
+                scope: "agent",
+                identifier: "agent-\(wsId.uuidString)-\(agentName)",
+                title: "\(agentName) 에이전트 메모리",
+                content: content
+            )
+        }
     }
 
     // MARK: - Local Server Monitoring
@@ -1599,6 +1639,9 @@ final class DochiViewModel {
                             let action: MemoryToastEvent.Action = call.name == "save_memory" ? .saved : .updated
                             let preview = (call.arguments["content"] as? String) ?? (call.arguments["new_content"] as? String) ?? ""
                             showMemoryToast(scope: scope, action: action, contentPreview: preview)
+
+                            // H-4: 메모리 저장/수정 시 Spotlight 인크리멘탈 인덱싱
+                            indexMemoryForSpotlight(scope: scope, content: preview)
                         }
                     }
 
