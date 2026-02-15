@@ -52,6 +52,9 @@ final class DochiViewModel {
     private(set) var memoryConsolidator: MemoryConsolidator?
     private var lastConsolidatedConversationId: UUID?
 
+    // MARK: - Feedback (I-4)
+    private(set) var feedbackStore: FeedbackStoreProtocol?
+
     /// @Observable 관찰 추적을 위해 구체 타입으로 캐스팅하여 반환
     var concreteSpotlightIndexer: SpotlightIndexer? {
         spotlightIndexer as? SpotlightIndexer
@@ -232,6 +235,56 @@ final class DochiViewModel {
     func configureMemoryConsolidator(_ consolidator: MemoryConsolidator) {
         self.memoryConsolidator = consolidator
         Log.app.info("MemoryConsolidator configured")
+    }
+
+    /// FeedbackStore 설정 (I-4)
+    func configureFeedbackStore(_ store: FeedbackStoreProtocol) {
+        self.feedbackStore = store
+        Log.app.info("FeedbackStore configured")
+    }
+
+    /// 피드백 제출 (I-4)
+    func submitFeedback(messageId: UUID, conversationId: UUID, rating: FeedbackRating, category: FeedbackCategory? = nil, comment: String? = nil) {
+        let entry = FeedbackEntry(
+            messageId: messageId,
+            conversationId: conversationId,
+            rating: rating,
+            category: category,
+            comment: comment,
+            agentName: settings.activeAgentName,
+            provider: settings.llmProvider,
+            model: settings.llmModel
+        )
+        feedbackStore?.add(entry)
+
+        // Update message's feedbackRating for visual state
+        if let convIdx = conversations.firstIndex(where: { $0.id == conversationId }) {
+            if let msgIdx = conversations[convIdx].messages.firstIndex(where: { $0.id == messageId }) {
+                conversations[convIdx].messages[msgIdx].feedbackRating = rating
+            }
+        }
+        if currentConversation?.id == conversationId {
+            if let msgIdx = currentConversation?.messages.firstIndex(where: { $0.id == messageId }) {
+                currentConversation?.messages[msgIdx].feedbackRating = rating
+            }
+        }
+    }
+
+    /// 피드백 삭제 (I-4)
+    func removeFeedback(messageId: UUID) {
+        feedbackStore?.remove(messageId: messageId)
+
+        // Clear message's feedbackRating
+        if let convId = currentConversation?.id {
+            if let convIdx = conversations.firstIndex(where: { $0.id == convId }) {
+                if let msgIdx = conversations[convIdx].messages.firstIndex(where: { $0.id == messageId }) {
+                    conversations[convIdx].messages[msgIdx].feedbackRating = nil
+                }
+            }
+            if let msgIdx = currentConversation?.messages.firstIndex(where: { $0.id == messageId }) {
+                currentConversation?.messages[msgIdx].feedbackRating = nil
+            }
+        }
     }
 
     /// 딥링크 처리 (dochi:// URL)

@@ -7,6 +7,11 @@ struct ConversationView: View {
     let processingSubState: ProcessingSubState?
     let fontSize: Double
     let toolExecutions: [ToolExecution]
+    var feedbackEnabled: Bool = false
+    var feedbackShowOnHover: Bool = true
+    var feedbackStore: FeedbackStoreProtocol?
+    var onFeedback: ((UUID, FeedbackRating, FeedbackCategory?, String?) -> Void)?
+    var onRemoveFeedback: ((UUID) -> Void)?
 
     init(
         messages: [Message],
@@ -14,7 +19,12 @@ struct ConversationView: View {
         currentToolName: String? = nil,
         processingSubState: ProcessingSubState? = nil,
         fontSize: Double = 14.0,
-        toolExecutions: [ToolExecution] = []
+        toolExecutions: [ToolExecution] = [],
+        feedbackEnabled: Bool = false,
+        feedbackShowOnHover: Bool = true,
+        feedbackStore: FeedbackStoreProtocol? = nil,
+        onFeedback: ((UUID, FeedbackRating, FeedbackCategory?, String?) -> Void)? = nil,
+        onRemoveFeedback: ((UUID) -> Void)? = nil
     ) {
         self.messages = messages
         self.streamingText = streamingText
@@ -22,6 +32,11 @@ struct ConversationView: View {
         self.processingSubState = processingSubState
         self.fontSize = fontSize
         self.toolExecutions = toolExecutions
+        self.feedbackEnabled = feedbackEnabled
+        self.feedbackShowOnHover = feedbackShowOnHover
+        self.feedbackStore = feedbackStore
+        self.onFeedback = onFeedback
+        self.onRemoveFeedback = onRemoveFeedback
     }
 
     var body: some View {
@@ -54,8 +69,16 @@ struct ConversationView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(visibleMessages) { message in
-                        MessageBubbleView(message: message, fontSize: fontSize)
-                            .id(message.id)
+                        MessageBubbleView(
+                            message: message,
+                            fontSize: fontSize,
+                            feedbackRating: feedbackStore?.rating(for: message.id),
+                            feedbackEnabled: feedbackEnabled,
+                            feedbackShowOnHover: feedbackShowOnHover,
+                            onFeedback: onFeedback,
+                            onRemoveFeedback: onRemoveFeedback
+                        )
+                        .id(message.id)
                     }
 
                     // Streaming text as temporary assistant bubble

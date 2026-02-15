@@ -5,6 +5,7 @@ struct QuickModelPopoverView: View {
     var settings: AppSettings
     var keychainService: KeychainServiceProtocol?
     var isOfflineFallbackActive: Bool = false
+    var feedbackStore: FeedbackStoreProtocol?
 
     @State private var selectedProviderRaw: String = ""
     @State private var selectedModel: String = ""
@@ -279,6 +280,18 @@ struct QuickModelPopoverView: View {
                     Text("\(tokens / 1000)K")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.tertiary)
+                }
+
+                // I-4: Feedback warning badge
+                if let store = feedbackStore {
+                    let breakdown = store.modelBreakdown()
+                    if let modelStat = breakdown.first(where: { $0.model == model }),
+                       modelStat.isWarning {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 6, height: 6)
+                            .help("만족도 \(String(format: "%.0f%%", modelStat.satisfactionRate * 100)) (피드백 \(modelStat.totalCount)건)")
+                    }
                 }
 
                 if isSelected {

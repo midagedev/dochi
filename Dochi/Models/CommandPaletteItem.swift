@@ -369,6 +369,15 @@ enum CommandPaletteRegistry {
             category: .settings,
             action: .openSettingsSection(section: "rag")
         ),
+        // I-4: 피드백 통계
+        CommandPaletteItem(
+            id: "settings.open.feedback",
+            icon: "chart.line.uptrend.xyaxis",
+            title: "피드백 통계 보기",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "feedback")
+        ),
         // I-2: 메모리 자동 정리
         CommandPaletteItem(
             id: "consolidate-memory",

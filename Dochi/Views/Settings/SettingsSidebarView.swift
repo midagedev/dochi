@@ -8,6 +8,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case usage = "usage"
     case rag = "rag"
     case memory = "memory"
+    case feedback = "feedback"
     case voice = "voice"
     case interface = "interface"
     case wakeWord = "wake-word"
@@ -29,6 +30,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .usage: return "사용량"
         case .rag: return "문서 검색"
         case .memory: return "메모리 정리"
+        case .feedback: return "피드백 통계"
         case .voice: return "음성 합성"
         case .interface: return "인터페이스"
         case .wakeWord: return "웨이크워드"
@@ -50,6 +52,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .usage: return "chart.bar.xaxis"
         case .rag: return "doc.text.magnifyingglass"
         case .memory: return "brain.head.profile"
+        case .feedback: return "chart.line.uptrend.xyaxis"
         case .voice: return "speaker.wave.2"
         case .interface: return "textformat.size"
         case .wakeWord: return "mic"
@@ -66,7 +69,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var group: SettingsSectionGroup {
         switch self {
-        case .aiModel, .apiKey, .usage, .rag, .memory: return .ai
+        case .aiModel, .apiKey, .usage, .rag, .memory, .feedback: return .ai
         case .voice: return .voice
         case .interface, .wakeWord, .heartbeat: return .general
         case .family, .agent: return .people
@@ -87,6 +90,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             return ["RAG", "문서", "검색", "임베딩", "embedding", "벡터", "vector", "PDF", "인덱싱"]
         case .memory:
             return ["메모리", "정리", "자동", "요약", "사실", "추출", "아카이브", "모순", "중복", "consolidation"]
+        case .feedback:
+            return ["피드백", "만족도", "평가", "feedback", "통계", "좋아요", "싫어요"]
         case .voice:
             return ["음성", "TTS", "속도", "피치", "Google Cloud", "프로바이더"]
         case .interface:

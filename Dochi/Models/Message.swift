@@ -47,8 +47,9 @@ struct Message: Codable, Identifiable, Sendable {
     var toolExecutionRecords: [ToolExecutionRecord]?
     var memoryContextInfo: MemoryContextInfo?
     var ragContextInfo: RAGContextInfo?
+    var feedbackRating: FeedbackRating?
 
-    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCalls: [CodableToolCall]? = nil, toolCallId: String? = nil, imageURLs: [URL]? = nil, imageData: [ImageContent]? = nil, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil, memoryContextInfo: MemoryContextInfo? = nil, ragContextInfo: RAGContextInfo? = nil) {
+    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCalls: [CodableToolCall]? = nil, toolCallId: String? = nil, imageURLs: [URL]? = nil, imageData: [ImageContent]? = nil, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil, memoryContextInfo: MemoryContextInfo? = nil, ragContextInfo: RAGContextInfo? = nil, feedbackRating: FeedbackRating? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -61,6 +62,7 @@ struct Message: Codable, Identifiable, Sendable {
         self.toolExecutionRecords = toolExecutionRecords
         self.memoryContextInfo = memoryContextInfo
         self.ragContextInfo = ragContextInfo
+        self.feedbackRating = feedbackRating
     }
 
     init(from decoder: Decoder) throws {
@@ -77,5 +79,6 @@ struct Message: Codable, Identifiable, Sendable {
         toolExecutionRecords = try container.decodeIfPresent([ToolExecutionRecord].self, forKey: .toolExecutionRecords)
         memoryContextInfo = try container.decodeIfPresent(MemoryContextInfo.self, forKey: .memoryContextInfo)
         ragContextInfo = try container.decodeIfPresent(RAGContextInfo.self, forKey: .ragContextInfo)
+        feedbackRating = try container.decodeIfPresent(FeedbackRating.self, forKey: .feedbackRating)
     }
 }

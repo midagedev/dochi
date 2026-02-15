@@ -444,6 +444,20 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(ragChunkOverlap, forKey: "ragChunkOverlap") }
     }
 
+    // MARK: - Feedback (I-4)
+
+    var feedbackEnabled: Bool = UserDefaults.standard.object(forKey: "feedbackEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(feedbackEnabled, forKey: "feedbackEnabled") }
+    }
+
+    var feedbackShowOnHover: Bool = UserDefaults.standard.object(forKey: "feedbackShowOnHover") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(feedbackShowOnHover, forKey: "feedbackShowOnHover") }
+    }
+
+    var feedbackAutoAnalyze: Bool = UserDefaults.standard.object(forKey: "feedbackAutoAnalyze") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(feedbackAutoAnalyze, forKey: "feedbackAutoAnalyze") }
+    }
+
     // MARK: - Guide (UX-9)
 
     /// 인앱 힌트 표시 여부 (hintsGloballyDisabled의 반전)

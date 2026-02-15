@@ -241,6 +241,10 @@ struct DochiApp: App {
                     // Configure Memory Consolidator (I-2)
                     viewModel.configureMemoryConsolidator(memoryConsolidator)
 
+                    // Configure FeedbackStore (I-4)
+                    let feedbackStore = FeedbackStore()
+                    viewModel.configureFeedbackStore(feedbackStore)
+
                     // Wire notification callbacks (H-3)
                     notificationManager.onReply = { [weak viewModel] text, category, originalBody in
                         guard let viewModel else { return }
@@ -352,7 +356,8 @@ struct DochiApp: App {
                 notificationManager: notificationManager,
                 metricsCollector: viewModel.metricsCollector,
                 viewModel: viewModel,
-                documentIndexer: documentIndexer
+                documentIndexer: documentIndexer,
+                feedbackStore: viewModel.feedbackStore
             )
         }
         .commands {
