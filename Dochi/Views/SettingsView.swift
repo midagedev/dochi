@@ -23,6 +23,7 @@ struct SettingsView: View {
     var pluginManager: PluginManagerProtocol?
     var documentIndexer: DocumentIndexer?
     var feedbackStore: FeedbackStoreProtocol?
+    var resourceOptimizer: ResourceOptimizerService?
 
     @State var selectedSection: SettingsSection = .aiModel
     @State private var searchText: String = ""
@@ -54,7 +55,7 @@ struct SettingsView: View {
 
         case .usage:
             if let metricsCollector {
-                UsageDashboardView(metricsCollector: metricsCollector, settings: settings)
+                UsageDashboardView(metricsCollector: metricsCollector, settings: settings, resourceOptimizer: resourceOptimizer)
             } else {
                 unavailableView(title: "사용량", message: "메트릭 수집기가 초기화되지 않았습니다.")
             }

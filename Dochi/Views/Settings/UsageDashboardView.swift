@@ -5,6 +5,7 @@ import Charts
 struct UsageDashboardView: View {
     let metricsCollector: MetricsCollector
     let settings: AppSettings
+    var resourceOptimizer: ResourceOptimizerService?
 
     @State private var selectedPeriod: Period = .thisMonth
     @State private var chartMode: ChartMode = .cost
@@ -12,6 +13,9 @@ struct UsageDashboardView: View {
     @State private var summary: MonthlyUsageSummary?
     @State private var allMonthsSummaries: [MonthlyUsageSummary] = []
     @State private var isLoading = true
+    @State private var utilizations: [ResourceUtilization] = []
+    @State private var showSubscriptionSheet = false
+    @State private var editingSubscription: SubscriptionPlan?
 
     enum Period: String, CaseIterable {
         case today = "오늘"
@@ -68,15 +72,55 @@ struct UsageDashboardView: View {
                 budgetSection
                     .padding(.horizontal)
 
+                if let resourceOptimizer {
+                    Divider()
+                        .padding(.horizontal)
+
+                    // Subscription plan cards
+                    subscriptionCardsSection(resourceOptimizer)
+                        .padding(.horizontal)
+
+                    // Auto task settings
+                    autoTaskSection
+                        .padding(.horizontal)
+
+                    // Subscription management
+                    subscriptionManagementSection(resourceOptimizer)
+                        .padding(.horizontal)
+                }
+
                 Spacer(minLength: 20)
             }
             .padding(.vertical)
         }
         .task {
             await loadData()
+            await loadUtilizations()
         }
         .onChange(of: selectedPeriod) { _, _ in
             Task { await loadData() }
+        }
+        .sheet(isPresented: $showSubscriptionSheet) {
+            SubscriptionEditSheet(
+                subscription: editingSubscription,
+                onSave: { plan in
+                    guard let optimizer = resourceOptimizer else { return }
+                    Task {
+                        if editingSubscription != nil {
+                            await optimizer.updateSubscription(plan)
+                        } else {
+                            await optimizer.addSubscription(plan)
+                        }
+                        await loadUtilizations()
+                    }
+                    editingSubscription = nil
+                    showSubscriptionSheet = false
+                },
+                onCancel: {
+                    editingSubscription = nil
+                    showSubscriptionSheet = false
+                }
+            )
         }
     }
 
@@ -421,6 +465,275 @@ struct UsageDashboardView: View {
         return map
             .map { BreakdownItem(name: $0.key, cost: $0.value) }
             .sorted { $0.cost > $1.cost }
+    }
+
+    // MARK: - Subscription Cards Section
+
+    private func subscriptionCardsSection(_ optimizer: ResourceOptimizerService) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("구독 플랜 사용률")
+                .font(.system(size: 13, weight: .semibold))
+
+            if utilizations.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "creditcard")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.tertiary)
+                    Text("등록된 구독 플랜이 없습니다")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Text("구독을 등록하면 사용량을 추적하고 낭비를 방지합니다.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                    Button("구독 추가") {
+                        editingSubscription = nil
+                        showSubscriptionSheet = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+            } else {
+                ForEach(utilizations, id: \.subscription.id) { util in
+                    subscriptionCard(util)
+                }
+            }
+        }
+        .padding(12)
+        .background(.secondary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func subscriptionCard(_ util: ResourceUtilization) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(util.subscription.providerName)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(util.subscription.planName)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                riskBadge(util.riskLevel)
+            }
+
+            // Usage gauge
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(.secondary.opacity(0.15))
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(riskColor(util.riskLevel))
+                        .frame(width: max(0, min(geo.size.width, geo.size.width * util.usageRatio)))
+                }
+            }
+            .frame(height: 8)
+
+            HStack {
+                if let limit = util.subscription.monthlyTokenLimit {
+                    Text("사용: \(formatTokens(util.usedTokens)) / \(formatTokens(limit))")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("사용: \(formatTokens(util.usedTokens)) (무제한)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("리셋일: 매월 \(util.subscription.resetDayOfMonth)일")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text("잔여: \(util.daysRemaining)일")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+
+            if util.subscription.monthlyTokenLimit != nil {
+                Text("예상 미사용: \(String(format: "%.0f", util.estimatedUnusedPercent))%")
+                    .font(.system(size: 10))
+                    .foregroundStyle(util.riskLevel == .wasteRisk ? .red : .secondary)
+            }
+        }
+        .padding(8)
+        .background(.secondary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func riskBadge(_ level: WasteRiskLevel) -> some View {
+        Text(level.displayName)
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(riskColor(level).opacity(0.15))
+            .foregroundStyle(riskColor(level))
+            .clipShape(Capsule())
+    }
+
+    private func riskColor(_ level: WasteRiskLevel) -> Color {
+        switch level {
+        case .comfortable: return .green
+        case .caution: return .yellow
+        case .wasteRisk: return .red
+        case .normal: return .blue
+        }
+    }
+
+    // MARK: - Auto Task Section
+
+    private var autoTaskSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("자동 작업 설정")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { settings.resourceAutoTaskEnabled },
+                    set: { settings.resourceAutoTaskEnabled = $0 }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+
+            if settings.resourceAutoTaskEnabled {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("자동 작업 유형")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(AutoTaskType.allCases, id: \.rawValue) { taskType in
+                        Toggle(isOn: autoTaskBinding(for: taskType)) {
+                            HStack(spacing: 6) {
+                                Image(systemName: taskType.icon)
+                                    .font(.system(size: 11))
+                                    .frame(width: 16)
+                                Text(taskType.displayName)
+                                    .font(.system(size: 12))
+                            }
+                        }
+                    }
+                }
+
+                Toggle("\"낭비 위험\" 시에만 실행", isOn: Binding(
+                    get: { settings.resourceAutoTaskOnlyWasteRisk },
+                    set: { settings.resourceAutoTaskOnlyWasteRisk = $0 }
+                ))
+                .font(.system(size: 12))
+
+                if !settings.resourceAutoTaskOnlyWasteRisk {
+                    Text("잔여 토큰이 있으면 항상 자동 작업을 실행합니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(.secondary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func autoTaskBinding(for taskType: AutoTaskType) -> Binding<Bool> {
+        Binding(
+            get: {
+                let enabled = settings.resourceAutoTaskTypes
+                return enabled.contains(taskType.rawValue)
+            },
+            set: { newValue in
+                var enabled = settings.resourceAutoTaskTypes
+                if newValue {
+                    if !enabled.contains(taskType.rawValue) {
+                        enabled.append(taskType.rawValue)
+                    }
+                } else {
+                    enabled.removeAll { $0 == taskType.rawValue }
+                }
+                settings.resourceAutoTaskTypes = enabled
+            }
+        )
+    }
+
+    // MARK: - Subscription Management Section
+
+    private func subscriptionManagementSection(_ optimizer: ResourceOptimizerService) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("구독 플랜 관리")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button {
+                    editingSubscription = nil
+                    showSubscriptionSheet = true
+                } label: {
+                    Label("구독 추가", systemImage: "plus")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            if optimizer.subscriptions.isEmpty {
+                Text("등록된 구독이 없습니다")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(optimizer.subscriptions) { sub in
+                    HStack(spacing: 8) {
+                        Text(sub.providerName)
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 80, alignment: .leading)
+                        Text(sub.planName)
+                            .font(.system(size: 11))
+                            .frame(width: 80, alignment: .leading)
+                            .lineLimit(1)
+                        if let limit = sub.monthlyTokenLimit {
+                            Text(formatTokens(limit))
+                                .font(.system(size: 10, design: .monospaced))
+                                .frame(width: 60, alignment: .trailing)
+                        } else {
+                            Text("무제한")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 60, alignment: .trailing)
+                        }
+                        Text("매월 \(sub.resetDayOfMonth)일")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 60, alignment: .trailing)
+                        Spacer()
+                        Button {
+                            editingSubscription = sub
+                            showSubscriptionSheet = true
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        Button {
+                            Task {
+                                await optimizer.deleteSubscription(id: sub.id)
+                                await loadUtilizations()
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.red.opacity(0.7))
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(.secondary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Utilization Loading
+
+    private func loadUtilizations() async {
+        guard let optimizer = resourceOptimizer else { return }
+        utilizations = await optimizer.allUtilizations()
     }
 
     // MARK: - Formatting
