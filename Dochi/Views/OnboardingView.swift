@@ -16,6 +16,7 @@ struct OnboardingView: View {
     @State private var interactionMode: InteractionMode = .voiceAndText
     @State private var isValidatingKey = false
     @State private var errorMessage: String?
+    @State private var showFeatureTour = false
 
     enum OnboardingStep: Int, CaseIterable {
         case welcome
@@ -27,6 +28,28 @@ struct OnboardingView: View {
     }
 
     var body: some View {
+        Group {
+            if showFeatureTour {
+                FeatureTourView(
+                    onComplete: {
+                        settings.featureTourCompleted = true
+                        showFeatureTour = false
+                        onComplete()
+                    },
+                    onSkip: {
+                        settings.featureTourCompleted = true
+                        settings.featureTourSkipped = true
+                        showFeatureTour = false
+                        onComplete()
+                    }
+                )
+            } else {
+                onboardingContent
+            }
+        }
+    }
+
+    private var onboardingContent: some View {
         VStack(spacing: 0) {
             // Progress
             HStack(spacing: 4) {
@@ -74,8 +97,15 @@ struct OnboardingView: View {
                 }
                 Spacer()
                 if step == .complete {
+                    // 완료 단계: 두 가지 선택지
                     Button("시작하기") {
                         finishOnboarding()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+
+                    Button("기능 둘러보기") {
+                        finishOnboardingAndStartTour()
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
@@ -240,9 +270,10 @@ struct OnboardingView: View {
             .background(Color.secondary.opacity(0.05))
             .cornerRadius(10)
 
-            Text("설정은 나중에 언제든 변경할 수 있습니다.")
+            Text("설정은 나중에 언제든 변경할 수 있습니다.\n\"기능 둘러보기\"를 눌러 도치의 기능을 알아보세요.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
     }
 
@@ -301,8 +332,7 @@ struct OnboardingView: View {
         }
     }
 
-    private func finishOnboarding() {
-        // Save all settings
+    private func saveSettings() {
         settings.llmProvider = selectedProvider.rawValue
         settings.llmModel = defaultModel(for: selectedProvider)
         settings.activeAgentName = agentName.isEmpty ? "도치" : agentName
@@ -319,7 +349,17 @@ struct OnboardingView: View {
 
         // Mark onboarding complete
         UserDefaults.standard.set(true, forKey: "onboardingCompleted")
+    }
 
+    private func finishOnboarding() {
+        saveSettings()
         onComplete()
+    }
+
+    private func finishOnboardingAndStartTour() {
+        saveSettings()
+        withAnimation {
+            showFeatureTour = true
+        }
     }
 }

@@ -48,7 +48,7 @@ struct IntegrationsSettingsView: View {
 
     @ViewBuilder
     private var telegramSection: some View {
-        Section("텔레그램") {
+        Section {
             Toggle("봇 활성화", isOn: Binding(
                 get: { settings.telegramEnabled },
                 set: { newValue in
@@ -130,6 +130,10 @@ struct IntegrationsSettingsView: View {
                 set: { settings.telegramStreamReplies = $0 }
             ))
 
+            Text("응답을 점진적으로 전송합니다 (API 호출 증가)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Picker("연결 모드", selection: Binding(
                 get: { TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling },
                 set: { settings.telegramConnectionMode = $0.rawValue }
@@ -171,6 +175,11 @@ struct IntegrationsSettingsView: View {
                     }
                 }
             }
+        } header: {
+            SettingsSectionHeader(
+                title: "텔레그램",
+                helpContent: "텔레그램 봇을 연결하면 텔레그램 DM으로도 도치와 대화할 수 있습니다. @BotFather에서 봇을 만들고 토큰을 입력하세요."
+            )
         }
     }
 
@@ -284,7 +293,7 @@ struct IntegrationsSettingsView: View {
 
     @ViewBuilder
     private var mcpSection: some View {
-        Section("MCP 서버") {
+        Section {
             let servers = mcpService?.listServers() ?? []
 
             if servers.isEmpty {
@@ -303,6 +312,11 @@ struct IntegrationsSettingsView: View {
             } label: {
                 Label("MCP 서버 추가", systemImage: "plus")
             }
+        } header: {
+            SettingsSectionHeader(
+                title: "MCP 서버",
+                helpContent: "Model Context Protocol 서버를 추가하면 외부 도구를 도치에 연결할 수 있습니다. 데이터베이스, 사내 API 등을 AI가 직접 사용합니다."
+            )
         }
         .confirmationDialog(
             "이 MCP 서버를 삭제하시겠습니까?",

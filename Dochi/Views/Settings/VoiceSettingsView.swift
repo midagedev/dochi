@@ -11,7 +11,7 @@ struct VoiceSettingsView: View {
 
     var body: some View {
         Form {
-            Section("TTS 프로바이더") {
+            Section {
                 Picker("프로바이더", selection: Binding(
                     get: { settings.ttsProvider },
                     set: { settings.ttsProvider = $0 }
@@ -21,6 +21,11 @@ struct VoiceSettingsView: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
+            } header: {
+                SettingsSectionHeader(
+                    title: "TTS 프로바이더",
+                    helpContent: "텍스트를 음성으로 변환하는 엔진을 선택합니다. \"시스템 TTS\"는 추가 설정 없이 사용 가능하며, Google Cloud TTS와 Supertonic은 더 자연스러운 음성을 제공합니다."
+                )
             }
 
             if settings.currentTTSProvider == .googleCloud {

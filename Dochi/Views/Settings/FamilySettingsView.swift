@@ -13,7 +13,7 @@ struct FamilySettingsView: View {
 
     var body: some View {
         Form {
-            Section("구성원 목록") {
+            Section {
                 if profiles.isEmpty {
                     Text("등록된 구성원이 없습니다")
                         .foregroundStyle(.secondary)
@@ -81,6 +81,11 @@ struct FamilySettingsView: View {
                         }
                     }
                 }
+            } header: {
+                SettingsSectionHeader(
+                    title: "구성원 목록",
+                    helpContent: "여러 사용자가 하나의 도치를 공유할 수 있습니다. 각 사용자는 별도의 메모리와 대화 기록을 가집니다. 사이드바 상단이나 \u{2318}\u{21E7}U로 사용자를 전환할 수 있습니다."
+                )
             }
 
             Section("구성원 추가") {

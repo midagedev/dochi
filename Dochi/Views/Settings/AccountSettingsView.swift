@@ -15,7 +15,7 @@ struct AccountSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Supabase 연결") {
+            Section {
                 DisclosureGroup("서버 설정") {
                     TextField("URL", text: $supabaseURL)
                         .textFieldStyle(.roundedBorder)
@@ -46,6 +46,11 @@ struct AccountSettingsView: View {
                         }
                     }
                 }
+            } header: {
+                SettingsSectionHeader(
+                    title: "Supabase 연결",
+                    helpContent: "클라우드 동기화를 위한 Supabase 서버를 연결합니다. 대화, 메모리, 설정을 여러 기기에서 동기화할 수 있습니다. 자체 Supabase 프로젝트를 만들어 사용합니다."
+                )
             }
 
             Section("인증") {

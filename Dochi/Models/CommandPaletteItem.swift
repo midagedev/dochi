@@ -36,6 +36,8 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case openTagManagement
         case toggleMultiSelect
         case createAgent
+        case openFeatureTour
+        case resetHints
         case custom(id: String)
     }
 }
@@ -204,6 +206,22 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .agent,
             action: .createAgent
+        ),
+        CommandPaletteItem(
+            id: "feature-tour",
+            icon: "questionmark.circle",
+            title: "기능 투어",
+            subtitle: "",
+            category: .navigation,
+            action: .openFeatureTour
+        ),
+        CommandPaletteItem(
+            id: "reset-hints",
+            icon: "arrow.counterclockwise",
+            title: "인앱 힌트 초기화",
+            subtitle: "",
+            category: .settings,
+            action: .resetHints
         ),
     ]
 

@@ -231,4 +231,46 @@ final class AppSettings {
     var currentTTSProvider: TTSProvider {
         TTSProvider(rawValue: ttsProvider) ?? .system
     }
+
+    // MARK: - Guide (UX-9)
+
+    /// 인앱 힌트 표시 여부 (hintsGloballyDisabled의 반전)
+    var hintsEnabled: Bool {
+        get { !UserDefaults.standard.bool(forKey: "hintsGloballyDisabled") }
+        set { UserDefaults.standard.set(!newValue, forKey: "hintsGloballyDisabled") }
+    }
+
+    /// 기능 투어 완료 여부
+    var featureTourCompleted: Bool {
+        get { UserDefaults.standard.bool(forKey: "featureTourCompleted") }
+        set { UserDefaults.standard.set(newValue, forKey: "featureTourCompleted") }
+    }
+
+    /// 기능 투어 건너뛰기 여부
+    var featureTourSkipped: Bool {
+        get { UserDefaults.standard.bool(forKey: "featureTourSkipped") }
+        set { UserDefaults.standard.set(newValue, forKey: "featureTourSkipped") }
+    }
+
+    /// 기능 투어 재안내 배너 닫음 여부
+    var featureTourBannerDismissed: Bool {
+        get { UserDefaults.standard.bool(forKey: "featureTourBannerDismissed") }
+        set { UserDefaults.standard.set(newValue, forKey: "featureTourBannerDismissed") }
+    }
+
+    /// 모든 힌트 표시 상태를 초기화
+    func resetAllHints() {
+        let allKeys = UserDefaults.standard.dictionaryRepresentation().keys
+        for key in allKeys where key.hasPrefix("hint_seen_") {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        UserDefaults.standard.set(false, forKey: "hintsGloballyDisabled")
+    }
+
+    /// 기능 투어 상태를 초기화
+    func resetFeatureTour() {
+        UserDefaults.standard.set(false, forKey: "featureTourCompleted")
+        UserDefaults.standard.set(false, forKey: "featureTourSkipped")
+        UserDefaults.standard.set(false, forKey: "featureTourBannerDismissed")
+    }
 }
