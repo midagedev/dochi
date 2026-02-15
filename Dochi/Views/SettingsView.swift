@@ -210,6 +210,33 @@ struct InterfaceSettingsContent: View {
                 helpContent: "VRM 형식의 3D 아바타를 대화 영역 위에 표시합니다. macOS 15 이상에서 사용 가능합니다. Resources/Models/에 VRM 파일이 필요합니다."
             )
         }
+
+        Section {
+            Toggle("메뉴바 아이콘 표시", isOn: Binding(
+                get: { settings.menuBarEnabled },
+                set: { settings.menuBarEnabled = $0 }
+            ))
+
+            Text("메뉴바에서 바로 도치와 대화할 수 있습니다")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if settings.menuBarEnabled {
+                Toggle("글로벌 단축키 (Cmd+Shift+D)", isOn: Binding(
+                    get: { settings.menuBarGlobalShortcutEnabled },
+                    set: { settings.menuBarGlobalShortcutEnabled = $0 }
+                ))
+
+                Text("다른 앱 사용 중에도 단축키로 퀵 액세스 팝업을 열 수 있습니다")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            SettingsSectionHeader(
+                title: "메뉴바 퀵 액세스",
+                helpContent: "메뉴바 아이콘을 통해 메인 앱을 열지 않고도 빠르게 도치와 대화할 수 있습니다. Cmd+Shift+D로 어디서든 팝업을 토글할 수 있습니다."
+            )
+        }
     }
 }
 

@@ -10,6 +10,13 @@
 
 ```
 DochiApp (entry point)
+├── MenuBarManager (NSStatusItem + NSPopover) (H-1)
+│   └── MenuBarPopoverView — 메뉴바 퀵 액세스 팝업 (380x480pt)
+│       ├── 헤더 (36pt) — 에이전트 아이콘+이름, 워크스페이스명, 닫기 버튼
+│       ├── 대화 영역 — 최근 메시지 10개 (컴팩트 버블), 스트리밍 표시
+│       ├── 빈 상태 — 도치 아이콘 + "무엇이든 물어보세요" + 제안 칩 3개
+│       ├── 입력바 (44pt) — TextField + 전송/중지 버튼
+│       └── 푸터 (30pt) — 모델명, 새 대화 버튼, 메인 앱 열기 버튼
 └── ContentView (NavigationSplitView + ZStack)
     ├── [Sidebar] SidebarView
     │   ├── SidebarHeaderView — 워크스페이스/에이전트/사용자 전환
@@ -59,6 +66,7 @@ DochiApp (entry point)
 
 | 화면 | 파일 | 접근 방법 | 설명 |
 |------|------|-----------|------|
+| MenuBarPopoverView | `Views/MenuBarPopoverView.swift` | 메뉴바 아이콘 클릭 또는 Cmd+Shift+D (글로벌) | 메뉴바 퀵 액세스 팝업 (380x480pt): 헤더+대화+입력+푸터 (H-1) |
 | ContentView | `Views/ContentView.swift` | 앱 시작 | 메인 레이아웃 (사이드바 + 디테일 + 커맨드 팔레트 오버레이) |
 | SidebarView | `Views/ContentView.swift` | 항상 표시 | 대화 목록, 검색, 필터, 섹션 탭 |
 | SidebarHeaderView | `Views/Sidebar/SidebarHeaderView.swift` | 사이드바 상단 | 워크스페이스/에이전트/사용자 드롭다운 |
@@ -298,6 +306,7 @@ MemoryContextInfo 필드:
 | 가이드 | `hintsEnabled`, `featureTourCompleted`, `featureTourSkipped`, `featureTourBannerDismissed` |
 | 예산 (G-4) | `budgetEnabled`, `monthlyBudgetUSD`, `budgetAlert50`, `budgetAlert80`, `budgetAlert100`, `budgetBlockOnExceed` |
 | 동기화 (G-3) | `autoSyncEnabled`, `realtimeSyncEnabled`, `syncConversations`, `syncMemory`, `syncKanban`, `syncProfiles`, `conflictResolutionStrategy` |
+| 메뉴바 (H-1) | `menuBarEnabled`, `menuBarGlobalShortcutEnabled` |
 | 기타 | `chatFontSize`, `currentWorkspaceId`, `defaultUserId`, `activeAgentName` |
 
 ---
@@ -425,6 +434,18 @@ ONNX 모델 관리:
   -> 설치된 모델 Picker로 선택 -> settings.onnxModelId 변경
 ```
 
+### 메뉴바 퀵 액세스 (H-1 추가)
+```
+메뉴바 아이콘 클릭 / ⌘⇧D (글로벌) → MenuBarManager.togglePopover()
+  → NSPopover → MenuBarPopoverView (viewModel 공유)
+  → 입력 → viewModel.inputText 설정 → viewModel.sendMessage()
+  → 메인 앱에도 동일 대화 반영 (동일 참조)
+  → 새 대화: viewModel.newConversation()
+  → 메인 앱 열기: NSApp.activate() + 메인 윈도우 표시
+설정: settings.menuBarEnabled → MenuBarManager.setup()/teardown()
+  settings.menuBarGlobalShortcutEnabled → 글로벌 단축키 등록/해제
+```
+
 ### 가이드/온보딩 (UX-9 추가)
 ```
 기능 투어: 온보딩 완료 → "기능 둘러보기" 버튼 → FeatureTourView (4단계)
@@ -477,6 +498,7 @@ ONNX 모델 관리:
 | ⌘⇧K | 칸반/대화 전환 | ContentView (onKeyPress) |
 | ⌘⇧L | 즐겨찾기 필터 토글 | ContentView (onKeyPress) |
 | ⌘⇧M | 모델 빠른 변경 (QuickModelPopover) | ContentView (onKeyPress) (UX-10 변경, 기존 일괄선택은 커맨드 팔레트/툴바로 접근) |
+| ⌘⇧D | 메뉴바 퀵 액세스 토글 (글로벌) | MenuBarManager (NSEvent monitor) (H-1) |
 | ⌘⇧T | 도구 카드 일괄 접기/펼치기 | ContentView (hidden button) |
 | Escape | 요청 취소 / 확인 배너 거부 / 팔레트 닫기 | ContentView (onKeyPress) |
 | Enter | 확인 배너 허용 / 메시지 전송 | ContentView (onKeyPress) / InputBarView |
@@ -527,6 +549,7 @@ ONNX 모델 관리:
 | 개인 메모리 없음 (사용자 미설정) | "사용자가 설정되지 않아 표시할 수 없습니다" | MemoryPanelView |
 | 투어 미완료 (건너뜀) | "도치의 주요 기능을 알아보세요" 배너 + "둘러보기" | EmptyConversationView |
 | 첫 대화 힌트 | "첫 대화를 시작해보세요!" 힌트 버블 | EmptyConversationView |
+| 메뉴바 빈 대화 | 도치 아이콘 + "무엇이든 물어보세요" + 제안 칩 3개 | MenuBarPopoverView |
 
 ---
 
@@ -590,4 +613,4 @@ ONNX 모델 관리:
 
 ---
 
-*최종 업데이트: 2026-02-15 (G-4 사용량 대시보드 머지 후)*
+*최종 업데이트: 2026-02-15 (H-1 메뉴바 퀵 액세스 머지 후)*

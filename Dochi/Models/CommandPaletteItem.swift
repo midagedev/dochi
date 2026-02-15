@@ -43,6 +43,7 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case syncNow
         case syncConflicts
         case cloudAccountSettings
+        case toggleMenuBar
         case custom(id: String)
     }
 }
@@ -300,6 +301,15 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .settings,
             action: .openSettingsSection(section: "ai-model")
+        ),
+        // H-1: 메뉴바 퀵 액세스
+        CommandPaletteItem(
+            id: "toggle-menu-bar",
+            icon: "menubar.rectangle",
+            title: "메뉴바 퀵 액세스 토글",
+            subtitle: "⌘⇧D",
+            category: .navigation,
+            action: .toggleMenuBar
         ),
         // G-3: 동기화 명령
         CommandPaletteItem(
