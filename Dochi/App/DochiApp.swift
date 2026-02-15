@@ -52,6 +52,7 @@ struct DochiApp: App {
     private let notificationManager: NotificationManager
     private let modelDownloadManager: ModelDownloadManager
     private let usageStore: UsageStore
+    private let spotlightIndexer: SpotlightIndexer
 
     init() {
         let settings = AppSettings()
@@ -114,6 +115,10 @@ struct DochiApp: App {
         self.usageStore = usageStore
         metricsCollector.usageStore = usageStore
         metricsCollector.settings = settings
+
+        // Spotlight indexer (H-4)
+        let spotlightIndexer = SpotlightIndexer(settings: settings)
+        self.spotlightIndexer = spotlightIndexer
 
         _viewModel = State(initialValue: DochiViewModel(
             llmService: llmService,
@@ -209,6 +214,9 @@ struct DochiApp: App {
 
                     heartbeatService.restart()
 
+                    // Configure Spotlight indexer (H-4)
+                    viewModel.configureSpotlightIndexer(spotlightIndexer)
+
                     // Wire notification callbacks (H-3)
                     notificationManager.onReply = { [weak viewModel] text, category, originalBody in
                         guard let viewModel else { return }
@@ -278,6 +286,9 @@ struct DochiApp: App {
                 }
                 .onChange(of: settings.menuBarGlobalShortcutEnabled) { _, _ in
                     appDelegate.menuBarManager?.handleSettingsChange()
+                }
+                .onOpenURL { url in
+                    viewModel.handleDeepLink(url: url)
                 }
                 .sheet(isPresented: $showOnboarding) {
                     OnboardingView(

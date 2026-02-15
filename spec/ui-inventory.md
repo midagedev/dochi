@@ -10,6 +10,12 @@
 
 ```
 DochiApp (entry point)
+├── SpotlightIndexer (CoreSpotlight 인덱싱 서비스) (H-4)
+│   ├── indexConversation/removeConversation — 대화 인덱싱/제거
+│   ├── indexMemory/removeMemory — 메모리 인덱싱/제거
+│   ├── rebuildAllIndices — 전체 재구축 (async, 진행률)
+│   ├── clearAllIndices — 모든 인덱스 삭제
+│   └── parseDeepLink(url:) — dochi:// URL 파싱
 ├── NotificationManager (UNUserNotificationCenterDelegate) (H-3)
 │   ├── 4 카테고리: dochi-calendar (답장+열기), dochi-kanban (열기), dochi-reminder (답장+열기), dochi-memory (열기)
 │   ├── 3 액션: reply (텍스트 입력), open-app (포그라운드), dismiss (파괴적)
@@ -146,7 +152,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
 | AI | 사용량 (`usage`) | chart.bar.xaxis | `Views/Settings/UsageDashboardView.swift` | 기간별 사용량 (오늘/주/월/전체), 요약 카드 (교환수/토큰/비용), Swift Charts 일별 차트 (비용/토큰 모드), 모델별/에이전트별 분류 테이블, 예산 설정 (월 한도/알림/차단) (G-4) |
 | 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더 (시스템/Google Cloud/ONNX), 음성, 속도/피치, ONNX 모델 관리 (ONNXModelManagerView), 디퓨전 스텝, TTS 오프라인 폴백 |
-| 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타 |
+| 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타, Spotlight 검색 (H-4) |
 | 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
 | 일반 | 하트비트 (`heartbeat`) | heart.circle | `Views/SettingsView.swift` 내 HeartbeatSettingsContent | Heartbeat 간격, 캘린더/칸반/미리알림 체크, 알림 센터 설정 (권한 상태, 소리/답장 토글, 카테고리별 알림 토글) (H-3) |
 | 사람 | 가족 (`family`) | person.2 | `Views/Settings/FamilySettingsView.swift` | 사용자 프로필 CRUD |
@@ -167,6 +173,8 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 - `App/DochiShortcuts.swift` — AppShortcutsProvider, Siri 문구 등록 (H-2)
 - `Services/ShortcutService.swift` — DochiShortcutService 싱글턴, ShortcutError (H-2)
 - `Models/ShortcutExecutionLog.swift` — ShortcutExecutionLog 모델, ShortcutExecutionLogStore (H-2)
+- `Services/SpotlightIndexer.swift` — SpotlightIndexer (CoreSpotlight 인덱싱 + 딥링크 파싱) (H-4)
+- `Services/Protocols/SpotlightIndexerProtocol.swift` — SpotlightIndexerProtocol (H-4)
 
 ---
 
@@ -195,6 +203,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | `allToolCardsCollapsed` | `Bool` | 도구 카드 일괄 접기/펼치기 상태 | ⌘⇧T 토글 |
 | `memoryToastEvents` | `[MemoryToastEvent]` | 메모리 저장 토스트 이벤트 큐 | MemoryToastContainerView |
 | `syncEngine` | `SyncEngine?` | 동기화 엔진 (G-3) | SystemHealthBarView, CloudSyncTabView, AccountSettingsView, SyncToastContainerView |
+| `spotlightIndexer` | `SpotlightIndexerProtocol?` | Spotlight 인덱싱 서비스 (H-4) | InterfaceSettingsContent (Spotlight 섹션) |
 
 ### 대화 정리 상태 (UX-4 추가)
 
@@ -318,6 +327,7 @@ MemoryContextInfo 필드:
 | 예산 (G-4) | `budgetEnabled`, `monthlyBudgetUSD`, `budgetAlert50`, `budgetAlert80`, `budgetAlert100`, `budgetBlockOnExceed` |
 | 동기화 (G-3) | `autoSyncEnabled`, `realtimeSyncEnabled`, `syncConversations`, `syncMemory`, `syncKanban`, `syncProfiles`, `conflictResolutionStrategy` |
 | 메뉴바 (H-1) | `menuBarEnabled`, `menuBarGlobalShortcutEnabled` |
+| Spotlight (H-4) | `spotlightIndexingEnabled`, `spotlightIndexConversations`, `spotlightIndexPersonalMemory`, `spotlightIndexAgentMemory`, `spotlightIndexWorkspaceMemory` |
 | 기타 | `chatFontSize`, `currentWorkspaceId`, `defaultUserId`, `activeAgentName` |
 
 ---
@@ -514,6 +524,22 @@ HeartbeatService tick -> 카테고리별 컨텍스트 수집
 커맨드 팔레트: "기능 투어" → FeatureTourView 시트 / "인앱 힌트 초기화" → resetHints
 ```
 
+### Spotlight 검색 (H-4 추가)
+```
+대화 저장 → saveConversation() → spotlightIndexer.indexConversation()
+  → CSSearchableItem 생성 (uniqueId: dochi-conversation-{uuid})
+  → CSSearchableIndex.indexSearchableItems()
+대화 삭제 → deleteConversation() → spotlightIndexer.removeConversation()
+메모리 인덱싱 → spotlightIndexer.indexMemory(scope:identifier:title:content:)
+전체 재구축 → 설정 UI "인덱스 재구축" / 커맨드 팔레트 "Spotlight 인덱스 재구축"
+  → spotlightIndexer.rebuildAllIndices() (async, rebuildProgress 0.0~1.0)
+딥링크: Spotlight 결과 클릭 → dochi://conversation/{uuid} 또는 dochi://memory/...
+  → .onOpenURL → viewModel.handleDeepLink(url:) → 대화 선택 또는 메모리 패널 표시
+설정: 설정 > 일반 > 인터페이스 > Spotlight 검색
+  → 활성화 토글, 범위 체크박스 (대화/개인메모리/에이전트메모리/워크스페이스메모리)
+  → 인덱싱 상태 (N건), 재구축/초기화 버튼, 진행률 ProgressView
+```
+
 ### 내보내기/공유 (UX-5 추가)
 ```
 빠른 내보내기: ⌘E -> viewModel.exportConversation(format: .markdown) -> NSSavePanel
@@ -679,4 +705,4 @@ HeartbeatService tick -> 카테고리별 컨텍스트 수집
 
 ---
 
-*최종 업데이트: 2026-02-15 (H-3 알림 센터 연동 추가)*
+*최종 업데이트: 2026-02-15 (H-4 Spotlight/시스템 검색 연동 추가)*

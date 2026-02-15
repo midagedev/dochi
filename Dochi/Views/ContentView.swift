@@ -589,6 +589,16 @@ struct ContentView: View {
             showSyncConflictSheet = true
         case .cloudAccountSettings:
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        case .rebuildSpotlightIndex:
+            if let indexer = viewModel.spotlightIndexer {
+                Task {
+                    await indexer.rebuildAllIndices(
+                        conversations: viewModel.conversations,
+                        contextService: viewModel.contextService,
+                        sessionContext: viewModel.sessionContext
+                    )
+                }
+            }
         case .toggleMenuBar:
             // Toggle menu bar popover via AppDelegate
             if let appDelegate = NSApp.delegate as? AppDelegate {

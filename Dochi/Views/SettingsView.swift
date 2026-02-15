@@ -59,7 +59,7 @@ struct SettingsView: View {
 
         case .interface:
             Form {
-                InterfaceSettingsContent(settings: settings)
+                InterfaceSettingsContent(settings: settings, viewModel: viewModel)
             }
             .formStyle(.grouped)
             .padding()
@@ -157,6 +157,7 @@ struct SettingsView: View {
 
 struct InterfaceSettingsContent: View {
     var settings: AppSettings
+    var viewModel: DochiViewModel?
 
     var body: some View {
         Section {
@@ -240,6 +241,103 @@ struct InterfaceSettingsContent: View {
             SettingsSectionHeader(
                 title: "메뉴바 퀵 액세스",
                 helpContent: "메뉴바 아이콘을 통해 메인 앱을 열지 않고도 빠르게 도치와 대화할 수 있습니다. Cmd+Shift+D로 어디서든 팝업을 토글할 수 있습니다."
+            )
+        }
+
+        // MARK: - Spotlight 검색 (H-4)
+
+        Section {
+            Toggle("Spotlight 인덱싱 활성화", isOn: Binding(
+                get: { settings.spotlightIndexingEnabled },
+                set: { settings.spotlightIndexingEnabled = $0 }
+            ))
+
+            if settings.spotlightIndexingEnabled {
+                // 인덱싱 상태
+                if let indexer = viewModel?.spotlightIndexer {
+                    HStack {
+                        Text("인덱싱된 항목")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(indexer.indexedItemCount)건")
+                            .font(.system(.body, design: .monospaced))
+                    }
+
+                    if let lastDate = indexer.lastIndexedAt {
+                        HStack {
+                            Text("마지막 인덱싱")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(lastDate, style: .relative)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    // 재구축/초기화 버튼
+                    if indexer.isRebuilding {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ProgressView(value: indexer.rebuildProgress)
+                            Text("재구축 중... \(Int(indexer.rebuildProgress * 100))%")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        HStack(spacing: 12) {
+                            Button("인덱스 재구축") {
+                                guard let vm = viewModel else { return }
+                                Task {
+                                    await indexer.rebuildAllIndices(
+                                        conversations: vm.conversations,
+                                        contextService: vm.contextService,
+                                        sessionContext: vm.sessionContext
+                                    )
+                                }
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("인덱스 초기화") {
+                                Task {
+                                    await indexer.clearAllIndices()
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .foregroundStyle(.red)
+                        }
+                    }
+                }
+
+                Divider()
+
+                // 인덱싱 범위 체크박스
+                Text("인덱싱 범위")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("대화", isOn: Binding(
+                    get: { settings.spotlightIndexConversations },
+                    set: { settings.spotlightIndexConversations = $0 }
+                ))
+
+                Toggle("개인 메모리", isOn: Binding(
+                    get: { settings.spotlightIndexPersonalMemory },
+                    set: { settings.spotlightIndexPersonalMemory = $0 }
+                ))
+
+                Toggle("에이전트 메모리", isOn: Binding(
+                    get: { settings.spotlightIndexAgentMemory },
+                    set: { settings.spotlightIndexAgentMemory = $0 }
+                ))
+
+                Toggle("워크스페이스 메모리", isOn: Binding(
+                    get: { settings.spotlightIndexWorkspaceMemory },
+                    set: { settings.spotlightIndexWorkspaceMemory = $0 }
+                ))
+            }
+        } header: {
+            SettingsSectionHeader(
+                title: "Spotlight 검색",
+                helpContent: "대화와 메모리를 macOS Spotlight에 인덱싱하여 앱 밖에서도 검색할 수 있습니다. Spotlight에서 결과를 클릭하면 해당 대화나 메모리로 바로 이동합니다."
             )
         }
     }
