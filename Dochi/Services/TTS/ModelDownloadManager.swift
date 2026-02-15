@@ -317,6 +317,7 @@ final class ModelDownloadManager {
 private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     let onProgress: @Sendable (Double) -> Void
     var completion: ((Result<(URL, URLResponse), Error>) -> Void)?
+    private var hasResumed = false
 
     init(onProgress: @escaping @Sendable (Double) -> Void) {
         self.onProgress = onProgress
@@ -327,14 +328,23 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
+        guard !hasResumed else { return }
+        hasResumed = true
+
         // Copy to temp location before the session cleans up
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".onnx")
         do {
+            guard let response = downloadTask.response else {
+                completion?(.failure(URLError(.badServerResponse)))
+                session.finishTasksAndInvalidate()
+                return
+            }
             try FileManager.default.copyItem(at: location, to: tempURL)
-            completion?(.success((tempURL, downloadTask.response!)))
+            completion?(.success((tempURL, response)))
         } catch {
             completion?(.failure(error))
         }
+        session.finishTasksAndInvalidate()
     }
 
     func urlSession(
@@ -351,7 +361,10 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error {
+            guard !hasResumed else { return }
+            hasResumed = true
             completion?(.failure(error))
+            session.finishTasksAndInvalidate()
         }
     }
 }
