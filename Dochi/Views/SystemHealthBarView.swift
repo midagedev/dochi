@@ -7,6 +7,8 @@ struct SystemHealthBarView: View {
     let metricsCollector: MetricsCollector
     var heartbeatService: HeartbeatService?
     var supabaseService: SupabaseServiceProtocol?
+    var isOfflineFallbackActive: Bool = false
+    var localServerStatus: LocalServerStatus = .unknown
 
     // UX-10: Individual indicator callbacks
     let onModelTap: () -> Void
@@ -18,6 +20,33 @@ struct SystemHealthBarView: View {
         metricsCollector.sessionSummary
     }
 
+    /// Icon for the model indicator depending on provider type and status.
+    private var modelIcon: String {
+        if settings.currentProvider.isLocal {
+            return "desktopcomputer"
+        }
+        return "cpu"
+    }
+
+    /// Display text for the model indicator.
+    private var modelDisplayText: String {
+        if isOfflineFallbackActive {
+            return "\(settings.llmModel) (오프라인)"
+        }
+        return settings.llmModel
+    }
+
+    /// Foreground style for model text based on status.
+    private var modelTextColor: Color {
+        if isOfflineFallbackActive {
+            return .orange
+        }
+        if settings.currentProvider.isLocal && localServerStatus == .disconnected {
+            return .red
+        }
+        return .secondary
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             // 1. Current model (clickable -> QuickModelPopover)
@@ -26,11 +55,12 @@ struct SystemHealthBarView: View {
             } label: {
                 indicator {
                     HStack(spacing: 4) {
-                        Image(systemName: "cpu")
+                        Image(systemName: modelIcon)
                             .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                        Text(settings.llmModel)
+                            .foregroundStyle(modelTextColor)
+                        Text(modelDisplayText)
                             .lineLimit(1)
+                            .foregroundStyle(modelTextColor)
                         Image(systemName: "chevron.down")
                             .font(.system(size: 7))
                             .foregroundStyle(.quaternary)

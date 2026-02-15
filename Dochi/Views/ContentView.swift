@@ -267,6 +267,8 @@ struct ContentView: View {
                 metricsCollector: viewModel.metricsCollector,
                 heartbeatService: heartbeatService,
                 supabaseService: supabaseService,
+                isOfflineFallbackActive: viewModel.isOfflineFallbackActive,
+                localServerStatus: viewModel.localServerStatus,
                 onModelTap: { showQuickModelPopover = true },
                 onSyncTap: { showSystemStatusSheet = true },
                 onHeartbeatTap: { showSystemStatusSheet = true },
@@ -275,7 +277,8 @@ struct ContentView: View {
             .popover(isPresented: $showQuickModelPopover) {
                 QuickModelPopoverView(
                     settings: viewModel.settings,
-                    keychainService: viewModel.keychainService
+                    keychainService: viewModel.keychainService,
+                    isOfflineFallbackActive: viewModel.isOfflineFallbackActive
                 )
             }
 
@@ -286,6 +289,14 @@ struct ContentView: View {
                     toolDescription: confirmation.toolDescription,
                     onApprove: { viewModel.respondToToolConfirmation(approved: true) },
                     onDeny: { viewModel.respondToToolConfirmation(approved: false) }
+                )
+            }
+
+            // Offline fallback banner
+            if viewModel.isOfflineFallbackActive {
+                OfflineFallbackBannerView(
+                    modelName: viewModel.settings.llmModel,
+                    onRestore: { viewModel.restoreOriginalModel() }
                 )
             }
 
@@ -1363,6 +1374,41 @@ struct EmptyConversationView: View {
                 .stroke(Color.blue.opacity(0.15), lineWidth: 1)
         )
         .padding(.horizontal, 40)
+    }
+}
+
+// MARK: - Offline Fallback Banner
+
+struct OfflineFallbackBannerView: View {
+    let modelName: String
+    let onRestore: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi.slash")
+                .foregroundStyle(.orange)
+                .font(.system(size: 12))
+
+            Text("인터넷 연결이 끊어져 로컬 모델로 전환되었습니다.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            Text(modelName)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.orange)
+
+            Spacer()
+
+            Button("원래 모델로 복구") {
+                onRestore()
+            }
+            .font(.system(size: 11, weight: .medium))
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.08))
     }
 }
 

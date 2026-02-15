@@ -38,6 +38,12 @@ final class DochiViewModel {
     var isMultiSelectMode: Bool = false
     var selectedConversationIds: Set<UUID> = []
 
+    // MARK: - Offline Fallback State
+    var isOfflineFallbackActive: Bool = false
+    var originalProvider: LLMProvider?
+    var originalModel: String?
+    var localServerStatus: LocalServerStatus = .unknown
+
     // MARK: - Services
 
     private let llmService: LLMServiceProtocol
@@ -58,6 +64,7 @@ final class DochiViewModel {
     private var processingTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var confirmationTimeoutTask: Task<Void, Never>?
+    private var localServerMonitorTask: Task<Void, Never>?
     private var sentenceChunker = SentenceChunker()
     private var llmStreamActive = false
     private static let maxToolLoopIterations = 10
@@ -133,7 +140,86 @@ final class DochiViewModel {
         // Load user profiles
         reloadProfiles()
 
+        // Start local server monitoring if using a local provider
+        startLocalServerMonitoringIfNeeded()
+
         Log.app.info("DochiViewModel initialized")
+    }
+
+    // MARK: - Local Server Monitoring
+
+    /// Start periodic local server status checking (30s interval) when using a local provider.
+    func startLocalServerMonitoringIfNeeded() {
+        localServerMonitorTask?.cancel()
+        guard settings.currentProvider.isLocal || settings.offlineFallbackEnabled else { return }
+
+        localServerMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.checkLocalServerStatus()
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+    }
+
+    /// Check the connection status of the currently relevant local server.
+    private func checkLocalServerStatus() async {
+        let provider = settings.currentProvider
+        guard provider.isLocal else {
+            // If offline fallback is enabled, check fallback provider
+            if settings.offlineFallbackEnabled,
+               let fallbackProvider = LLMProvider(rawValue: settings.offlineFallbackProvider),
+               fallbackProvider.isLocal {
+                let available = await checkProviderAvailable(fallbackProvider)
+                localServerStatus = available ? .connected : .disconnected
+            }
+            return
+        }
+
+        localServerStatus = .checking
+        let available = await checkProviderAvailable(provider)
+        localServerStatus = available ? .connected : .disconnected
+
+        if !available {
+            Log.llm.warning("Local server \(provider.displayName) not available")
+        }
+    }
+
+    /// Check if a specific local provider's server is available.
+    private func checkProviderAvailable(_ provider: LLMProvider) async -> Bool {
+        switch provider {
+        case .ollama:
+            let baseURL = URL(string: settings.ollamaBaseURL) ?? URL(string: "http://localhost:11434")!
+            return await OllamaModelFetcher.isAvailable(baseURL: baseURL)
+        case .lmStudio:
+            let baseURL = URL(string: settings.lmStudioBaseURL) ?? URL(string: "http://localhost:1234")!
+            return await LMStudioModelFetcher.isAvailable(baseURL: baseURL)
+        default:
+            return false
+        }
+    }
+
+    /// Activate offline fallback: switch to local model and remember original.
+    func activateOfflineFallback(provider: LLMProvider, model: String) {
+        guard !isOfflineFallbackActive else { return }
+        originalProvider = settings.currentProvider
+        originalModel = settings.llmModel
+        settings.llmProvider = provider.rawValue
+        settings.llmModel = model
+        isOfflineFallbackActive = true
+        Log.app.info("Offline fallback activated: \(provider.displayName)/\(model)")
+    }
+
+    /// Restore the original model after offline fallback.
+    func restoreOriginalModel() {
+        guard isOfflineFallbackActive,
+              let provider = originalProvider,
+              let model = originalModel else { return }
+        settings.llmProvider = provider.rawValue
+        settings.llmModel = model
+        isOfflineFallbackActive = false
+        originalProvider = nil
+        originalModel = nil
+        Log.app.info("Original model restored: \(provider.displayName)/\(model)")
     }
 
     // MARK: - State Transitions
@@ -1368,6 +1454,8 @@ final class DochiViewModel {
     // MARK: - LLM Send with Fallback
 
     /// Send to the primary model, falling back to alternate model on transient failure.
+    /// If both primary and regular fallback fail with a network error and offline fallback
+    /// is enabled, attempts to use the configured local offline fallback model.
     private func sendWithFallback(
         messages: [Message],
         systemPrompt: String,
@@ -1404,27 +1492,95 @@ final class DochiViewModel {
             recordMetrics(wasFallback: false)
             return response
         } catch {
-            // Try fallback if available and the error is eligible
-            guard let fallback, ModelRouter.shouldFallback(for: error) else {
-                throw error
+            // Try regular fallback if available and the error is eligible
+            if let fallback, ModelRouter.shouldFallback(for: error) {
+                Log.llm.warning("Primary model failed, trying fallback: \(fallback.provider.displayName)/\(fallback.model)")
+                streamingText = ""
+                sentenceChunker = SentenceChunker()
+
+                do {
+                    let response = try await llmService.send(
+                        messages: messages,
+                        systemPrompt: systemPrompt,
+                        model: fallback.model,
+                        provider: fallback.provider,
+                        apiKey: fallback.apiKey,
+                        tools: tools.isEmpty ? nil : tools,
+                        onPartial: onPartial
+                    )
+                    recordMetrics(wasFallback: true)
+                    return response
+                } catch {
+                    // Regular fallback also failed — try offline fallback below
+                    Log.llm.warning("Regular fallback also failed: \(error.localizedDescription)")
+
+                    if let offlineResponse = try await attemptOfflineFallback(
+                        error: error,
+                        messages: messages,
+                        systemPrompt: systemPrompt,
+                        tools: tools,
+                        onPartial: onPartial
+                    ) {
+                        return offlineResponse
+                    }
+
+                    throw error
+                }
             }
 
-            Log.llm.warning("Primary model failed, trying fallback: \(fallback.provider.displayName)/\(fallback.model)")
-            streamingText = ""
-            sentenceChunker = SentenceChunker()
-
-            let response = try await llmService.send(
+            // No regular fallback — try offline fallback if it's a network error
+            if let offlineResponse = try await attemptOfflineFallback(
+                error: error,
                 messages: messages,
                 systemPrompt: systemPrompt,
-                model: fallback.model,
-                provider: fallback.provider,
-                apiKey: fallback.apiKey,
-                tools: tools.isEmpty ? nil : tools,
+                tools: tools,
                 onPartial: onPartial
-            )
-            recordMetrics(wasFallback: true)
-            return response
+            ) {
+                return offlineResponse
+            }
+
+            throw error
         }
+    }
+
+    /// Attempt offline fallback if the error is a network error and offline fallback is configured.
+    /// Returns the LLM response on success, or nil if offline fallback is not applicable.
+    private func attemptOfflineFallback(
+        error: Error,
+        messages: [Message],
+        systemPrompt: String,
+        tools: [[String: Any]],
+        onPartial: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> LLMResponse? {
+        guard ModelRouter.isNetworkError(error),
+              settings.offlineFallbackEnabled else {
+            return nil
+        }
+
+        let router = ModelRouter(settings: settings, keychainService: keychainService)
+        guard let offlineModel = router.resolveOfflineFallback() else {
+            Log.llm.warning("Offline fallback enabled but no valid offline model configured")
+            return nil
+        }
+
+        Log.llm.info("Network error detected, trying offline fallback: \(offlineModel.provider.displayName)/\(offlineModel.model)")
+        streamingText = ""
+        sentenceChunker = SentenceChunker()
+
+        let response = try await llmService.send(
+            messages: messages,
+            systemPrompt: systemPrompt,
+            model: offlineModel.model,
+            provider: offlineModel.provider,
+            apiKey: offlineModel.apiKey,
+            tools: tools.isEmpty ? nil : tools,
+            onPartial: onPartial
+        )
+
+        // Offline fallback succeeded — activate offline mode
+        activateOfflineFallback(provider: offlineModel.provider, model: offlineModel.model)
+        recordMetrics(wasFallback: true)
+        return response
     }
 
     /// Record metrics from the most recent LLM exchange.

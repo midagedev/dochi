@@ -178,6 +178,26 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(heavyModelName, forKey: "heavyModelName") }
     }
 
+    // MARK: - LM Studio
+
+    var lmStudioBaseURL: String = UserDefaults.standard.string(forKey: "lmStudioBaseURL") ?? "http://localhost:1234" {
+        didSet { UserDefaults.standard.set(lmStudioBaseURL, forKey: "lmStudioBaseURL") }
+    }
+
+    // MARK: - Offline Fallback
+
+    var offlineFallbackEnabled: Bool = UserDefaults.standard.object(forKey: "offlineFallbackEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(offlineFallbackEnabled, forKey: "offlineFallbackEnabled") }
+    }
+
+    var offlineFallbackProvider: String = UserDefaults.standard.string(forKey: "offlineFallbackProvider") ?? "ollama" {
+        didSet { UserDefaults.standard.set(offlineFallbackProvider, forKey: "offlineFallbackProvider") }
+    }
+
+    var offlineFallbackModel: String = UserDefaults.standard.string(forKey: "offlineFallbackModel") ?? "" {
+        didSet { UserDefaults.standard.set(offlineFallbackModel, forKey: "offlineFallbackModel") }
+    }
+
     // MARK: - Avatar
 
     var avatarEnabled: Bool = UserDefaults.standard.object(forKey: "avatarEnabled") as? Bool ?? false {

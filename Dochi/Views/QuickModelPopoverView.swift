@@ -4,20 +4,33 @@ import SwiftUI
 struct QuickModelPopoverView: View {
     var settings: AppSettings
     var keychainService: KeychainServiceProtocol?
+    var isOfflineFallbackActive: Bool = false
 
     @State private var selectedProviderRaw: String = ""
     @State private var selectedModel: String = ""
-    @State private var ollamaModels: [String] = []
+    @State private var ollamaModels: [LocalModelInfo] = []
+    @State private var lmStudioModels: [LocalModelInfo] = []
+    @State private var ollamaAvailable: Bool? = nil
+    @State private var lmStudioAvailable: Bool? = nil
 
     private var selectedProvider: LLMProvider {
         LLMProvider(rawValue: selectedProviderRaw) ?? .openai
     }
 
     private var availableModels: [String] {
-        if selectedProvider == .ollama {
-            return ollamaModels
+        switch selectedProvider {
+        case .ollama: return ollamaModels.map(\.name)
+        case .lmStudio: return lmStudioModels.map(\.name)
+        default: return selectedProvider.models
         }
-        return selectedProvider.models
+    }
+
+    private var currentLocalModels: [LocalModelInfo] {
+        switch selectedProvider {
+        case .ollama: return ollamaModels
+        case .lmStudio: return lmStudioModels
+        default: return []
+        }
     }
 
     var body: some View {
@@ -29,13 +42,24 @@ struct QuickModelPopoverView: View {
 
             Divider()
 
-            // Provider selection
+            // Provider selection with cloud/local grouping
             VStack(alignment: .leading, spacing: 6) {
-                Text("프로바이더")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                Text("클라우드")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
 
-                ForEach(LLMProvider.allCases, id: \.self) { provider in
+                ForEach(LLMProvider.cloudProviders, id: \.self) { provider in
+                    providerRow(provider)
+                }
+
+                Text("로컬")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
+                    .padding(.top, 4)
+
+                ForEach(LLMProvider.localProviders, id: \.self) { provider in
                     providerRow(provider)
                 }
             }
@@ -49,10 +73,22 @@ struct QuickModelPopoverView: View {
                     .foregroundStyle(.secondary)
 
                 if availableModels.isEmpty {
-                    Text("사용 가능한 모델이 없습니다")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                    if selectedProvider.isLocal {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("사용 가능한 모델이 없습니다")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                            Text("서버가 실행 중인지 확인하세요")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.quaternary)
+                        }
                         .padding(.vertical, 4)
+                    } else {
+                        Text("사용 가능한 모델이 없습니다")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .padding(.vertical, 4)
+                    }
                 } else {
                     ForEach(availableModels, id: \.self) { model in
                         modelRow(model)
@@ -71,6 +107,35 @@ struct QuickModelPopoverView: View {
                 }
             ))
             .font(.system(size: 11))
+
+            // Offline fallback info
+            if settings.offlineFallbackEnabled {
+                Divider()
+                HStack(spacing: 4) {
+                    Image(systemName: isOfflineFallbackActive ? "exclamationmark.triangle.fill" : "wifi.slash")
+                        .font(.system(size: 10))
+                        .foregroundStyle(isOfflineFallbackActive ? .orange : .secondary)
+
+                    if isOfflineFallbackActive {
+                        Text("오프라인 모드 활성 중")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                    } else {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("오프라인 폴백")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                            if !settings.offlineFallbackModel.isEmpty {
+                                Text("\(settings.offlineFallbackModel)")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+
+                    Spacer()
+                }
+            }
 
             Divider()
 
@@ -99,7 +164,11 @@ struct QuickModelPopoverView: View {
             selectedModel = settings.llmModel
             if selectedProvider == .ollama {
                 fetchOllamaModels()
+            } else if selectedProvider == .lmStudio {
+                fetchLMStudioModels()
             }
+            // Check local server availability for all local providers
+            checkLocalServers()
         }
     }
 
@@ -116,13 +185,18 @@ struct QuickModelPopoverView: View {
             settings.llmProvider = provider.rawValue
             Log.app.info("설정 변경: llmProvider = \(provider.rawValue)")
 
-            if provider == .ollama {
+            switch provider {
+            case .ollama:
                 fetchOllamaModels()
-            } else if !provider.models.contains(selectedModel) {
-                let newModel = provider.models.first ?? ""
-                selectedModel = newModel
-                settings.llmModel = newModel
-                Log.app.info("설정 변경: llmModel = \(newModel)")
+            case .lmStudio:
+                fetchLMStudioModels()
+            default:
+                if !provider.models.contains(selectedModel) {
+                    let newModel = provider.models.first ?? ""
+                    selectedModel = newModel
+                    settings.llmModel = newModel
+                    Log.app.info("설정 변경: llmModel = \(newModel)")
+                }
             }
         } label: {
             HStack(spacing: 6) {
@@ -140,7 +214,18 @@ struct QuickModelPopoverView: View {
                         .foregroundStyle(.tertiary)
                 }
 
-                Spacer()
+                // Local server connection indicator
+                if provider.isLocal {
+                    Spacer()
+                    let available = provider == .ollama ? ollamaAvailable : lmStudioAvailable
+                    if let available {
+                        Circle()
+                            .fill(available ? Color.green : Color.red)
+                            .frame(width: 6, height: 6)
+                    }
+                } else {
+                    Spacer()
+                }
             }
             .padding(.vertical, 2)
         }
@@ -153,6 +238,7 @@ struct QuickModelPopoverView: View {
     @ViewBuilder
     private func modelRow(_ model: String) -> some View {
         let isSelected = selectedModel == model
+        let localInfo = currentLocalModels.first { $0.name == model }
 
         Button {
             selectedModel = model
@@ -170,11 +256,30 @@ struct QuickModelPopoverView: View {
 
                 Spacer()
 
-                // Context window tokens
-                let tokens = selectedProvider.contextWindowTokens(for: model)
-                Text("\(tokens / 1000)K")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                // Local model metadata (compact)
+                if let info = localInfo {
+                    if let parameterSize = info.parameterSize {
+                        Text(parameterSize)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                    if info.size > 0 {
+                        Text(info.formattedSize)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                    if info.supportsTools {
+                        Image(systemName: "wrench.and.screwdriver")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tertiary)
+                    }
+                } else {
+                    // Context window tokens for cloud models
+                    let tokens = selectedProvider.contextWindowTokens(for: model)
+                    Text("\(tokens / 1000)K")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
 
                 if isSelected {
                     Image(systemName: "checkmark")
@@ -199,13 +304,38 @@ struct QuickModelPopoverView: View {
     private func fetchOllamaModels() {
         Task {
             let baseURL = URL(string: settings.ollamaBaseURL) ?? URL(string: "http://localhost:11434")!
-            let models = await OllamaModelFetcher.fetchModels(baseURL: baseURL)
-            ollamaModels = models
-            if !models.contains(selectedModel) {
-                let newModel = models.first ?? ""
+            let infos = await OllamaModelFetcher.fetchModelInfos(baseURL: baseURL)
+            ollamaModels = infos
+            ollamaAvailable = await OllamaModelFetcher.isAvailable(baseURL: baseURL)
+            if !infos.map(\.name).contains(selectedModel) {
+                let newModel = infos.first?.name ?? ""
                 selectedModel = newModel
                 settings.llmModel = newModel
             }
+        }
+    }
+
+    private func fetchLMStudioModels() {
+        Task {
+            let baseURL = URL(string: settings.lmStudioBaseURL) ?? URL(string: "http://localhost:1234")!
+            let infos = await LMStudioModelFetcher.fetchModelInfos(baseURL: baseURL)
+            lmStudioModels = infos
+            lmStudioAvailable = await LMStudioModelFetcher.isAvailable(baseURL: baseURL)
+            if !infos.map(\.name).contains(selectedModel) {
+                let newModel = infos.first?.name ?? ""
+                selectedModel = newModel
+                settings.llmModel = newModel
+            }
+        }
+    }
+
+    private func checkLocalServers() {
+        Task {
+            let ollamaURL = URL(string: settings.ollamaBaseURL) ?? URL(string: "http://localhost:11434")!
+            ollamaAvailable = await OllamaModelFetcher.isAvailable(baseURL: ollamaURL)
+
+            let lmURL = URL(string: settings.lmStudioBaseURL) ?? URL(string: "http://localhost:1234")!
+            lmStudioAvailable = await LMStudioModelFetcher.isAvailable(baseURL: lmURL)
         }
     }
 }

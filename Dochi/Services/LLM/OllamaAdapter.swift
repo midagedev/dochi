@@ -72,11 +72,40 @@ enum OllamaModelFetcher {
         let name: String
         let size: Int64?
         let digest: String?
+        let details: ModelDetails?
 
         enum CodingKeys: String, CodingKey {
-            case name, size, digest
+            case name, size, digest, details
         }
     }
+
+    struct ModelDetails: Decodable {
+        let parameterSize: String?
+        let quantizationLevel: String?
+        let family: String?
+
+        enum CodingKeys: String, CodingKey {
+            case parameterSize = "parameter_size"
+            case quantizationLevel = "quantization_level"
+            case family
+        }
+    }
+
+    /// Known model families that support tool/function calling in Ollama.
+    private static let toolSupportedFamilies: Set<String> = [
+        "llama", "mistral", "mixtral", "qwen", "qwen2", "qwen2.5",
+        "command-r", "firefunction", "hermes", "nous-hermes",
+    ]
+
+    /// Known model name patterns that indicate tool support.
+    private static let toolSupportedPatterns: [String] = [
+        "llama3", "llama3.1", "llama3.2", "llama3.3",
+        "mistral", "mixtral",
+        "qwen2", "qwen2.5",
+        "command-r",
+        "firefunction",
+        "hermes",
+    ]
 
     /// Fetch available models from Ollama API.
     static func fetchModels(baseURL: URL = URL(string: "http://localhost:11434")!) async -> [String] {
@@ -94,6 +123,45 @@ enum OllamaModelFetcher {
         }
     }
 
+    /// Fetch available models with detailed metadata from Ollama API.
+    static func fetchModelInfos(baseURL: URL = URL(string: "http://localhost:11434")!) async -> [LocalModelInfo] {
+        let url = baseURL.appendingPathComponent("api/tags")
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let response = try JSONDecoder().decode(ModelListResponse.self, from: data)
+            return response.models.map { model in
+                let family = model.details?.family
+                let supportsTools = detectToolSupport(modelName: model.name, family: family)
+                return LocalModelInfo(
+                    name: model.name,
+                    size: model.size ?? 0,
+                    parameterSize: model.details?.parameterSize,
+                    quantization: model.details?.quantizationLevel,
+                    family: family,
+                    supportsTools: supportsTools
+                )
+            }
+        } catch {
+            Log.llm.debug("Ollama model info fetch failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Detect whether a model likely supports tool/function calling.
+    static func detectToolSupport(modelName: String, family: String?) -> Bool {
+        // Check family
+        if let family, toolSupportedFamilies.contains(family.lowercased()) {
+            return true
+        }
+
+        // Check model name patterns
+        let lowerName = modelName.lowercased()
+        return toolSupportedPatterns.contains { lowerName.contains($0) }
+    }
+
     /// Check if Ollama is running.
     static func isAvailable(baseURL: URL = URL(string: "http://localhost:11434")!) async -> Bool {
         let url = baseURL.appendingPathComponent("api/tags")
@@ -108,3 +176,4 @@ enum OllamaModelFetcher {
         }
     }
 }
+
