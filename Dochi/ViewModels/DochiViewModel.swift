@@ -79,6 +79,9 @@ final class DochiViewModel {
     // MARK: - Interest Discovery (K-3)
     private(set) var interestDiscoveryService: InterestDiscoveryServiceProtocol?
 
+    // MARK: - External Tool (K-4)
+    private(set) var externalToolManager: ExternalToolSessionManagerProtocol?
+
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
     var showConnectedDevicesPopover: Bool = false
@@ -340,6 +343,13 @@ final class DochiViewModel {
     func configureProactiveSuggestionService(_ service: ProactiveSuggestionServiceProtocol) {
         self.proactiveSuggestionService = service
         Log.app.info("ProactiveSuggestionService configured")
+    }
+
+    // MARK: - External Tool (K-4)
+
+    func configureExternalToolManager(_ manager: ExternalToolSessionManagerProtocol) {
+        self.externalToolManager = manager
+        Log.app.info("ExternalToolSessionManager configured")
     }
 
     // MARK: - Interest Discovery (K-3)
@@ -2423,7 +2433,19 @@ final class DochiViewModel {
             parts.append(interestAddition)
         }
 
-        // 9. Non-baseline tool listing for LLM awareness
+        // 9. External tool status (K-4)
+        if let manager = externalToolManager, !manager.sessions.isEmpty {
+            var lines: [String] = ["## 외부 AI 도구 세션"]
+            for session in manager.sessions where session.status != .dead {
+                let profileName = manager.profiles.first(where: { $0.id == session.profileId })?.name ?? "?"
+                lines.append("- \(profileName): \(session.status.rawValue) (tmux: \(session.tmuxSessionName))")
+            }
+            if !lines.isEmpty {
+                parts.append(lines.joined(separator: "\n"))
+            }
+        }
+
+        // 10. Non-baseline tool listing for LLM awareness
         let nonBaseline = toolService.nonBaselineToolSummaries
         if !nonBaseline.isEmpty {
             var lines: [String] = ["## 추가 도구", "필요 시 tools.enable으로 활성화할 수 있는 도구:"]

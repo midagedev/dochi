@@ -971,3 +971,99 @@ final class MockProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
         state = .disabled
     }
 }
+
+// MARK: - MockExternalToolSessionManager (K-4)
+
+@MainActor
+final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
+    var profiles: [ExternalToolProfile] = []
+    var sessions: [ExternalToolSession] = []
+    var isTmuxAvailable: Bool = true
+
+    var loadProfilesCallCount = 0
+    var saveProfileCallCount = 0
+    var deleteProfileCallCount = 0
+    var startSessionCallCount = 0
+    var stopSessionCallCount = 0
+    var restartSessionCallCount = 0
+    var sendCommandCallCount = 0
+    var checkHealthCallCount = 0
+    var checkAllHealthCallCount = 0
+    var captureOutputCallCount = 0
+
+    var lastSavedProfile: ExternalToolProfile?
+    var lastSentCommand: String?
+    var mockOutputLines: [String] = ["line1", "line2"]
+
+    func loadProfiles() {
+        loadProfilesCallCount += 1
+    }
+
+    func saveProfile(_ profile: ExternalToolProfile) {
+        saveProfileCallCount += 1
+        lastSavedProfile = profile
+        if let idx = profiles.firstIndex(where: { $0.id == profile.id }) {
+            profiles[idx] = profile
+        } else {
+            profiles.append(profile)
+        }
+    }
+
+    func deleteProfile(id: UUID) {
+        deleteProfileCallCount += 1
+        profiles.removeAll { $0.id == id }
+    }
+
+    func startSession(profileId: UUID) async throws {
+        startSessionCallCount += 1
+        guard let profile = profiles.first(where: { $0.id == profileId }) else {
+            throw ExternalToolError.profileNotFound(profileId)
+        }
+        let session = ExternalToolSession(
+            profileId: profileId,
+            tmuxSessionName: "mock-\(profile.name)",
+            status: .idle,
+            startedAt: Date()
+        )
+        sessions.append(session)
+    }
+
+    func stopSession(id: UUID) async {
+        stopSessionCallCount += 1
+        if let session = sessions.first(where: { $0.id == id }) {
+            session.status = .dead
+        }
+    }
+
+    func restartSession(id: UUID) async throws {
+        restartSessionCallCount += 1
+        guard let session = sessions.first(where: { $0.id == id }) else {
+            throw ExternalToolError.sessionNotFound(id)
+        }
+        let profileId = session.profileId
+        await stopSession(id: id)
+        sessions.removeAll { $0.id == id }
+        try await startSession(profileId: profileId)
+    }
+
+    func sendCommand(sessionId: UUID, command: String) async throws {
+        sendCommandCallCount += 1
+        lastSentCommand = command
+        guard sessions.contains(where: { $0.id == sessionId }) else {
+            throw ExternalToolError.sessionNotFound(sessionId)
+        }
+    }
+
+    func checkHealth(sessionId: UUID) async {
+        checkHealthCallCount += 1
+    }
+
+    func checkAllHealth() async {
+        checkAllHealthCallCount += 1
+    }
+
+    func captureOutput(sessionId: UUID, lines: Int) async -> [String] {
+        captureOutputCallCount += 1
+        return Array(mockOutputLines.prefix(lines))
+    }
+}

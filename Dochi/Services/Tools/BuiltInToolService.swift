@@ -250,6 +250,11 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     // MARK: - Terminal Service Injection (C-6)
 
     /// TerminalRunTool이 nil로 등록되므로, 이후 서비스 생성 후 주입
+    /// Register an external tool with the registry.
+    func registerTool(_ tool: any BuiltInToolProtocol) {
+        registry.register(tool)
+    }
+
     func configureTerminalService(_ service: TerminalServiceProtocol) {
         if let terminalTool = registry.tool(named: "terminal.run") as? TerminalRunTool {
             terminalTool.updateTerminalService(service)

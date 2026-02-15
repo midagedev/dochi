@@ -59,6 +59,8 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case clearTerminalOutput
         case toggleProactiveSuggestion
         case showSuggestionHistory
+        case openExternalToolDashboard
+        case externalToolHealthcheck
         case custom(id: String)
     }
 }
@@ -521,6 +523,31 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .navigation,
             action: .showSuggestionHistory
+        ),
+        // K-4: 외부 도구
+        CommandPaletteItem(
+            id: "external-tool-dashboard",
+            icon: "hammer",
+            title: "외부 도구 대시보드",
+            subtitle: "",
+            category: .tool,
+            action: .openExternalToolDashboard
+        ),
+        CommandPaletteItem(
+            id: "external-tool-healthcheck",
+            icon: "heart.text.square",
+            title: "외부 도구 헬스체크",
+            subtitle: "",
+            category: .tool,
+            action: .externalToolHealthcheck
+        ),
+        CommandPaletteItem(
+            id: "settings.open.external-tool",
+            icon: "hammer",
+            title: "외부 도구 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "external-tool")
         ),
         // K-3: 관심사 발굴
         CommandPaletteItem(

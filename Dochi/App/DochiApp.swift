@@ -63,6 +63,7 @@ struct DochiApp: App {
     private let terminalService: any TerminalServiceProtocol
     private let proactiveSuggestionService: ProactiveSuggestionService
     private let interestDiscoveryService: InterestDiscoveryService
+    private let externalToolManager: ExternalToolSessionManager
 
     init() {
         let settings = AppSettings()
@@ -154,6 +155,10 @@ struct DochiApp: App {
         // Interest Discovery Service (K-3)
         let interestDiscoveryService = InterestDiscoveryService(settings: settings)
         self.interestDiscoveryService = interestDiscoveryService
+
+        // External Tool Session Manager (K-4)
+        let externalToolManager = ExternalToolSessionManager(settings: settings)
+        self.externalToolManager = externalToolManager
 
         // Proactive Suggestion Service (K-2)
         let proactiveSuggestionService = ProactiveSuggestionService(
@@ -321,6 +326,11 @@ struct DochiApp: App {
                     // Configure InterestDiscoveryService (K-3)
                     viewModel.configureInterestDiscoveryService(interestDiscoveryService)
                     heartbeatService.setInterestDiscoveryService(interestDiscoveryService)
+
+                    // Configure ExternalToolSessionManager (K-4)
+                    viewModel.configureExternalToolManager(externalToolManager)
+                    heartbeatService.setExternalToolManager(externalToolManager)
+                    ExternalToolTools.register(toolService: toolService, manager: externalToolManager)
 
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)
