@@ -38,6 +38,10 @@ final class DochiViewModel {
     var isMultiSelectMode: Bool = false
     var selectedConversationIds: Set<UUID> = []
 
+    // MARK: - TTS Fallback State
+    var isTTSFallbackActive: Bool = false
+    var ttsFallbackProviderName: String?
+
     // MARK: - Offline Fallback State
     var isOfflineFallbackActive: Bool = false
     var originalProvider: LLMProvider?
@@ -131,6 +135,14 @@ final class DochiViewModel {
             self?.handleTTSComplete()
         }
 
+        // Wire TTS fallback state callback
+        if let router = ttsService as? TTSRouter {
+            router.onFallbackStateChanged = { [weak self] active, providerName in
+                self?.isTTSFallbackActive = active
+                self?.ttsFallbackProviderName = providerName
+            }
+        }
+
         // Wire sensitive tool confirmation handler
         self.toolService.confirmationHandler = { [weak self] toolName, toolDescription in
             guard let self else { return false }
@@ -220,6 +232,16 @@ final class DochiViewModel {
         originalProvider = nil
         originalModel = nil
         Log.app.info("Original model restored: \(provider.displayName)/\(model)")
+    }
+
+    /// Restore the original TTS provider after fallback.
+    func restoreTTSProvider() {
+        if let router = ttsService as? TTSRouter {
+            router.restoreTTSProvider()
+        }
+        isTTSFallbackActive = false
+        ttsFallbackProviderName = nil
+        Log.app.info("TTS provider restored from fallback")
     }
 
     // MARK: - State Transitions

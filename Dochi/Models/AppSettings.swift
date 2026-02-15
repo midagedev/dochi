@@ -198,6 +198,16 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(offlineFallbackModel, forKey: "offlineFallbackModel") }
     }
 
+    // MARK: - ONNX TTS
+
+    var onnxModelId: String = UserDefaults.standard.string(forKey: "onnxModelId") ?? "" {
+        didSet { UserDefaults.standard.set(onnxModelId, forKey: "onnxModelId") }
+    }
+
+    var ttsOfflineFallbackEnabled: Bool = UserDefaults.standard.object(forKey: "ttsOfflineFallbackEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(ttsOfflineFallbackEnabled, forKey: "ttsOfflineFallbackEnabled") }
+    }
+
     // MARK: - Avatar
 
     var avatarEnabled: Bool = UserDefaults.standard.object(forKey: "avatarEnabled") as? Bool ?? false {

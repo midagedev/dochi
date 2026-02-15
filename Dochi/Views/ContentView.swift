@@ -300,6 +300,14 @@ struct ContentView: View {
                 )
             }
 
+            // TTS fallback banner
+            if viewModel.isTTSFallbackActive {
+                TTSFallbackBannerView(
+                    providerName: viewModel.ttsFallbackProviderName ?? "로컬",
+                    onRestore: { viewModel.restoreTTSProvider() }
+                )
+            }
+
             // UX-8: System prompt banner
             SystemPromptBannerView(contextService: viewModel.contextService)
 
@@ -1409,6 +1417,37 @@ struct OfflineFallbackBannerView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color.orange.opacity(0.08))
+    }
+}
+
+// MARK: - TTS Fallback Banner
+
+struct TTSFallbackBannerView: View {
+    let providerName: String
+    let onRestore: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "speaker.wave.2.circle")
+                .foregroundStyle(.purple)
+                .font(.system(size: 12))
+
+            Text("음성 합성: \(providerName)로 전환됨")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button("원래 TTS로 복구") {
+                onRestore()
+            }
+            .font(.system(size: 11, weight: .medium))
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.purple.opacity(0.1))
     }
 }
 
