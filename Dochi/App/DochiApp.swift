@@ -4,6 +4,8 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// UsageStore reference for flushing pending data on app termination (C-3).
     var usageStore: UsageStore?
+    /// MenuBarManager reference for popover toggle (H-1).
+    var menuBarManager: MenuBarManager?
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
@@ -21,6 +23,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.flushToDiskSync()
             Log.app.info("UsageStore flushed on app termination")
         }
+
+        // Teardown menu bar (H-1)
+        menuBarManager?.teardown()
+    }
+
+    /// Toggle menu bar popover (called from NSStatusItem button action)
+    @MainActor @objc func toggleMenuBarPopover() {
+        menuBarManager?.togglePopover()
     }
 }
 
@@ -189,6 +199,13 @@ struct DochiApp: App {
                     // Wire UsageStore to AppDelegate for flush on termination (C-3)
                     appDelegate.usageStore = usageStore
 
+                    // Setup menu bar manager (H-1)
+                    if appDelegate.menuBarManager == nil {
+                        let manager = MenuBarManager(settings: settings, viewModel: viewModel)
+                        appDelegate.menuBarManager = manager
+                        manager.setup()
+                    }
+
                     // Smoke test: write app state for automated verification
                     SmokeTestReporter.report(
                         profileCount: viewModel.userProfiles.count,
@@ -222,6 +239,12 @@ struct DochiApp: App {
                 }
                 .onChange(of: settings.heartbeatQuietHoursEnd) { _, _ in
                     heartbeatService.restart()
+                }
+                .onChange(of: settings.menuBarEnabled) { _, _ in
+                    appDelegate.menuBarManager?.handleSettingsChange()
+                }
+                .onChange(of: settings.menuBarGlobalShortcutEnabled) { _, _ in
+                    appDelegate.menuBarManager?.handleSettingsChange()
                 }
                 .sheet(isPresented: $showOnboarding) {
                     OnboardingView(

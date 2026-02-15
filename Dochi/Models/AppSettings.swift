@@ -300,6 +300,16 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(conflictResolutionStrategy, forKey: "conflictResolutionStrategy") }
     }
 
+    // MARK: - Menu Bar (H-1)
+
+    var menuBarEnabled: Bool = UserDefaults.standard.object(forKey: "menuBarEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(menuBarEnabled, forKey: "menuBarEnabled") }
+    }
+
+    var menuBarGlobalShortcutEnabled: Bool = UserDefaults.standard.object(forKey: "menuBarGlobalShortcutEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(menuBarGlobalShortcutEnabled, forKey: "menuBarGlobalShortcutEnabled") }
+    }
+
     // MARK: - Computed
 
     var currentProvider: LLMProvider {

@@ -570,6 +570,11 @@ struct ContentView: View {
             showSyncConflictSheet = true
         case .cloudAccountSettings:
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        case .toggleMenuBar:
+            // Toggle menu bar popover via AppDelegate
+            if let appDelegate = NSApp.delegate as? AppDelegate {
+                appDelegate.menuBarManager?.togglePopover()
+            }
         case .custom(let id):
             if id.hasPrefix("switchUser-") {
                 let userIdStr = String(id.dropFirst("switchUser-".count))

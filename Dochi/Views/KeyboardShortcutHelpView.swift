@@ -48,6 +48,13 @@ struct KeyboardShortcutHelpView: View {
             ]
         ),
         (
+            title: "메뉴바",
+            icon: "menubar.rectangle",
+            entries: [
+                ShortcutEntry(keys: "⌘⇧D", description: "메뉴바 퀵 액세스 토글 (글로벌)"),
+            ]
+        ),
+        (
             title: "명령 팔레트",
             icon: "command",
             entries: [
