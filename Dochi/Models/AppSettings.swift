@@ -244,6 +244,36 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(heartbeatQuietHoursEnd, forKey: "heartbeatQuietHoursEnd") }
     }
 
+    // MARK: - Sync Settings (G-3)
+
+    var autoSyncEnabled: Bool = UserDefaults.standard.object(forKey: "autoSyncEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoSyncEnabled, forKey: "autoSyncEnabled") }
+    }
+
+    var realtimeSyncEnabled: Bool = UserDefaults.standard.object(forKey: "realtimeSyncEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(realtimeSyncEnabled, forKey: "realtimeSyncEnabled") }
+    }
+
+    var syncConversations: Bool = UserDefaults.standard.object(forKey: "syncConversations") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(syncConversations, forKey: "syncConversations") }
+    }
+
+    var syncMemory: Bool = UserDefaults.standard.object(forKey: "syncMemory") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(syncMemory, forKey: "syncMemory") }
+    }
+
+    var syncKanban: Bool = UserDefaults.standard.object(forKey: "syncKanban") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(syncKanban, forKey: "syncKanban") }
+    }
+
+    var syncProfiles: Bool = UserDefaults.standard.object(forKey: "syncProfiles") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(syncProfiles, forKey: "syncProfiles") }
+    }
+
+    var conflictResolutionStrategy: String = UserDefaults.standard.string(forKey: "conflictResolutionStrategy") ?? "lastWriteWins" {
+        didSet { UserDefaults.standard.set(conflictResolutionStrategy, forKey: "conflictResolutionStrategy") }
+    }
+
     // MARK: - Computed
 
     var currentProvider: LLMProvider {

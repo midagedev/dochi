@@ -37,6 +37,10 @@ struct ContentView: View {
     // UX-10: 빠른 모델 팝오버
     @State private var showQuickModelPopover = false
 
+    // G-3: 동기화
+    @State private var showSyncConflictSheet = false
+    @State private var showInitialSyncWizard = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -63,8 +67,30 @@ struct ContentView: View {
                     metricsCollector: viewModel.metricsCollector,
                     settings: viewModel.settings,
                     heartbeatService: heartbeatService,
-                    supabaseService: supabaseService
+                    supabaseService: supabaseService,
+                    syncEngine: viewModel.syncEngine
                 )
+            }
+            .sheet(isPresented: $showSyncConflictSheet) {
+                if let engine = viewModel.syncEngine {
+                    SyncConflictListView(
+                        conflicts: engine.syncConflicts,
+                        onResolve: { id, resolution in
+                            engine.resolveConflict(id: id, resolution: resolution)
+                        },
+                        onResolveAll: { resolution in
+                            engine.resolveAllConflicts(resolution: resolution)
+                        }
+                    )
+                }
+            }
+            .sheet(isPresented: $showInitialSyncWizard) {
+                if let engine = viewModel.syncEngine {
+                    InitialSyncWizardView(
+                        syncEngine: engine,
+                        onComplete: {}
+                    )
+                }
             }
             .sheet(isPresented: $showShortcutHelp) {
                 KeyboardShortcutHelpView()
@@ -130,6 +156,14 @@ struct ContentView: View {
                     onDismiss: { showCommandPalette = false }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+
+            // G-3: Sync toast overlay
+            if let engine = viewModel.syncEngine {
+                SyncToastContainerView(
+                    events: engine.syncToastEvents,
+                    onDismiss: { id in viewModel.dismissSyncToast(id: id) }
+                )
             }
 
             // UX-8: Memory toast overlay
@@ -267,12 +301,14 @@ struct ContentView: View {
                 metricsCollector: viewModel.metricsCollector,
                 heartbeatService: heartbeatService,
                 supabaseService: supabaseService,
+                syncEngine: viewModel.syncEngine,
                 isOfflineFallbackActive: viewModel.isOfflineFallbackActive,
                 localServerStatus: viewModel.localServerStatus,
                 onModelTap: { showQuickModelPopover = true },
                 onSyncTap: { showSystemStatusSheet = true },
                 onHeartbeatTap: { showSystemStatusSheet = true },
-                onTokenTap: { showSystemStatusSheet = true }
+                onTokenTap: { showSystemStatusSheet = true },
+                onSyncConflictTap: { showSyncConflictSheet = true }
             )
             .popover(isPresented: $showQuickModelPopover) {
                 QuickModelPopoverView(
@@ -528,6 +564,12 @@ struct ContentView: View {
         case .openSettingsSection:
             // Open settings window (the section deep-link is handled by Settings scene)
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        case .syncNow:
+            Task { await viewModel.syncEngine?.sync() }
+        case .syncConflicts:
+            showSyncConflictSheet = true
+        case .cloudAccountSettings:
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         case .custom(let id):
             if id.hasPrefix("switchUser-") {
                 let userIdStr = String(id.dropFirst("switchUser-".count))
@@ -723,7 +765,10 @@ struct SidebarView: View {
                 // Auth/sync status
                 if let service = supabaseService, service.authState.isSignedIn {
                     Divider()
-                    SidebarAuthStatusView(authState: service.authState)
+                    SidebarAuthStatusView(
+                        authState: service.authState,
+                        syncState: viewModel.syncEngine?.syncState
+                    )
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -760,24 +805,42 @@ struct SidebarView: View {
 
 struct SidebarAuthStatusView: View {
     let authState: AuthState
+    var syncState: SyncState?
 
     var body: some View {
         VStack(spacing: 4) {
             if case .signedIn(_, let email) = authState {
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(.green)
+                        .fill(sidebarDotColor)
                         .frame(width: 6, height: 6)
                     Text(email ?? "로그인됨")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer()
+                    if let syncState, syncState != .idle && syncState != .disabled {
+                        Text(syncState.displayText)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    private var sidebarDotColor: Color {
+        guard let state = syncState else { return .green }
+        switch state {
+        case .idle: return .green
+        case .syncing: return .blue
+        case .conflict: return .orange
+        case .error: return .red
+        case .offline: return .gray
+        case .disabled: return .green
+        }
     }
 }
 

@@ -109,7 +109,8 @@ struct SettingsView: View {
         case .account:
             AccountSettingsView(
                 supabaseService: supabaseService,
-                settings: settings
+                settings: settings,
+                syncEngine: viewModel?.syncEngine
             )
 
         case .guide:

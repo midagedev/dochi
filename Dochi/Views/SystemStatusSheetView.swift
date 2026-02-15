@@ -6,6 +6,7 @@ struct SystemStatusSheetView: View {
     let settings: AppSettings
     var heartbeatService: HeartbeatService?
     var supabaseService: SupabaseServiceProtocol?
+    var syncEngine: SyncEngine?
     @Environment(\.dismiss) private var dismiss
 
     enum Tab: String, CaseIterable {
@@ -54,7 +55,7 @@ struct SystemStatusSheetView: View {
                 case .heartbeat:
                     HeartbeatTabView(heartbeatService: heartbeatService, settings: settings)
                 case .cloud:
-                    CloudSyncTabView(supabaseService: supabaseService)
+                    CloudSyncTabView(supabaseService: supabaseService, syncEngine: syncEngine)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -295,6 +296,9 @@ private struct HeartbeatTabView: View {
 
 private struct CloudSyncTabView: View {
     let supabaseService: SupabaseServiceProtocol?
+    var syncEngine: SyncEngine?
+
+    @State private var showConflictSheet = false
 
     var body: some View {
         if let service = supabaseService, service.authState.isSignedIn {
@@ -320,47 +324,253 @@ private struct CloudSyncTabView: View {
     }
 
     private func syncContent(_ service: SupabaseServiceProtocol) -> some View {
-        VStack(spacing: 16) {
-            // Status
-            HStack(spacing: 12) {
+        VStack(spacing: 0) {
+            // 상태 헤더
+            statusHeader(service)
+
+            Divider()
+
+            ScrollView {
+                VStack(spacing: 12) {
+                    // 동기화 대상 요약
+                    if let engine = syncEngine {
+                        syncTargetSummary(engine)
+                    }
+
+                    // 충돌 섹션
+                    if let engine = syncEngine, !engine.syncConflicts.isEmpty {
+                        conflictSection(engine)
+                    }
+
+                    // 동기화 히스토리
+                    if let engine = syncEngine {
+                        historySection(engine)
+                    }
+
+                    // 동기화 버튼
+                    syncButtons(service)
+                }
+                .padding()
+            }
+        }
+        .sheet(isPresented: $showConflictSheet) {
+            if let engine = syncEngine {
+                SyncConflictListView(
+                    conflicts: engine.syncConflicts,
+                    onResolve: { id, resolution in
+                        engine.resolveConflict(id: id, resolution: resolution)
+                    },
+                    onResolveAll: { resolution in
+                        engine.resolveAllConflicts(resolution: resolution)
+                    }
+                )
+            }
+        }
+    }
+
+    private func statusHeader(_ service: SupabaseServiceProtocol) -> some View {
+        HStack(spacing: 12) {
+            if let engine = syncEngine {
+                Image(systemName: engine.syncState.iconName)
+                    .font(.system(size: 18))
+                    .foregroundStyle(syncStateColor(engine.syncState))
+            } else {
                 Image(systemName: "icloud.fill")
                     .font(.system(size: 18))
                     .foregroundStyle(.green)
+            }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    if case .signedIn(_, let email) = service.authState {
+            VStack(alignment: .leading, spacing: 2) {
+                if case .signedIn(_, let email) = service.authState {
+                    HStack(spacing: 6) {
                         Text("로그인됨")
                             .font(.system(size: 13, weight: .medium))
-                        if let email {
-                            Text(email)
+                        if let engine = syncEngine {
+                            Text(engine.syncState.displayText)
                                 .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(syncStateColor(engine.syncState))
                         }
                     }
+                    if let email {
+                        Text(email)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
 
+            Spacer()
+
+            if let engine = syncEngine, let lastSync = engine.lastSuccessfulSync {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("마지막 동기화")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text(lastSync, style: .relative)
+                        .font(.system(size: 11))
+                }
+            }
+        }
+        .padding()
+        .background(.secondary.opacity(0.04))
+    }
+
+    private func syncTargetSummary(_ engine: SyncEngine) -> some View {
+        let counts = engine.entityCounts()
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("동기화 대상")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 16) {
+                ForEach(SyncEntityType.allCases, id: \.self) { type in
+                    HStack(spacing: 4) {
+                        Image(systemName: type.iconName)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text("\(type.displayName) \(counts[type] ?? 0)건")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.secondary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func conflictSection(_ engine: SyncEngine) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.system(size: 12))
+                Text("충돌 \(engine.syncConflicts.count)건")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.orange)
                 Spacer()
+                Button("해결하기") {
+                    showConflictSheet = true
+                }
+                .font(.system(size: 11))
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
             }
-            .padding()
-            .background(.secondary.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
 
-            // Manual sync button
-            Button {
-                Task {
-                    try? await service.syncContext()
-                    try? await service.syncConversations()
-                }
-            } label: {
+            ForEach(engine.syncConflicts.prefix(3)) { conflict in
                 HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                    Text("수동 동기화")
+                    Image(systemName: conflict.entityType.iconName)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                    Text(conflict.entityTitle)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                    Spacer()
                 }
             }
-            .buttonStyle(.bordered)
+
+            if engine.syncConflicts.count > 3 {
+                Text("외 \(engine.syncConflicts.count - 3)건...")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.orange.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func historySection(_ engine: SyncEngine) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("동기화 히스토리")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            if engine.syncHistory.isEmpty {
+                Text("아직 동기화 기록이 없습니다.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(engine.syncHistory.prefix(10)) { entry in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(entry.success ? .green : .red)
+                            .frame(width: 5, height: 5)
+                        Image(systemName: entry.direction == .incoming ? "arrow.down" : "arrow.up")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                        Text(entry.entityTitle)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(entry.timestamp, style: .time)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.secondary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func syncButtons(_ service: SupabaseServiceProtocol) -> some View {
+        HStack(spacing: 12) {
+            if let engine = syncEngine {
+                Button {
+                    Task { await engine.sync() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text("수동 동기화")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(engine.syncState == .syncing)
+
+                Button {
+                    Task { await engine.fullSync() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise.icloud")
+                        Text("전체 동기화")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(engine.syncState == .syncing)
+            } else {
+                Button {
+                    Task {
+                        try? await service.syncContext()
+                        try? await service.syncConversations()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text("수동 동기화")
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
 
             Spacer()
         }
-        .padding()
+    }
+
+    private func syncStateColor(_ state: SyncState) -> Color {
+        switch state {
+        case .idle: .green
+        case .syncing: .blue
+        case .conflict: .orange
+        case .error: .red
+        case .offline: .gray
+        case .disabled: .gray
+        }
     }
 }
