@@ -155,6 +155,7 @@ struct DochiApp: App {
             settings: settings,
             llmService: llmService,
             contextService: contextService,
+            conversationService: conversationService,
             keychainService: keychainService,
             sessionContext: sessionContext
         )
