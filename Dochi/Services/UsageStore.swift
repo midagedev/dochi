@@ -151,6 +151,28 @@ final class UsageStore: UsageStoreProtocol {
         }
     }
 
+    /// Flush all dirty months to disk immediately (synchronous variant for app termination).
+    nonisolated func flushToDiskSync() {
+        MainActor.assumeIsolated {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+            for monthKey in dirtyMonths {
+                guard let file = cache[monthKey] else { continue }
+                let fileURL = usageFileURL(for: monthKey)
+                do {
+                    let data = try encoder.encode(file)
+                    try data.write(to: fileURL, options: .atomic)
+                    Log.storage.debug("Usage file saved (sync): \(monthKey)")
+                } catch {
+                    Log.storage.error("Failed to save usage file (sync) \(monthKey): \(error.localizedDescription)")
+                }
+            }
+            dirtyMonths.removeAll()
+        }
+    }
+
     /// Flush all dirty months to disk immediately.
     func flushToDisk() async {
         let encoder = JSONEncoder()

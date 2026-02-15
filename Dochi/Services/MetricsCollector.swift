@@ -20,6 +20,9 @@ final class MetricsCollector {
     private var firedBudgetAlerts: Set<Int> = []
     private var currentAlertMonth: String = ""
 
+    /// Cached persistent monthly cost (updated after each record).
+    private(set) var cachedMonthCostUSD: Double = 0.0
+
     /// Record a new exchange metric.
     func record(_ metrics: ExchangeMetrics) {
         recentMetrics.append(metrics)
@@ -38,6 +41,7 @@ final class MetricsCollector {
         if let store = usageStore {
             Task {
                 await store.record(metrics)
+                self.cachedMonthCostUSD = await store.currentMonthCost()
                 await checkBudget()
             }
         }
@@ -73,11 +77,16 @@ final class MetricsCollector {
         }
     }
 
-    /// Whether the current month budget has been exceeded.
+    /// Whether the current month budget has been exceeded (based on persistent monthly cost).
     var isBudgetExceeded: Bool {
         guard let settings, settings.budgetEnabled, settings.budgetBlockOnExceed else { return false }
-        // Use cached session cost as a fast approximation
-        return sessionCostUSD > settings.monthlyBudgetUSD
+        return cachedMonthCostUSD > settings.monthlyBudgetUSD
+    }
+
+    /// Refresh the cached monthly cost from the persistent usage store.
+    func refreshMonthCost() async {
+        guard let store = usageStore else { return }
+        cachedMonthCostUSD = await store.currentMonthCost()
     }
 
     // MARK: - Budget Checking

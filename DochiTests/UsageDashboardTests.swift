@@ -375,7 +375,7 @@ final class MetricsCollectorCostTests: XCTestCase {
         XCTAssertFalse(collector.isBudgetExceeded)
     }
 
-    func testBudgetExceededWhenEnabled() {
+    func testBudgetExceededWhenEnabled() async {
         let collector = MetricsCollector()
         let settings = AppSettings()
         settings.budgetEnabled = true
@@ -383,7 +383,28 @@ final class MetricsCollectorCostTests: XCTestCase {
         settings.monthlyBudgetUSD = 0.001  // Very low budget
         collector.settings = settings
 
-        // Record a metric that will exceed the tiny budget
+        // Wire a mock usage store that reports high cost
+        let mockStore = MockUsageStore()
+        mockStore.stubbedCost = 10.0  // Way over budget
+        collector.usageStore = mockStore
+
+        // Refresh cached cost from persistent store
+        await collector.refreshMonthCost()
+
+        XCTAssertTrue(collector.isBudgetExceeded)
+    }
+
+    func testBudgetNotExceededWithOnlySessionCost() {
+        // C-2: isBudgetExceeded should NOT use sessionCostUSD, so even with
+        // session metrics recorded, budget is not exceeded if cachedMonthCostUSD is 0
+        let collector = MetricsCollector()
+        let settings = AppSettings()
+        settings.budgetEnabled = true
+        settings.budgetBlockOnExceed = true
+        settings.monthlyBudgetUSD = 0.001
+        collector.settings = settings
+
+        // Record metrics WITHOUT a usage store — cachedMonthCostUSD stays 0
         let metrics = ExchangeMetrics(
             provider: "openai",
             model: "gpt-4o",
@@ -397,7 +418,53 @@ final class MetricsCollectorCostTests: XCTestCase {
         )
         collector.record(metrics)
 
+        // Session cost is high, but isBudgetExceeded should use persistent cost (0)
+        XCTAssertGreaterThan(collector.sessionCostUSD, settings.monthlyBudgetUSD)
+        XCTAssertFalse(collector.isBudgetExceeded)
+    }
+
+    func testBudgetExceededAfterRecordWithStore() async {
+        // C-2: After recording with a usage store, cachedMonthCostUSD gets updated
+        let collector = MetricsCollector()
+        let settings = AppSettings()
+        settings.budgetEnabled = true
+        settings.budgetBlockOnExceed = true
+        settings.monthlyBudgetUSD = 0.001
+        collector.settings = settings
+
+        let mockStore = MockUsageStore()
+        mockStore.stubbedCost = 0.05  // Above budget
+        collector.usageStore = mockStore
+
+        let metrics = ExchangeMetrics(
+            provider: "openai",
+            model: "gpt-4o",
+            inputTokens: 10000,
+            outputTokens: 5000,
+            totalTokens: 15000,
+            firstByteLatency: nil,
+            totalLatency: 1.0,
+            timestamp: Date(),
+            wasFallback: false
+        )
+        collector.record(metrics)
+
+        // Wait for the Task inside record() to complete
+        try? await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(collector.cachedMonthCostUSD, 0.05)
         XCTAssertTrue(collector.isBudgetExceeded)
+    }
+
+    func testRefreshMonthCostFromStore() async {
+        let collector = MetricsCollector()
+        let mockStore = MockUsageStore()
+        mockStore.stubbedCost = 42.0
+        collector.usageStore = mockStore
+
+        XCTAssertEqual(collector.cachedMonthCostUSD, 0.0)
+        await collector.refreshMonthCost()
+        XCTAssertEqual(collector.cachedMonthCostUSD, 42.0)
     }
 
     func testSessionSummaryPreserved() {
@@ -516,5 +583,145 @@ final class UsageCommandPaletteTests: XCTestCase {
         XCTAssertNotNil(usageItem)
         XCTAssertEqual(usageItem?.title, "사용량 대시보드")
         XCTAssertEqual(usageItem?.icon, "chart.bar.xaxis")
+    }
+}
+
+// MARK: - Budget Blocking Tests (C-1)
+
+@MainActor
+final class BudgetBlockingTests: XCTestCase {
+
+    private func makeViewModel(metricsCollector: MetricsCollector) -> DochiViewModel {
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        // Set an API key so model resolution doesn't fail
+        try? keychainService.save(account: LLMProvider.openai.keychainAccount, value: "test-key")
+
+        return DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(
+                workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
+                currentUserId: nil
+            ),
+            metricsCollector: metricsCollector
+        )
+    }
+
+    func testSendMessageBlockedWhenBudgetExceeded() async {
+        let collector = MetricsCollector()
+        let settings = AppSettings()
+        settings.budgetEnabled = true
+        settings.budgetBlockOnExceed = true
+        settings.monthlyBudgetUSD = 0.001
+        collector.settings = settings
+
+        let mockStore = MockUsageStore()
+        mockStore.stubbedCost = 10.0  // Way over budget
+        collector.usageStore = mockStore
+        await collector.refreshMonthCost()
+
+        let vm = makeViewModel(metricsCollector: collector)
+        vm.inputText = "Hello"
+        vm.sendMessage()
+
+        // Should be blocked — errorMessage set, state stays idle
+        XCTAssertNotNil(vm.errorMessage)
+        XCTAssertTrue(vm.errorMessage!.contains("월 예산을 초과했습니다"))
+        XCTAssertEqual(vm.inputText, "Hello")  // Input not cleared
+    }
+
+    func testSendMessageAllowedWhenBudgetNotExceeded() {
+        let collector = MetricsCollector()
+        let settings = AppSettings()
+        settings.budgetEnabled = true
+        settings.budgetBlockOnExceed = true
+        settings.monthlyBudgetUSD = 100.0
+        collector.settings = settings
+        // cachedMonthCostUSD defaults to 0.0, well under budget
+
+        let vm = makeViewModel(metricsCollector: collector)
+        vm.inputText = "Hello"
+        vm.sendMessage()
+
+        // Should NOT be blocked — no error message about budget
+        let hasBudgetError = vm.errorMessage?.contains("월 예산을 초과했습니다") ?? false
+        XCTAssertFalse(hasBudgetError)
+        XCTAssertEqual(vm.inputText, "")  // Input cleared (processing started)
+    }
+
+    func testSendMessageAllowedWhenBudgetDisabled() {
+        let collector = MetricsCollector()
+        let settings = AppSettings()
+        settings.budgetEnabled = false
+        settings.budgetBlockOnExceed = true
+        settings.monthlyBudgetUSD = 0.001
+        collector.settings = settings
+
+        let vm = makeViewModel(metricsCollector: collector)
+        vm.inputText = "Hello"
+        vm.sendMessage()
+
+        let hasBudgetError = vm.errorMessage?.contains("월 예산을 초과했습니다") ?? false
+        XCTAssertFalse(hasBudgetError)
+    }
+}
+
+// MARK: - FlushToDiskSync Tests (C-3)
+
+@MainActor
+final class FlushToDiskSyncTests: XCTestCase {
+    private var store: UsageStore!
+    private var tempDir: URL!
+
+    override func setUp() {
+        super.setUp()
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DochiFlushSyncTests-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        store = UsageStore(baseURL: tempDir)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: tempDir)
+        super.tearDown()
+    }
+
+    func testFlushToDiskSyncPersistsData() async {
+        let metrics = ExchangeMetrics(
+            provider: "openai",
+            model: "gpt-4o",
+            inputTokens: 100,
+            outputTokens: 50,
+            totalTokens: 150,
+            firstByteLatency: nil,
+            totalLatency: 1.0,
+            timestamp: Date(),
+            wasFallback: false
+        )
+
+        await store.record(metrics)
+
+        // Use synchronous flush (as would happen on app termination)
+        store.flushToDiskSync()
+
+        // Verify by loading from a fresh store
+        let store2 = UsageStore(baseURL: tempDir)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let monthKey = formatter.string(from: Date())
+
+        let records = await store2.dailyRecords(for: monthKey)
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].entries.count, 1)
+        XCTAssertEqual(records[0].entries[0].model, "gpt-4o")
     }
 }
