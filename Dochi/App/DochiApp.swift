@@ -320,6 +320,7 @@ struct DochiApp: App {
 
                     // Configure InterestDiscoveryService (K-3)
                     viewModel.configureInterestDiscoveryService(interestDiscoveryService)
+                    heartbeatService.setInterestDiscoveryService(interestDiscoveryService)
 
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)
