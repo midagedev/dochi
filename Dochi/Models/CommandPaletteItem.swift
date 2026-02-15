@@ -48,6 +48,9 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case rebuildSpotlightIndex
         case openDocumentLibrary
         case reindexDocuments
+        case consolidateMemory
+        case memoryChangeHistory
+        case memorySettings
         case custom(id: String)
     }
 }
@@ -365,6 +368,31 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .settings,
             action: .openSettingsSection(section: "rag")
+        ),
+        // I-2: 메모리 자동 정리
+        CommandPaletteItem(
+            id: "consolidate-memory",
+            icon: "brain.head.profile",
+            title: "메모리 자동 정리 실행",
+            subtitle: "",
+            category: .tool,
+            action: .consolidateMemory
+        ),
+        CommandPaletteItem(
+            id: "memory-change-history",
+            icon: "clock.arrow.circlepath",
+            title: "메모리 변경 이력",
+            subtitle: "",
+            category: .navigation,
+            action: .memoryChangeHistory
+        ),
+        CommandPaletteItem(
+            id: "settings.open.memory",
+            icon: "brain.head.profile",
+            title: "메모리 정리 설정",
+            subtitle: "",
+            category: .settings,
+            action: .memorySettings
         ),
         // G-3: 동기화 명령
         CommandPaletteItem(

@@ -45,6 +45,7 @@ DochiApp (entry point)
     │   │   ├── OfflineFallbackBannerView — 오프라인 폴백 상태 배너 (로컬 모델 전환 알림 + 복구 버튼) (G-1)
     │   │   ├── TTSFallbackBannerView — TTS 오프라인 폴백 배너 (로컬 TTS 전환 알림 + 복구 버튼) (G-2)
     │   │   ├── SystemPromptBannerView — 시스템 프롬프트 접기/펼치기 배너 (UX-8)
+    │   │   ├── MemoryConsolidationBannerView — 메모리 자동 정리 상태 배너 (analyzing/completed/conflict/failed, 15초 후 자동 소멸) (I-2)
     │   │   ├── ErrorBannerView — 에러 표시
     │   │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
     │   │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크 + 단축키 힌트 + 에이전트 힌트 카드 + 투어 리마인더 + 첫 대화 힌트)
@@ -152,6 +153,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
 | AI | 사용량 (`usage`) | chart.bar.xaxis | `Views/Settings/UsageDashboardView.swift` | 기간별 사용량 (오늘/주/월/전체), 요약 카드 (교환수/토큰/비용), Swift Charts 일별 차트 (비용/토큰 모드), 모델별/에이전트별 분류 테이블, 예산 설정 (월 한도/알림/차단) (G-4) |
 | AI | 문서 검색 (`rag`) | doc.text.magnifyingglass | `Views/Settings/RAGSettingsView.swift` | RAG 활성화, 임베딩 설정 (프로바이더/모델), 검색 설정 (자동/topK/최소유사도), 청킹 설정 (크기/오버랩), 문서 통계, 유지보수 (재인덱싱/초기화) (I-1) |
+| AI | 메모리 정리 (`memory`) | brain.head.profile | `Views/Settings/MemorySettingsView.swift` | 자동 정리 활성화, 최소 메시지 수, 정리 모델 (경량/기본), 배너 표시, 크기 한도 (개인/워크스페이스/에이전트), 자동 아카이브, 변경 이력 (I-2) |
 | 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더 (시스템/Google Cloud/ONNX), 음성, 속도/피치, ONNX 모델 관리 (ONNXModelManagerView), 디퓨전 스텝, TTS 오프라인 폴백 |
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타, Spotlight 검색 (H-4) |
 | 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
@@ -590,6 +592,38 @@ HeartbeatService tick -> 카테고리별 컨텍스트 수집
 데이터: ~/Library/Application Support/Dochi/rag/{workspaceId}/vectors.sqlite
 모델: RAGDocument, RAGReference, RAGContextInfo, RAGSearchResult, RAGFileType, RAGIndexingStatus, RAGIndexingState
 커맨드 팔레트: "문서 라이브러리" / "문서 재인덱싱" / "문서 검색 설정"
+```
+
+### 메모리 자동 정리 (I-2 추가)
+```
+트리거: newConversation() / selectConversation(id:) 시 이전 대화에 assistant >= minMessages
+  → MemoryConsolidator.consolidate(conversation:sessionContext:settings:)
+  → fire-and-forget (대화 흐름 방해 없음)
+수동 실행: 커맨드 팔레트 "메모리 자동 정리 실행"
+정리 흐름:
+  1. LLM 호출로 대화에서 사실/결정 추출 (JSON 형태)
+  2. 현재 memory.md 로드 (ContextService)
+  3. 중복 감지 (Jaccard 유사도 > 0.7)
+  4. 모순 감지 (유사도 0.3~0.7 구간 + 주요 키워드 공유)
+  5. memory.md 업데이트 (신규 추가, 중복 스킵)
+  6. 크기 한도 초과 시 아카이브
+  7. ConsolidationResult → changelog 기록
+배너: MemoryConsolidationBannerView (ContentView chatDetailView 내)
+  → idle: 미표시
+  → analyzing: 보라색 + brain + 스피너
+  → completed: 초록색 + checkmark + "N건 추가, M건 갱신" + 변경 내용 버튼
+  → conflict: 주황색 + exclamationmark + "모순 N건" + 해결하기 버튼
+  → failed: 빨간색 + xmark + 실패 메시지
+  → 15초 후 자동 fade (analyzing 제외)
+시트: MemoryDiffSheetView (560x480pt) — 변경 이력 diff, 되돌리기
+시트: MemoryConflictResolverView (520x400pt) — 모순 해결 (기존 유지/새 항목 적용/둘 다 유지)
+설정: 설정 > AI > 메모리 정리 (MemorySettingsView)
+  → 활성화, 최소 메시지 수, 정리 모델, 배너 표시, 크기 한도, 자동 아카이브
+데이터: ~/Library/Application Support/Dochi/memory_changelog.json (최대 100건 FIFO)
+데이터: ~/Library/Application Support/Dochi/memory_archive/{scope}_{timestamp}.md
+모델: ConsolidationState, ConsolidationResult, MemoryChange, MemoryConflict, MemoryConflictResolution, MemoryScope, ExtractedFact, ChangelogEntry
+커맨드 팔레트: "메모리 자동 정리 실행" / "메모리 변경 이력" / "메모리 정리 설정"
+AppSettings: memoryConsolidationEnabled, memoryConsolidationMinMessages, memoryConsolidationModel, memoryConsolidationBannerEnabled, memoryWorkspaceSizeLimit, memoryAgentSizeLimit, memoryPersonalSizeLimit, memoryAutoArchiveEnabled
 ```
 
 ### 내보내기/공유 (UX-5 추가)

@@ -44,6 +44,10 @@ struct ContentView: View {
     // I-1: RAG 문서 라이브러리
     @State private var showDocumentLibrary = false
 
+    // I-2: 메모리 자동 정리
+    @State private var showMemoryDiffSheet = false
+    @State private var showMemoryConflictSheet = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -161,6 +165,28 @@ struct ContentView: View {
             .sheet(isPresented: $showDocumentLibrary) {
                 if let indexer = viewModel.documentIndexer {
                     DocumentLibraryView(documentIndexer: indexer)
+                }
+            }
+            .sheet(isPresented: $showMemoryDiffSheet) {
+                if let consolidator = viewModel.memoryConsolidator {
+                    MemoryDiffSheetView(
+                        changelog: consolidator.changelog,
+                        onRevert: { id in consolidator.revert(changeId: id) }
+                    )
+                }
+            }
+            .sheet(isPresented: $showMemoryConflictSheet) {
+                if let consolidator = viewModel.memoryConsolidator,
+                   let result = consolidator.lastResult {
+                    MemoryConflictResolverView(
+                        conflicts: result.conflicts,
+                        onResolve: { resolutions in
+                            consolidator.resolveConflicts(
+                                conflicts: result.conflicts,
+                                resolutions: resolutions
+                            )
+                        }
+                    )
                 }
             }
     }
@@ -373,6 +399,18 @@ struct ContentView: View {
 
             // UX-8: System prompt banner
             SystemPromptBannerView(contextService: viewModel.contextService)
+
+            // I-2: Memory consolidation banner
+            if let consolidator = viewModel.memoryConsolidator,
+               viewModel.settings.memoryConsolidationBannerEnabled,
+               consolidator.consolidationState != .idle {
+                MemoryConsolidationBannerView(
+                    state: consolidator.consolidationState,
+                    onShowDiff: { showMemoryDiffSheet = true },
+                    onShowConflicts: { showMemoryConflictSheet = true },
+                    onDismiss: { viewModel.dismissConsolidationBanner() }
+                )
+            }
 
             // Error banner
             if let error = viewModel.errorMessage {
@@ -609,6 +647,12 @@ struct ContentView: View {
             }
         case .openDocumentLibrary:
             showDocumentLibrary = true
+        case .consolidateMemory:
+            viewModel.manualConsolidateMemory()
+        case .memoryChangeHistory:
+            showMemoryDiffSheet = true
+        case .memorySettings:
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         case .reindexDocuments:
             if let indexer = viewModel.documentIndexer {
                 Task { await indexer.reindexAll() }
