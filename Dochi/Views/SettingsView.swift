@@ -712,7 +712,7 @@ struct HeartbeatSettingsContent: View {
                 helpContent: "사용자가 일정 시간 유휴 상태일 때, 칸반 진행 상황/메모리 기한/대화 주제 등을 기반으로 자동 제안합니다. 조용한 시간 설정은 하트비트와 공유합니다."
             )
         }
-        .disabled(!settings.proactiveSuggestionEnabled && !settings.proactiveSuggestionEnabled)
+        .disabled(!settings.proactiveSuggestionEnabled)
 
         Section("제안 유형") {
             ForEach(SuggestionType.allCases, id: \.rawValue) { type in
