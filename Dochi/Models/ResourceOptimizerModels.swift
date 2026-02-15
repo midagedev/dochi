@@ -65,7 +65,7 @@ struct ResourceUtilization: Sendable {
         return Double(daysRemaining) / Double(daysInPeriod)
     }
 
-    var estimatedUnusedPercent: Double {
+    var currentUnusedPercent: Double {
         guard let limit = subscription.monthlyTokenLimit, limit > 0 else { return 0 }
         let remaining = max(0, limit - usedTokens)
         return (Double(remaining) / Double(limit)) * 100

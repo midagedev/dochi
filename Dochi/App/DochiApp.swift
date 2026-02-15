@@ -59,7 +59,7 @@ struct DochiApp: App {
     private let delegationManager: DelegationManager
     private let schedulerService: SchedulerService
     private let pluginManager: PluginManager
-    private let resourceOptimizer: ResourceOptimizerService
+    private let resourceOptimizer: any ResourceOptimizerProtocol
 
     init() {
         let settings = AppSettings()

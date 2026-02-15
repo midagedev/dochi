@@ -23,7 +23,7 @@ struct SettingsView: View {
     var pluginManager: PluginManagerProtocol?
     var documentIndexer: DocumentIndexer?
     var feedbackStore: FeedbackStoreProtocol?
-    var resourceOptimizer: ResourceOptimizerService?
+    var resourceOptimizer: (any ResourceOptimizerProtocol)?
 
     @State var selectedSection: SettingsSection = .aiModel
     @State private var searchText: String = ""

@@ -5,7 +5,7 @@ import Charts
 struct UsageDashboardView: View {
     let metricsCollector: MetricsCollector
     let settings: AppSettings
-    var resourceOptimizer: ResourceOptimizerService?
+    var resourceOptimizer: (any ResourceOptimizerProtocol)?
 
     @State private var selectedPeriod: Period = .thisMonth
     @State private var chartMode: ChartMode = .cost
@@ -16,6 +16,8 @@ struct UsageDashboardView: View {
     @State private var utilizations: [ResourceUtilization] = []
     @State private var showSubscriptionSheet = false
     @State private var editingSubscription: SubscriptionPlan?
+    @State private var showDeleteConfirm = false
+    @State private var deletingSubscriptionId: UUID?
 
     enum Period: String, CaseIterable {
         case today = "오늘"
@@ -121,6 +123,21 @@ struct UsageDashboardView: View {
                     showSubscriptionSheet = false
                 }
             )
+        }
+        .alert("구독 삭제", isPresented: $showDeleteConfirm) {
+            Button("삭제", role: .destructive) {
+                guard let id = deletingSubscriptionId else { return }
+                Task {
+                    await resourceOptimizer?.deleteSubscription(id: id)
+                    await loadUtilizations()
+                }
+                deletingSubscriptionId = nil
+            }
+            Button("취소", role: .cancel) {
+                deletingSubscriptionId = nil
+            }
+        } message: {
+            Text("이 구독 플랜을 삭제하시겠습니까?")
         }
     }
 
@@ -469,7 +486,7 @@ struct UsageDashboardView: View {
 
     // MARK: - Subscription Cards Section
 
-    private func subscriptionCardsSection(_ optimizer: ResourceOptimizerService) -> some View {
+    private func subscriptionCardsSection(_ optimizer: any ResourceOptimizerProtocol) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("구독 플랜 사용률")
                 .font(.system(size: 13, weight: .semibold))
@@ -549,7 +566,7 @@ struct UsageDashboardView: View {
             }
 
             if util.subscription.monthlyTokenLimit != nil {
-                Text("예상 미사용: \(String(format: "%.0f", util.estimatedUnusedPercent))%")
+                Text("예상 미사용: \(String(format: "%.0f", util.currentUnusedPercent))%")
                     .font(.system(size: 10))
                     .foregroundStyle(util.riskLevel == .wasteRisk ? .red : .secondary)
             }
@@ -653,7 +670,7 @@ struct UsageDashboardView: View {
 
     // MARK: - Subscription Management Section
 
-    private func subscriptionManagementSection(_ optimizer: ResourceOptimizerService) -> some View {
+    private func subscriptionManagementSection(_ optimizer: any ResourceOptimizerProtocol) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("구독 플랜 관리")
@@ -710,10 +727,8 @@ struct UsageDashboardView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
                         Button {
-                            Task {
-                                await optimizer.deleteSubscription(id: sub.id)
-                                await loadUtilizations()
-                            }
+                            deletingSubscriptionId = sub.id
+                            showDeleteConfirm = true
                         } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 10))

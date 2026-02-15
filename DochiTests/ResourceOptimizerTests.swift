@@ -183,7 +183,7 @@ final class ResourceOptimizerTests: XCTestCase {
 
         let util = await service.utilization(for: plan)
         XCTAssertEqual(util.usageRatio, 0)
-        XCTAssertEqual(util.estimatedUnusedPercent, 0)
+        XCTAssertEqual(util.currentUnusedPercent, 0)
     }
 
     func testAllUtilizations() async {
@@ -288,7 +288,7 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(util.usageRatio, 0.3, accuracy: 0.001)
         XCTAssertEqual(util.periodRatio, 20.0 / 30.0, accuracy: 0.001)
         XCTAssertEqual(util.remainingRatio, 10.0 / 30.0, accuracy: 0.001)
-        XCTAssertEqual(util.estimatedUnusedPercent, 70, accuracy: 0.1)
+        XCTAssertEqual(util.currentUnusedPercent, 70, accuracy: 0.1)
     }
 
     func testResourceUtilizationUnlimited() {
@@ -307,7 +307,7 @@ final class ResourceOptimizerTests: XCTestCase {
         )
 
         XCTAssertEqual(util.usageRatio, 0)
-        XCTAssertEqual(util.estimatedUnusedPercent, 0)
+        XCTAssertEqual(util.currentUnusedPercent, 0)
     }
 
     // MARK: - Mock Tests
@@ -327,6 +327,38 @@ final class ResourceOptimizerTests: XCTestCase {
         await mock.deleteSubscription(id: plan.id)
         XCTAssertEqual(mock.deleteSubscriptionCallCount, 1)
         XCTAssertEqual(mock.subscriptions.count, 0)
+    }
+
+    // MARK: - ViewModel DI
+
+    func testViewModelAcceptsMockResourceOptimizer() async {
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+        let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: AppSettings(),
+            sessionContext: SessionContext(workspaceId: wsId)
+        )
+
+        let mock = MockResourceOptimizer()
+        viewModel.configureResourceOptimizer(mock)
+
+        XCTAssertNotNil(viewModel.resourceOptimizer)
+
+        // Verify the mock works through the protocol interface
+        let plan = SubscriptionPlan(providerName: "TestProvider", planName: "Pro")
+        await viewModel.resourceOptimizer?.addSubscription(plan)
+        XCTAssertEqual(mock.addSubscriptionCallCount, 1)
+        XCTAssertEqual(mock.subscriptions.count, 1)
     }
 
     // MARK: - WasteRiskLevel

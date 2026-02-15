@@ -66,7 +66,7 @@ final class DochiViewModel {
     private(set) var pluginManager: PluginManagerProtocol?
 
     // MARK: - Resource Optimizer (J-5)
-    private(set) var resourceOptimizer: ResourceOptimizerService?
+    private(set) var resourceOptimizer: (any ResourceOptimizerProtocol)?
 
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
@@ -282,7 +282,7 @@ final class DochiViewModel {
     }
 
     /// ResourceOptimizerService 설정 (J-5)
-    func configureResourceOptimizer(_ optimizer: ResourceOptimizerService) {
+    func configureResourceOptimizer(_ optimizer: any ResourceOptimizerProtocol) {
         self.resourceOptimizer = optimizer
         Log.app.info("ResourceOptimizerService configured")
     }

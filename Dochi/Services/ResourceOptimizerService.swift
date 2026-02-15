@@ -173,10 +173,6 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
     private func tokensUsedByProvider(_ providerName: String, since startDate: Date) async -> Int {
         guard let store = usageStore else { return 0 }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-
         let dayFormatter = DateFormatter()
         dayFormatter.dateFormat = "yyyy-MM-dd"
         dayFormatter.locale = Locale(identifier: "en_US_POSIX")
@@ -193,7 +189,7 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
             for day in records {
                 guard day.date >= startStr else { continue }
                 for entry in day.entries {
-                    if entry.provider.lowercased().contains(providerLower) {
+                    if entry.provider.lowercased() == providerLower {
                         totalTokens += entry.inputTokens + entry.outputTokens
                     }
                 }
