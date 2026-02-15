@@ -52,6 +52,9 @@ struct ContentView: View {
     // J-1: 디바이스 정책
     @State private var showConnectedDevicesPopover = false
 
+    // J-2: 위임 모니터
+    @State private var showDelegationMonitor = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -191,6 +194,11 @@ struct ContentView: View {
                             )
                         }
                     )
+                }
+            }
+            .sheet(isPresented: $showDelegationMonitor) {
+                if let manager = viewModel.delegationManager {
+                    DelegationMonitorView(delegationManager: manager)
                 }
             }
     }
@@ -692,6 +700,8 @@ struct ContentView: View {
             }
         case .openConnectedDevices:
             showConnectedDevicesPopover = true
+        case .openDelegationMonitor:
+            showDelegationMonitor = true
         case .openShortcutsApp:
             NSWorkspace.shared.open(URL(string: "shortcuts://")!)
         case .custom(let id):

@@ -56,6 +56,7 @@ struct DochiApp: App {
     private let vectorStore: VectorStore
     private let documentIndexer: DocumentIndexer
     private let memoryConsolidator: MemoryConsolidator
+    private let delegationManager: DelegationManager
 
     init() {
         let settings = AppSettings()
@@ -100,6 +101,9 @@ struct DochiApp: App {
         let sessionContext = SessionContext(workspaceId: workspaceId, currentUserId: restoredUserId)
         self.sessionContext = sessionContext
 
+        let delegationManager = DelegationManager()
+        self.delegationManager = delegationManager
+
         let toolService = BuiltInToolService(
             contextService: contextService,
             keychainService: keychainService,
@@ -107,7 +111,9 @@ struct DochiApp: App {
             settings: settings,
             supabaseService: supabaseService,
             telegramService: telegramService,
-            mcpService: mcpService
+            mcpService: mcpService,
+            llmService: llmService,
+            delegationManager: delegationManager
         )
         self.toolService = toolService
 
@@ -244,6 +250,9 @@ struct DochiApp: App {
                     // Configure FeedbackStore (I-4)
                     let feedbackStore = FeedbackStore()
                     viewModel.configureFeedbackStore(feedbackStore)
+
+                    // Configure DelegationManager (J-2)
+                    viewModel.configureDelegationManager(delegationManager)
 
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)

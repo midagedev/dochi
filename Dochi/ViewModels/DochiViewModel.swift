@@ -55,6 +55,10 @@ final class DochiViewModel {
     // MARK: - Feedback (I-4)
     private(set) var feedbackStore: FeedbackStoreProtocol?
 
+    // MARK: - Agent Delegation (J-2)
+    private(set) var delegationManager: DelegationManager?
+    var showDelegationMonitor: Bool = false
+
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
     var showConnectedDevicesPopover: Bool = false
@@ -250,6 +254,11 @@ final class DochiViewModel {
     func configureDevicePolicyService(_ service: DevicePolicyServiceProtocol) {
         self.devicePolicyService = service
         Log.app.info("DevicePolicyService configured")
+    }
+
+    func configureDelegationManager(_ manager: DelegationManager) {
+        self.delegationManager = manager
+        Log.app.info("DelegationManager configured")
     }
 
     /// 피드백 제출 (I-4)

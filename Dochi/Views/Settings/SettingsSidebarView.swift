@@ -106,7 +106,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .family:
             return ["가족", "구성원", "프로필", "사용자"]
         case .agent:
-            return ["에이전트", "페르소나", "템플릿"]
+            return ["에이전트", "페르소나", "템플릿", "위임", "delegation"]
         case .tools:
             return ["도구", "tool", "권한", "safe", "sensitive", "restricted"]
         case .integrations:

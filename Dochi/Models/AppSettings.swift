@@ -358,6 +358,20 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(spotlightIndexWorkspaceMemory, forKey: "spotlightIndexWorkspaceMemory") }
     }
 
+    // MARK: - Agent Delegation (J-2)
+
+    var delegationEnabled: Bool = UserDefaults.standard.object(forKey: "delegationEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(delegationEnabled, forKey: "delegationEnabled") }
+    }
+
+    var delegationMaxChainDepth: Int = UserDefaults.standard.object(forKey: "delegationMaxChainDepth") as? Int ?? 3 {
+        didSet { UserDefaults.standard.set(delegationMaxChainDepth, forKey: "delegationMaxChainDepth") }
+    }
+
+    var delegationDefaultTimeoutSeconds: Int = UserDefaults.standard.object(forKey: "delegationDefaultTimeoutSeconds") as? Int ?? 120 {
+        didSet { UserDefaults.standard.set(delegationDefaultTimeoutSeconds, forKey: "delegationDefaultTimeoutSeconds") }
+    }
+
     // MARK: - Device Policy (J-1)
 
     var deviceSelectionPolicy: String = UserDefaults.standard.string(forKey: "deviceSelectionPolicy") ?? "priorityBased" {

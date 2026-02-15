@@ -23,7 +23,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         settings: AppSettings,
         supabaseService: SupabaseServiceProtocol,
         telegramService: TelegramServiceProtocol,
-        mcpService: MCPServiceProtocol
+        mcpService: MCPServiceProtocol,
+        llmService: LLMServiceProtocol? = nil,
+        delegationManager: DelegationManager? = nil
     ) {
         self.sessionContext = sessionContext
         self.mcpService = mcpService
@@ -207,8 +209,16 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(GitHubViewTool())
 
         // Agent orchestration (conditional, sensitive)
-        registry.register(AgentDelegateTaskTool(contextService: contextService, sessionContext: sessionContext, settings: settings))
+        registry.register(AgentDelegateTaskTool(
+            contextService: contextService,
+            sessionContext: sessionContext,
+            settings: settings,
+            llmService: llmService,
+            keychainService: keychainService,
+            delegationManager: delegationManager
+        ))
         registry.register(AgentCheckStatusTool(contextService: contextService, sessionContext: sessionContext, settings: settings))
+        registry.register(AgentDelegationStatusTool(delegationManager: delegationManager))
 
         // Coding agent (conditional, restricted/sensitive)
         registry.register(CodingRunTaskTool())
