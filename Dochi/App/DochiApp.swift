@@ -59,6 +59,7 @@ struct DochiApp: App {
     private let delegationManager: DelegationManager
     private let schedulerService: SchedulerService
     private let pluginManager: PluginManager
+    private let resourceOptimizer: any ResourceOptimizerProtocol
 
     init() {
         let settings = AppSettings()
@@ -133,6 +134,10 @@ struct DochiApp: App {
         self.usageStore = usageStore
         metricsCollector.usageStore = usageStore
         metricsCollector.settings = settings
+
+        // Resource Optimizer (J-5)
+        let resourceOptimizer = ResourceOptimizerService(baseURL: appSupportURL, usageStore: usageStore)
+        self.resourceOptimizer = resourceOptimizer
 
         // Spotlight indexer (H-4)
         let spotlightIndexer = SpotlightIndexer(settings: settings)
@@ -265,6 +270,9 @@ struct DochiApp: App {
 
                     // Configure PluginManager (J-4)
                     viewModel.configurePluginManager(pluginManager)
+
+                    // Configure ResourceOptimizer (J-5)
+                    viewModel.configureResourceOptimizer(resourceOptimizer)
 
                     // Configure SchedulerService (J-3)
                     viewModel.configureSchedulerService(schedulerService)
@@ -407,7 +415,8 @@ struct DochiApp: App {
             viewModel: viewModel,
             pluginManager: pluginManager,
             documentIndexer: documentIndexer,
-            feedbackStore: viewModel.feedbackStore
+            feedbackStore: viewModel.feedbackStore,
+            resourceOptimizer: resourceOptimizer
         )
     }
 

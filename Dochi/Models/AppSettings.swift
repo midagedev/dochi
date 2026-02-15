@@ -492,6 +492,20 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(feedbackShowOnHover, forKey: "feedbackShowOnHover") }
     }
 
+    // MARK: - Resource Optimizer (J-5)
+
+    var resourceAutoTaskEnabled: Bool = UserDefaults.standard.object(forKey: "resourceAutoTaskEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(resourceAutoTaskEnabled, forKey: "resourceAutoTaskEnabled") }
+    }
+
+    var resourceAutoTaskOnlyWasteRisk: Bool = UserDefaults.standard.object(forKey: "resourceAutoTaskOnlyWasteRisk") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(resourceAutoTaskOnlyWasteRisk, forKey: "resourceAutoTaskOnlyWasteRisk") }
+    }
+
+    var resourceAutoTaskTypes: [String] = UserDefaults.standard.stringArray(forKey: "resourceAutoTaskTypes") ?? AutoTaskType.allCases.map(\.rawValue) {
+        didSet { UserDefaults.standard.set(resourceAutoTaskTypes, forKey: "resourceAutoTaskTypes") }
+    }
+
     // MARK: - Guide (UX-9)
 
     /// 인앱 힌트 표시 여부 (hintsGloballyDisabled의 반전)

@@ -94,7 +94,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .apiKey:
             return ["API", "키", "key", "OpenAI", "Anthropic", "Tavily", "Fal", "티어"]
         case .usage:
-            return ["사용량", "비용", "cost", "토큰", "token", "예산", "budget", "대시보드", "dashboard"]
+            return ["사용량", "비용", "cost", "토큰", "token", "예산", "budget", "대시보드", "dashboard", "구독", "subscription", "최적화", "optimizer", "낭비", "소멸"]
         case .rag:
             return ["RAG", "문서", "검색", "임베딩", "embedding", "벡터", "vector", "PDF", "인덱싱"]
         case .memory:

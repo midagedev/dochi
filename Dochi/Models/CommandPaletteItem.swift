@@ -457,6 +457,15 @@ enum CommandPaletteRegistry {
             category: .settings,
             action: .openSettingsSection(section: "automation")
         ),
+        // J-5: 리소스 최적화
+        CommandPaletteItem(
+            id: "resource.check",
+            icon: "chart.bar.xaxis",
+            title: "리소스 사용률 확인",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "usage")
+        ),
         // G-3: 동기화 명령
         CommandPaletteItem(
             id: "sync-now",

@@ -65,6 +65,9 @@ final class DochiViewModel {
     // MARK: - Plugin System (J-4)
     private(set) var pluginManager: PluginManagerProtocol?
 
+    // MARK: - Resource Optimizer (J-5)
+    private(set) var resourceOptimizer: (any ResourceOptimizerProtocol)?
+
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
     var showConnectedDevicesPopover: Bool = false
@@ -276,6 +279,12 @@ final class DochiViewModel {
     func configurePluginManager(_ manager: PluginManagerProtocol) {
         self.pluginManager = manager
         Log.app.info("PluginManager configured")
+    }
+
+    /// ResourceOptimizerService 설정 (J-5)
+    func configureResourceOptimizer(_ optimizer: any ResourceOptimizerProtocol) {
+        self.resourceOptimizer = optimizer
+        Log.app.info("ResourceOptimizerService configured")
     }
 
     func dismissScheduleExecutionBanner() {

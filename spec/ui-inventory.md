@@ -164,7 +164,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 |------|----------------|--------|------|------|
 | AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택 (클라우드/로컬 그룹), Ollama 설정, LM Studio 설정, 오프라인 폴백, 태스크 라우팅 |
 | AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
-| AI | 사용량 (`usage`) | chart.bar.xaxis | `Views/Settings/UsageDashboardView.swift` | 기간별 사용량 (오늘/주/월/전체), 요약 카드 (교환수/토큰/비용), Swift Charts 일별 차트 (비용/토큰 모드), 모델별/에이전트별 분류 테이블, 예산 설정 (월 한도/알림/차단) (G-4) |
+| AI | 사용량 (`usage`) | chart.bar.xaxis | `Views/Settings/UsageDashboardView.swift` | 기간별 사용량 (오늘/주/월/전체), 요약 카드 (교환수/토큰/비용), Swift Charts 일별 차트 (비용/토큰 모드), 모델별/에이전트별 분류 테이블, 예산 설정 (월 한도/알림/차단), 구독 플랜 사용률 카드 (위험도 게이지), 자동 작업 설정, 구독 관리 CRUD (G-4, J-5) |
 | AI | 문서 검색 (`rag`) | doc.text.magnifyingglass | `Views/Settings/RAGSettingsView.swift` | RAG 활성화, 임베딩 설정 (프로바이더/모델), 검색 설정 (자동/topK/최소유사도), 청킹 설정 (크기/오버랩), 문서 통계, 유지보수 (재인덱싱/초기화) (I-1) |
 | AI | 메모리 정리 (`memory`) | brain.head.profile | `Views/Settings/MemorySettingsView.swift` | 자동 정리 활성화, 최소 메시지 수, 정리 모델 (경량/기본), 배너 표시, 크기 한도 (개인/워크스페이스/에이전트), 자동 아카이브, 변경 이력 (I-2) |
 | 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더 (시스템/Google Cloud/ONNX), 음성, 속도/피치, ONNX 모델 관리 (ONNXModelManagerView), 디퓨전 스텝, TTS 오프라인 폴백 |
@@ -187,6 +187,10 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 - `Services/Protocols/PluginManagerProtocol.swift` — PluginManagerProtocol (J-4)
 - `Services/PluginManager.swift` — PluginManager (@Observable, 파일 기반 플러그인 관리) (J-4)
 - `Models/UsageModels.swift` — UsageEntry, DailyUsageRecord, MonthlyUsageFile, MonthlyUsageSummary, ModelPricingTable (G-4)
+- `Models/ResourceOptimizerModels.swift` — SubscriptionPlan, ResourceUtilization, WasteRiskLevel, AutoTaskType, AutoTaskRecord, SubscriptionsFile (J-5)
+- `Services/Protocols/ResourceOptimizerProtocol.swift` — ResourceOptimizerProtocol (J-5)
+- `Services/ResourceOptimizerService.swift` — ResourceOptimizerService (@Observable, 구독 CRUD, 위험도 계산, 자동 작업 큐잉, 파일 기반 persist) (J-5)
+- `Views/Settings/SubscriptionEditSheet.swift` — 구독 등록/편집 시트 (J-5)
 - `Services/UsageStore.swift` — UsageStore (파일 기반 영구 저장, 5초 디바운스) (G-4)
 - `Services/Protocols/UsageStoreProtocol.swift` — UsageStoreProtocol (G-4)
 - `App/NotificationManager.swift` — NotificationManager (UNUserNotificationCenterDelegate, 알림 카테고리/액션 등록, 카테고리별 알림 발송, 사용자 응답 콜백) (H-3)
@@ -381,6 +385,7 @@ RAGReference 필드:
 | 메뉴바 (H-1) | `menuBarEnabled`, `menuBarGlobalShortcutEnabled` |
 | Spotlight (H-4) | `spotlightIndexingEnabled`, `spotlightIndexConversations`, `spotlightIndexPersonalMemory`, `spotlightIndexAgentMemory`, `spotlightIndexWorkspaceMemory` |
 | RAG (I-1) | `ragEnabled`, `ragEmbeddingProvider`, `ragEmbeddingModel`, `ragTopK`, `ragMinSimilarity`, `ragAutoSearch`, `ragChunkSize`, `ragChunkOverlap` |
+| 리소스 최적화 (J-5) | `resourceAutoTaskEnabled`, `resourceAutoTaskOnlyWasteRisk`, `resourceAutoTaskTypes` |
 | 기타 | `chatFontSize`, `currentWorkspaceId`, `defaultUserId`, `activeAgentName` |
 
 ---
@@ -755,6 +760,7 @@ AppSettings: memoryConsolidationEnabled, memoryConsolidationMinMessages, memoryC
 | 에이전트 템플릿 | `~/Library/Application Support/Dochi/agent_templates.json` | 커스텀 에이전트 템플릿 |
 | 사용량 데이터 | `~/Library/Application Support/Dochi/usage/{yyyy-MM}.json` | 월별 API 사용량/비용 기록 (G-4) |
 | Shortcuts 실행 기록 | `~/Library/Application Support/Dochi/shortcut_logs.json` | Shortcuts/Siri 실행 기록 (최대 50건, FIFO) (H-2) |
+| 구독 플랜 데이터 | `~/Library/Application Support/Dochi/subscriptions.json` | 구독 CRUD + 자동 작업 기록 (J-5) |
 
 ---
 
@@ -812,4 +818,4 @@ AppSettings: memoryConsolidationEnabled, memoryConsolidationMinMessages, memoryC
 
 ---
 
-*최종 업데이트: 2026-02-15 (J-4 플러그인 시스템 추가)*
+*최종 업데이트: 2026-02-15 (J-5 리소스 활용 최적화 추가)*
