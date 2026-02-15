@@ -147,6 +147,21 @@ struct OpenAIAdapter: LLMProviderAdapter {
             if let toolCallId = msg.toolCallId {
                 dict["tool_call_id"] = toolCallId
             }
+        } else if msg.role == .user, let images = msg.imageData, !images.isEmpty {
+            // I-3: Convert to multi-content array for Vision
+            var content: [[String: Any]] = []
+            if !msg.content.isEmpty {
+                content.append(["type": "text", "text": msg.content])
+            }
+            for image in images {
+                content.append([
+                    "type": "image_url",
+                    "image_url": [
+                        "url": "data:\(image.mimeType);base64,\(image.base64Data)",
+                    ] as [String: Any],
+                ])
+            }
+            dict["content"] = content
         } else {
             dict["content"] = msg.content
         }

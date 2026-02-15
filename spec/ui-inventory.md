@@ -53,11 +53,15 @@ DochiApp (entry point)
     │   │   │       ├── MessageBubbleView — 개별 메시지 버블 (호버 시 복사 버튼)
     │   │   │       │   ├── MessageMetadataBadgeView — 모델/응답시간 배지 (assistant만, 호버 팝오버)
     │   │   │       │   ├── MemoryReferenceBadgeView — 메모리 참조 배지 (assistant만, 호버 팝오버) (UX-8)
+    │   │   │       │   ├── InlineImageContentView — base64 이미지 인라인 표시 (200x200pt, 클릭→원본 팝오버) (I-3)
     │   │   │       │   └── ToolExecutionRecordCardView — 과거 도구 실행 기록 카드 (접을 수 있음)
     │   │   │       ├── ToolExecutionCardView — 실시간 도구 실행 카드 (상태별 스타일, 접을 수 있음)
     │   │   │       └── ToolChainProgressView — 도구 체인 진행 표시 (2개 이상 도구 실행 시)
     │   │   ├── Divider
-    │   │   └── InputBarView — 텍스트 입력 + 마이크 + 슬래시 명령
+    │   │   ├── VisionWarningBannerView — Vision 미지원 모델 경고 배너 (주황색, 닫기 가능) (I-3)
+    │   │   ├── ImageAttachmentBarView — 이미지 첨부 미리보기 바 (가로 스크롤, 최대 4장) (I-3)
+    │   │   │   └── ImageThumbnailView — 80x80pt 축소판 + X 제거 버튼 + 클릭→ImagePreviewPopoverView
+    │   │   └── InputBarView — 텍스트 입력 + 마이크 + [+] 이미지 첨부 + 슬래시 명령 (I-3 업데이트)
     │   │       └── SlashCommandPopoverView — / 자동완성 팝업
     │   └── [칸반 탭]
     │       └── KanbanWorkspaceView
@@ -89,7 +93,12 @@ DochiApp (entry point)
 | ConversationView | `Views/ConversationView.swift` | 대화 선택 시 | 메시지 스크롤 뷰 |
 | MessageBubbleView | `Views/MessageBubbleView.swift` | 자동 | 개별 메시지 렌더링 (역할별 스타일), 호버 시 복사 버튼 오버레이 |
 | EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트, 에이전트 0개 시 생성 힌트 카드, 투어 리마인더 배너, 첫 대화 힌트 버블 |
-| InputBarView | `Views/ContentView.swift` | 항상 표시 | 텍스트 입력, 마이크, 전송/취소 버튼, 슬래시 명령 |
+| InputBarView | `Views/ContentView.swift` | 항상 표시 | 텍스트 입력, 마이크, [+] 이미지 첨부, 전송/취소 버튼, 슬래시 명령, Cmd+V 이미지 붙여넣기, 드래그앤드롭 (I-3) |
+| ImageAttachmentBarView | `Views/ImageAttachmentBarView.swift` | 이미지 첨부 시 | 가로 스크롤 이미지 미리보기 바 (최대 4장) (I-3) |
+| ImageThumbnailView | `Views/ImageAttachmentBarView.swift` | 이미지 첨부 시 | 80x80pt 축소판 + X 제거 + 클릭→원본 팝오버 (I-3) |
+| ImagePreviewPopoverView | `Views/ImageAttachmentBarView.swift` | 축소판 클릭 | 원본 이미지 미리보기 + 메타정보 (I-3) |
+| VisionWarningBannerView | `Views/ImageAttachmentBarView.swift` | Vision 미지원 모델 + 이미지 첨부 시 | 주황색 경고 배너 (I-3) |
+| InlineImageContentView | `Views/MessageBubbleView.swift` | 메시지에 이미지 포함 시 | base64 이미지 인라인 렌더링 (200x200pt, 클릭→원본 팝오버) (I-3) |
 | SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 4개 독립 버튼: 모델(→QuickModelPopover), 동기화(SyncState 기반: idle→초록/syncing→파란pulse/conflict→주황+건수→SyncConflictListView/error→빨강/offline→회색), 하트비트(→상태시트), 토큰+비용(→상태시트, "1.2K 토큰 · $0.03" 형식). IndicatorButtonStyle 호버 (G-3, G-4 업데이트) |
 | SyncToastView | `Views/SyncToastView.swift` | 동기화 이벤트 발생 시 자동 | 우측 하단 토스트: 방향 아이콘(수신↓/발신↑) + 엔티티 타입 + 제목 + 충돌 여부, 4초 자동 fade (G-3) |
 | SyncToastContainerView | `Views/SyncToastView.swift` | 자동 | 여러 동기화 토스트 스택 관리 (G-3) |

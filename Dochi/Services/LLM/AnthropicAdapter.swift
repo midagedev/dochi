@@ -138,6 +138,26 @@ struct AnthropicAdapter: LLMProviderAdapter {
             return ["role": "user", "content": msg.content]
 
         case .user:
+            // I-3: If the message has image data, convert to multi-content array
+            if let images = msg.imageData, !images.isEmpty {
+                var content: [[String: Any]] = []
+                // Add image blocks first
+                for image in images {
+                    content.append([
+                        "type": "image",
+                        "source": [
+                            "type": "base64",
+                            "media_type": image.mimeType,
+                            "data": image.base64Data,
+                        ] as [String: Any],
+                    ])
+                }
+                // Add text block
+                if !msg.content.isEmpty {
+                    content.append(["type": "text", "text": msg.content])
+                }
+                return ["role": "user", "content": content]
+            }
             return ["role": "user", "content": msg.content]
 
         case .assistant:
