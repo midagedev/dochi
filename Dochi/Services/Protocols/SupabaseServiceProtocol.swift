@@ -28,9 +28,14 @@ protocol SupabaseServiceProtocol {
     func listDevices() async throws -> [Device]
     func removeDevice(id: UUID) async throws
 
-    // Sync
+    // Sync (legacy)
     func syncContext() async throws
     func syncConversations() async throws
+
+    // Sync (G-3 enhanced)
+    func pushEntities(type: SyncEntityType, payload: Data) async throws
+    func pullEntities(type: SyncEntityType, since: Date?) async throws -> Data?
+    func fetchRemoteTimestamps(type: SyncEntityType) async throws -> [String: Date]
 
     // Leader Lock
     func acquireLock(resource: String, workspaceId: UUID) async throws -> Bool

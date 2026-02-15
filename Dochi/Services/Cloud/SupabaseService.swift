@@ -415,6 +415,87 @@ final class SupabaseService: SupabaseServiceProtocol {
         Log.cloud.info("syncConversations completed for user \(userId)")
     }
 
+    // MARK: - Sync (G-3 Enhanced)
+
+    // TODO: G-3 Phase 2 - 엔티티별 테이블 분리. 현재는 단일 sync_data 테이블에 JSON blob으로 저장
+    func pushEntities(type: SyncEntityType, payload: Data) async throws {
+        let client = try requireClient()
+        let userId = try requireUserId()
+        let now = ISO8601DateFormatter().string(from: Date())
+
+        // Store sync payload in sync_data table
+        let payloadString = String(data: payload, encoding: .utf8) ?? ""
+        try await client.from("sync_data")
+            .upsert([
+                "user_id": userId.uuidString,
+                "entity_type": type.rawValue,
+                "payload": payloadString,
+                "updated_at": now,
+            ] as [String: String])
+            .execute()
+
+        Log.cloud.info("pushEntities(\(type.rawValue)) completed for user \(userId)")
+    }
+
+    // TODO: G-3 Phase 2 - 엔티티별 테이블 분리. 현재는 단일 sync_data 테이블에 JSON blob으로 저장
+    func pullEntities(type: SyncEntityType, since: Date?) async throws -> Data? {
+        let client = try requireClient()
+        let userId = try requireUserId()
+
+        struct SyncRow: Codable {
+            let payload: String
+            let updated_at: String
+        }
+
+        var query = client.from("sync_data")
+            .select()
+            .eq("user_id", value: userId.uuidString)
+            .eq("entity_type", value: type.rawValue)
+
+        if let since {
+            let sinceStr = ISO8601DateFormatter().string(from: since)
+            query = query.gte("updated_at", value: sinceStr)
+        }
+
+        let rows: [SyncRow] = try await query.execute().value
+
+        guard let row = rows.first else {
+            Log.cloud.debug("pullEntities(\(type.rawValue)): no data found")
+            return nil
+        }
+
+        Log.cloud.info("pullEntities(\(type.rawValue)) completed for user \(userId)")
+        return row.payload.data(using: .utf8)
+    }
+
+    func fetchRemoteTimestamps(type: SyncEntityType) async throws -> [String: Date] {
+        let client = try requireClient()
+        let userId = try requireUserId()
+
+        struct TimestampRow: Codable {
+            let entity_id: String
+            let updated_at: String
+        }
+
+        let rows: [TimestampRow] = try await client.from("sync_timestamps")
+            .select()
+            .eq("user_id", value: userId.uuidString)
+            .eq("entity_type", value: type.rawValue)
+            .execute()
+            .value
+
+        let formatter = ISO8601DateFormatter()
+        var result: [String: Date] = [:]
+        for row in rows {
+            if let date = formatter.date(from: row.updated_at) {
+                result[row.entity_id] = date
+            }
+        }
+
+        Log.cloud.debug("fetchRemoteTimestamps(\(type.rawValue)): \(result.count) entries")
+        return result
+    }
+
     // MARK: - Leader Lock
 
     func acquireLock(resource: String, workspaceId: UUID) async throws -> Bool {

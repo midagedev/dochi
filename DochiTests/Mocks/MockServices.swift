@@ -452,6 +452,24 @@ final class MockSupabaseService: SupabaseServiceProtocol {
 
     func syncContext() async throws {}
     func syncConversations() async throws {}
+
+    // G-3 enhanced sync
+    var pushedEntities: [(type: SyncEntityType, payload: Data)] = []
+    var pullResult: Data?
+    var remoteTimestamps: [String: Date] = [:]
+
+    func pushEntities(type: SyncEntityType, payload: Data) async throws {
+        pushedEntities.append((type: type, payload: payload))
+    }
+
+    func pullEntities(type: SyncEntityType, since: Date?) async throws -> Data? {
+        pullResult
+    }
+
+    func fetchRemoteTimestamps(type: SyncEntityType) async throws -> [String: Date] {
+        remoteTimestamps
+    }
+
     func acquireLock(resource: String, workspaceId: UUID) async throws -> Bool { true }
     func releaseLock(resource: String, workspaceId: UUID) async throws {}
     func refreshLock(resource: String, workspaceId: UUID) async throws {}

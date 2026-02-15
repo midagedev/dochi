@@ -40,6 +40,9 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case resetHints
         case openQuickModelPopover
         case openSettingsSection(section: String)
+        case syncNow
+        case syncConflicts
+        case cloudAccountSettings
         case custom(id: String)
     }
 }
@@ -289,6 +292,31 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .settings,
             action: .openSettingsSection(section: "ai-model")
+        ),
+        // G-3: 동기화 명령
+        CommandPaletteItem(
+            id: "sync-now",
+            icon: "arrow.triangle.2.circlepath",
+            title: "수동 동기화",
+            subtitle: "",
+            category: .tool,
+            action: .syncNow
+        ),
+        CommandPaletteItem(
+            id: "sync-conflicts",
+            icon: "exclamationmark.triangle",
+            title: "동기화 충돌 해결",
+            subtitle: "",
+            category: .tool,
+            action: .syncConflicts
+        ),
+        CommandPaletteItem(
+            id: "cloud-account",
+            icon: "person.icloud",
+            title: "클라우드 계정 설정",
+            subtitle: "",
+            category: .settings,
+            action: .cloudAccountSettings
         ),
     ]
 

@@ -31,6 +31,9 @@ final class DochiViewModel {
     // MARK: - Memory Toast (UX-8)
     var memoryToastEvents: [MemoryToastEvent] = []
 
+    // MARK: - Sync (G-3)
+    private(set) var syncEngine: SyncEngine?
+
     // MARK: - Conversation Organization
     var conversationTags: [ConversationTag] = []
     var conversationFolders: [ConversationFolder] = []
@@ -156,6 +159,33 @@ final class DochiViewModel {
         startLocalServerMonitoringIfNeeded()
 
         Log.app.info("DochiViewModel initialized")
+    }
+
+    // MARK: - Sync (G-3)
+
+    /// SyncEngine 설정 (SupabaseService 주입 후 호출)
+    func configureSyncEngine(supabaseService: SupabaseServiceProtocol) {
+        // 기존 엔진의 자동 동기화 Task 정리 (Task 누수 방지)
+        syncEngine?.stopAutoSync()
+
+        let engine = SyncEngine(
+            supabaseService: supabaseService,
+            settings: settings,
+            contextService: contextService,
+            conversationService: conversationService
+        )
+        self.syncEngine = engine
+        Log.cloud.info("SyncEngine configured")
+    }
+
+    /// 동기화 상태 복원 (앱 시작 시)
+    func restoreSyncState() {
+        syncEngine?.restoreSyncState()
+    }
+
+    /// 동기화 토스트 제거
+    func dismissSyncToast(id: UUID) {
+        syncEngine?.dismissSyncToast(id: id)
     }
 
     // MARK: - Local Server Monitoring

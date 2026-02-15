@@ -19,10 +19,10 @@ DochiApp (entry point)
     │   ├── ConversationListView — 즐겨찾기/폴더/미분류 섹션 대화 목록
     │   ├── BulkActionToolbarView — 일괄 선택 모드 하단 툴바
     │   ├── 폴더/태그 관리 버튼
-    │   └── SidebarAuthStatusView — Supabase 로그인 상태
+    │   └── SidebarAuthStatusView — Supabase 로그인 상태 + SyncState 표시 (G-3)
     ├── [Detail]
     │   ├── [대화 탭]
-    │   │   ├── SystemHealthBarView — 시스템 상태 바 (개별 클릭 가능: 모델→QuickModel팝오버/동기화/하트비트/토큰→상태시트, 로컬 프로바이더 아이콘, 오프라인 폴백 표시) [항상 표시]
+    │   │   ├── SystemHealthBarView — 시스템 상태 바 (개별 클릭 가능: 모델→QuickModel팝오버/동기화(SyncState 기반 인디케이터, 충돌→SyncConflictListView)/하트비트/토큰→상태시트, 로컬 프로바이더 아이콘, 오프라인 폴백 표시) [항상 표시] (G-3 업데이트)
     │   │   ├── StatusBarView — 상태/토큰 (처리 중에만 표시)
     │   │   ├── ToolConfirmationBannerView — 민감 도구 승인 (카운트다운 타이머, Enter/Escape 단축키)
     │   │   ├── OfflineFallbackBannerView — 오프라인 폴백 상태 배너 (로컬 모델 전환 알림 + 복구 버튼) (G-1)
@@ -47,6 +47,7 @@ DochiApp (entry point)
     ├── [Inspector] MemoryPanelView — 메모리 인스펙터 패널 (⌘I 토글) (UX-8)
     │   └── MemoryNodeView — 계층별 메모리 노드 (접기/펼치기 + 인라인 편집)
     ├── [Overlay] CommandPaletteView — ⌘K 커맨드 팔레트 (ZStack 오버레이)
+    ├── [Overlay] SyncToastContainerView — 동기화 이벤트 토스트 (우측 하단, 메모리 토스트 위) (G-3)
     └── [Overlay] MemoryToastContainerView — 메모리 저장 토스트 (우측 하단) (UX-8)
 ```
 
@@ -70,7 +71,9 @@ DochiApp (entry point)
 | MessageBubbleView | `Views/MessageBubbleView.swift` | 자동 | 개별 메시지 렌더링 (역할별 스타일), 호버 시 복사 버튼 오버레이 |
 | EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트, 에이전트 0개 시 생성 힌트 카드, 투어 리마인더 배너, 첫 대화 힌트 버블 |
 | InputBarView | `Views/ContentView.swift` | 항상 표시 | 텍스트 입력, 마이크, 전송/취소 버튼, 슬래시 명령 |
-| SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 4개 독립 버튼: 모델(→QuickModelPopover), 동기화(→상태시트), 하트비트(→상태시트), 토큰(→상태시트). IndicatorButtonStyle 호버 |
+| SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 4개 독립 버튼: 모델(→QuickModelPopover), 동기화(SyncState 기반: idle→초록/syncing→파란pulse/conflict→주황+건수→SyncConflictListView/error→빨강/offline→회색), 하트비트(→상태시트), 토큰(→상태시트). IndicatorButtonStyle 호버 (G-3 업데이트) |
+| SyncToastView | `Views/SyncToastView.swift` | 동기화 이벤트 발생 시 자동 | 우측 하단 토스트: 방향 아이콘(수신↓/발신↑) + 엔티티 타입 + 제목 + 충돌 여부, 4초 자동 fade (G-3) |
+| SyncToastContainerView | `Views/SyncToastView.swift` | 자동 | 여러 동기화 토스트 스택 관리 (G-3) |
 | MessageMetadataBadgeView | `Views/MessageBubbleView.swift` | assistant 메시지 자동 | 모델명·응답시간 배지, 호버 시 상세 팝오버 (토큰/프로바이더/폴백) |
 | StatusBarView | `Views/ContentView.swift` | 처리 중 자동 | 상태 아이콘 + 텍스트 + 토큰 사용량 |
 | ToolExecutionCardView | `Views/ToolExecutionCardView.swift` | 도구 실행 시 자동 | 접을 수 있는 실시간 도구 실행 카드 (상태 아이콘, 도구명, 입력 요약, 소요 시간, 카테고리 배지) |
@@ -95,7 +98,7 @@ DochiApp (entry point)
 
 | 화면 | 파일 | 접근 방법 | 설명 |
 |------|------|-----------|------|
-| SystemStatusSheetView | `Views/SystemStatusSheetView.swift` | 툴바 "상태" 버튼 (⌘⇧S) 또는 SystemHealthBar 클릭 | 3탭 상세: LLM 교환 이력, 하트비트 틱 기록, 클라우드 동기화 |
+| SystemStatusSheetView | `Views/SystemStatusSheetView.swift` | 툴바 "상태" 버튼 (⌘⇧S) 또는 SystemHealthBar 클릭 | 3탭 상세: LLM 교환 이력, 하트비트 틱 기록, 클라우드 동기화(상태 헤더+동기화 대상 요약+충돌 섹션+히스토리+수동/전체 동기화 버튼) (G-3 재설계) |
 | CapabilityCatalogView | `Views/CapabilityCatalogView.swift` | 툴바 "기능" 버튼 (⌘⇧F) | 전체 도구 그룹별 카탈로그 |
 | ContextInspectorView | `Views/ContextInspectorView.swift` | ⌘⌥I 또는 커맨드 팔레트 | 시스템 프롬프트 / 에이전트 / 메모리 탭 (시트) |
 | KeyboardShortcutHelpView | `Views/KeyboardShortcutHelpView.swift` | ⌘/ 또는 커맨드 팔레트 | 4섹션 키보드 단축키 도움말 (480x520) |
@@ -114,6 +117,9 @@ DochiApp (entry point)
 | AgentCardGridView | `Views/Agent/AgentCardGridView.swift` | 설정 > 에이전트 탭 | 2열 카드 그리드 (편집/복제/템플릿저장/삭제 메뉴), 빈 상태 안내 |
 | AgentDetailView | `Views/Sidebar/AgentDetailView.swift` | SidebarHeader 메뉴, AgentCardGridView 편집 | 에이전트 편집 (설정/페르소나/메모리 3탭) |
 | ExportOptionsView | `Views/ExportOptionsView.swift` | 툴바 "내보내기" 버튼 (⌘⇧E) 또는 커맨드 팔레트 | 4형식 선택(Md/JSON/PDF/텍스트), 3옵션 토글, 3액션(클립보드/공유/파일 저장), 400x480pt |
+| SyncConflictListView | `Views/SyncConflictListView.swift` | SystemHealthBar 충돌 클릭 또는 AccountSettings "해결하기" | 동기화 충돌 목록 시트 (600x500pt), 일괄 해결 (로컬/원격), 개별 클릭→SyncConflictDetailView (G-3) |
+| SyncConflictDetailView | `Views/SyncConflictDetailView.swift` | SyncConflictListView 항목 클릭 | 좌우 비교 (로컬 vs 원격), 메모리 충돌 시 수동 병합 TextEditor (600x500pt) (G-3) |
+| InitialSyncWizardView | `Views/InitialSyncWizardView.swift` | AccountSettingsView "초기 업로드" | 3단계 위저드: 안내→진행률→완료 (480x420pt) (G-3) |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
 ### 설정 (SettingsView — NavigationSplitView, 12섹션 6그룹) (UX-10 리디자인)
@@ -134,7 +140,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | 사람 | 에이전트 (`agent`) | person.crop.rectangle | `Views/Settings/AgentSettingsView.swift` → `Views/Agent/AgentCardGridView.swift` | 에이전트 카드 그리드 |
 | 연결 | 도구 (`tools`) | wrench.and.screwdriver | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
 | 연결 | 통합 (`integrations`) | puzzlepiece | `Views/Settings/IntegrationsSettingsView.swift` | 텔레그램, MCP, 채팅 매핑 |
-| 연결 | 계정 (`account`) | person.crop.circle | `Views/Settings/AccountSettingsView.swift` | Supabase 인증, 동기화 |
+| 연결 | 계정 (`account`) | person.crop.circle | `Views/Settings/AccountSettingsView.swift` | Supabase 인증, 동기화(SyncState 표시+충돌 건수+수동/전체 동기화), 동기화 설정(자동/실시간/대상 선택/충돌 전략), 데이터 관리(초기 업로드) (G-3 확장) |
 | 도움말 | 가이드 (`guide`) | play.rectangle | `Views/SettingsView.swift` 내 GuideSettingsContent | 투어/힌트 관리 |
 
 지원 파일:
@@ -166,6 +172,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | `toolExecutions` | `[ToolExecution]` | 현재 턴 도구 실행 목록 | ConversationView (ToolExecutionCardView, ToolChainProgressView) |
 | `allToolCardsCollapsed` | `Bool` | 도구 카드 일괄 접기/펼치기 상태 | ⌘⇧T 토글 |
 | `memoryToastEvents` | `[MemoryToastEvent]` | 메모리 저장 토스트 이벤트 큐 | MemoryToastContainerView |
+| `syncEngine` | `SyncEngine?` | 동기화 엔진 (G-3) | SystemHealthBarView, CloudSyncTabView, AccountSettingsView, SyncToastContainerView |
 
 ### 대화 정리 상태 (UX-4 추가)
 
@@ -236,6 +243,29 @@ MemoryContextInfo 필드:
 | `contentPreview` | `String` | 저장 내용 미리보기 (80자 이내) |
 | `timestamp` | `Date` | 발생 시각 |
 
+### SyncEngine 상태 (G-3 추가)
+
+| 프로퍼티 | 타입 | 설명 | UI 사용처 |
+|----------|------|------|-----------|
+| `syncState` | `SyncState` | idle/syncing/conflict/error/offline/disabled | SystemHealthBarView, SidebarAuthStatusView, CloudSyncTabView |
+| `syncProgress` | `SyncProgress` | 동기화 진행률 | InitialSyncWizardView, CloudSyncTabView |
+| `syncConflicts` | `[SyncConflict]` | 미해결 충돌 목록 | SyncConflictListView, CloudSyncTabView |
+| `lastSuccessfulSync` | `Date?` | 마지막 동기화 시각 | CloudSyncTabView, AccountSettingsView |
+| `pendingLocalChanges` | `Int` | 오프라인 큐 대기 건수 | AccountSettingsView |
+| `syncHistory` | `[SyncHistoryEntry]` | 최근 20건 동기화 이력 | CloudSyncTabView |
+| `syncToastEvents` | `[SyncToastEvent]` | 동기화 토스트 이벤트 큐 | SyncToastContainerView |
+
+### SyncToastEvent (G-3 추가)
+
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `id` | `UUID` | 이벤트 ID |
+| `direction` | `SyncDirection` | incoming/outgoing |
+| `entityType` | `SyncEntityType` | conversation/memory/kanban/profile |
+| `entityTitle` | `String` | 엔티티 이름 |
+| `isConflict` | `Bool` | 충돌 여부 |
+| `timestamp` | `Date` | 발생 시각 |
+
 ### TTS 폴백 상태 (G-2 추가)
 
 | 프로퍼티 | 타입 | 설명 | UI 사용처 |
@@ -262,6 +292,7 @@ MemoryContextInfo 필드:
 | Heartbeat | `heartbeatEnabled`, `heartbeatIntervalMinutes`, `heartbeatCheckCalendar/Kanban/Reminders` |
 | 아바타 | `avatarEnabled` |
 | 가이드 | `hintsEnabled`, `featureTourCompleted`, `featureTourSkipped`, `featureTourBannerDismissed` |
+| 동기화 (G-3) | `autoSyncEnabled`, `realtimeSyncEnabled`, `syncConversations`, `syncMemory`, `syncKanban`, `syncProfiles`, `conflictResolutionStrategy` |
 | 기타 | `chatFontSize`, `currentWorkspaceId`, `defaultUserId`, `activeAgentName` |
 
 ---

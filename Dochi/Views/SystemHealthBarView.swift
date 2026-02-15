@@ -7,6 +7,7 @@ struct SystemHealthBarView: View {
     let metricsCollector: MetricsCollector
     var heartbeatService: HeartbeatService?
     var supabaseService: SupabaseServiceProtocol?
+    var syncEngine: SyncEngine?
     var isOfflineFallbackActive: Bool = false
     var localServerStatus: LocalServerStatus = .unknown
 
@@ -15,6 +16,7 @@ struct SystemHealthBarView: View {
     let onSyncTap: () -> Void
     let onHeartbeatTap: () -> Void
     let onTokenTap: () -> Void
+    var onSyncConflictTap: (() -> Void)?
 
     private var sessionSummary: SessionMetricsSummary {
         metricsCollector.sessionSummary
@@ -72,8 +74,27 @@ struct SystemHealthBarView: View {
 
             divider
 
-            // 2. Cloud sync status
-            if let supabase = supabaseService, supabase.authState.isSignedIn {
+            // 2. Cloud sync status (G-3: SyncEngine 기반)
+            if let engine = syncEngine, supabaseService?.authState.isSignedIn == true {
+                Button {
+                    if case .conflict = engine.syncState {
+                        onSyncConflictTap?()
+                    } else {
+                        onSyncTap()
+                    }
+                } label: {
+                    indicator {
+                        HStack(spacing: 4) {
+                            syncIndicatorIcon(for: engine.syncState)
+                            Text(syncDisplayText(for: engine.syncState))
+                        }
+                    }
+                }
+                .buttonStyle(IndicatorButtonStyle())
+                .help("동기화 상태")
+
+                divider
+            } else if let supabase = supabaseService, supabase.authState.isSignedIn {
                 Button {
                     onSyncTap()
                 } label: {
@@ -161,6 +182,47 @@ struct SystemHealthBarView: View {
             return String(format: "%.1fK", Double(count) / 1000.0)
         }
         return "\(count)"
+    }
+
+    @ViewBuilder
+    private func syncIndicatorIcon(for state: SyncState) -> some View {
+        switch state {
+        case .idle:
+            Circle()
+                .fill(.green)
+                .frame(width: 6, height: 6)
+        case .syncing:
+            ProgressView()
+                .scaleEffect(0.4)
+                .frame(width: 6, height: 6)
+        case .conflict:
+            Circle()
+                .fill(.orange)
+                .frame(width: 6, height: 6)
+        case .error:
+            Circle()
+                .fill(.red)
+                .frame(width: 6, height: 6)
+        case .offline:
+            Circle()
+                .fill(.gray)
+                .frame(width: 6, height: 6)
+        case .disabled:
+            Circle()
+                .fill(.gray)
+                .frame(width: 6, height: 6)
+        }
+    }
+
+    private func syncDisplayText(for state: SyncState) -> String {
+        switch state {
+        case .idle: "동기화"
+        case .syncing: "동기화 중"
+        case .conflict(let count): "충돌 \(count)"
+        case .error: "동기화 오류"
+        case .offline: "오프라인"
+        case .disabled: "동기화"
+        }
     }
 
     private func syncStatusColor(for service: SupabaseServiceProtocol) -> Color {

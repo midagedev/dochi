@@ -3,6 +3,7 @@ import SwiftUI
 struct AccountSettingsView: View {
     var supabaseService: SupabaseServiceProtocol?
     var settings: AppSettings
+    var syncEngine: SyncEngine?
 
     @State private var supabaseURL = ""
     @State private var supabaseAnonKey = ""
@@ -12,6 +13,8 @@ struct AccountSettingsView: View {
     @State private var isSyncing = false
     @State private var syncStatus: String?
     @State private var lastSyncTime: Date?
+    @State private var showInitialSyncWizard = false
+    @State private var showConflictSheet = false
 
     var body: some View {
         Form {
@@ -91,38 +94,160 @@ struct AccountSettingsView: View {
             }
 
             Section("동기화") {
-                HStack {
-                    if let time = lastSyncTime {
-                        Text("마지막 동기화: \(time, style: .relative)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("아직 동기화하지 않음")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                // SyncState 표시
+                if let engine = syncEngine {
+                    HStack(spacing: 8) {
+                        Image(systemName: engine.syncState.iconName)
+                            .font(.system(size: 14))
+                            .foregroundStyle(syncStateColor(engine.syncState))
 
-                    Spacer()
-
-                    if let status = syncStatus {
-                        Text(status)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Button {
-                    syncNow()
-                } label: {
-                    HStack(spacing: 4) {
-                        if isSyncing {
-                            ProgressView()
-                                .scaleEffect(0.5)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(engine.syncState.displayText)
+                                .font(.system(size: 12, weight: .medium))
+                            if let lastSync = engine.lastSuccessfulSync {
+                                Text("마지막: \(lastSync, style: .relative)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        Text("수동 동기화")
+
+                        Spacer()
+
+                        if engine.pendingLocalChanges > 0 {
+                            Text("대기 \(engine.pendingLocalChanges)건")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
+                    }
+
+                    // 충돌 건수
+                    if !engine.syncConflicts.isEmpty {
+                        Button {
+                            showConflictSheet = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text("충돌 \(engine.syncConflicts.count)건 해결하기")
+                                    .font(.system(size: 12))
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                } else {
+                    HStack {
+                        if let time = lastSyncTime {
+                            Text("마지막 동기화: \(time, style: .relative)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("아직 동기화하지 않음")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if let status = syncStatus {
+                            Text(status)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-                .disabled(isSyncing || supabaseService?.authState.isSignedIn != true)
+
+                HStack(spacing: 8) {
+                    Button {
+                        syncNow()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if isSyncing {
+                                ProgressView()
+                                    .scaleEffect(0.5)
+                            }
+                            Text("수동 동기화")
+                        }
+                    }
+                    .disabled(isSyncing || supabaseService?.authState.isSignedIn != true)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    if syncEngine != nil {
+                        Button("전체 동기화") {
+                            Task {
+                                isSyncing = true
+                                await syncEngine?.fullSync()
+                                isSyncing = false
+                            }
+                        }
+                        .disabled(isSyncing || supabaseService?.authState.isSignedIn != true)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+
+            // 동기화 설정 (G-3)
+            Section("동기화 설정") {
+                Toggle("자동 동기화", isOn: Binding(
+                    get: { settings.autoSyncEnabled },
+                    set: { settings.autoSyncEnabled = $0 }
+                ))
+                .font(.system(size: 13))
+
+                Toggle("실시간 동기화", isOn: Binding(
+                    get: { settings.realtimeSyncEnabled },
+                    set: { settings.realtimeSyncEnabled = $0 }
+                ))
+                .font(.system(size: 13))
+                .disabled(!settings.autoSyncEnabled)
+
+                DisclosureGroup("동기화 대상") {
+                    Toggle("대화", isOn: Binding(
+                        get: { settings.syncConversations },
+                        set: { settings.syncConversations = $0 }
+                    ))
+                    .font(.system(size: 12))
+
+                    Toggle("메모리", isOn: Binding(
+                        get: { settings.syncMemory },
+                        set: { settings.syncMemory = $0 }
+                    ))
+                    .font(.system(size: 12))
+
+                    Toggle("칸반", isOn: Binding(
+                        get: { settings.syncKanban },
+                        set: { settings.syncKanban = $0 }
+                    ))
+                    .font(.system(size: 12))
+
+                    Toggle("프로필", isOn: Binding(
+                        get: { settings.syncProfiles },
+                        set: { settings.syncProfiles = $0 }
+                    ))
+                    .font(.system(size: 12))
+                }
+                .font(.system(size: 13))
+
+                Picker("충돌 전략", selection: Binding(
+                    get: { settings.conflictResolutionStrategy },
+                    set: { settings.conflictResolutionStrategy = $0 }
+                )) {
+                    Text("최근 수정 우선").tag("lastWriteWins")
+                    Text("수동 선택").tag("manual")
+                }
+                .font(.system(size: 13))
+            }
+
+            // 데이터 관리 (G-3)
+            Section("데이터 관리") {
+                Button("초기 업로드") {
+                    showInitialSyncWizard = true
+                }
+                .disabled(supabaseService?.authState.isSignedIn != true)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
@@ -138,6 +263,27 @@ struct AccountSettingsView: View {
                 supabaseService: supabaseService,
                 mode: loginMode
             )
+        }
+        .sheet(isPresented: $showInitialSyncWizard) {
+            if let engine = syncEngine {
+                InitialSyncWizardView(
+                    syncEngine: engine,
+                    onComplete: {}
+                )
+            }
+        }
+        .sheet(isPresented: $showConflictSheet) {
+            if let engine = syncEngine {
+                SyncConflictListView(
+                    conflicts: engine.syncConflicts,
+                    onResolve: { id, resolution in
+                        engine.resolveConflict(id: id, resolution: resolution)
+                    },
+                    onResolveAll: { resolution in
+                        engine.resolveAllConflicts(resolution: resolution)
+                    }
+                )
+            }
         }
     }
 
@@ -166,18 +312,34 @@ struct AccountSettingsView: View {
         configureError = nil
     }
 
+    private func syncStateColor(_ state: SyncState) -> Color {
+        switch state {
+        case .idle: .green
+        case .syncing: .blue
+        case .conflict: .orange
+        case .error: .red
+        case .offline: .gray
+        case .disabled: .gray
+        }
+    }
+
     private func syncNow() {
-        guard let service = supabaseService else { return }
         isSyncing = true
         syncStatus = "동기화 중..."
         Task {
-            do {
-                try await service.syncContext()
-                try await service.syncConversations()
-                lastSyncTime = Date()
-                syncStatus = "완료"
-            } catch {
-                syncStatus = "실패: \(error.localizedDescription)"
+            if let engine = syncEngine {
+                await engine.sync()
+                lastSyncTime = engine.lastSuccessfulSync
+                syncStatus = engine.syncState == .idle ? "완료" : engine.syncState.displayText
+            } else if let service = supabaseService {
+                do {
+                    try await service.syncContext()
+                    try await service.syncConversations()
+                    lastSyncTime = Date()
+                    syncStatus = "완료"
+                } catch {
+                    syncStatus = "실패: \(error.localizedDescription)"
+                }
             }
             isSyncing = false
         }
