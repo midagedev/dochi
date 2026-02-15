@@ -26,6 +26,7 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case switchAgent(name: String)
         case openSettings
         case openContextInspector
+        case openMemoryPanel
         case openCapabilityCatalog
         case openSystemStatus
         case openShortcutHelp
@@ -117,10 +118,18 @@ enum CommandPaletteRegistry {
             action: .openSettings
         ),
         CommandPaletteItem(
+            id: "memory-panel",
+            icon: "brain",
+            title: "메모리 인스펙터",
+            subtitle: "⌘I",
+            category: .navigation,
+            action: .openMemoryPanel
+        ),
+        CommandPaletteItem(
             id: "context-inspector",
             icon: "doc.text.magnifyingglass",
             title: "컨텍스트 인스펙터",
-            subtitle: "⌘I",
+            subtitle: "⌘⌥I",
             category: .navigation,
             action: .openContextInspector
         ),

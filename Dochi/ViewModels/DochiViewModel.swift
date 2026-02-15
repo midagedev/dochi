@@ -28,6 +28,9 @@ final class DochiViewModel {
     var toolExecutions: [ToolExecution] = []
     var allToolCardsCollapsed: Bool = true
 
+    // MARK: - Memory Toast (UX-8)
+    var memoryToastEvents: [MemoryToastEvent] = []
+
     // MARK: - Conversation Organization
     var conversationTags: [ConversationTag] = []
     var conversationFolders: [ConversationFolder] = []
@@ -573,6 +576,43 @@ final class DochiViewModel {
     func toggleAllToolCards() {
         allToolCardsCollapsed.toggle()
         Log.app.info("Tool cards all \(self.allToolCardsCollapsed ? "collapsed" : "expanded")")
+    }
+
+    // MARK: - Memory Toast (UX-8)
+
+    func showMemoryToast(scope: MemoryToastEvent.Scope, action: MemoryToastEvent.Action, contentPreview: String) {
+        let event = MemoryToastEvent(scope: scope, action: action, contentPreview: contentPreview)
+        memoryToastEvents.append(event)
+        Log.app.info("Memory toast: \(scope.rawValue) \(action.rawValue)")
+    }
+
+    func dismissMemoryToast(id: UUID) {
+        memoryToastEvents.removeAll { $0.id == id }
+    }
+
+    /// 현재 컨텍스트에서 MemoryContextInfo 생성
+    func buildMemoryContextInfo() -> MemoryContextInfo {
+        let wsId = sessionContext.workspaceId
+        let agentName = settings.activeAgentName
+
+        let systemPrompt = contextService.loadBaseSystemPrompt() ?? ""
+        let persona = contextService.loadAgentPersona(workspaceId: wsId, agentName: agentName) ?? ""
+        let wsMem = contextService.loadWorkspaceMemory(workspaceId: wsId) ?? ""
+        let agentMem = contextService.loadAgentMemory(workspaceId: wsId, agentName: agentName) ?? ""
+        let personalMem: String
+        if let userId = sessionContext.currentUserId {
+            personalMem = contextService.loadUserMemory(userId: userId) ?? ""
+        } else {
+            personalMem = ""
+        }
+
+        return MemoryContextInfo(
+            systemPromptLength: systemPrompt.count,
+            agentPersonaLength: persona.count,
+            workspaceMemoryLength: wsMem.count,
+            agentMemoryLength: agentMem.count,
+            personalMemoryLength: personalMem.count
+        )
     }
 
     // MARK: - Voice Actions
@@ -1281,6 +1321,19 @@ final class DochiViewModel {
                         execution.fail(errorSummary: resultSummary, errorFull: result.content)
                     } else {
                         execution.complete(resultSummary: resultSummary, resultFull: result.content)
+
+                        // UX-8: Memory toast for save/update memory tools
+                        if call.name == "save_memory" || call.name == "update_memory" {
+                            let scope: MemoryToastEvent.Scope
+                            if let scopeStr = call.arguments["scope"] as? String, scopeStr == "personal" {
+                                scope = .personal
+                            } else {
+                                scope = .workspace
+                            }
+                            let action: MemoryToastEvent.Action = call.name == "save_memory" ? .saved : .updated
+                            let preview = (call.arguments["content"] as? String) ?? (call.arguments["new_content"] as? String) ?? ""
+                            showMemoryToast(scope: scope, action: action, contentPreview: preview)
+                        }
                     }
 
                     let toolResult = ToolResult(
@@ -1717,7 +1770,8 @@ final class DochiViewModel {
     }
 
     private func appendAssistantMessage(_ text: String, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil) {
-        currentConversation?.messages.append(Message(role: .assistant, content: text, metadata: metadata, toolExecutionRecords: toolExecutionRecords))
+        let memoryInfo = buildMemoryContextInfo()
+        currentConversation?.messages.append(Message(role: .assistant, content: text, metadata: metadata, toolExecutionRecords: toolExecutionRecords, memoryContextInfo: memoryInfo.hasAnyMemory ? memoryInfo : nil))
         currentConversation?.updatedAt = Date()
     }
 

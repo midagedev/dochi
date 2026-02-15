@@ -28,6 +28,9 @@ struct ContentView: View {
     // UX-6: 에이전트 위저드
     @State private var showAgentWizard = false
 
+    // UX-8: 메모리 패널
+    @State private var showMemoryPanel = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -109,6 +112,13 @@ struct ContentView: View {
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
+
+            // UX-8: Memory toast overlay
+            MemoryToastContainerView(
+                events: viewModel.memoryToastEvents,
+                onViewMemory: { showMemoryPanel = true },
+                onDismiss: { id in viewModel.dismissMemoryToast(id: id) }
+            )
         }
         // Hidden buttons for keyboard shortcuts
         .background { hiddenShortcutButtons }
@@ -183,11 +193,11 @@ struct ContentView: View {
                                 .keyboardShortcut("f", modifiers: [.command, .shift])
 
                                 Button {
-                                    showContextInspector = true
+                                    showMemoryPanel.toggle()
                                 } label: {
-                                    Label("컨텍스트", systemImage: "doc.text.magnifyingglass")
+                                    Label("메모리", systemImage: "brain")
                                 }
-                                .help("컨텍스트 인스펙터 (⌘I)")
+                                .help("메모리 인스펙터 (⌘I)")
                                 .keyboardShortcut("i", modifiers: .command)
                             }
                         }
@@ -195,6 +205,14 @@ struct ContentView: View {
                 }
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
+        .inspector(isPresented: $showMemoryPanel) {
+            MemoryPanelView(
+                contextService: viewModel.contextService,
+                settings: viewModel.settings,
+                sessionContext: viewModel.sessionContext
+            )
+            .inspectorColumnWidth(min: 260, ideal: 300, max: 360)
+        }
         .frame(minWidth: 600, minHeight: 500)
     }
 
@@ -242,6 +260,9 @@ struct ContentView: View {
                     onDeny: { viewModel.respondToToolConfirmation(approved: false) }
                 )
             }
+
+            // UX-8: System prompt banner
+            SystemPromptBannerView(contextService: viewModel.contextService)
 
             // Error banner
             if let error = viewModel.errorMessage {
@@ -339,6 +360,13 @@ struct ContentView: View {
             }
             .keyboardShortcut("u", modifiers: [.command, .shift])
             .hidden()
+
+            // ⌘⌥I: Context inspector sheet (기존)
+            Button("") {
+                showContextInspector = true
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .hidden()
         }
     }
 
@@ -416,6 +444,8 @@ struct ContentView: View {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         case .openContextInspector:
             showContextInspector = true
+        case .openMemoryPanel:
+            showMemoryPanel.toggle()
         case .openCapabilityCatalog:
             showCapabilityCatalog = true
         case .openSystemStatus:
