@@ -756,3 +756,55 @@ final class MockFeedbackStore: FeedbackStoreProtocol {
         return grouped.map { cat, pairs in CategoryCount(category: cat, count: pairs.count) }
     }
 }
+
+// MARK: - MockTerminalService (K-1)
+
+@MainActor
+final class MockTerminalService: TerminalServiceProtocol {
+    var sessions: [TerminalSession] = []
+    var activeSessionId: UUID?
+    var maxSessions: Int = 8
+    var onOutputUpdate: ((UUID) -> Void)?
+    var onSessionClosed: ((UUID) -> Void)?
+
+    var createSessionCallCount = 0
+    var closeSessionCallCount = 0
+    var executeCommandCallCount = 0
+    var clearOutputCallCount = 0
+    var interruptCallCount = 0
+
+    @discardableResult
+    func createSession(name: String?, shellPath: String?) -> UUID {
+        createSessionCallCount += 1
+        let id = UUID()
+        let session = TerminalSession(
+            id: id,
+            name: name ?? "터미널 \(sessions.count + 1)",
+            isRunning: true
+        )
+        sessions.append(session)
+        activeSessionId = id
+        return id
+    }
+
+    func closeSession(id: UUID) {
+        closeSessionCallCount += 1
+        sessions.removeAll { $0.id == id }
+        if activeSessionId == id {
+            activeSessionId = sessions.last?.id
+        }
+        onSessionClosed?(id)
+    }
+
+    func executeCommand(_ command: String, in sessionId: UUID) {
+        executeCommandCallCount += 1
+    }
+
+    func clearOutput(for sessionId: UUID) {
+        clearOutputCallCount += 1
+    }
+
+    func interrupt(sessionId: UUID) {
+        interruptCallCount += 1
+    }
+}

@@ -231,6 +231,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(CodingSessionPauseTool(sessionManager: codingSessionManager))
         registry.register(CodingSessionEndTool(sessionManager: codingSessionManager))
 
+        // Terminal (conditional, restricted) (K-1)
+        registry.register(TerminalRunTool(settings: settings, terminalService: nil))
+
         // MCP settings (conditional, sensitive)
         registry.register(MCPAddServerTool(mcpService: mcpService))
         registry.register(MCPUpdateServerTool(mcpService: mcpService))

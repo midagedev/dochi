@@ -53,6 +53,10 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case memorySettings
         case openConnectedDevices
         case openDelegationMonitor
+        case toggleTerminal
+        case newTerminalSession
+        case closeTerminalSession
+        case clearTerminalOutput
         case custom(id: String)
     }
 }
@@ -465,6 +469,31 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .settings,
             action: .openSettingsSection(section: "usage")
+        ),
+        // K-1: 터미널
+        CommandPaletteItem(
+            id: "toggle-terminal",
+            icon: "terminal",
+            title: "터미널 토글",
+            subtitle: "Ctrl+`",
+            category: .navigation,
+            action: .toggleTerminal
+        ),
+        CommandPaletteItem(
+            id: "new-terminal-session",
+            icon: "plus.rectangle.on.rectangle",
+            title: "새 터미널 세션",
+            subtitle: "Ctrl+Shift+`",
+            category: .navigation,
+            action: .newTerminalSession
+        ),
+        CommandPaletteItem(
+            id: "settings.open.terminal",
+            icon: "terminal",
+            title: "터미널 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "terminal")
         ),
         // G-3: 동기화 명령
         CommandPaletteItem(

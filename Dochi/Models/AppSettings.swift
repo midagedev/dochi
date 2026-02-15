@@ -506,6 +506,48 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(resourceAutoTaskTypes, forKey: "resourceAutoTaskTypes") }
     }
 
+    // MARK: - Terminal (K-1)
+
+    var terminalShellPath: String = UserDefaults.standard.string(forKey: "terminalShellPath") ?? "/bin/zsh" {
+        didSet { UserDefaults.standard.set(terminalShellPath, forKey: "terminalShellPath") }
+    }
+
+    var terminalFontSize: Int = UserDefaults.standard.object(forKey: "terminalFontSize") as? Int ?? 14 {
+        didSet { UserDefaults.standard.set(terminalFontSize, forKey: "terminalFontSize") }
+    }
+
+    var terminalMaxBufferLines: Int = UserDefaults.standard.object(forKey: "terminalMaxBufferLines") as? Int ?? 10000 {
+        didSet { UserDefaults.standard.set(terminalMaxBufferLines, forKey: "terminalMaxBufferLines") }
+    }
+
+    var terminalCommandTimeout: Int = UserDefaults.standard.object(forKey: "terminalCommandTimeout") as? Int ?? 300 {
+        didSet { UserDefaults.standard.set(terminalCommandTimeout, forKey: "terminalCommandTimeout") }
+    }
+
+    var terminalMaxSessions: Int = UserDefaults.standard.object(forKey: "terminalMaxSessions") as? Int ?? 8 {
+        didSet { UserDefaults.standard.set(terminalMaxSessions, forKey: "terminalMaxSessions") }
+    }
+
+    var terminalConfirmOnClose: Bool = UserDefaults.standard.object(forKey: "terminalConfirmOnClose") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(terminalConfirmOnClose, forKey: "terminalConfirmOnClose") }
+    }
+
+    var terminalLLMEnabled: Bool = UserDefaults.standard.object(forKey: "terminalLLMEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(terminalLLMEnabled, forKey: "terminalLLMEnabled") }
+    }
+
+    var terminalLLMConfirmAlways: Bool = UserDefaults.standard.object(forKey: "terminalLLMConfirmAlways") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(terminalLLMConfirmAlways, forKey: "terminalLLMConfirmAlways") }
+    }
+
+    var terminalAutoShowPanel: Bool = UserDefaults.standard.object(forKey: "terminalAutoShowPanel") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(terminalAutoShowPanel, forKey: "terminalAutoShowPanel") }
+    }
+
+    var terminalPanelHeight: Double = UserDefaults.standard.object(forKey: "terminalPanelHeight") as? Double ?? 200 {
+        didSet { UserDefaults.standard.set(terminalPanelHeight, forKey: "terminalPanelHeight") }
+    }
+
     // MARK: - Guide (UX-9)
 
     /// 인앱 힌트 표시 여부 (hintsGloballyDisabled의 반전)

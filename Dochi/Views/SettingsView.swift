@@ -148,6 +148,9 @@ struct SettingsView: View {
         case .plugins:
             PluginSettingsView(pluginManager: pluginManager)
 
+        case .terminal:
+            TerminalSettingsView(settings: settings)
+
         case .devices:
             if let devicePolicyService {
                 DeviceSettingsView(
