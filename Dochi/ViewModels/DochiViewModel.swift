@@ -462,48 +462,63 @@ final class DochiViewModel {
         // Barge-in: if TTS is playing in text mode, stop it
         ttsService.stopAndClear()
 
-        // Process pending images
-        var imageContents: [ImageContent]?
+        // Check vision support early (before clearing state)
+        var shouldProcessImages = false
         if hasImages {
             let provider = settings.currentProvider
             let model = settings.llmModel
             if !provider.supportsVision(model: model) {
                 Log.app.warning("Vision not supported by \(model). Images will not be sent.")
-                // Show warning but still send text
                 if !visionWarningDismissed {
                     errorMessage = "현재 모델(\(model))은 이미지 입력을 지원하지 않습니다. 텍스트만 전송됩니다."
                 }
             } else {
-                var processed: [ImageContent] = []
-                for attachment in pendingImages {
-                    if let content = ImageProcessor.processForLLM(attachment.image) {
-                        processed.append(content)
-                    } else {
-                        Log.app.warning("Failed to process image: \(attachment.fileName)")
-                    }
-                }
-                if !processed.isEmpty {
-                    imageContents = processed
-                    Log.app.info("Attached \(processed.count) image(s) to message")
-                }
+                shouldProcessImages = true
             }
         }
 
         let finalText = text.isEmpty ? "이미지를 분석해주세요." : text
+        let imagesToProcess = shouldProcessImages ? pendingImages : []
         inputText = ""
         pendingImages = []
         visionWarningDismissed = false
         errorMessage = nil
 
         ensureConversation()
-        appendUserMessage(finalText, imageData: imageContents)
 
-        transition(to: .processing)
-        processingSubState = .streaming
-        llmStreamActive = true
+        if imagesToProcess.isEmpty {
+            // No images — send immediately
+            appendUserMessage(finalText, imageData: nil)
+            transition(to: .processing)
+            processingSubState = .streaming
+            llmStreamActive = true
+            processingTask = Task {
+                await processLLMLoop()
+            }
+        } else {
+            // Process images off main thread, then send
+            transition(to: .processing)
+            processingSubState = .streaming
+            llmStreamActive = true
+            processingTask = Task {
+                let imageContents = await Task.detached { () -> [ImageContent] in
+                    var processed: [ImageContent] = []
+                    for attachment in imagesToProcess {
+                        if let content = ImageProcessor.processForLLM(attachment.image) {
+                            processed.append(content)
+                        } else {
+                            Log.app.warning("Failed to process image: \(attachment.fileName)")
+                        }
+                    }
+                    return processed
+                }.value
 
-        processingTask = Task {
-            await processLLMLoop()
+                if !imageContents.isEmpty {
+                    Log.app.info("Attached \(imageContents.count) image(s) to message")
+                }
+                appendUserMessage(finalText, imageData: imageContents.isEmpty ? nil : imageContents)
+                await processLLMLoop()
+            }
         }
     }
 

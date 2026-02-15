@@ -1231,7 +1231,6 @@ struct ErrorBannerView: View {
 struct InputBarView: View {
     @Bindable var viewModel: DochiViewModel
     @State private var showSlashCommands = false
-    @State private var showImagePicker = false
     @State private var isDraggingOver = false
 
     private var matchingCommands: [SlashCommand] {
@@ -1345,6 +1344,8 @@ struct InputBarView: View {
         }
         // I-3: Drag-and-drop support for images
         .onDrop(of: [.image, .fileURL], isTargeted: $isDraggingOver) { providers in
+            let hasImageProvider = providers.contains { $0.canLoadObject(ofClass: NSImage.self) }
+            guard hasImageProvider else { return false }
             handleDrop(providers: providers)
             return true
         }

@@ -34,15 +34,6 @@ struct ImageAttachment: Identifiable, Sendable {
     /// JPEG compression quality for resized images.
     static let jpegQuality: CGFloat = 0.85
 
-    /// Supported UTType identifiers for image input.
-    static let supportedTypes: Set<String> = [
-        "public.png",
-        "public.jpeg",
-        "com.compuserve.gif",
-        "public.heic",
-        "public.tiff",
-    ]
-
     /// Supported file extensions for image input.
     static let supportedExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "heic", "tiff",

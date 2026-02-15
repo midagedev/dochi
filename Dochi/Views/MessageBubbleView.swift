@@ -245,45 +245,47 @@ struct MessageBubbleView: View {
 struct InlineImageContentView: View {
     let imageContent: ImageContent
     @State private var showFullSize = false
-
-    private var nsImage: NSImage? {
-        guard let data = Data(base64Encoded: imageContent.base64Data) else { return nil }
-        return NSImage(data: data)
-    }
+    @State private var nsImage: NSImage?
 
     var body: some View {
-        if let image = nsImage {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: 200, maxHeight: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .onTapGesture {
-                    showFullSize = true
-                }
-                .popover(isPresented: $showFullSize) {
-                    VStack(spacing: 8) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 600, maxHeight: 600)
-
-                        HStack(spacing: 12) {
-                            Text("\(imageContent.width) x \(imageContent.height)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.tertiary)
-                            Text(imageContent.mimeType)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.tertiary)
-                        }
+        Group {
+            if let image = nsImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 200, maxHeight: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .onTapGesture {
+                        showFullSize = true
                     }
-                    .padding(12)
-                }
-                .help("클릭하여 원본 크기로 보기")
-        } else {
-            Label("이미지 표시 불가", systemImage: "photo.badge.exclamationmark")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                    .popover(isPresented: $showFullSize) {
+                        VStack(spacing: 8) {
+                            Image(nsImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 600, maxHeight: 600)
+
+                            HStack(spacing: 12) {
+                                Text("\(imageContent.width) x \(imageContent.height)")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                Text(imageContent.mimeType)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(12)
+                    }
+                    .help("클릭하여 원본 크기로 보기")
+            } else {
+                Label("이미지 표시 불가", systemImage: "photo.badge.exclamationmark")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task {
+            guard let data = Data(base64Encoded: imageContent.base64Data) else { return }
+            nsImage = NSImage(data: data)
         }
     }
 }
