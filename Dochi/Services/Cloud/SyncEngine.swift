@@ -30,7 +30,11 @@ final class SyncEngine {
 
     private var syncMetadata: SyncMetadata
     private var offlineQueue: [SyncQueueItem] = []
-    private var autoSyncTask: Task<Void, Never>?
+    private var autoSyncTask: Task<Void, Never>? {
+        didSet { _autoSyncTaskForCleanup = autoSyncTask }
+    }
+    /// deinit에서 Task cancel을 위한 nonisolated 참조 (deinit은 nonisolated이므로 @MainActor 속성 접근 불가)
+    nonisolated(unsafe) private var _autoSyncTaskForCleanup: Task<Void, Never>?
     private var isOnline: Bool = true
 
     /// 오프라인 큐 파일 경로
@@ -64,6 +68,10 @@ final class SyncEngine {
         loadMetadata()
         loadOfflineQueue()
         updatePendingCount()
+    }
+
+    deinit {
+        _autoSyncTaskForCleanup?.cancel()
     }
 
     // MARK: - Public API
@@ -348,6 +356,9 @@ final class SyncEngine {
         if let memory = contextService.loadWorkspaceMemory(workspaceId: wsId) {
             let data = Data(memory.utf8)
             try await supabaseService.pushEntities(type: .memory, payload: data)
+            // 로컬 push 시점 기록 — pullMemory에서 lastWriteWins 비교에 사용
+            syncMetadata.entityTimestamps["memory:\(wsId.uuidString)"] = Date()
+            saveMetadata()
             addToast(direction: .outgoing, entityType: .memory, entityTitle: "워크스페이스 메모리")
         }
     }
@@ -424,9 +435,19 @@ final class SyncEngine {
 
         if localMemory != remoteMemory {
             if settings.conflictResolutionStrategy == "lastWriteWins" {
-                // 원격 데이터 적용
-                contextService.saveWorkspaceMemory(workspaceId: wsId, content: remoteMemory)
-                addToast(direction: .incoming, entityType: .memory, entityTitle: "워크스페이스 메모리")
+                // 원격 updatedAt과 로컬 updatedAt 비교하여 더 최신인 쪽을 유지
+                let remoteTimestamps = try await supabaseService.fetchRemoteTimestamps(type: .memory)
+                let remoteUpdatedAt = remoteTimestamps[wsId.uuidString] ?? .distantPast
+                let localUpdatedAt = syncMetadata.entityTimestamps["memory:\(wsId.uuidString)"] ?? .distantPast
+
+                if remoteUpdatedAt > localUpdatedAt {
+                    // 원격이 더 최신 — 원격 데이터 적용
+                    contextService.saveWorkspaceMemory(workspaceId: wsId, content: remoteMemory)
+                    addToast(direction: .incoming, entityType: .memory, entityTitle: "워크스페이스 메모리")
+                } else {
+                    // 로컬이 더 최신 — 덮어쓰지 않음 (다음 push에서 올라감)
+                    Log.cloud.info("pullMemory: local is newer, skipping remote overwrite")
+                }
             } else if let localMemory, !localMemory.isEmpty {
                 let conflict = SyncConflict(
                     entityType: .memory,

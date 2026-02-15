@@ -165,6 +165,9 @@ final class DochiViewModel {
 
     /// SyncEngine 설정 (SupabaseService 주입 후 호출)
     func configureSyncEngine(supabaseService: SupabaseServiceProtocol) {
+        // 기존 엔진의 자동 동기화 Task 정리 (Task 누수 방지)
+        syncEngine?.stopAutoSync()
+
         let engine = SyncEngine(
             supabaseService: supabaseService,
             settings: settings,

@@ -417,6 +417,7 @@ final class SupabaseService: SupabaseServiceProtocol {
 
     // MARK: - Sync (G-3 Enhanced)
 
+    // TODO: G-3 Phase 2 - 엔티티별 테이블 분리. 현재는 단일 sync_data 테이블에 JSON blob으로 저장
     func pushEntities(type: SyncEntityType, payload: Data) async throws {
         let client = try requireClient()
         let userId = try requireUserId()
@@ -436,6 +437,7 @@ final class SupabaseService: SupabaseServiceProtocol {
         Log.cloud.info("pushEntities(\(type.rawValue)) completed for user \(userId)")
     }
 
+    // TODO: G-3 Phase 2 - 엔티티별 테이블 분리. 현재는 단일 sync_data 테이블에 JSON blob으로 저장
     func pullEntities(type: SyncEntityType, since: Date?) async throws -> Data? {
         let client = try requireClient()
         let userId = try requireUserId()
