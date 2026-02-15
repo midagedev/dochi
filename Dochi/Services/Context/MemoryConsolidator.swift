@@ -48,6 +48,13 @@ final class MemoryConsolidator: MemoryConsolidatorProtocol {
     private let archiveBaseURL: URL
     private static let maxChangelogEntries = 100
 
+    /// 마지막 정리 시 사용된 세션 컨텍스트 (resolveConflicts / revert에서 사용)
+    private var lastSessionContext: SessionContext?
+    /// 마지막 정리 시 사용된 설정 (resolveConflicts / revert에서 사용)
+    private var lastSettings: AppSettings?
+    /// 자동 배너 닫기 Task (누수 방지를 위해 이전 Task 취소용)
+    private var autoDismissTask: Task<Void, Never>?
+
     // MARK: - Init
 
     init(
@@ -76,6 +83,10 @@ final class MemoryConsolidator: MemoryConsolidatorProtocol {
         settings: AppSettings
     ) async {
         guard settings.memoryConsolidationEnabled else { return }
+
+        // 세션 컨텍스트와 설정을 저장 (resolveConflicts / revert에서 사용)
+        self.lastSessionContext = sessionContext
+        self.lastSettings = settings
 
         let assistantMessages = conversation.messages.filter { $0.role == .assistant }
         guard assistantMessages.count >= settings.memoryConsolidationMinMessages else {
@@ -179,22 +190,35 @@ final class MemoryConsolidator: MemoryConsolidatorProtocol {
         resolutions: [UUID: MemoryConflictResolution]
     ) {
         guard let result = lastResult else { return }
+        guard let sessionContext = lastSessionContext,
+              let settings = lastSettings else {
+            Log.storage.warning("resolveConflicts: 세션 컨텍스트 또는 설정이 없음")
+            return
+        }
 
-        let sessionContext = SessionContext(workspaceId: UUID(), currentUserId: nil)
-        // We use the stored result's conflicts
         for conflict in conflicts {
             guard let resolution = resolutions[conflict.id] else { continue }
             switch resolution {
             case .keepExisting:
-                // No action needed
+                // 변경 없음
                 break
             case .useNew:
-                // Remove existing, add new — reflected in memory through ContextService
-                // The actual update is done by the caller via ContextService
-                break
+                // 기존 항목을 새 항목으로 교체
+                replaceInMemory(
+                    scope: conflict.scope,
+                    oldLine: conflict.existingFact,
+                    newLine: "- \(conflict.newFact)",
+                    sessionContext: sessionContext,
+                    settings: settings
+                )
             case .keepBoth:
-                // Both remain — no removal needed
-                break
+                // 기존 유지 + 새 항목 추가
+                appendToMemory(
+                    scope: conflict.scope,
+                    content: "- \(conflict.newFact)",
+                    sessionContext: sessionContext,
+                    settings: settings
+                )
             }
         }
 
@@ -218,9 +242,50 @@ final class MemoryConsolidator: MemoryConsolidatorProtocol {
             return
         }
 
-        // In a real implementation, this would restore the previous memory content
-        // For now, log the revert attempt
-        Log.storage.info("메모리 변경 되돌리기: \(changeId), 변경 \(entry.changes.count)건")
+        guard let sessionContext = lastSessionContext,
+              let settings = lastSettings else {
+            Log.storage.warning("revert: 세션 컨텍스트 또는 설정이 없음")
+            return
+        }
+
+        for change in entry.changes {
+            switch change.type {
+            case .added:
+                // 추가된 항목 제거: 해당 내용을 메모리에서 삭제
+                removeFromMemory(
+                    scope: change.scope,
+                    line: "- \(change.content)",
+                    sessionContext: sessionContext,
+                    settings: settings
+                )
+            case .updated:
+                // 이전 내용으로 복원
+                if let previous = change.previousContent {
+                    replaceInMemory(
+                        scope: change.scope,
+                        oldLine: "- \(change.content)",
+                        newLine: previous,
+                        sessionContext: sessionContext,
+                        settings: settings
+                    )
+                }
+            case .removed:
+                // 삭제된 항목 복원: previousContent를 메모리에 다시 추가
+                if let previous = change.previousContent {
+                    appendToMemory(
+                        scope: change.scope,
+                        content: previous,
+                        sessionContext: sessionContext,
+                        settings: settings
+                    )
+                }
+            case .archived:
+                // 아카이브된 항목은 되돌리기 대상이 아님
+                break
+            }
+        }
+
+        Log.storage.info("메모리 변경 되돌리기 완료: \(changeId), 변경 \(entry.changes.count)건")
     }
 
     // MARK: - Changelog
@@ -498,12 +563,127 @@ final class MemoryConsolidator: MemoryConsolidatorProtocol {
         }
     }
 
+    // MARK: - Memory Helpers (resolveConflicts / revert용)
+
+    /// 특정 scope의 메모리에서 oldLine을 newLine으로 교체
+    private func replaceInMemory(
+        scope: MemoryScope,
+        oldLine: String,
+        newLine: String,
+        sessionContext: SessionContext,
+        settings: AppSettings
+    ) {
+        guard var memory = loadMemory(scope: scope, sessionContext: sessionContext, settings: settings) else { return }
+        // 줄 단위로 교체
+        let lines = memory.components(separatedBy: "\n")
+        let replaced = lines.map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let oldTrimmed = oldLine.trimmingCharacters(in: .whitespaces)
+            if trimmed == oldTrimmed || trimmed == "- \(oldTrimmed)" {
+                return newLine
+            }
+            return line
+        }
+        memory = replaced.joined(separator: "\n")
+        saveMemory(scope: scope, content: memory, sessionContext: sessionContext, settings: settings)
+    }
+
+    /// 특정 scope의 메모리에 내용 추가
+    private func appendToMemory(
+        scope: MemoryScope,
+        content: String,
+        sessionContext: SessionContext,
+        settings: AppSettings
+    ) {
+        switch scope {
+        case .personal:
+            if let userId = sessionContext.currentUserId {
+                contextService.appendUserMemory(userId: userId, content: content)
+            }
+        case .workspace:
+            contextService.appendWorkspaceMemory(workspaceId: sessionContext.workspaceId, content: content)
+        case .agent:
+            contextService.appendAgentMemory(
+                workspaceId: sessionContext.workspaceId,
+                agentName: settings.activeAgentName,
+                content: content
+            )
+        }
+    }
+
+    /// 특정 scope의 메모리에서 해당 줄 제거
+    private func removeFromMemory(
+        scope: MemoryScope,
+        line: String,
+        sessionContext: SessionContext,
+        settings: AppSettings
+    ) {
+        guard let memory = loadMemory(scope: scope, sessionContext: sessionContext, settings: settings) else { return }
+        let lines = memory.components(separatedBy: "\n")
+        let lineTrimmed = line.trimmingCharacters(in: .whitespaces)
+        let filtered = lines.filter { $0.trimmingCharacters(in: .whitespaces) != lineTrimmed }
+        let updated = filtered.joined(separator: "\n")
+        saveMemory(scope: scope, content: updated, sessionContext: sessionContext, settings: settings)
+    }
+
+    /// scope별 메모리 로드
+    private func loadMemory(
+        scope: MemoryScope,
+        sessionContext: SessionContext,
+        settings: AppSettings
+    ) -> String? {
+        switch scope {
+        case .personal:
+            guard let userId = sessionContext.currentUserId else { return nil }
+            return contextService.loadUserMemory(userId: userId)
+        case .workspace:
+            return contextService.loadWorkspaceMemory(workspaceId: sessionContext.workspaceId)
+        case .agent:
+            return contextService.loadAgentMemory(workspaceId: sessionContext.workspaceId, agentName: settings.activeAgentName)
+        }
+    }
+
+    /// scope별 메모리 저장
+    private func saveMemory(
+        scope: MemoryScope,
+        content: String,
+        sessionContext: SessionContext,
+        settings: AppSettings
+    ) {
+        switch scope {
+        case .personal:
+            if let userId = sessionContext.currentUserId {
+                contextService.saveUserMemory(userId: userId, content: content)
+            }
+        case .workspace:
+            contextService.saveWorkspaceMemory(workspaceId: sessionContext.workspaceId, content: content)
+        case .agent:
+            contextService.saveAgentMemory(
+                workspaceId: sessionContext.workspaceId,
+                agentName: settings.activeAgentName,
+                content: content
+            )
+        }
+    }
+
+    /// identifier에서 경로 위험 문자를 제거 (alphanumeric, hyphen, underscore만 허용)
+    private static func sanitizeIdentifier(_ identifier: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let sanitized = identifier.unicodeScalars
+            .filter { allowed.contains($0) }
+            .map { Character($0) }
+        let result = String(sanitized)
+        return result.isEmpty ? "unknown" : result
+    }
+
     private func archiveMemory(scope: MemoryScope, identifier: String, content: String) {
         do {
             try FileManager.default.createDirectory(at: archiveBaseURL, withIntermediateDirectories: true)
             let formatter = ISO8601DateFormatter()
             let timestamp = formatter.string(from: Date())
-            let filename = "\(scope.rawValue)_\(identifier)_\(timestamp).md"
+            // C-4: identifier를 sanitize하여 경로 조작 방지
+            let safeIdentifier = Self.sanitizeIdentifier(identifier)
+            let filename = "\(scope.rawValue)_\(safeIdentifier)_\(timestamp).md"
             let fileURL = archiveBaseURL.appendingPathComponent(filename)
             try content.write(to: fileURL, atomically: true, encoding: .utf8)
             Log.storage.info("메모리 아카이브 저장: \(filename)")
@@ -539,9 +719,14 @@ final class MemoryConsolidator: MemoryConsolidatorProtocol {
     }
 
     private func scheduleAutoDismiss() {
+        // 이전 자동 닫기 Task가 있으면 취소 (C-3: Task 누수 방지)
+        autoDismissTask?.cancel()
+        autoDismissTask = nil
+
         guard case .analyzing = consolidationState else {
-            Task { @MainActor in
+            autoDismissTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled else { return }
                 if case .analyzing = self.consolidationState { return }
                 self.consolidationState = .idle
             }
