@@ -81,6 +81,8 @@ struct DeviceCapabilities: Codable, Sendable, Equatable {
 // MARK: - DeviceInfo
 
 struct DeviceInfo: Codable, Identifiable, Sendable, Equatable {
+    static let onlineThreshold: TimeInterval = 120
+
     let id: UUID
     var name: String
     var deviceType: DeviceType
@@ -91,7 +93,7 @@ struct DeviceInfo: Codable, Identifiable, Sendable, Equatable {
     var capabilities: DeviceCapabilities
 
     var isOnline: Bool {
-        Date().timeIntervalSince(lastSeen) < 120
+        Date().timeIntervalSince(lastSeen) < Self.onlineThreshold
     }
 
     var statusText: String {

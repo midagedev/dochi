@@ -632,9 +632,12 @@ final class MockDevicePolicyService: DevicePolicyServiceProtocol {
     }
 
     func renameDevice(id: UUID, name: String) {
-        renamedDevices.append((id: id, name: name))
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let finalName = String(trimmed.prefix(64))
+        renamedDevices.append((id: id, name: finalName))
         if let idx = registeredDevices.firstIndex(where: { $0.id == id }) {
-            registeredDevices[idx].name = name
+            registeredDevices[idx].name = finalName
         }
     }
 
@@ -665,6 +668,10 @@ final class MockDevicePolicyService: DevicePolicyServiceProtocol {
             if let manualId = manualDeviceId,
                let device = onlineDevices.first(where: { $0.id == manualId }) {
                 return device.isCurrentDevice ? .thisDevice : .otherDevice(device)
+            }
+            // Fallback to current device if manual device not found online
+            if onlineDevices.contains(where: { $0.isCurrentDevice }) {
+                return .thisDevice
             }
             return .noDeviceAvailable
         }

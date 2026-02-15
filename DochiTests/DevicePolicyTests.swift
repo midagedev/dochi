@@ -589,6 +589,262 @@ final class DevicePolicyServiceEvaluationTests: XCTestCase {
     }
 }
 
+// MARK: - DevicePolicyService Name Validation Tests (C-1)
+
+@MainActor
+final class DevicePolicyServiceNameValidationTests: XCTestCase {
+    var tempDir: URL!
+    var storageURL: URL!
+    var settings: AppSettings!
+
+    override func setUp() {
+        super.setUp()
+        tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        storageURL = tempDir.appendingPathComponent("devices.json")
+        settings = AppSettings()
+        UserDefaults.standard.removeObject(forKey: "deviceSelectionPolicy")
+        UserDefaults.standard.removeObject(forKey: "manualResponderDeviceId")
+        UserDefaults.standard.removeObject(forKey: "deviceId")
+        UserDefaults.standard.removeObject(forKey: "currentDeviceName")
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: tempDir)
+        super.tearDown()
+    }
+
+    func testRenameDeviceRejectsEmptyName() async {
+        let service = DevicePolicyService(settings: settings, storageURL: storageURL)
+        await service.registerCurrentDevice()
+        let id = service.currentDevice!.id
+        let originalName = service.currentDevice!.name
+
+        service.renameDevice(id: id, name: "")
+        XCTAssertEqual(service.currentDevice?.name, originalName, "Empty name should be rejected")
+    }
+
+    func testRenameDeviceRejectsWhitespaceOnly() async {
+        let service = DevicePolicyService(settings: settings, storageURL: storageURL)
+        await service.registerCurrentDevice()
+        let id = service.currentDevice!.id
+        let originalName = service.currentDevice!.name
+
+        service.renameDevice(id: id, name: "   ")
+        XCTAssertEqual(service.currentDevice?.name, originalName, "Whitespace-only name should be rejected")
+    }
+
+    func testRenameDeviceTrimsWhitespace() async {
+        let service = DevicePolicyService(settings: settings, storageURL: storageURL)
+        await service.registerCurrentDevice()
+        let id = service.currentDevice!.id
+
+        service.renameDevice(id: id, name: "  My Mac  ")
+        XCTAssertEqual(service.currentDevice?.name, "My Mac", "Name should be trimmed")
+    }
+
+    func testRenameDeviceTruncatesLongName() async {
+        let service = DevicePolicyService(settings: settings, storageURL: storageURL)
+        await service.registerCurrentDevice()
+        let id = service.currentDevice!.id
+
+        let longName = String(repeating: "A", count: 100)
+        service.renameDevice(id: id, name: longName)
+        XCTAssertEqual(service.currentDevice?.name.count, 64, "Name should be truncated to 64 chars")
+    }
+
+    func testRenameDeviceAcceptsValidName() async {
+        let service = DevicePolicyService(settings: settings, storageURL: storageURL)
+        await service.registerCurrentDevice()
+        let id = service.currentDevice!.id
+
+        service.renameDevice(id: id, name: "My MacBook Pro")
+        XCTAssertEqual(service.currentDevice?.name, "My MacBook Pro")
+        XCTAssertEqual(settings.currentDeviceName, "My MacBook Pro")
+    }
+
+    func testRenameDeviceExactly64Chars() async {
+        let service = DevicePolicyService(settings: settings, storageURL: storageURL)
+        await service.registerCurrentDevice()
+        let id = service.currentDevice!.id
+
+        let exactName = String(repeating: "B", count: 64)
+        service.renameDevice(id: id, name: exactName)
+        XCTAssertEqual(service.currentDevice?.name, exactName, "Exactly 64 chars should be accepted as-is")
+    }
+}
+
+// MARK: - MockDevicePolicyService Name Validation Tests (C-1)
+
+@MainActor
+final class MockDevicePolicyServiceNameValidationTests: XCTestCase {
+
+    func testMockRenameDeviceRejectsEmptyName() {
+        let mock = MockDevicePolicyService()
+        let id = UUID()
+        mock.registeredDevices = [
+            DeviceInfo(id: id, name: "Original", deviceType: .desktop, platform: .macos)
+        ]
+
+        mock.renameDevice(id: id, name: "")
+        XCTAssertEqual(mock.registeredDevices[0].name, "Original", "Empty name should be rejected")
+        XCTAssertTrue(mock.renamedDevices.isEmpty, "No rename should be recorded")
+    }
+
+    func testMockRenameDeviceRejectsWhitespaceOnly() {
+        let mock = MockDevicePolicyService()
+        let id = UUID()
+        mock.registeredDevices = [
+            DeviceInfo(id: id, name: "Original", deviceType: .desktop, platform: .macos)
+        ]
+
+        mock.renameDevice(id: id, name: "   ")
+        XCTAssertEqual(mock.registeredDevices[0].name, "Original", "Whitespace-only name should be rejected")
+    }
+
+    func testMockRenameDeviceTruncatesLongName() {
+        let mock = MockDevicePolicyService()
+        let id = UUID()
+        mock.registeredDevices = [
+            DeviceInfo(id: id, name: "Original", deviceType: .desktop, platform: .macos)
+        ]
+
+        let longName = String(repeating: "X", count: 100)
+        mock.renameDevice(id: id, name: longName)
+        XCTAssertEqual(mock.registeredDevices[0].name.count, 64, "Name should be truncated to 64 chars")
+        XCTAssertEqual(mock.renamedDevices.count, 1)
+        XCTAssertEqual(mock.renamedDevices[0].name.count, 64, "Recorded name should also be truncated")
+    }
+}
+
+// MARK: - MockDevicePolicyService Manual Fallback Tests (C-2)
+
+@MainActor
+final class MockDevicePolicyServiceManualFallbackTests: XCTestCase {
+
+    func testManualFallbackToCurrentDeviceWhenManualDeviceOffline() {
+        let mock = MockDevicePolicyService()
+        mock.currentPolicy = .manual
+        let currentId = UUID()
+        let offlineId = UUID()
+        let onlineOtherId = UUID()
+
+        // Need 2+ online devices to bypass the singleDevice shortcut
+        mock.registeredDevices = [
+            DeviceInfo(id: currentId, name: "Mac", deviceType: .desktop, platform: .macos, lastSeen: Date(), isCurrentDevice: true),
+            DeviceInfo(id: onlineOtherId, name: "iPad", deviceType: .mobile, platform: .ios, lastSeen: Date(), isCurrentDevice: false),
+            DeviceInfo(id: offlineId, name: "iPhone", deviceType: .mobile, platform: .ios, lastSeen: Date().addingTimeInterval(-300), isCurrentDevice: false),
+        ]
+        mock.currentDevice = mock.registeredDevices[0]
+        mock.manualDeviceId = offlineId  // Points to offline device
+
+        let result = mock.evaluateResponder()
+        // Should fall back to current device, NOT .noDeviceAvailable
+        XCTAssertEqual(result, .thisDevice, "Manual policy should fall back to current device when manual device is offline")
+    }
+
+    func testManualFallbackMatchesRealService() async {
+        // Set up real service
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let storageURL = tempDir.appendingPathComponent("devices.json")
+        let settings = AppSettings()
+        UserDefaults.standard.removeObject(forKey: "deviceSelectionPolicy")
+        UserDefaults.standard.removeObject(forKey: "manualResponderDeviceId")
+        UserDefaults.standard.removeObject(forKey: "deviceId")
+        UserDefaults.standard.removeObject(forKey: "currentDeviceName")
+
+        let realService = DevicePolicyService(settings: settings, storageURL: storageURL)
+        await realService.registerCurrentDevice()
+        let currentId = realService.currentDevice!.id
+
+        // Add an offline device and set manual to non-existent device
+        let offlineDevice = DeviceInfo(name: "iPhone", deviceType: .mobile, platform: .ios, lastSeen: Date().addingTimeInterval(-300))
+        realService.registeredDevices.append(offlineDevice)
+        realService.setPolicy(.manual)
+        let nonExistentId = UUID()
+        realService.setManualDevice(id: nonExistentId)
+
+        let realResult = realService.evaluateResponder()
+
+        // Set up mock with same configuration
+        let mock = MockDevicePolicyService()
+        mock.currentPolicy = .manual
+        mock.registeredDevices = [
+            DeviceInfo(id: currentId, name: "Mac", deviceType: .desktop, platform: .macos, lastSeen: Date(), isCurrentDevice: true),
+            DeviceInfo(id: offlineDevice.id, name: "iPhone", deviceType: .mobile, platform: .ios, lastSeen: Date().addingTimeInterval(-300), isCurrentDevice: false),
+        ]
+        mock.currentDevice = mock.registeredDevices[0]
+        mock.manualDeviceId = nonExistentId
+
+        let mockResult = mock.evaluateResponder()
+
+        XCTAssertEqual(realResult, mockResult, "Mock manual fallback should match real service behavior")
+    }
+
+    func testManualPolicyNoDeviceAvailableWhenAllOfflineNoCurrentDevice() {
+        let mock = MockDevicePolicyService()
+        mock.currentPolicy = .manual
+        let offlineId = UUID()
+
+        mock.registeredDevices = [
+            DeviceInfo(id: offlineId, name: "iPhone", deviceType: .mobile, platform: .ios, lastSeen: Date().addingTimeInterval(-300), isCurrentDevice: false),
+        ]
+        mock.manualDeviceId = UUID()  // Non-existent
+
+        let result = mock.evaluateResponder()
+        XCTAssertEqual(result, .noDeviceAvailable, "Should return noDeviceAvailable when no online devices and no current device")
+    }
+
+    func testManualPolicyDirectMatchStillWorks() {
+        let mock = MockDevicePolicyService()
+        mock.currentPolicy = .manual
+        let deviceId = UUID()
+
+        mock.registeredDevices = [
+            DeviceInfo(name: "Mac", deviceType: .desktop, platform: .macos, lastSeen: Date(), isCurrentDevice: true),
+            DeviceInfo(id: deviceId, name: "iPhone", deviceType: .mobile, platform: .ios, lastSeen: Date(), isCurrentDevice: false),
+        ]
+        mock.currentDevice = mock.registeredDevices[0]
+        mock.manualDeviceId = deviceId
+
+        let result = mock.evaluateResponder()
+        if case .otherDevice(let device) = result {
+            XCTAssertEqual(device.id, deviceId)
+        } else {
+            XCTFail("Expected otherDevice result when manual device is online, got \(result)")
+        }
+    }
+}
+
+// MARK: - DeviceInfo onlineThreshold Tests (S-1)
+
+final class DeviceInfoOnlineThresholdTests: XCTestCase {
+
+    func testOnlineThresholdConstant() {
+        XCTAssertEqual(DeviceInfo.onlineThreshold, 120)
+    }
+
+    func testIsOnlineUsesThreshold() {
+        let justWithin = DeviceInfo(
+            name: "Test",
+            deviceType: .desktop,
+            platform: .macos,
+            lastSeen: Date().addingTimeInterval(-(DeviceInfo.onlineThreshold - 1))
+        )
+        XCTAssertTrue(justWithin.isOnline, "Device seen just within threshold should be online")
+
+        let justOutside = DeviceInfo(
+            name: "Test",
+            deviceType: .desktop,
+            platform: .macos,
+            lastSeen: Date().addingTimeInterval(-(DeviceInfo.onlineThreshold + 1))
+        )
+        XCTAssertFalse(justOutside.isOnline, "Device seen just outside threshold should be offline")
+    }
+}
+
 // MARK: - SettingsSection Devices Tests
 
 final class SettingsSectionDevicesTests: XCTestCase {

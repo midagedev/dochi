@@ -34,6 +34,7 @@ struct DeviceSettingsView: View {
                                 isEditingName = false
                             }
                             .buttonStyle(.bordered)
+                            .disabled(editingName.trimmingCharacters(in: .whitespaces).isEmpty)
                             Button("취소") {
                                 isEditingName = false
                             }

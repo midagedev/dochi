@@ -22,7 +22,6 @@ final class DevicePolicyService: DevicePolicyServiceProtocol {
     private var manualDeviceId: UUID?
 
     private static let heartbeatInterval: TimeInterval = 30
-    private static let onlineThreshold: TimeInterval = 120
 
     // MARK: - Init
 
@@ -109,11 +108,17 @@ final class DevicePolicyService: DevicePolicyServiceProtocol {
     }
 
     func renameDevice(id: UUID, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            Log.app.warning("Device rename rejected: empty name")
+            return
+        }
+        let finalName = String(trimmed.prefix(64))
         guard let idx = registeredDevices.firstIndex(where: { $0.id == id }) else { return }
-        registeredDevices[idx].name = name
+        registeredDevices[idx].name = finalName
         if registeredDevices[idx].isCurrentDevice {
             currentDevice = registeredDevices[idx]
-            settings.currentDeviceName = name
+            settings.currentDeviceName = finalName
         }
         saveToDisk()
     }
@@ -180,7 +185,7 @@ final class DevicePolicyService: DevicePolicyServiceProtocol {
                 return .otherDevice(device)
             }
             // Fallback to current device if manual device not found online
-            if let current = onlineDevices.first(where: { $0.isCurrentDevice }) {
+            if onlineDevices.contains(where: { $0.isCurrentDevice }) {
                 return .thisDevice
             }
             return .noDeviceAvailable

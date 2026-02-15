@@ -6,6 +6,8 @@ struct ConnectedDevicesPopoverView: View {
     var onOpenSettings: () -> Void
 
     var body: some View {
+        let responderResult = devicePolicyService.evaluateResponder()
+
         VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
@@ -36,7 +38,7 @@ struct ConnectedDevicesPopoverView: View {
                     HStack(spacing: 8) {
                         // Status indicator
                         Circle()
-                            .fill(statusColor(for: device))
+                            .fill(statusColor(for: device, responderResult: responderResult))
                             .frame(width: 8, height: 8)
 
                         Image(systemName: device.deviceType.iconName)
@@ -55,7 +57,7 @@ struct ConnectedDevicesPopoverView: View {
 
                         Spacer()
 
-                        if isPrimaryResponder(device) {
+                        if isPrimaryResponder(device, responderResult: responderResult) {
                             Text("응답")
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(.white)
@@ -111,8 +113,8 @@ struct ConnectedDevicesPopoverView: View {
         }
     }
 
-    private func statusColor(for device: DeviceInfo) -> Color {
-        if isPrimaryResponder(device) {
+    private func statusColor(for device: DeviceInfo, responderResult: DeviceNegotiationResult) -> Color {
+        if isPrimaryResponder(device, responderResult: responderResult) {
             return .green
         }
         if device.isCurrentDevice || device.isOnline {
@@ -121,9 +123,8 @@ struct ConnectedDevicesPopoverView: View {
         return .gray
     }
 
-    private func isPrimaryResponder(_ device: DeviceInfo) -> Bool {
-        let result = devicePolicyService.evaluateResponder()
-        switch result {
+    private func isPrimaryResponder(_ device: DeviceInfo, responderResult: DeviceNegotiationResult) -> Bool {
+        switch responderResult {
         case .thisDevice:
             return device.isCurrentDevice
         case .otherDevice(let responder):
