@@ -66,7 +66,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var searchKeywords: [String] {
         switch self {
         case .aiModel:
-            return ["모델", "프로바이더", "OpenAI", "Anthropic", "Z.AI", "Ollama", "라우팅", "폴백"]
+            return ["모델", "프로바이더", "OpenAI", "Anthropic", "Z.AI", "Ollama", "LM Studio", "로컬", "오프라인", "local", "라우팅", "폴백"]
         case .apiKey:
             return ["API", "키", "key", "OpenAI", "Anthropic", "Tavily", "Fal", "티어"]
         case .voice:

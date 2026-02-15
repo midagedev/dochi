@@ -143,8 +143,21 @@ struct ModelRouter {
         return ResolvedModel(provider: provider, model: modelName, apiKey: apiKey, isFallback: false)
     }
 
+    /// Resolve the offline fallback model, if configured and local server is presumably available.
+    func resolveOfflineFallback() -> ResolvedModel? {
+        guard settings.offlineFallbackEnabled,
+              !settings.offlineFallbackModel.isEmpty,
+              let provider = LLMProvider(rawValue: settings.offlineFallbackProvider),
+              provider.isLocal else {
+            return nil
+        }
+
+        let apiKey = keychainService.load(account: provider.keychainAccount) ?? ""
+        return ResolvedModel(provider: provider, model: settings.offlineFallbackModel, apiKey: apiKey, isFallback: true)
+    }
+
     /// Whether a given error should trigger fallback to an alternate model.
-    static func shouldFallback(for error: Error) -> Bool {
+    nonisolated static func shouldFallback(for error: Error) -> Bool {
         guard let llmError = error as? LLMError else { return false }
         switch llmError {
         case .serverError, .timeout, .networkError, .emptyResponse, .rateLimited:
@@ -154,5 +167,19 @@ struct ModelRouter {
         case .noAPIKey, .authenticationFailed, .cancelled, .invalidResponse:
             return false
         }
+    }
+
+    /// Whether a given error indicates a network connectivity problem (offline scenario).
+    nonisolated static func isNetworkError(_ error: Error) -> Bool {
+        if let llmError = error as? LLMError {
+            switch llmError {
+            case .networkError, .timeout:
+                return true
+            default:
+                return false
+            }
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain
     }
 }

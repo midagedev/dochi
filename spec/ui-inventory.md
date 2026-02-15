@@ -22,9 +22,10 @@ DochiApp (entry point)
     │   └── SidebarAuthStatusView — Supabase 로그인 상태
     ├── [Detail]
     │   ├── [대화 탭]
-    │   │   ├── SystemHealthBarView — 시스템 상태 바 (개별 클릭 가능: 모델→QuickModel팝오버/동기화/하트비트/토큰→상태시트) [항상 표시]
+    │   │   ├── SystemHealthBarView — 시스템 상태 바 (개별 클릭 가능: 모델→QuickModel팝오버/동기화/하트비트/토큰→상태시트, 로컬 프로바이더 아이콘, 오프라인 폴백 표시) [항상 표시]
     │   │   ├── StatusBarView — 상태/토큰 (처리 중에만 표시)
     │   │   ├── ToolConfirmationBannerView — 민감 도구 승인 (카운트다운 타이머, Enter/Escape 단축키)
+    │   │   ├── OfflineFallbackBannerView — 오프라인 폴백 상태 배너 (로컬 모델 전환 알림 + 복구 버튼) (G-1)
     │   │   ├── SystemPromptBannerView — 시스템 프롬프트 접기/펼치기 배너 (UX-8)
     │   │   ├── ErrorBannerView — 에러 표시
     │   │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
@@ -100,7 +101,8 @@ DochiApp (entry point)
 | CommandPaletteView | `Views/CommandPaletteView.swift` | ⌘K | VS Code 스타일 커맨드 팔레트 오버레이 (퍼지 검색, 그룹 섹션) |
 | QuickSwitcherView | `Views/QuickSwitcherView.swift` | ⌘⇧A / ⌘⇧W / ⌘⇧U | 에이전트/워크스페이스/사용자 빠른 전환 시트 |
 | TagManagementView | `Views/Sidebar/TagManagementView.swift` | 사이드바 "태그" 버튼 또는 컨텍스트 메뉴 "태그 관리" | 태그 CRUD 시트 (360x400pt), 9색 팔레트, 사용 수 |
-| QuickModelPopoverView | `Views/QuickModelPopoverView.swift` | SystemHealthBar 모델 클릭 또는 ⌘⇧M | 프로바이더 선택 + 모델 목록 + 자동 라우팅 토글 (320pt 폭) |
+| QuickModelPopoverView | `Views/QuickModelPopoverView.swift` | SystemHealthBar 모델 클릭 또는 ⌘⇧M | 프로바이더 선택 (클라우드/로컬 그룹) + 모델 목록 (메타데이터 표시) + 자동 라우팅 토글 + 로컬 서버 연결 인디케이터 + 오프라인 폴백 정보 (320pt 폭) |
+| OfflineFallbackBannerView | `Views/ContentView.swift` 내 | 오프라인 폴백 발동 시 자동 표시 | 오프라인 전환 안내 + 모델명 + "원래 모델로 복구" 버튼 (G-1) |
 | OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 + 기능 투어 연결 |
 | FeatureTourView | `Views/Guide/FeatureTourViews.swift` | 온보딩 완료 후 / 설정 > 일반 > 가이드 / 커맨드 팔레트 | 4단계 기능 투어 (개요/대화/에이전트·워크스페이스/단축키) |
 | WorkspaceManagementView | `Views/Sidebar/WorkspaceManagementView.swift` | SidebarHeader 메뉴 | 워크스페이스 생성/삭제 |
@@ -119,7 +121,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 
 | 그룹 | 섹션 (rawValue) | 아이콘 | 파일 | 내용 |
 |------|----------------|--------|------|------|
-| AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택, Ollama, 태스크 라우팅, 폴백 |
+| AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택 (클라우드/로컬 그룹), Ollama 설정, LM Studio 설정, 오프라인 폴백, 태스크 라우팅 |
 | AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
 | 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더, 음성, 속도/피치 |
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타 |
@@ -338,9 +340,23 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 ```
 SystemHealthBarView 모델 클릭 / ⌘⇧M -> showQuickModelPopover = true
   -> QuickModelPopoverView (320pt popover)
-  -> 프로바이더 라디오 버튼 선택 -> settings.llmProvider 변경
+  -> 프로바이더 라디오 버튼 선택 (클라우드/로컬 그룹) -> settings.llmProvider 변경
+  -> 로컬 프로바이더: 연결 상태 인디케이터 (초록/빨간 점)
   -> 모델 목록 선택 -> settings.llmModel 변경
+  -> 로컬 모델: 파라미터 크기 + 파일 크기 + 도구 지원 아이콘 표시
   -> "자동 모델 선택" 토글 -> settings.taskRoutingEnabled 변경
+  -> 오프라인 폴백 설정 정보 표시 (활성 시)
+
+### 오프라인 폴백 (G-1 추가)
+```
+네트워크 에러 발생
+  -> ModelRouter.isNetworkError() 판단
+  -> settings.offlineFallbackEnabled 확인
+  -> 로컬 서버 연결 확인
+  -> DochiViewModel.activateOfflineFallback() -> 로컬 모델로 전환
+  -> OfflineFallbackBannerView 표시
+  -> SystemHealthBarView 아이콘/텍스트 변경 (주황색 "오프라인")
+  -> "원래 모델로 복구" 클릭 -> DochiViewModel.restoreOriginalModel()
   -> "설정에서 더 보기" -> 설정 창 열기 (aiModel 섹션)
 커맨드 팔레트: "모델 빠르게 변경" -> openQuickModelPopover 액션
   "AI 모델 설정 열기" / "API 키 설정 열기" / ... -> openSettingsSection(section:) 액션

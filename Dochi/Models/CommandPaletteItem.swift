@@ -282,6 +282,14 @@ enum CommandPaletteRegistry {
             category: .settings,
             action: .openSettingsSection(section: "account")
         ),
+        CommandPaletteItem(
+            id: "settings.open.localllm",
+            icon: "desktopcomputer",
+            title: "로컬 LLM 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "ai-model")
+        ),
     ]
 
     // MARK: - 최근 사용 기록

@@ -72,11 +72,53 @@ enum OllamaModelFetcher {
         let name: String
         let size: Int64?
         let digest: String?
+        let details: ModelDetails?
 
         enum CodingKeys: String, CodingKey {
-            case name, size, digest
+            case name, size, digest, details
         }
     }
+
+    struct ModelDetails: Decodable {
+        let parameterSize: String?
+        let quantizationLevel: String?
+        let family: String?
+
+        enum CodingKeys: String, CodingKey {
+            case parameterSize = "parameter_size"
+            case quantizationLevel = "quantization_level"
+            case family
+        }
+    }
+
+    /// Response from /api/show endpoint for detailed model info.
+    struct ShowResponse: Decodable {
+        let modelInfo: [String: AnyCodableValue]?
+        let details: ModelDetails?
+        let parameters: String?
+
+        enum CodingKeys: String, CodingKey {
+            case modelInfo = "model_info"
+            case details
+            case parameters
+        }
+    }
+
+    /// Known model families that support tool/function calling in Ollama.
+    private static let toolSupportedFamilies: Set<String> = [
+        "llama", "mistral", "mixtral", "qwen", "qwen2", "qwen2.5",
+        "command-r", "firefunction", "hermes", "nous-hermes",
+    ]
+
+    /// Known model name patterns that indicate tool support.
+    private static let toolSupportedPatterns: [String] = [
+        "llama3", "llama3.1", "llama3.2", "llama3.3",
+        "mistral", "mixtral",
+        "qwen2", "qwen2.5",
+        "command-r",
+        "firefunction",
+        "hermes",
+    ]
 
     /// Fetch available models from Ollama API.
     static func fetchModels(baseURL: URL = URL(string: "http://localhost:11434")!) async -> [String] {
@@ -94,6 +136,45 @@ enum OllamaModelFetcher {
         }
     }
 
+    /// Fetch available models with detailed metadata from Ollama API.
+    static func fetchModelInfos(baseURL: URL = URL(string: "http://localhost:11434")!) async -> [LocalModelInfo] {
+        let url = baseURL.appendingPathComponent("api/tags")
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let response = try JSONDecoder().decode(ModelListResponse.self, from: data)
+            return response.models.map { model in
+                let family = model.details?.family
+                let supportsTools = detectToolSupport(modelName: model.name, family: family)
+                return LocalModelInfo(
+                    name: model.name,
+                    size: model.size ?? 0,
+                    parameterSize: model.details?.parameterSize,
+                    quantization: model.details?.quantizationLevel,
+                    family: family,
+                    supportsTools: supportsTools
+                )
+            }
+        } catch {
+            Log.llm.debug("Ollama model info fetch failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Detect whether a model likely supports tool/function calling.
+    static func detectToolSupport(modelName: String, family: String?) -> Bool {
+        // Check family
+        if let family, toolSupportedFamilies.contains(family.lowercased()) {
+            return true
+        }
+
+        // Check model name patterns
+        let lowerName = modelName.lowercased()
+        return toolSupportedPatterns.contains { lowerName.contains($0) }
+    }
+
     /// Check if Ollama is running.
     static func isAvailable(baseURL: URL = URL(string: "http://localhost:11434")!) async -> Bool {
         let url = baseURL.appendingPathComponent("api/tags")
@@ -105,6 +186,37 @@ enum OllamaModelFetcher {
             return (response as? HTTPURLResponse)?.statusCode == 200
         } catch {
             return false
+        }
+    }
+}
+
+// MARK: - AnyCodableValue (for flexible JSON decoding)
+
+/// A type-erased Codable value for handling dynamic JSON structures.
+enum AnyCodableValue: Codable, Sendable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let v = try? container.decode(String.self) { self = .string(v) }
+        else if let v = try? container.decode(Int.self) { self = .int(v) }
+        else if let v = try? container.decode(Double.self) { self = .double(v) }
+        else if let v = try? container.decode(Bool.self) { self = .bool(v) }
+        else { self = .null }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try container.encode(v)
+        case .int(let v): try container.encode(v)
+        case .double(let v): try container.encode(v)
+        case .bool(let v): try container.encode(v)
+        case .null: try container.encodeNil()
         }
     }
 }

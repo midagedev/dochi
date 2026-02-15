@@ -451,53 +451,113 @@ struct ModelSettingsView: View {
 
     @State private var selectedProviderRaw: String = ""
     @State private var selectedModel: String = ""
-    @State private var ollamaModels: [String] = []
+    @State private var ollamaModels: [LocalModelInfo] = []
     @State private var ollamaAvailable: Bool? = nil
     @State private var ollamaURL: String = ""
+    @State private var lmStudioModels: [LocalModelInfo] = []
+    @State private var lmStudioAvailable: Bool? = nil
+    @State private var lmStudioURL: String = ""
+
+    // Offline fallback
+    @State private var offlineFallbackModels: [String] = []
 
     private var selectedProvider: LLMProvider {
         LLMProvider(rawValue: selectedProviderRaw) ?? .openai
     }
 
-    /// Combined model list: static for most providers, dynamic for Ollama.
+    /// Combined model list: static for most providers, dynamic for local providers.
     private var availableModels: [String] {
-        if selectedProvider == .ollama {
-            return ollamaModels
+        switch selectedProvider {
+        case .ollama:
+            return ollamaModels.map(\.name)
+        case .lmStudio:
+            return lmStudioModels.map(\.name)
+        default:
+            return selectedProvider.models
         }
-        return selectedProvider.models
+    }
+
+    /// Get LocalModelInfo for current local provider, if applicable.
+    private var currentLocalModels: [LocalModelInfo] {
+        switch selectedProvider {
+        case .ollama: return ollamaModels
+        case .lmStudio: return lmStudioModels
+        default: return []
+        }
     }
 
     var body: some View {
         Form {
+            // Provider picker with cloud/local grouping
             Section {
                 Picker("프로바이더", selection: $selectedProviderRaw) {
-                    ForEach(LLMProvider.allCases, id: \.self) { provider in
-                        Text(provider.displayName).tag(provider.rawValue)
+                    // Cloud providers
+                    Section("클라우드") {
+                        ForEach(LLMProvider.cloudProviders, id: \.self) { provider in
+                            Text(provider.displayName).tag(provider.rawValue)
+                        }
+                    }
+                    // Local providers
+                    Section("로컬") {
+                        ForEach(LLMProvider.localProviders, id: \.self) { provider in
+                            Text(provider.displayName).tag(provider.rawValue)
+                        }
                     }
                 }
                 .onChange(of: selectedProviderRaw) { _, newValue in
-
                     settings.llmProvider = newValue
                     let provider = LLMProvider(rawValue: newValue) ?? .openai
-                    if provider == .ollama {
+                    switch provider {
+                    case .ollama:
                         fetchOllamaModels()
-                    } else if !provider.models.contains(selectedModel) {
-                        selectedModel = provider.models.first ?? ""
-                        settings.llmModel = selectedModel
+                    case .lmStudio:
+                        fetchLMStudioModels()
+                    default:
+                        if !provider.models.contains(selectedModel) {
+                            selectedModel = provider.models.first ?? ""
+                            settings.llmModel = selectedModel
+                        }
                     }
                 }
 
-                if selectedProvider == .ollama {
+                if selectedProvider.isLocal {
+                    // Local model picker with metadata
                     Picker("모델", selection: $selectedModel) {
-                        if ollamaModels.isEmpty {
+                        if availableModels.isEmpty {
                             Text("모델 없음").tag("")
                         }
-                        ForEach(ollamaModels, id: \.self) { model in
-                            Text(model).tag(model)
+                        ForEach(currentLocalModels) { model in
+                            HStack {
+                                Text(model.name)
+                                if !model.compactDescription.isEmpty {
+                                    Text(model.compactDescription)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if model.supportsTools {
+                                    Image(systemName: "wrench.and.screwdriver")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .tag(model.name)
                         }
                     }
                     .onChange(of: selectedModel) { _, newValue in
                         settings.llmModel = newValue
+                    }
+
+                    // Tool support warning for selected model
+                    if let selectedInfo = currentLocalModels.first(where: { $0.name == selectedModel }),
+                       !selectedInfo.supportsTools {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            Text("이 모델은 도구 호출(function calling)을 지원하지 않을 수 있습니다")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } else {
                     Picker("모델", selection: $selectedModel) {
@@ -512,10 +572,11 @@ struct ModelSettingsView: View {
             } header: {
                 SettingsSectionHeader(
                     title: "LLM 프로바이더",
-                    helpContent: "AI 응답을 생성하는 서비스를 선택합니다. 각 프로바이더는 다른 모델과 가격 체계를 갖고 있습니다. API 키가 필요합니다."
+                    helpContent: "AI 응답을 생성하는 서비스를 선택합니다. 클라우드 프로바이더는 API 키가 필요하며, 로컬 프로바이더(Ollama, LM Studio)는 별도 설치 후 사용합니다."
                 )
             }
 
+            // Ollama settings
             if selectedProvider == .ollama {
                 Section("Ollama 설정") {
                     HStack {
@@ -529,25 +590,32 @@ struct ModelSettingsView: View {
                             }
                     }
 
-                    HStack {
-                        Text("상태")
-                        Spacer()
-                        if let available = ollamaAvailable {
-                            if available {
-                                Label("연결됨", systemImage: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                            } else {
-                                Label("연결 불가", systemImage: "xmark.circle.fill")
-                                    .foregroundStyle(.red)
-                            }
-                        } else {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
+                    localServerStatusRow(available: ollamaAvailable)
 
                     Button("모델 새로고침") {
                         fetchOllamaModels()
+                    }
+                }
+            }
+
+            // LM Studio settings
+            if selectedProvider == .lmStudio {
+                Section("LM Studio 설정") {
+                    HStack {
+                        Text("Base URL")
+                        TextField("http://localhost:1234", text: $lmStudioURL)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                            .onSubmit {
+                                settings.lmStudioBaseURL = lmStudioURL
+                                fetchLMStudioModels()
+                            }
+                    }
+
+                    localServerStatusRow(available: lmStudioAvailable)
+
+                    Button("모델 새로고침") {
+                        fetchLMStudioModels()
                     }
                 }
             }
@@ -565,6 +633,61 @@ struct ModelSettingsView: View {
                 SettingsSectionHeader(
                     title: "컨텍스트",
                     helpContent: "모델이 한 번에 처리할 수 있는 텍스트 양(토큰)입니다. 대화가 길어지면 오래된 메시지는 자동으로 압축됩니다."
+                )
+            }
+
+            // Offline fallback
+            Section {
+                Toggle("오프라인 자동 전환", isOn: Binding(
+                    get: { settings.offlineFallbackEnabled },
+                    set: { settings.offlineFallbackEnabled = $0 }
+                ))
+
+                Text("네트워크 연결이 끊어지면 자동으로 로컬 모델로 전환합니다")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if settings.offlineFallbackEnabled {
+                    Picker("폴백 프로바이더", selection: Binding(
+                        get: { settings.offlineFallbackProvider },
+                        set: { newValue in
+                            settings.offlineFallbackProvider = newValue
+                            settings.offlineFallbackModel = ""
+                            fetchOfflineFallbackModels()
+                        }
+                    )) {
+                        ForEach(LLMProvider.localProviders, id: \.self) { p in
+                            Text(p.displayName).tag(p.rawValue)
+                        }
+                    }
+
+                    Picker("폴백 모델", selection: Binding(
+                        get: { settings.offlineFallbackModel },
+                        set: { settings.offlineFallbackModel = $0 }
+                    )) {
+                        if offlineFallbackModels.isEmpty {
+                            Text("서버 연결 필요").tag("")
+                        }
+                        ForEach(offlineFallbackModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+
+                    if !settings.offlineFallbackModel.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                            Text("오프라인 폴백 설정 완료: \(settings.offlineFallbackModel)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                SettingsSectionHeader(
+                    title: "오프라인 폴백",
+                    helpContent: "클라우드 LLM 서비스에 접속할 수 없을 때 로컬에서 실행 중인 Ollama 또는 LM Studio 모델로 자동 전환합니다."
                 )
             }
 
@@ -646,23 +769,84 @@ struct ModelSettingsView: View {
             selectedProviderRaw = settings.llmProvider
             selectedModel = settings.llmModel
             ollamaURL = settings.ollamaBaseURL
+            lmStudioURL = settings.lmStudioBaseURL
             if selectedProvider == .ollama {
                 fetchOllamaModels()
+            } else if selectedProvider == .lmStudio {
+                fetchLMStudioModels()
+            }
+            if settings.offlineFallbackEnabled {
+                fetchOfflineFallbackModels()
             }
         }
     }
+
+    // MARK: - Local Server Status Row
+
+    @ViewBuilder
+    private func localServerStatusRow(available: Bool?) -> some View {
+        HStack {
+            Text("상태")
+            Spacer()
+            if let available {
+                if available {
+                    Label("연결됨", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label("연결 불가", systemImage: "xmark.circle.fill")
+                        .foregroundStyle(.red)
+                }
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    // MARK: - Data Fetching
 
     private func fetchOllamaModels() {
         ollamaAvailable = nil
         Task {
             let baseURL = URL(string: settings.ollamaBaseURL) ?? URL(string: "http://localhost:11434")!
-            let models = await OllamaModelFetcher.fetchModels(baseURL: baseURL)
+            let infos = await OllamaModelFetcher.fetchModelInfos(baseURL: baseURL)
             let available = await OllamaModelFetcher.isAvailable(baseURL: baseURL)
-            ollamaModels = models
+            ollamaModels = infos
             ollamaAvailable = available
-            if !models.contains(selectedModel) {
-                selectedModel = models.first ?? ""
+            if !infos.map(\.name).contains(selectedModel) {
+                selectedModel = infos.first?.name ?? ""
                 settings.llmModel = selectedModel
+            }
+        }
+    }
+
+    private func fetchLMStudioModels() {
+        lmStudioAvailable = nil
+        Task {
+            let baseURL = URL(string: settings.lmStudioBaseURL) ?? URL(string: "http://localhost:1234")!
+            let infos = await LMStudioModelFetcher.fetchModelInfos(baseURL: baseURL)
+            let available = await LMStudioModelFetcher.isAvailable(baseURL: baseURL)
+            lmStudioModels = infos
+            lmStudioAvailable = available
+            if !infos.map(\.name).contains(selectedModel) {
+                selectedModel = infos.first?.name ?? ""
+                settings.llmModel = selectedModel
+            }
+        }
+    }
+
+    private func fetchOfflineFallbackModels() {
+        Task {
+            guard let provider = LLMProvider(rawValue: settings.offlineFallbackProvider) else { return }
+            switch provider {
+            case .ollama:
+                let baseURL = URL(string: settings.ollamaBaseURL) ?? URL(string: "http://localhost:11434")!
+                offlineFallbackModels = await OllamaModelFetcher.fetchModels(baseURL: baseURL)
+            case .lmStudio:
+                let baseURL = URL(string: settings.lmStudioBaseURL) ?? URL(string: "http://localhost:1234")!
+                offlineFallbackModels = await LMStudioModelFetcher.fetchModels(baseURL: baseURL)
+            default:
+                offlineFallbackModels = []
             }
         }
     }

@@ -20,6 +20,7 @@ final class LLMService: LLMServiceProtocol {
         .anthropic: AnthropicAdapter(),
         .zai: ZAIAdapter(),
         .ollama: OllamaAdapter(),
+        .lmStudio: LMStudioAdapter(),
     ]
 
     /// Max retries for transient errors (5xx, timeout).
