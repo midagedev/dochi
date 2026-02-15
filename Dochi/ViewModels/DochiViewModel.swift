@@ -62,6 +62,9 @@ final class DochiViewModel {
     // MARK: - Scheduler (J-3)
     private(set) var schedulerService: SchedulerServiceProtocol?
 
+    // MARK: - Plugin System (J-4)
+    private(set) var pluginManager: PluginManagerProtocol?
+
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
     var showConnectedDevicesPopover: Bool = false
@@ -267,6 +270,12 @@ final class DochiViewModel {
     func configureSchedulerService(_ service: SchedulerServiceProtocol) {
         self.schedulerService = service
         Log.app.info("SchedulerService configured")
+    }
+
+    /// PluginManager 설정 (J-4)
+    func configurePluginManager(_ manager: PluginManagerProtocol) {
+        self.pluginManager = manager
+        Log.app.info("PluginManager configured")
     }
 
     func dismissScheduleExecutionBanner() {

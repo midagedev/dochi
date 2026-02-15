@@ -20,6 +20,7 @@ struct SettingsView: View {
     var notificationManager: NotificationManager?
     var metricsCollector: MetricsCollector?
     var viewModel: DochiViewModel?
+    var pluginManager: PluginManagerProtocol?
     var documentIndexer: DocumentIndexer?
     var feedbackStore: FeedbackStoreProtocol?
 
@@ -142,6 +143,9 @@ struct SettingsView: View {
 
         case .shortcuts:
             ShortcutsSettingsView()
+
+        case .plugins:
+            PluginSettingsView(pluginManager: pluginManager)
 
         case .devices:
             if let devicePolicyService {

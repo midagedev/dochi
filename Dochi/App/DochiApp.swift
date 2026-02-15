@@ -58,6 +58,7 @@ struct DochiApp: App {
     private let memoryConsolidator: MemoryConsolidator
     private let delegationManager: DelegationManager
     private let schedulerService: SchedulerService
+    private let pluginManager: PluginManager
 
     init() {
         let settings = AppSettings()
@@ -107,6 +108,10 @@ struct DochiApp: App {
 
         let schedulerService = SchedulerService(settings: settings)
         self.schedulerService = schedulerService
+
+        // Plugin Manager (J-4)
+        let pluginManager = PluginManager()
+        self.pluginManager = pluginManager
 
         let toolService = BuiltInToolService(
             contextService: contextService,
@@ -258,6 +263,9 @@ struct DochiApp: App {
                     // Configure DelegationManager (J-2)
                     viewModel.configureDelegationManager(delegationManager)
 
+                    // Configure PluginManager (J-4)
+                    viewModel.configurePluginManager(pluginManager)
+
                     // Configure SchedulerService (J-3)
                     viewModel.configureSchedulerService(schedulerService)
                     schedulerService.setExecutionHandler { [weak viewModel] schedule in
@@ -372,30 +380,35 @@ struct DochiApp: App {
         .defaultSize(width: 1000, height: 600)
 
         Settings {
-            SettingsView(
-                settings: settings,
-                keychainService: keychainService,
-                contextService: contextService,
-                sessionContext: sessionContext,
-                ttsService: ttsService,
-                downloadManager: modelDownloadManager,
-                telegramService: telegramService,
-                mcpService: mcpService,
-                supabaseService: supabaseService,
-                toolService: toolService,
-                devicePolicyService: viewModel.devicePolicyService,
-                schedulerService: schedulerService,
-                heartbeatService: heartbeatService,
-                notificationManager: notificationManager,
-                metricsCollector: viewModel.metricsCollector,
-                viewModel: viewModel,
-                documentIndexer: documentIndexer,
-                feedbackStore: viewModel.feedbackStore
-            )
+            settingsView
         }
         .commands {
             DebugCommands()
         }
+    }
+
+    private var settingsView: some View {
+        SettingsView(
+            settings: settings,
+            keychainService: keychainService,
+            contextService: contextService,
+            sessionContext: sessionContext,
+            ttsService: ttsService,
+            downloadManager: modelDownloadManager,
+            telegramService: telegramService,
+            mcpService: mcpService,
+            supabaseService: supabaseService,
+            toolService: toolService,
+            devicePolicyService: viewModel.devicePolicyService,
+            schedulerService: schedulerService,
+            heartbeatService: heartbeatService,
+            notificationManager: notificationManager,
+            metricsCollector: viewModel.metricsCollector,
+            viewModel: viewModel,
+            pluginManager: pluginManager,
+            documentIndexer: documentIndexer,
+            feedbackStore: viewModel.feedbackStore
+        )
     }
 
     private func restoreMCPServers(mcpService: MCPService, json: String) {

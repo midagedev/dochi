@@ -154,7 +154,7 @@ DochiApp (entry point)
 | InitialSyncWizardView | `Views/InitialSyncWizardView.swift` | AccountSettingsView "초기 업로드" | 3단계 위저드: 안내→진행률→완료 (480x420pt) (G-3) |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
-### 설정 (SettingsView — NavigationSplitView, 16섹션 6그룹) (UX-10 리디자인, G-4, H-2, I-1, J-3 추가)
+### 설정 (SettingsView — NavigationSplitView, 17섹션 6그룹) (UX-10 리디자인, G-4, H-2, I-1, J-3, J-4 추가)
 
 SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 NavigationSplitView 구조.
 사이드바: 검색 필드 + 6개 그룹별 섹션 목록 (호버/선택 하이라이트).
@@ -177,11 +177,15 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | 연결 | 도구 (`tools`) | wrench.and.screwdriver | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
 | 연결 | 통합 (`integrations`) | puzzlepiece | `Views/Settings/IntegrationsSettingsView.swift` | 텔레그램, MCP, 채팅 매핑 |
 | 연결 | 단축어 (`shortcuts`) | square.grid.3x3.square | `Views/Settings/ShortcutsSettingsView.swift` | Apple Shortcuts/Siri 연동 상태, 4개 액션 카드, 실행 기록 (H-2) |
+| 연결 | 플러그인 (`plugins`) | puzzlepiece.extension | `Views/Settings/PluginSettingsView.swift` + `PluginDetailSheet.swift` | 플러그인 디렉토리 관리, 매니페스트 파싱, 활성화/비활성화, 권한 관리, 상세 시트 (J-4) |
 | 연결 | 계정 (`account`) | person.crop.circle | `Views/Settings/AccountSettingsView.swift` | Supabase 인증, 동기화(SyncState 표시+충돌 건수+수동/전체 동기화), 동기화 설정(자동/실시간/대상 선택/충돌 전략), 데이터 관리(초기 업로드) (G-3 확장) |
 | 도움말 | 가이드 (`guide`) | play.rectangle | `Views/SettingsView.swift` 내 GuideSettingsContent | 투어/힌트 관리 |
 
 지원 파일:
 - `Views/Settings/SettingsSidebarView.swift` — SettingsSection enum, SettingsSectionGroup enum, SettingsSidebarView, SettingsSidebarRow
+- `Models/PluginModels.swift` — PluginManifest, PluginCapabilityEntry, PluginCapability, PluginStatus, PluginInfo, PluginStateFile (J-4)
+- `Services/Protocols/PluginManagerProtocol.swift` — PluginManagerProtocol (J-4)
+- `Services/PluginManager.swift` — PluginManager (@Observable, 파일 기반 플러그인 관리) (J-4)
 - `Models/UsageModels.swift` — UsageEntry, DailyUsageRecord, MonthlyUsageFile, MonthlyUsageSummary, ModelPricingTable (G-4)
 - `Services/UsageStore.swift` — UsageStore (파일 기반 영구 저장, 5초 디바운스) (G-4)
 - `Services/Protocols/UsageStoreProtocol.swift` — UsageStoreProtocol (G-4)
@@ -808,4 +812,4 @@ AppSettings: memoryConsolidationEnabled, memoryConsolidationMinMessages, memoryC
 
 ---
 
-*최종 업데이트: 2026-02-15 (H-4 Spotlight/시스템 검색 연동 추가)*
+*최종 업데이트: 2026-02-15 (J-4 플러그인 시스템 추가)*

@@ -6,7 +6,7 @@ import XCTest
 final class SettingsSectionTests: XCTestCase {
 
     func testAllCasesCount() {
-        XCTAssertEqual(SettingsSection.allCases.count, 19, "There should be 19 settings sections")
+        XCTAssertEqual(SettingsSection.allCases.count, 20, "There should be 20 settings sections")
     }
 
     func testTitleNotEmpty() {
@@ -51,6 +51,7 @@ final class SettingsSectionTests: XCTestCase {
         XCTAssertEqual(SettingsSection.tools.group, .connection)
         XCTAssertEqual(SettingsSection.integrations.group, .connection)
         XCTAssertEqual(SettingsSection.shortcuts.group, .connection)
+        XCTAssertEqual(SettingsSection.plugins.group, .connection)
         XCTAssertEqual(SettingsSection.account.group, .connection)
         XCTAssertEqual(SettingsSection.guide.group, .help)
     }
@@ -97,6 +98,14 @@ final class SettingsSectionTests: XCTestCase {
         let section = SettingsSection.voice
         XCTAssertEqual(section.title, "음성 합성")
         XCTAssertEqual(section.icon, "speaker.wave.2")
+    }
+
+    func testPluginsSection() {
+        let section = SettingsSection.plugins
+        XCTAssertEqual(section.title, "플러그인")
+        XCTAssertEqual(section.icon, "puzzlepiece.extension")
+        XCTAssertEqual(section.rawValue, "plugins")
+        XCTAssertEqual(section.group, .connection)
     }
 
     func testGuideSection() {
@@ -202,10 +211,11 @@ final class SettingsSectionGroupTests: XCTestCase {
 
     func testConnectionGroupSections() {
         let sections = SettingsSectionGroup.connection.sections
-        XCTAssertEqual(sections.count, 5)
+        XCTAssertEqual(sections.count, 6)
         XCTAssertTrue(sections.contains(.tools))
         XCTAssertTrue(sections.contains(.integrations))
         XCTAssertTrue(sections.contains(.shortcuts))
+        XCTAssertTrue(sections.contains(.plugins))
         XCTAssertTrue(sections.contains(.devices))
         XCTAssertTrue(sections.contains(.account))
     }
