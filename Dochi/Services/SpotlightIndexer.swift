@@ -106,7 +106,7 @@ final class SpotlightIndexer: SpotlightIndexerProtocol {
         attributeSet.contentDescription = String(content.prefix(Self.maxDescriptionLength))
         attributeSet.domainIdentifier = Self.domainIdentifier
         attributeSet.thumbnailData = appIconData()
-        attributeSet.contentURL = URL(string: "dochi://memory/\(identifier)")
+        attributeSet.contentURL = URL(string: "dochi://memory/\(Self.contentURLPath(scope: scope, identifier: identifier))")
         attributeSet.contentModificationDate = Date()
 
         let item = CSSearchableItem(
@@ -299,6 +299,45 @@ final class SpotlightIndexer: SpotlightIndexerProtocol {
     }
 
     // MARK: - Helpers
+
+    /// identifier(예: "user-{uuid}", "workspace-{uuid}", "agent-{wsId}-{name}")를
+    /// parseDeepLink()이 기대하는 URL 경로(예: "user/{uuid}", "workspace/{uuid}", "agent/{wsId}/{name}")로 변환
+    static func contentURLPath(scope: String, identifier: String) -> String {
+        switch scope {
+        case "personal":
+            // identifier: "user-{uuid}" → "user/{uuid}"
+            let prefix = "user-"
+            if identifier.hasPrefix(prefix) {
+                let userId = String(identifier.dropFirst(prefix.count))
+                return "user/\(userId)"
+            }
+            return identifier
+        case "workspace":
+            // identifier: "workspace-{uuid}" → "workspace/{uuid}"
+            let prefix = "workspace-"
+            if identifier.hasPrefix(prefix) {
+                let wsId = String(identifier.dropFirst(prefix.count))
+                return "workspace/\(wsId)"
+            }
+            return identifier
+        case "agent":
+            // identifier: "agent-{wsId}-{agentName}" → "agent/{wsId}/{agentName}"
+            // wsId is a UUID (36 chars), so split after "agent-" + 36 chars + "-"
+            let prefix = "agent-"
+            if identifier.hasPrefix(prefix) {
+                let rest = String(identifier.dropFirst(prefix.count))
+                // UUID is 36 characters (8-4-4-4-12)
+                if rest.count > 36, rest[rest.index(rest.startIndex, offsetBy: 36)] == "-" {
+                    let wsId = String(rest.prefix(36))
+                    let agentName = String(rest.dropFirst(37))
+                    return "agent/\(wsId)/\(agentName)"
+                }
+            }
+            return identifier
+        default:
+            return identifier
+        }
+    }
 
     private func clearAllIndicesInternal() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in

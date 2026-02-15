@@ -273,6 +273,58 @@ final class SpotlightIndexerTests: XCTestCase {
         XCTAssertTrue(vm.concreteSpotlightIndexer === realIndexer)
     }
 
+    // MARK: - contentURLPath (C-4 fix)
+
+    func testContentURLPathPersonal() {
+        let uuid = UUID().uuidString
+        let result = SpotlightIndexer.contentURLPath(scope: "personal", identifier: "user-\(uuid)")
+        XCTAssertEqual(result, "user/\(uuid)")
+    }
+
+    func testContentURLPathWorkspace() {
+        let uuid = UUID().uuidString
+        let result = SpotlightIndexer.contentURLPath(scope: "workspace", identifier: "workspace-\(uuid)")
+        XCTAssertEqual(result, "workspace/\(uuid)")
+    }
+
+    func testContentURLPathAgent() {
+        let wsId = UUID().uuidString
+        let agentName = "MyAgent"
+        let result = SpotlightIndexer.contentURLPath(scope: "agent", identifier: "agent-\(wsId)-\(agentName)")
+        XCTAssertEqual(result, "agent/\(wsId)/\(agentName)")
+    }
+
+    func testContentURLPathProducesValidDeepLink() {
+        // indexMemory()가 생성하는 URL이 parseDeepLink()로 올바르게 파싱되는지 검증
+        let userId = UUID().uuidString
+        let path = SpotlightIndexer.contentURLPath(scope: "personal", identifier: "user-\(userId)")
+        let url = URL(string: "dochi://memory/\(path)")!
+        let result = SpotlightIndexer.parseDeepLink(url: url)
+        XCTAssertEqual(result, .memoryUser(userId: userId))
+    }
+
+    func testContentURLPathWorkspaceProducesValidDeepLink() {
+        let wsId = UUID().uuidString
+        let path = SpotlightIndexer.contentURLPath(scope: "workspace", identifier: "workspace-\(wsId)")
+        let url = URL(string: "dochi://memory/\(path)")!
+        let result = SpotlightIndexer.parseDeepLink(url: url)
+        XCTAssertEqual(result, .memoryWorkspace(workspaceId: wsId))
+    }
+
+    func testContentURLPathAgentProducesValidDeepLink() {
+        let wsId = UUID().uuidString
+        let agentName = "TestAgent"
+        let path = SpotlightIndexer.contentURLPath(scope: "agent", identifier: "agent-\(wsId)-\(agentName)")
+        let url = URL(string: "dochi://memory/\(path)")!
+        let result = SpotlightIndexer.parseDeepLink(url: url)
+        XCTAssertEqual(result, .memoryAgent(workspaceId: wsId, agentName: agentName))
+    }
+
+    func testContentURLPathUnknownScopePassesThrough() {
+        let result = SpotlightIndexer.contentURLPath(scope: "unknown", identifier: "some-id")
+        XCTAssertEqual(result, "some-id")
+    }
+
     // MARK: - AppSettings Defaults
 
     func testSpotlightSettingsDefaults() {
