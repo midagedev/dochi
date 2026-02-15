@@ -64,7 +64,8 @@ final class PluginManager: PluginManagerProtocol {
                         manifest: manifest,
                         status: .error,
                         loadedAt: Date(),
-                        errorMessage: "매니페스트 검증 실패: 필수 필드 누락"
+                        errorMessage: "매니페스트 검증 실패: 필수 필드 누락",
+                        directoryURL: dir
                     ))
                     continue
                 }
@@ -73,7 +74,8 @@ final class PluginManager: PluginManagerProtocol {
                 discovered.append(PluginInfo(
                     manifest: manifest,
                     status: status,
-                    loadedAt: Date()
+                    loadedAt: Date(),
+                    directoryURL: dir
                 ))
                 Log.app.debug("Plugin loaded: \(manifest.id) v\(manifest.version) [\(status.rawValue)]")
             } catch {
@@ -94,7 +96,8 @@ final class PluginManager: PluginManagerProtocol {
                     manifest: errorManifest,
                     status: .error,
                     loadedAt: Date(),
-                    errorMessage: error.localizedDescription
+                    errorMessage: error.localizedDescription,
+                    directoryURL: dir
                 ))
             }
         }
@@ -120,12 +123,31 @@ final class PluginManager: PluginManagerProtocol {
     }
 
     func removePlugin(id: String) throws {
-        let pluginDir = pluginDirectory.appendingPathComponent(id)
-        guard fileManager.fileExists(atPath: pluginDir.path) else {
-            Log.app.warning("Plugin directory not found for removal: \(id)")
+        guard let pluginInfo = plugins.first(where: { $0.id == id }) else {
+            Log.app.warning("Plugin not found for removal: \(id)")
             return
         }
-        try fileManager.removeItem(at: pluginDir)
+
+        guard let dirURL = pluginInfo.directoryURL else {
+            Log.app.error("Plugin has no directory URL: \(id)")
+            return
+        }
+
+        // Path traversal protection: verify directory is under pluginDirectory
+        let canonicalPluginDir = pluginDirectory.standardizedFileURL.path
+        let canonicalTargetDir = dirURL.standardizedFileURL.path
+        guard canonicalTargetDir.hasPrefix(canonicalPluginDir + "/") else {
+            Log.app.error("Plugin directory path traversal blocked: \(canonicalTargetDir) is not under \(canonicalPluginDir)")
+            return
+        }
+
+        guard fileManager.fileExists(atPath: dirURL.path) else {
+            Log.app.warning("Plugin directory not found for removal: \(id)")
+            plugins.removeAll { $0.id == id }
+            return
+        }
+
+        try fileManager.removeItem(at: dirURL)
         plugins.removeAll { $0.id == id }
 
         // Clean up saved state
@@ -155,11 +177,17 @@ final class PluginManager: PluginManagerProtocol {
     // MARK: - State Persistence
 
     private func loadStates() -> [String: PluginStatus] {
-        guard let data = try? Data(contentsOf: stateFileURL),
-              let file = try? JSONDecoder().decode(PluginStateFile.self, from: data) else {
+        guard fileManager.fileExists(atPath: stateFileURL.path) else {
             return [:]
         }
-        return file.states
+        do {
+            let data = try Data(contentsOf: stateFileURL)
+            let file = try JSONDecoder().decode(PluginStateFile.self, from: data)
+            return file.states
+        } catch {
+            Log.app.error("Failed to load plugin states: \(error.localizedDescription)")
+            return [:]
+        }
     }
 
     private func saveStates(_ overrideStates: [String: PluginStatus]? = nil) {

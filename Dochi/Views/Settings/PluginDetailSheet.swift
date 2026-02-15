@@ -2,13 +2,27 @@ import SwiftUI
 
 /// Detail sheet for a single plugin, showing capabilities, permissions, and controls.
 struct PluginDetailSheet: View {
-    let plugin: PluginInfo
+    let pluginId: String
     let pluginManager: PluginManagerProtocol
 
     @Environment(\.dismiss) private var dismiss
     @State private var showDeleteConfirmation = false
 
+    private var plugin: PluginInfo? {
+        pluginManager.plugins.first { $0.id == pluginId }
+    }
+
     var body: some View {
+        if let plugin {
+            pluginContent(plugin)
+        } else {
+            ContentUnavailableView("플러그인을 찾을 수 없습니다", systemImage: "puzzlepiece.extension")
+                .frame(width: 420, height: 480)
+        }
+    }
+
+    @ViewBuilder
+    private func pluginContent(_ plugin: PluginInfo) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             HStack(spacing: 12) {
@@ -69,15 +83,15 @@ struct PluginDetailSheet: View {
                     }
 
                     // Capabilities
-                    capabilitiesSection
+                    capabilitiesSection(plugin)
 
                     // Permissions
-                    permissionsSection
+                    permissionsSection(plugin)
 
                     Divider()
 
                     // Controls
-                    controlsSection
+                    controlsSection(plugin)
                 }
                 .padding()
             }
@@ -87,7 +101,7 @@ struct PluginDetailSheet: View {
             Button("취소", role: .cancel) {}
             Button("삭제", role: .destructive) {
                 do {
-                    try pluginManager.removePlugin(id: plugin.id)
+                    try pluginManager.removePlugin(id: pluginId)
                     dismiss()
                 } catch {
                     Log.app.error("Plugin removal failed: \(error.localizedDescription)")
@@ -101,7 +115,7 @@ struct PluginDetailSheet: View {
     // MARK: - Capabilities
 
     @ViewBuilder
-    private var capabilitiesSection: some View {
+    private func capabilitiesSection(_ plugin: PluginInfo) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("제공 기능")
                 .font(.headline)
@@ -155,7 +169,7 @@ struct PluginDetailSheet: View {
     // MARK: - Permissions
 
     @ViewBuilder
-    private var permissionsSection: some View {
+    private func permissionsSection(_ plugin: PluginInfo) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("요청 권한")
                 .font(.headline)
@@ -196,16 +210,16 @@ struct PluginDetailSheet: View {
     // MARK: - Controls
 
     @ViewBuilder
-    private var controlsSection: some View {
+    private func controlsSection(_ plugin: PluginInfo) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if plugin.status != .error {
                 Toggle("활성화", isOn: Binding(
                     get: { plugin.isActive },
                     set: { enabled in
                         if enabled {
-                            pluginManager.enablePlugin(id: plugin.id)
+                            pluginManager.enablePlugin(id: pluginId)
                         } else {
-                            pluginManager.disablePlugin(id: plugin.id)
+                            pluginManager.disablePlugin(id: pluginId)
                         }
                     }
                 ))

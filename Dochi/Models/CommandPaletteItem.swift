@@ -436,7 +436,7 @@ enum CommandPaletteRegistry {
             id: "settings.open.plugins",
             icon: "puzzlepiece.extension",
             title: "플러그인 설정",
-            subtitle: "",
+            subtitle: "플러그인 관리 및 설정",
             category: .settings,
             action: .openSettingsSection(section: "plugins")
         ),

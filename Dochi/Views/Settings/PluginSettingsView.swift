@@ -113,7 +113,7 @@ struct PluginSettingsView: View {
         .padding()
         .sheet(item: $selectedPlugin) { plugin in
             if let manager = pluginManager {
-                PluginDetailSheet(plugin: plugin, pluginManager: manager)
+                PluginDetailSheet(pluginId: plugin.id, pluginManager: manager)
             }
         }
     }

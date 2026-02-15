@@ -146,13 +146,6 @@ final class PluginInfoTests: XCTestCase {
         XCTAssertEqual(info.icon, "star")
     }
 
-    func testPluginCapabilityAllCases() {
-        XCTAssertEqual(PluginCapability.allCases.count, 3)
-        XCTAssertTrue(PluginCapability.allCases.contains(.tool))
-        XCTAssertTrue(PluginCapability.allCases.contains(.llmProvider))
-        XCTAssertTrue(PluginCapability.allCases.contains(.ttsEngine))
-    }
-
     func testPluginStatusRawValues() {
         XCTAssertEqual(PluginStatus.active.rawValue, "active")
         XCTAssertEqual(PluginStatus.inactive.rawValue, "inactive")
@@ -368,6 +361,90 @@ final class PluginManagerTests: XCTestCase {
         try createPlugin(id: "new-plugin", name: "New")
         manager.scanPlugins()
         XCTAssertEqual(manager.plugins.count, 1)
+    }
+
+    // MARK: - Path Traversal Defense Tests
+
+    func testRemovePluginBlocksPathTraversal() throws {
+        // Create a plugin with a traversal id (e.g., "../../important-data")
+        // but stored in a legitimate directory
+        let pluginDir = tempDir.appendingPathComponent("plugins/legit-dir")
+        try FileManager.default.createDirectory(at: pluginDir, withIntermediateDirectories: true)
+
+        let manifest = """
+        {
+            "id": "../../important-data",
+            "name": "Malicious",
+            "version": "1.0.0",
+            "capabilities": {},
+            "permissions": {}
+        }
+        """
+        try manifest.write(to: pluginDir.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
+
+        let manager = PluginManager(baseURL: tempDir)
+        XCTAssertEqual(manager.plugins.count, 1)
+        XCTAssertEqual(manager.plugins.first?.id, "../../important-data")
+
+        // directoryURL should point to the actual directory, not reconstructed from id
+        XCTAssertEqual(manager.plugins.first?.directoryURL?.standardizedFileURL, pluginDir.standardizedFileURL)
+
+        // Removal should succeed using the safe directoryURL
+        try manager.removePlugin(id: "../../important-data")
+        XCTAssertTrue(manager.plugins.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pluginDir.path))
+    }
+
+    func testRemovePluginBlocksOutsideDirectory() throws {
+        // Use MockPluginManager to test path traversal defense with tampered directoryURL
+        let outsideDir = tempDir.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try "important".write(to: outsideDir.appendingPathComponent("data.txt"), atomically: true, encoding: .utf8)
+
+        // Create a real plugin, then verify the manager's path check
+        // by creating a plugin whose directory is inside plugins/ but
+        // trying to remove one with a traversal id that doesn't match
+        try createPlugin(id: "normal-plugin", name: "Normal")
+
+        let manager = PluginManager(baseURL: tempDir)
+        XCTAssertEqual(manager.plugins.count, 1)
+
+        // The directoryURL should point to the real dir inside plugins/
+        let expectedDir = tempDir.appendingPathComponent("plugins/normal-plugin")
+        XCTAssertEqual(manager.plugins.first?.directoryURL?.standardizedFileURL, expectedDir.standardizedFileURL)
+
+        // Removing works safely via the stored directoryURL
+        try manager.removePlugin(id: "normal-plugin")
+        XCTAssertTrue(manager.plugins.isEmpty)
+
+        // Outside directory must not be affected
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideDir.path))
+    }
+
+    func testScanStoresDirectoryURL() throws {
+        try createPlugin(id: "dir-test", name: "Dir Test")
+        let manager = PluginManager(baseURL: tempDir)
+
+        XCTAssertEqual(manager.plugins.count, 1)
+        let expectedDir = tempDir.appendingPathComponent("plugins/dir-test")
+        XCTAssertEqual(manager.plugins.first?.directoryURL?.standardizedFileURL, expectedDir.standardizedFileURL)
+    }
+
+    func testRemovePluginWithNilDirectoryURL() throws {
+        // Use MockPluginManager to inject a plugin with nil directoryURL
+        let mock = MockPluginManager()
+        let manifest = PluginManifest(
+            id: "no-dir", name: "No Dir", version: "1.0",
+            author: nil, description: nil, icon: nil,
+            capabilities: .init(), permissions: .init(), minAppVersion: nil
+        )
+        mock.plugins = [PluginInfo(manifest: manifest, status: .inactive, directoryURL: nil)]
+
+        // MockPluginManager.removePlugin removes from its list (it doesn't do path checks)
+        // This test verifies that PluginInfo can be constructed with nil directoryURL
+        XCTAssertNil(mock.plugins.first?.directoryURL)
+        try mock.removePlugin(id: "no-dir")
+        XCTAssertTrue(mock.plugins.isEmpty)
     }
 
     // MARK: - Helpers

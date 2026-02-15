@@ -37,15 +37,6 @@ struct PluginCapabilityEntry: Codable, Sendable, Identifiable {
     var id: String { name }
 }
 
-// MARK: - PluginCapability
-
-/// High-level capability type exposed by a plugin.
-enum PluginCapability: String, Codable, Sendable, CaseIterable {
-    case tool
-    case llmProvider
-    case ttsEngine
-}
-
 // MARK: - PluginStatus
 
 /// Plugin activation status.
@@ -63,6 +54,7 @@ struct PluginInfo: Identifiable, Sendable {
     var status: PluginStatus
     var loadedAt: Date?
     var errorMessage: String?
+    var directoryURL: URL?
 
     var id: String { manifest.id }
     var name: String { manifest.name }
