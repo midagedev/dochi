@@ -71,7 +71,7 @@ DochiApp (entry point)
 | MessageBubbleView | `Views/MessageBubbleView.swift` | 자동 | 개별 메시지 렌더링 (역할별 스타일), 호버 시 복사 버튼 오버레이 |
 | EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트, 에이전트 0개 시 생성 힌트 카드, 투어 리마인더 배너, 첫 대화 힌트 버블 |
 | InputBarView | `Views/ContentView.swift` | 항상 표시 | 텍스트 입력, 마이크, 전송/취소 버튼, 슬래시 명령 |
-| SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 4개 독립 버튼: 모델(→QuickModelPopover), 동기화(SyncState 기반: idle→초록/syncing→파란pulse/conflict→주황+건수→SyncConflictListView/error→빨강/offline→회색), 하트비트(→상태시트), 토큰(→상태시트). IndicatorButtonStyle 호버 (G-3 업데이트) |
+| SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 4개 독립 버튼: 모델(→QuickModelPopover), 동기화(SyncState 기반: idle→초록/syncing→파란pulse/conflict→주황+건수→SyncConflictListView/error→빨강/offline→회색), 하트비트(→상태시트), 토큰+비용(→상태시트, "1.2K 토큰 · $0.03" 형식). IndicatorButtonStyle 호버 (G-3, G-4 업데이트) |
 | SyncToastView | `Views/SyncToastView.swift` | 동기화 이벤트 발생 시 자동 | 우측 하단 토스트: 방향 아이콘(수신↓/발신↑) + 엔티티 타입 + 제목 + 충돌 여부, 4초 자동 fade (G-3) |
 | SyncToastContainerView | `Views/SyncToastView.swift` | 자동 | 여러 동기화 토스트 스택 관리 (G-3) |
 | MessageMetadataBadgeView | `Views/MessageBubbleView.swift` | assistant 메시지 자동 | 모델명·응답시간 배지, 호버 시 상세 팝오버 (토큰/프로바이더/폴백) |
@@ -98,7 +98,7 @@ DochiApp (entry point)
 
 | 화면 | 파일 | 접근 방법 | 설명 |
 |------|------|-----------|------|
-| SystemStatusSheetView | `Views/SystemStatusSheetView.swift` | 툴바 "상태" 버튼 (⌘⇧S) 또는 SystemHealthBar 클릭 | 3탭 상세: LLM 교환 이력, 하트비트 틱 기록, 클라우드 동기화(상태 헤더+동기화 대상 요약+충돌 섹션+히스토리+수동/전체 동기화 버튼) (G-3 재설계) |
+| SystemStatusSheetView | `Views/SystemStatusSheetView.swift` | 툴바 "상태" 버튼 (⌘⇧S) 또는 SystemHealthBar 클릭 | 3탭 상세: LLM 교환 이력(세션 추정 비용 표시+"상세 대시보드 열기" 링크 G-4), 하트비트 틱 기록, 클라우드 동기화(상태 헤더+동기화 대상 요약+충돌 섹션+히스토리+수동/전체 동기화 버튼) (G-3 재설계) |
 | CapabilityCatalogView | `Views/CapabilityCatalogView.swift` | 툴바 "기능" 버튼 (⌘⇧F) | 전체 도구 그룹별 카탈로그 |
 | ContextInspectorView | `Views/ContextInspectorView.swift` | ⌘⌥I 또는 커맨드 팔레트 | 시스템 프롬프트 / 에이전트 / 메모리 탭 (시트) |
 | KeyboardShortcutHelpView | `Views/KeyboardShortcutHelpView.swift` | ⌘/ 또는 커맨드 팔레트 | 4섹션 키보드 단축키 도움말 (480x520) |
@@ -122,7 +122,7 @@ DochiApp (entry point)
 | InitialSyncWizardView | `Views/InitialSyncWizardView.swift` | AccountSettingsView "초기 업로드" | 3단계 위저드: 안내→진행률→완료 (480x420pt) (G-3) |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
-### 설정 (SettingsView — NavigationSplitView, 12섹션 6그룹) (UX-10 리디자인)
+### 설정 (SettingsView — NavigationSplitView, 13섹션 6그룹) (UX-10 리디자인, G-4 추가)
 
 SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 NavigationSplitView 구조.
 사이드바: 검색 필드 + 6개 그룹별 섹션 목록 (호버/선택 하이라이트).
@@ -132,6 +132,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 |------|----------------|--------|------|------|
 | AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택 (클라우드/로컬 그룹), Ollama 설정, LM Studio 설정, 오프라인 폴백, 태스크 라우팅 |
 | AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
+| AI | 사용량 (`usage`) | chart.bar.xaxis | `Views/Settings/UsageDashboardView.swift` | 기간별 사용량 (오늘/주/월/전체), 요약 카드 (교환수/토큰/비용), Swift Charts 일별 차트 (비용/토큰 모드), 모델별/에이전트별 분류 테이블, 예산 설정 (월 한도/알림/차단) (G-4) |
 | 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더 (시스템/Google Cloud/ONNX), 음성, 속도/피치, ONNX 모델 관리 (ONNXModelManagerView), 디퓨전 스텝, TTS 오프라인 폴백 |
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타 |
 | 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
@@ -145,6 +146,9 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 
 지원 파일:
 - `Views/Settings/SettingsSidebarView.swift` — SettingsSection enum, SettingsSectionGroup enum, SettingsSidebarView, SettingsSidebarRow
+- `Models/UsageModels.swift` — UsageEntry, DailyUsageRecord, MonthlyUsageFile, MonthlyUsageSummary, ModelPricingTable (G-4)
+- `Services/UsageStore.swift` — UsageStore (파일 기반 영구 저장, 5초 디바운스) (G-4)
+- `Services/Protocols/UsageStoreProtocol.swift` — UsageStoreProtocol (G-4)
 
 ---
 
@@ -168,7 +172,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | `lastInputTokens` | `Int?` | 마지막 입력 토큰 | StatusBarView |
 | `lastOutputTokens` | `Int?` | 마지막 출력 토큰 | StatusBarView |
 | `contextWindowTokens` | `Int` | 모델 컨텍스트 윈도우 | StatusBarView |
-| `metricsCollector` | `MetricsCollector` | LLM 교환 메트릭 수집 | SystemHealthBarView, SystemStatusSheetView |
+| `metricsCollector` | `MetricsCollector` | LLM 교환 메트릭 수집, 세션 비용 추적, UsageStore 영구 기록, 예산 알림 (G-4) | SystemHealthBarView, SystemStatusSheetView, UsageDashboardView |
 | `toolExecutions` | `[ToolExecution]` | 현재 턴 도구 실행 목록 | ConversationView (ToolExecutionCardView, ToolChainProgressView) |
 | `allToolCardsCollapsed` | `Bool` | 도구 카드 일괄 접기/펼치기 상태 | ⌘⇧T 토글 |
 | `memoryToastEvents` | `[MemoryToastEvent]` | 메모리 저장 토스트 이벤트 큐 | MemoryToastContainerView |
@@ -292,6 +296,7 @@ MemoryContextInfo 필드:
 | Heartbeat | `heartbeatEnabled`, `heartbeatIntervalMinutes`, `heartbeatCheckCalendar/Kanban/Reminders` |
 | 아바타 | `avatarEnabled` |
 | 가이드 | `hintsEnabled`, `featureTourCompleted`, `featureTourSkipped`, `featureTourBannerDismissed` |
+| 예산 (G-4) | `budgetEnabled`, `monthlyBudgetUSD`, `budgetAlert50`, `budgetAlert80`, `budgetAlert100`, `budgetBlockOnExceed` |
 | 동기화 (G-3) | `autoSyncEnabled`, `realtimeSyncEnabled`, `syncConversations`, `syncMemory`, `syncKanban`, `syncProfiles`, `conflictResolutionStrategy` |
 | 기타 | `chatFontSize`, `currentWorkspaceId`, `defaultUserId`, `activeAgentName` |
 
@@ -538,6 +543,7 @@ ONNX 모델 관리:
 | 칸반 보드 | `~/Library/Application Support/Dochi/kanban/{boardId}.json` | 칸반 데이터 |
 | 워크스페이스 | `~/Library/Application Support/Dochi/workspaces/{wsId}/` | 워크스페이스 데이터 |
 | 에이전트 템플릿 | `~/Library/Application Support/Dochi/agent_templates.json` | 커스텀 에이전트 템플릿 |
+| 사용량 데이터 | `~/Library/Application Support/Dochi/usage/{yyyy-MM}.json` | 월별 API 사용량/비용 기록 (G-4) |
 
 ---
 
@@ -584,4 +590,4 @@ ONNX 모델 관리:
 
 ---
 
-*최종 업데이트: 2026-02-15 (G-2 ONNX TTS 머지 후)*
+*최종 업데이트: 2026-02-15 (G-4 사용량 대시보드 머지 후)*

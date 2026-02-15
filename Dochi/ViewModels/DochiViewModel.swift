@@ -326,6 +326,13 @@ final class DochiViewModel {
             return
         }
 
+        // Budget check: block if monthly budget exceeded
+        if metricsCollector.isBudgetExceeded {
+            errorMessage = "월 예산을 초과했습니다. 설정 > 사용량에서 예산을 조정하거나 차단을 해제하세요."
+            Log.app.warning("LLM request blocked: monthly budget exceeded")
+            return
+        }
+
         // Barge-in: if TTS is playing in text mode, stop it
         ttsService.stopAndClear()
 
@@ -928,6 +935,14 @@ final class DochiViewModel {
             } else {
                 transition(to: .idle)
             }
+            return
+        }
+
+        // Budget check: block if monthly budget exceeded
+        if metricsCollector.isBudgetExceeded {
+            errorMessage = "월 예산을 초과했습니다. 설정 > 사용량에서 예산을 조정하거나 차단을 해제하세요."
+            Log.app.warning("LLM request blocked (voice): monthly budget exceeded")
+            transition(to: .idle)
             return
         }
 

@@ -2,6 +2,9 @@ import SwiftUI
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// UsageStore reference for flushing pending data on app termination (C-3).
+    var usageStore: UsageStore?
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
@@ -10,6 +13,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Flush any pending usage data to disk before exit (C-3)
+        if let store = usageStore {
+            store.flushToDiskSync()
+            Log.app.info("UsageStore flushed on app termination")
+        }
     }
 }
 
@@ -28,6 +39,7 @@ struct DochiApp: App {
     private let toolService: BuiltInToolService
     private let heartbeatService: HeartbeatService
     private let modelDownloadManager: ModelDownloadManager
+    private let usageStore: UsageStore
 
     init() {
         let settings = AppSettings()
@@ -81,6 +93,14 @@ struct DochiApp: App {
         )
         self.toolService = toolService
 
+        let metricsCollector = MetricsCollector()
+        let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Dochi")
+        let usageStore = UsageStore(baseURL: appSupportURL)
+        self.usageStore = usageStore
+        metricsCollector.usageStore = usageStore
+        metricsCollector.settings = settings
+
         _viewModel = State(initialValue: DochiViewModel(
             llmService: llmService,
             toolService: toolService,
@@ -91,7 +111,8 @@ struct DochiApp: App {
             ttsService: ttsService,
             soundService: soundService,
             settings: settings,
-            sessionContext: sessionContext
+            sessionContext: sessionContext,
+            metricsCollector: metricsCollector
         ))
 
         contextService.migrateIfNeeded()
@@ -159,6 +180,14 @@ struct DochiApp: App {
                     }
 
                     heartbeatService.restart()
+
+                    // Refresh cached monthly cost for budget checking (C-2)
+                    Task {
+                        await viewModel.metricsCollector.refreshMonthCost()
+                    }
+
+                    // Wire UsageStore to AppDelegate for flush on termination (C-3)
+                    appDelegate.usageStore = usageStore
 
                     // Smoke test: write app state for automated verification
                     SmokeTestReporter.report(
@@ -229,6 +258,7 @@ struct DochiApp: App {
                 supabaseService: supabaseService,
                 toolService: toolService,
                 heartbeatService: heartbeatService,
+                metricsCollector: viewModel.metricsCollector,
                 viewModel: viewModel
             )
         }

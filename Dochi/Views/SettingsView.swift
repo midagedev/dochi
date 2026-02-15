@@ -14,6 +14,7 @@ struct SettingsView: View {
     var supabaseService: SupabaseServiceProtocol?
     var toolService: BuiltInToolService?
     var heartbeatService: HeartbeatService?
+    var metricsCollector: MetricsCollector?
     var viewModel: DochiViewModel?
 
     @State var selectedSection: SettingsSection = .aiModel
@@ -43,6 +44,13 @@ struct SettingsView: View {
 
         case .apiKey:
             APIKeySettingsView(keychainService: keychainService)
+
+        case .usage:
+            if let metricsCollector {
+                UsageDashboardView(metricsCollector: metricsCollector, settings: settings)
+            } else {
+                unavailableView(title: "사용량", message: "메트릭 수집기가 초기화되지 않았습니다.")
+            }
 
         case .voice:
             VoiceSettingsView(settings: settings, keychainService: keychainService, ttsService: ttsService, downloadManager: downloadManager)

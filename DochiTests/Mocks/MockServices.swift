@@ -516,3 +516,38 @@ final class MockSlackService: SlackServiceProtocol {
         SlackUser(id: "U123BOT", name: "test-bot", isBot: true)
     }
 }
+
+// MARK: - MockUsageStore
+
+@MainActor
+final class MockUsageStore: UsageStoreProtocol {
+    var recordedMetrics: [ExchangeMetrics] = []
+    var stubbedCost: Double = 0.0
+
+    func record(_ metrics: ExchangeMetrics) async {
+        recordedMetrics.append(metrics)
+    }
+
+    func dailyRecords(for month: String) async -> [DailyUsageRecord] {
+        []
+    }
+
+    func monthlySummary(for month: String) async -> MonthlyUsageSummary {
+        MonthlyUsageSummary(
+            month: month,
+            totalExchanges: recordedMetrics.count,
+            totalInputTokens: recordedMetrics.compactMap(\.inputTokens).reduce(0, +),
+            totalOutputTokens: recordedMetrics.compactMap(\.outputTokens).reduce(0, +),
+            totalCostUSD: stubbedCost,
+            days: []
+        )
+    }
+
+    func allMonths() async -> [String] {
+        []
+    }
+
+    func currentMonthCost() async -> Double {
+        stubbedCost
+    }
+}
