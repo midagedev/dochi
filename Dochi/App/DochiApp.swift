@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// UsageStore reference for flushing pending data on app termination (C-3).
@@ -48,6 +49,7 @@ struct DochiApp: App {
     private let supabaseService: SupabaseService
     private let toolService: BuiltInToolService
     private let heartbeatService: HeartbeatService
+    private let notificationManager: NotificationManager
     private let modelDownloadManager: ModelDownloadManager
     private let usageStore: UsageStore
 
@@ -64,6 +66,7 @@ struct DochiApp: App {
         let telegramService = TelegramService()
         let mcpService = MCPService()
         let heartbeatService = HeartbeatService(settings: settings)
+        let notificationManager = NotificationManager(settings: settings)
 
         self.keychainService = keychainService
         self.settings = settings
@@ -73,6 +76,7 @@ struct DochiApp: App {
         self.mcpService = mcpService
         self.supabaseService = supabaseService
         self.heartbeatService = heartbeatService
+        self.notificationManager = notificationManager
         self.modelDownloadManager = ModelDownloadManager()
 
         let workspaceId = UUID(uuidString: settings.currentWorkspaceId)
@@ -137,11 +141,16 @@ struct DochiApp: App {
         )
 
         heartbeatService.configure(contextService: contextService, sessionContext: sessionContext)
+        heartbeatService.setNotificationManager(notificationManager)
         heartbeatService.setProactiveHandler { [weak viewModel] message in
             guard let viewModel else { return }
             Log.app.info("Heartbeat proactive message: \(message)")
             viewModel.injectProactiveMessage(message)
         }
+
+        // Setup notification categories (H-3)
+        notificationManager.registerCategories()
+        UNUserNotificationCenter.current().delegate = notificationManager
 
         // Start Telegram connection if enabled
         if settings.telegramEnabled,
@@ -199,6 +208,21 @@ struct DochiApp: App {
                     }
 
                     heartbeatService.restart()
+
+                    // Wire notification callbacks (H-3)
+                    notificationManager.onReply = { [weak viewModel] text, category, originalBody in
+                        guard let viewModel else { return }
+                        viewModel.handleNotificationReply(text: text, category: category, originalBody: originalBody)
+                    }
+                    notificationManager.onOpenApp = { [weak viewModel] category in
+                        guard let viewModel else { return }
+                        viewModel.handleNotificationOpenApp(category: category)
+                    }
+                    if settings.heartbeatEnabled {
+                        Task {
+                            await notificationManager.requestAuthorizationIfNeeded()
+                        }
+                    }
 
                     // Refresh cached monthly cost for budget checking (C-2)
                     Task {
@@ -290,6 +314,7 @@ struct DochiApp: App {
                 supabaseService: supabaseService,
                 toolService: toolService,
                 heartbeatService: heartbeatService,
+                notificationManager: notificationManager,
                 metricsCollector: viewModel.metricsCollector,
                 viewModel: viewModel
             )

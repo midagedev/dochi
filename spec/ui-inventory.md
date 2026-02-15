@@ -10,6 +10,10 @@
 
 ```
 DochiApp (entry point)
+├── NotificationManager (UNUserNotificationCenterDelegate) (H-3)
+│   ├── 4 카테고리: dochi-calendar (답장+열기), dochi-kanban (열기), dochi-reminder (답장+열기), dochi-memory (열기)
+│   ├── 3 액션: reply (텍스트 입력), open-app (포그라운드), dismiss (파괴적)
+│   └── 콜백: onReply → ViewModel.handleNotificationReply, onOpenApp → ViewModel.handleNotificationOpenApp
 ├── MenuBarManager (NSStatusItem + NSPopover) (H-1)
 │   └── MenuBarPopoverView — 메뉴바 퀵 액세스 팝업 (380x480pt)
 │       ├── 헤더 (36pt) — 에이전트 아이콘+이름, 워크스페이스명, 닫기 버튼
@@ -144,7 +148,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더 (시스템/Google Cloud/ONNX), 음성, 속도/피치, ONNX 모델 관리 (ONNXModelManagerView), 디퓨전 스텝, TTS 오프라인 폴백 |
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타 |
 | 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
-| 일반 | 하트비트 (`heartbeat`) | heart.circle | `Views/SettingsView.swift` 내 HeartbeatSettingsContent | Heartbeat 간격, 캘린더/칸반/미리알림 체크 |
+| 일반 | 하트비트 (`heartbeat`) | heart.circle | `Views/SettingsView.swift` 내 HeartbeatSettingsContent | Heartbeat 간격, 캘린더/칸반/미리알림 체크, 알림 센터 설정 (권한 상태, 소리/답장 토글, 카테고리별 알림 토글) (H-3) |
 | 사람 | 가족 (`family`) | person.2 | `Views/Settings/FamilySettingsView.swift` | 사용자 프로필 CRUD |
 | 사람 | 에이전트 (`agent`) | person.crop.rectangle | `Views/Settings/AgentSettingsView.swift` → `Views/Agent/AgentCardGridView.swift` | 에이전트 카드 그리드 |
 | 연결 | 도구 (`tools`) | wrench.and.screwdriver | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
@@ -158,6 +162,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 - `Models/UsageModels.swift` — UsageEntry, DailyUsageRecord, MonthlyUsageFile, MonthlyUsageSummary, ModelPricingTable (G-4)
 - `Services/UsageStore.swift` — UsageStore (파일 기반 영구 저장, 5초 디바운스) (G-4)
 - `Services/Protocols/UsageStoreProtocol.swift` — UsageStoreProtocol (G-4)
+- `App/NotificationManager.swift` — NotificationManager (UNUserNotificationCenterDelegate, 알림 카테고리/액션 등록, 카테고리별 알림 발송, 사용자 응답 콜백) (H-3)
 - `App/DochiAppIntents.swift` — 4개 AppIntent (AskDochiIntent, AddMemoIntent, CreateKanbanCardIntent, TodayBriefingIntent) (H-2)
 - `App/DochiShortcuts.swift` — AppShortcutsProvider, Siri 문구 등록 (H-2)
 - `Services/ShortcutService.swift` — DochiShortcutService 싱글턴, ShortcutError (H-2)
@@ -307,6 +312,7 @@ MemoryContextInfo 필드:
 | 음성 | `ttsProvider`, `wakeWordEnabled`, `wakeWord`, `sttSilenceTimeout`, `onnxModelId`, `ttsOfflineFallbackEnabled`, `ttsDiffusionSteps` |
 | 통합 | `telegramEnabled`, `telegramStreamReplies`, `ollamaBaseURL` |
 | Heartbeat | `heartbeatEnabled`, `heartbeatIntervalMinutes`, `heartbeatCheckCalendar/Kanban/Reminders` |
+| 알림 센터 (H-3) | `notificationCalendarEnabled`, `notificationKanbanEnabled`, `notificationReminderEnabled`, `notificationMemoryEnabled`, `notificationSoundEnabled`, `notificationReplyEnabled` |
 | 아바타 | `avatarEnabled` |
 | 가이드 | `hintsEnabled`, `featureTourCompleted`, `featureTourSkipped`, `featureTourBannerDismissed` |
 | 예산 (G-4) | `budgetEnabled`, `monthlyBudgetUSD`, `budgetAlert50`, `budgetAlert80`, `budgetAlert100`, `budgetBlockOnExceed` |
@@ -471,6 +477,26 @@ AppIntents 프레임워크 등록 (앱 포함 시 자동)
   "단축어 설정" -> openSettingsSection(section: "shortcuts")
 ```
 
+### 알림 센터 연동 (H-3 추가)
+```
+HeartbeatService tick -> 카테고리별 컨텍스트 수집
+  -> NotificationManager.sendCalendarNotification/sendKanbanNotification/sendReminderNotification/sendMemoryNotification
+  -> 설정에 따라 필터링 (notificationCalendarEnabled 등)
+  -> UNMutableNotificationContent (카테고리 식별자 + threadIdentifier + 소리 옵션)
+  -> UNUserNotificationCenter.add()
+사용자 응답:
+  -> 답장 (reply 액션) -> NotificationManager.onReply
+    -> DochiViewModel.handleNotificationReply(text:category:originalBody:)
+    -> 대화에 알림 컨텍스트 주입 + sendMessage()
+  -> 앱 열기 (open-app 액션 / 알림 탭) -> NotificationManager.onOpenApp
+    -> DochiViewModel.handleNotificationOpenApp(category:)
+    -> NSApp.activate() + 카테고리별 네비게이션
+설정: 설정 > 일반 > 하트비트 > 알림 센터 섹션
+  -> 권한 상태 표시 (초록/빨강/노랑 원)
+  -> 소리/답장 토글, 캘린더/칸반/미리알림/메모리 카테고리별 토글
+  -> 하트비트 비활성 시 전체 disabled
+```
+
 ### 가이드/온보딩 (UX-9 추가)
 ```
 기능 투어: 온보딩 완료 → "기능 둘러보기" 버튼 → FeatureTourView (4단계)
@@ -556,6 +582,7 @@ AppIntents 프레임워크 등록 (앱 포함 시 자동)
 | 투어 단계 (step indicator + 콘텐츠) | FeatureTourView | 4단계 워크스루 (이전/다음/건너뛰기/시작) |
 | 인디케이터 버튼 (ButtonStyle + onHover) | SystemHealthBarView | 호버 시 배경색 표시, 개별 클릭 영역 (UX-10) |
 | 설정 사이드바 (List + 그룹 섹션) | SettingsSidebarView | 검색 필드 + 6그룹 14섹션, 호버/선택 하이라이트 (UX-10, H-2 추가) |
+| 알림 권한 상태 (Circle + Text) | NotificationAuthorizationStatusView | 초록(허용)/빨강(거부)/노랑(미결정) 원 + 상태 텍스트 (H-3) |
 | 액션 카드 (HStack + 아이콘 배경 + 제목/설명/Siri문구) | ShortcutsSettingsView | Shortcuts 액션 카드 (아이콘, 설명, Siri 문구 표시) (H-2) |
 
 ---
@@ -652,4 +679,4 @@ AppIntents 프레임워크 등록 (앱 포함 시 자동)
 
 ---
 
-*최종 업데이트: 2026-02-15 (H-2 Apple Shortcuts 연동 추가)*
+*최종 업데이트: 2026-02-15 (H-3 알림 센터 연동 추가)*
