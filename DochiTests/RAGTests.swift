@@ -435,6 +435,79 @@ final class VectorStoreTests: XCTestCase {
         ])
         XCTAssertEqual(store.chunkCount, 2)
     }
+
+    func testStoredEmbeddingDimensionEmpty() {
+        let store = makeTempStore()
+        // No chunks stored yet — should return nil
+        XCTAssertNil(store.storedEmbeddingDimension())
+    }
+
+    func testStoredEmbeddingDimension() {
+        let store = makeTempStore()
+        let docId = UUID()
+        store.upsertDocument(RAGDocument(
+            id: docId,
+            fileName: "dim_test.md",
+            filePath: "/tmp/dim_test.md",
+            fileSize: 100,
+            fileType: .markdown,
+            indexingStatus: .indexed
+        ))
+
+        // Insert chunk with 5-dimensional embedding
+        store.insertChunks([
+            (id: UUID(), documentId: docId, content: "test", sectionTitle: nil, embedding: [1, 2, 3, 4, 5], position: 0),
+        ])
+
+        XCTAssertEqual(store.storedEmbeddingDimension(), 5)
+    }
+
+    func testDeleteChunksPreparedStatement() {
+        let store = makeTempStore()
+        let docId = UUID()
+        store.upsertDocument(RAGDocument(
+            id: docId,
+            fileName: "del_test.md",
+            filePath: "/tmp/del_test.md",
+            fileSize: 100,
+            fileType: .markdown,
+            indexingStatus: .indexed
+        ))
+
+        store.insertChunks([
+            (id: UUID(), documentId: docId, content: "chunk1", sectionTitle: nil, embedding: [1, 0], position: 0),
+            (id: UUID(), documentId: docId, content: "chunk2", sectionTitle: nil, embedding: [0, 1], position: 1),
+        ])
+        XCTAssertEqual(store.chunkCount, 2)
+
+        store.deleteChunks(documentId: docId)
+        XCTAssertEqual(store.chunkCount, 0)
+        // Document still exists
+        XCTAssertEqual(store.documentCount, 1)
+    }
+
+    func testDeleteDocumentPreparedStatement() {
+        let store = makeTempStore()
+        let docId = UUID()
+        store.upsertDocument(RAGDocument(
+            id: docId,
+            fileName: "del_doc.md",
+            filePath: "/tmp/del_doc.md",
+            fileSize: 100,
+            fileType: .markdown,
+            indexingStatus: .indexed
+        ))
+
+        store.insertChunks([
+            (id: UUID(), documentId: docId, content: "chunk1", sectionTitle: nil, embedding: [1, 0], position: 0),
+        ])
+        XCTAssertEqual(store.documentCount, 1)
+        XCTAssertEqual(store.chunkCount, 1)
+
+        store.deleteDocument(id: docId)
+        XCTAssertEqual(store.documentCount, 0)
+        XCTAssertEqual(store.chunkCount, 0)
+    }
 }
 
 // MARK: - Message RAGContextInfo Backward Compatibility Tests

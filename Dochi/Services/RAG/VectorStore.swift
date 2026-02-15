@@ -190,8 +190,26 @@ final class VectorStore {
 
     func deleteDocument(id: UUID) {
         // Delete chunks first (foreign key)
-        executeSQL("DELETE FROM chunks WHERE documentId = '\(id.uuidString)';")
-        executeSQL("DELETE FROM documents WHERE id = '\(id.uuidString)';")
+        let deleteChunksSQL = "DELETE FROM chunks WHERE documentId = ?;"
+        var chunkStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, deleteChunksSQL, -1, &chunkStmt, nil) == SQLITE_OK {
+            bindText(chunkStmt, index: 1, value: id.uuidString)
+            if sqlite3_step(chunkStmt) != SQLITE_DONE {
+                Log.storage.error("VectorStore: Failed to delete chunks for document \(id.uuidString)")
+            }
+        }
+        sqlite3_finalize(chunkStmt)
+
+        let deleteDocSQL = "DELETE FROM documents WHERE id = ?;"
+        var docStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, deleteDocSQL, -1, &docStmt, nil) == SQLITE_OK {
+            bindText(docStmt, index: 1, value: id.uuidString)
+            if sqlite3_step(docStmt) != SQLITE_DONE {
+                Log.storage.error("VectorStore: Failed to delete document \(id.uuidString)")
+            }
+        }
+        sqlite3_finalize(docStmt)
+
         refreshCounts()
     }
 
@@ -226,7 +244,7 @@ final class VectorStore {
             // Store embedding as blob
             let embeddingData = chunk.embedding.withUnsafeBufferPointer { Data(buffer: $0) }
             _ = embeddingData.withUnsafeBytes { ptr in
-                sqlite3_bind_blob(stmt, 5, ptr.baseAddress, Int32(embeddingData.count), nil)
+                sqlite3_bind_blob(stmt, 5, ptr.baseAddress, Int32(embeddingData.count), Self.sqliteTransient)
             }
             sqlite3_bind_int(stmt, 6, Int32(chunk.position))
 
@@ -240,7 +258,15 @@ final class VectorStore {
     }
 
     func deleteChunks(documentId: UUID) {
-        executeSQL("DELETE FROM chunks WHERE documentId = '\(documentId.uuidString)';")
+        let sql = "DELETE FROM chunks WHERE documentId = ?;"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, index: 1, value: documentId.uuidString)
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                Log.storage.error("VectorStore: Failed to delete chunks for document \(documentId.uuidString)")
+            }
+        }
+        sqlite3_finalize(stmt)
         refreshCounts()
     }
 
@@ -312,6 +338,21 @@ final class VectorStore {
     func refreshCounts() {
         documentCount = countRows("documents")
         chunkCount = countRows("chunks")
+    }
+
+    /// 기존 인덱스에 저장된 임베딩 벡터의 차원 수를 반환한다.
+    /// 저장된 청크가 없으면 nil을 반환한다.
+    func storedEmbeddingDimension() -> Int? {
+        let sql = "SELECT embedding FROM chunks WHERE embedding IS NOT NULL LIMIT 1;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_step(stmt) == SQLITE_ROW,
+              sqlite3_column_blob(stmt, 0) != nil else { return nil }
+
+        let blobSize = Int(sqlite3_column_bytes(stmt, 0))
+        return blobSize / MemoryLayout<Float>.size
     }
 
     // MARK: - Helpers

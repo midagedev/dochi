@@ -5,6 +5,15 @@ struct RAGSettingsView: View {
     var settings: AppSettings
     var documentIndexer: DocumentIndexer?
 
+    @State private var showModelChangeAlert = false
+    @State private var pendingModelChange: String?
+
+    /// 모델별 임베딩 차원 수
+    private static let modelDimensions: [String: Int] = [
+        "text-embedding-3-small": 1536,
+        "text-embedding-3-large": 3072
+    ]
+
     var body: some View {
         Form {
             // MARK: - 활성화
@@ -36,7 +45,9 @@ struct RAGSettingsView: View {
 
                     Picker("임베딩 모델", selection: Binding(
                         get: { settings.ragEmbeddingModel },
-                        set: { settings.ragEmbeddingModel = $0 }
+                        set: { newModel in
+                            handleModelChange(to: newModel)
+                        }
                     )) {
                         Text("text-embedding-3-small").tag("text-embedding-3-small")
                         Text("text-embedding-3-large").tag("text-embedding-3-large")
@@ -163,5 +174,47 @@ struct RAGSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .alert("임베딩 모델 변경", isPresented: $showModelChangeAlert) {
+            Button("재인덱싱") {
+                if let newModel = pendingModelChange {
+                    settings.ragEmbeddingModel = newModel
+                    if let indexer = documentIndexer {
+                        Task {
+                            await indexer.reindexAll()
+                        }
+                    }
+                }
+                pendingModelChange = nil
+            }
+            Button("모델만 변경") {
+                if let newModel = pendingModelChange {
+                    settings.ragEmbeddingModel = newModel
+                }
+                pendingModelChange = nil
+            }
+            Button("취소", role: .cancel) {
+                pendingModelChange = nil
+            }
+        } message: {
+            Text("기존 인덱스와 차원이 호환되지 않을 수 있습니다. 재인덱싱하시겠습니까?")
+        }
+    }
+
+    // MARK: - Model Change Handling
+
+    private func handleModelChange(to newModel: String) {
+        let currentModel = settings.ragEmbeddingModel
+        guard newModel != currentModel else { return }
+
+        // Check if there are existing indexed chunks with a different dimension
+        if let indexer = documentIndexer,
+           let storedDimension = indexer.storedEmbeddingDimension,
+           let newDimension = Self.modelDimensions[newModel],
+           storedDimension != newDimension {
+            pendingModelChange = newModel
+            showModelChangeAlert = true
+        } else {
+            settings.ragEmbeddingModel = newModel
+        }
     }
 }

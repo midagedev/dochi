@@ -211,8 +211,8 @@ struct DocumentLibraryView: View {
             errorMessage = nil
             guard folderURL.startAccessingSecurityScopedResource() else { return }
             Task {
+                defer { folderURL.stopAccessingSecurityScopedResource() }
                 await documentIndexer.indexFolder(at: folderURL)
-                folderURL.stopAccessingSecurityScopedResource()
                 refreshDocuments()
             }
         case .failure(let error):

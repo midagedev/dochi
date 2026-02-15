@@ -17,6 +17,11 @@ final class DocumentIndexer {
         vectorStore.loadDocuments()
     }
 
+    /// 기존 인덱스에 저장된 임베딩 벡터의 차원 수 (없으면 nil)
+    var storedEmbeddingDimension: Int? {
+        vectorStore.storedEmbeddingDimension()
+    }
+
     init(vectorStore: VectorStore, embeddingService: EmbeddingService, settings: AppSettings) {
         self.vectorStore = vectorStore
         self.embeddingService = embeddingService
