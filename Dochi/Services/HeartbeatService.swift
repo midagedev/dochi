@@ -22,6 +22,7 @@ final class HeartbeatService: Observable {
     private var sessionContext: SessionContext?
     private var onProactiveMessage: ((String) -> Void)?
     private var notificationManager: NotificationManager?
+    private var interestDiscoveryService: InterestDiscoveryServiceProtocol?
 
     // Observable state
     private(set) var lastTickDate: Date?
@@ -44,6 +45,11 @@ final class HeartbeatService: Observable {
     /// Inject NotificationManager for actionable notifications (H-3).
     func setNotificationManager(_ manager: NotificationManager) {
         self.notificationManager = manager
+    }
+
+    /// Inject InterestDiscoveryService for expiration checks (K-3).
+    func setInterestDiscoveryService(_ service: InterestDiscoveryServiceProtocol) {
+        self.interestDiscoveryService = service
     }
 
     /// Set a callback for when the heartbeat decides to proactively message the user.
@@ -143,6 +149,9 @@ final class HeartbeatService: Observable {
                     contextParts.append("💾 메모리:\n\(memoryWarning)")
                 }
             }
+
+            // 5. Interest expiration check (K-3)
+            interestDiscoveryService?.checkExpirations()
 
             consecutiveErrors = 0
         } catch {

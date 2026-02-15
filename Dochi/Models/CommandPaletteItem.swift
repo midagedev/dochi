@@ -522,6 +522,15 @@ enum CommandPaletteRegistry {
             category: .navigation,
             action: .showSuggestionHistory
         ),
+        // K-3: 관심사 발굴
+        CommandPaletteItem(
+            id: "settings.open.interest",
+            icon: "sparkle.magnifyingglass",
+            title: "관심사 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "interest")
+        ),
         // G-3: 동기화 명령
         CommandPaletteItem(
             id: "sync-now",

@@ -62,6 +62,7 @@ struct DochiApp: App {
     private let resourceOptimizer: any ResourceOptimizerProtocol
     private let terminalService: any TerminalServiceProtocol
     private let proactiveSuggestionService: ProactiveSuggestionService
+    private let interestDiscoveryService: InterestDiscoveryService
 
     init() {
         let settings = AppSettings()
@@ -149,6 +150,10 @@ struct DochiApp: App {
             commandTimeout: settings.terminalCommandTimeout
         )
         self.terminalService = terminalService
+
+        // Interest Discovery Service (K-3)
+        let interestDiscoveryService = InterestDiscoveryService(settings: settings)
+        self.interestDiscoveryService = interestDiscoveryService
 
         // Proactive Suggestion Service (K-2)
         let proactiveSuggestionService = ProactiveSuggestionService(
@@ -312,6 +317,10 @@ struct DochiApp: App {
                     // Configure ProactiveSuggestionService (K-2)
                     viewModel.configureProactiveSuggestionService(proactiveSuggestionService)
                     proactiveSuggestionService.start()
+
+                    // Configure InterestDiscoveryService (K-3)
+                    viewModel.configureInterestDiscoveryService(interestDiscoveryService)
+                    heartbeatService.setInterestDiscoveryService(interestDiscoveryService)
 
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)

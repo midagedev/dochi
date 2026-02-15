@@ -139,6 +139,12 @@ DochiApp (entry point)
 | SuggestionHistoryView | `Views/SuggestionHistoryView.swift` | 커맨드 팔레트 "제안 기록" | 제안 기록 시트 (400x480pt): 오늘 요약 + 최근 20건 리스트 + 상태 배지 |
 | ProactiveSuggestionSettingsView | `Views/Settings/ProactiveSuggestionSettingsView.swift` | 설정 > 프로액티브 제안 | 활성화, 유휴 감지 시간, 쿨다운, 조용한 시간, 유형별 토글 |
 
+### 관심사 발굴 (K-3)
+
+| 화면 | 파일 | 접근 방법 | 설명 |
+|------|------|-----------|------|
+| InterestSettingsView | `Views/Settings/InterestSettingsView.swift` | 설정 > 관심사 | 마스터 토글, 발굴 모드 (자동/적극/수동/비활성), 수집된 관심사 목록 (CRUD), 고급 설정 (만료/감지횟수/프롬프트 포함) |
+
 ### 칸반
 
 | 화면 | 파일 | 접근 방법 | 설명 |

@@ -827,6 +827,82 @@ final class MockTerminalService: TerminalServiceProtocol {
     }
 }
 
+// MARK: - MockInterestDiscoveryService (K-3)
+
+@MainActor
+final class MockInterestDiscoveryService: InterestDiscoveryServiceProtocol {
+    var profile = InterestProfile()
+    var currentAggressiveness: DiscoveryAggressiveness = .passive
+
+    var loadProfileCallCount = 0
+    var saveProfileCallCount = 0
+    var addInterestCallCount = 0
+    var updateInterestCallCount = 0
+    var confirmInterestCallCount = 0
+    var restoreInterestCallCount = 0
+    var removeInterestCallCount = 0
+    var analyzeMessageCallCount = 0
+    var checkExpirationsCallCount = 0
+    var syncToMemoryCallCount = 0
+
+    var lastAnalyzedMessage: String?
+    var stubbedSystemPromptAddition: String?
+
+    func loadProfile(userId: String) {
+        loadProfileCallCount += 1
+    }
+
+    func saveProfile(userId: String) {
+        saveProfileCallCount += 1
+    }
+
+    func addInterest(_ entry: InterestEntry) {
+        addInterestCallCount += 1
+        profile.interests.append(entry)
+    }
+
+    func updateInterest(id: UUID, topic: String?, tags: [String]?) {
+        updateInterestCallCount += 1
+        guard let index = profile.interests.firstIndex(where: { $0.id == id }) else { return }
+        if let topic { profile.interests[index].topic = topic }
+        if let tags { profile.interests[index].tags = tags }
+    }
+
+    func confirmInterest(id: UUID) {
+        confirmInterestCallCount += 1
+        guard let index = profile.interests.firstIndex(where: { $0.id == id }) else { return }
+        profile.interests[index].status = .confirmed
+    }
+
+    func restoreInterest(id: UUID) {
+        restoreInterestCallCount += 1
+        guard let index = profile.interests.firstIndex(where: { $0.id == id }) else { return }
+        profile.interests[index].status = .confirmed
+    }
+
+    func removeInterest(id: UUID) {
+        removeInterestCallCount += 1
+        profile.interests.removeAll { $0.id == id }
+    }
+
+    func analyzeMessage(_ content: String, conversationId: UUID) {
+        analyzeMessageCallCount += 1
+        lastAnalyzedMessage = content
+    }
+
+    func buildDiscoverySystemPromptAddition() -> String? {
+        return stubbedSystemPromptAddition
+    }
+
+    func checkExpirations() {
+        checkExpirationsCallCount += 1
+    }
+
+    func syncToMemory(contextService: ContextServiceProtocol, userId: String) {
+        syncToMemoryCallCount += 1
+    }
+}
+
 // MARK: - MockProactiveSuggestionService
 
 @MainActor

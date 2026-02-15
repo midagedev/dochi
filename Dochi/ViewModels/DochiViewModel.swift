@@ -76,6 +76,9 @@ final class DochiViewModel {
     private(set) var proactiveSuggestionService: ProactiveSuggestionServiceProtocol?
     var showSuggestionHistory: Bool = false
 
+    // MARK: - Interest Discovery (K-3)
+    private(set) var interestDiscoveryService: InterestDiscoveryServiceProtocol?
+
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
     var showConnectedDevicesPopover: Bool = false
@@ -337,6 +340,17 @@ final class DochiViewModel {
     func configureProactiveSuggestionService(_ service: ProactiveSuggestionServiceProtocol) {
         self.proactiveSuggestionService = service
         Log.app.info("ProactiveSuggestionService configured")
+    }
+
+    // MARK: - Interest Discovery (K-3)
+
+    func configureInterestDiscoveryService(_ service: InterestDiscoveryServiceProtocol) {
+        self.interestDiscoveryService = service
+        // Load profile for current user
+        if let userId = sessionContext.currentUserId {
+            service.loadProfile(userId: userId)
+        }
+        Log.app.info("InterestDiscoveryService configured")
     }
 
     var currentSuggestion: ProactiveSuggestion? {
@@ -685,6 +699,19 @@ final class DochiViewModel {
 
         ensureConversation()
 
+        // K-3: Analyze message for interest discovery
+        if let conversationId = currentConversation?.id,
+           let interestService = interestDiscoveryService {
+            let countBefore = interestService.profile.interests.count
+            interestService.analyzeMessage(finalText, conversationId: conversationId)
+            // Persist if new interest was inferred
+            if interestService.profile.interests.count > countBefore,
+               let userId = sessionContext.currentUserId {
+                interestService.saveProfile(userId: userId)
+                interestService.syncToMemory(contextService: contextService, userId: userId)
+            }
+        }
+
         if imagesToProcess.isEmpty {
             // No images — send immediately
             appendUserMessage(finalText, imageData: nil)
@@ -858,6 +885,8 @@ final class DochiViewModel {
         sessionContext.currentUserId = profile.id.uuidString
         settings.defaultUserId = profile.id.uuidString
         currentUserName = profile.name
+        // K-3: Reload interest profile for the new user
+        interestDiscoveryService?.loadProfile(userId: profile.id.uuidString)
         Log.app.info("Switched user to: \(profile.name)")
     }
 
@@ -2389,7 +2418,12 @@ final class DochiViewModel {
             parts.append("## 개인 메모리\n\(personalMem)")
         }
 
-        // 8. Non-baseline tool listing for LLM awareness
+        // 8. Interest discovery (K-3)
+        if let interestAddition = interestDiscoveryService?.buildDiscoverySystemPromptAddition() {
+            parts.append(interestAddition)
+        }
+
+        // 9. Non-baseline tool listing for LLM awareness
         let nonBaseline = toolService.nonBaselineToolSummaries
         if !nonBaseline.isEmpty {
             var lines: [String] = ["## 추가 도구", "필요 시 tools.enable으로 활성화할 수 있는 도구:"]
