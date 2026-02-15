@@ -33,7 +33,7 @@ struct DochiApp: App {
         let contextService = ContextService()
         let keychainService = KeychainService()
         let conversationService = ConversationService()
-        let llmService = LLMService()
+        let llmService = LLMService(settings: settings)
         let speechService = SpeechService()
         let ttsService = TTSRouter(settings: settings, keychainService: keychainService)
         let soundService = SoundService()

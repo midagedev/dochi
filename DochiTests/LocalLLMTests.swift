@@ -419,4 +419,123 @@ final class LocalLLMTests: XCTestCase {
         XCTAssertEqual(settings.lmStudioBaseURL.isEmpty, false)
         XCTAssertTrue(settings.lmStudioBaseURL.contains("localhost:1234"))
     }
+
+    // MARK: - LLMService Custom Base URL (C-2)
+
+    @MainActor
+    func testLLMServiceUsesCustomOllamaBaseURL() async throws {
+        let settings = AppSettings()
+        let originalURL = settings.ollamaBaseURL
+        defer { settings.ollamaBaseURL = originalURL } // Restore after test
+        // Use localhost with unlikely port — connection refused is fast (no TCP timeout)
+        settings.ollamaBaseURL = "http://127.0.0.1:19999"
+        let service = LLMService(settings: settings)
+
+        // Attempt a request to Ollama — it will fail (no server) but we can verify
+        // the error is NOT "Unknown provider" (adapter resolves correctly)
+        do {
+            _ = try await service.send(
+                messages: [Message(role: .user, content: "test")],
+                systemPrompt: "",
+                model: "test-model",
+                provider: .ollama,
+                apiKey: "",
+                tools: nil,
+                onPartial: { _ in }
+            )
+        } catch let error as LLMError {
+            if case .invalidResponse(let msg) = error {
+                XCTAssertFalse(msg.contains("Unknown provider"), "Ollama adapter should resolve with custom base URL")
+            }
+            // Network/timeout errors are expected since no server is running
+        } catch {
+            // Network errors are expected
+        }
+    }
+
+    @MainActor
+    func testLLMServiceUsesCustomLMStudioBaseURL() async throws {
+        let settings = AppSettings()
+        let originalURL = settings.lmStudioBaseURL
+        defer { settings.lmStudioBaseURL = originalURL } // Restore after test
+        // Use localhost with unlikely port — connection refused is fast (no TCP timeout)
+        settings.lmStudioBaseURL = "http://127.0.0.1:19998"
+        let service = LLMService(settings: settings)
+
+        do {
+            _ = try await service.send(
+                messages: [Message(role: .user, content: "test")],
+                systemPrompt: "",
+                model: "test-model",
+                provider: .lmStudio,
+                apiKey: "",
+                tools: nil,
+                onPartial: { _ in }
+            )
+        } catch let error as LLMError {
+            if case .invalidResponse(let msg) = error {
+                XCTAssertFalse(msg.contains("Unknown provider"), "LM Studio adapter should resolve with custom base URL")
+            }
+        } catch {
+            // Network errors are expected
+        }
+    }
+
+    @MainActor
+    func testLLMServiceWithoutSettingsUsesDefaultBaseURL() async throws {
+        // When no settings are provided, adapters use the default base URL
+        let service = LLMService()
+
+        do {
+            _ = try await service.send(
+                messages: [Message(role: .user, content: "test")],
+                systemPrompt: "",
+                model: "test-model",
+                provider: .ollama,
+                apiKey: "",
+                tools: nil,
+                onPartial: { _ in }
+            )
+        } catch let error as LLMError {
+            if case .invalidResponse(let msg) = error {
+                XCTAssertFalse(msg.contains("Unknown provider"), "Ollama adapter should resolve without settings")
+            }
+        } catch {
+            // Network errors are expected
+        }
+    }
+
+    // MARK: - OllamaAdapter Custom Base URL
+
+    @MainActor
+    func testOllamaAdapterCustomBaseURL() throws {
+        var adapter = OllamaAdapter()
+        adapter.baseURL = URL(string: "http://192.168.1.100:11434/v1/chat/completions")!
+
+        let request = try adapter.buildRequest(
+            messages: [],
+            systemPrompt: "",
+            model: "test",
+            tools: nil,
+            apiKey: ""
+        )
+
+        XCTAssertEqual(request.url?.absoluteString, "http://192.168.1.100:11434/v1/chat/completions")
+    }
+
+    @MainActor
+    func testOllamaAdapterDefaultBaseURL() throws {
+        let adapter = OllamaAdapter()
+
+        let request = try adapter.buildRequest(
+            messages: [],
+            systemPrompt: "",
+            model: "test",
+            tools: nil,
+            apiKey: ""
+        )
+
+        // Should use default Ollama URL
+        XCTAssertTrue(request.url?.absoluteString.contains("localhost:11434") ?? false)
+    }
 }

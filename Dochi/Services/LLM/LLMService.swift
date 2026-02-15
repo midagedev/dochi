@@ -12,6 +12,7 @@ private struct StreamResult: Sendable {
 final class LLMService: LLMServiceProtocol {
     private var currentTask: Task<StreamResult, Error>?
     private let session: URLSession
+    private let settings: AppSettings?
 
     private(set) var lastMetrics: ExchangeMetrics?
 
@@ -32,7 +33,8 @@ final class LLMService: LLMServiceProtocol {
     /// Full exchange soft limit.
     private nonisolated(unsafe) static let exchangeTimeout: Duration = .seconds(60)
 
-    init() {
+    init(settings: AppSettings? = nil) {
+        self.settings = settings
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 70 // slightly above exchange timeout
         config.timeoutIntervalForResource = 70
@@ -52,7 +54,7 @@ final class LLMService: LLMServiceProtocol {
             throw LLMError.noAPIKey
         }
 
-        guard let adapter = adapters[provider] else {
+        guard let adapter = resolveAdapter(for: provider) else {
             throw LLMError.invalidResponse("Unknown provider: \(provider.rawValue)")
         }
 
@@ -130,6 +132,37 @@ final class LLMService: LLMServiceProtocol {
         currentTask?.cancel()
         currentTask = nil
         Log.llm.info("LLM request cancelled")
+    }
+
+    // MARK: - Adapter Resolution
+
+    /// Resolve the adapter for a provider, applying custom base URLs from settings for local providers.
+    private func resolveAdapter(for provider: LLMProvider) -> (any LLMProviderAdapter)? {
+        guard let baseAdapter = adapters[provider] else { return nil }
+
+        // For local providers, apply custom base URL from settings
+        guard let settings else { return baseAdapter }
+
+        switch provider {
+        case .ollama:
+            if let url = URL(string: settings.ollamaBaseURL) {
+                let chatURL = url.appendingPathComponent("v1/chat/completions")
+                var adapter = OllamaAdapter()
+                adapter.baseURL = chatURL
+                return adapter
+            }
+        case .lmStudio:
+            if let url = URL(string: settings.lmStudioBaseURL) {
+                let chatURL = url.appendingPathComponent("v1/chat/completions")
+                var adapter = LMStudioAdapter()
+                adapter.baseURL = chatURL
+                return adapter
+            }
+        default:
+            break
+        }
+
+        return baseAdapter
     }
 
     // MARK: - Retry Logic
