@@ -58,6 +58,9 @@ struct SettingsView: View {
         case .rag:
             RAGSettingsView(settings: settings, documentIndexer: documentIndexer)
 
+        case .memory:
+            MemorySettingsView(settings: settings, memoryConsolidator: viewModel?.memoryConsolidator)
+
         case .voice:
             VoiceSettingsView(settings: settings, keychainService: keychainService, ttsService: ttsService, downloadManager: downloadManager)
 

@@ -55,6 +55,7 @@ struct DochiApp: App {
     private let spotlightIndexer: SpotlightIndexer
     private let vectorStore: VectorStore
     private let documentIndexer: DocumentIndexer
+    private let memoryConsolidator: MemoryConsolidator
 
     init() {
         let settings = AppSettings()
@@ -128,6 +129,14 @@ struct DochiApp: App {
         let documentIndexer = DocumentIndexer(vectorStore: vectorStore, embeddingService: embeddingService, settings: settings)
         self.vectorStore = vectorStore
         self.documentIndexer = documentIndexer
+
+        // Memory Consolidator (I-2)
+        let memoryConsolidator = MemoryConsolidator(
+            contextService: contextService,
+            llmService: llmService,
+            keychainService: keychainService
+        )
+        self.memoryConsolidator = memoryConsolidator
 
         _viewModel = State(initialValue: DochiViewModel(
             llmService: llmService,
@@ -228,6 +237,9 @@ struct DochiApp: App {
 
                     // Configure RAG DocumentIndexer (I-1)
                     viewModel.configureDocumentIndexer(documentIndexer)
+
+                    // Configure Memory Consolidator (I-2)
+                    viewModel.configureMemoryConsolidator(memoryConsolidator)
 
                     // Wire notification callbacks (H-3)
                     notificationManager.onReply = { [weak viewModel] text, category, originalBody in

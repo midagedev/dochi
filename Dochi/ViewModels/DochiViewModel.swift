@@ -44,6 +44,10 @@ final class DochiViewModel {
     private(set) var documentIndexer: DocumentIndexer?
     private var ragLastContextInfo: RAGContextInfo?
 
+    // MARK: - Memory Consolidation (I-2)
+    private(set) var memoryConsolidator: MemoryConsolidator?
+    private var lastConsolidatedConversationId: UUID?
+
     /// @Observable 관찰 추적을 위해 구체 타입으로 캐스팅하여 반환
     var concreteSpotlightIndexer: SpotlightIndexer? {
         spotlightIndexer as? SpotlightIndexer
@@ -218,6 +222,12 @@ final class DochiViewModel {
     func configureDocumentIndexer(_ indexer: DocumentIndexer) {
         self.documentIndexer = indexer
         Log.app.info("DocumentIndexer configured")
+    }
+
+    /// Memory Consolidator 설정 (I-2)
+    func configureMemoryConsolidator(_ consolidator: MemoryConsolidator) {
+        self.memoryConsolidator = consolidator
+        Log.app.info("MemoryConsolidator configured")
     }
 
     /// 딥링크 처리 (dochi:// URL)
@@ -483,6 +493,9 @@ final class DochiViewModel {
     }
 
     func newConversation() {
+        // I-2: 이전 대화에 대해 메모리 자동 정리 트리거
+        triggerMemoryConsolidation(for: currentConversation)
+
         currentConversation = nil
         streamingText = ""
         errorMessage = nil
@@ -496,6 +509,10 @@ final class DochiViewModel {
 
     func selectConversation(id: UUID) {
         guard interactionState == .idle else { return }
+
+        // I-2: 이전 대화에 대해 메모리 자동 정리 트리거
+        triggerMemoryConsolidation(for: currentConversation)
+
         if let conversation = conversationService.load(id: id) {
             currentConversation = conversation
             streamingText = ""
@@ -845,6 +862,47 @@ final class DochiViewModel {
 
     func dismissMemoryToast(id: UUID) {
         memoryToastEvents.removeAll { $0.id == id }
+    }
+
+    // MARK: - Memory Consolidation (I-2)
+
+    /// 대화 전환/종료 시 메모리 자동 정리 트리거 (fire-and-forget)
+    private func triggerMemoryConsolidation(for conversation: Conversation?) {
+        guard let conversation,
+              let consolidator = memoryConsolidator,
+              conversation.id != lastConsolidatedConversationId else { return }
+
+        lastConsolidatedConversationId = conversation.id
+
+        Task { [weak self] in
+            guard let self else { return }
+            await consolidator.consolidate(
+                conversation: conversation,
+                sessionContext: self.sessionContext,
+                settings: self.settings
+            )
+        }
+    }
+
+    /// 수동 메모리 정리 실행 (커맨드 팔레트에서 호출)
+    func manualConsolidateMemory() {
+        guard let conversation = currentConversation else { return }
+        guard let consolidator = memoryConsolidator else { return }
+
+        // 수동 실행 시에는 이전 정리 ID를 무시
+        Task { [weak self] in
+            guard let self else { return }
+            await consolidator.consolidate(
+                conversation: conversation,
+                sessionContext: self.sessionContext,
+                settings: self.settings
+            )
+        }
+    }
+
+    /// 메모리 정리 배너 닫기
+    func dismissConsolidationBanner() {
+        memoryConsolidator?.dismissBanner()
     }
 
     /// 현재 컨텍스트에서 MemoryContextInfo 생성

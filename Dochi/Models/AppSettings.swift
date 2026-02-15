@@ -376,6 +376,40 @@ final class AppSettings {
         TTSProvider(rawValue: ttsProvider) ?? .system
     }
 
+    // MARK: - Memory Consolidation (I-2)
+
+    var memoryConsolidationEnabled: Bool = UserDefaults.standard.object(forKey: "memoryConsolidationEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(memoryConsolidationEnabled, forKey: "memoryConsolidationEnabled") }
+    }
+
+    var memoryConsolidationMinMessages: Int = UserDefaults.standard.object(forKey: "memoryConsolidationMinMessages") as? Int ?? 3 {
+        didSet { UserDefaults.standard.set(memoryConsolidationMinMessages, forKey: "memoryConsolidationMinMessages") }
+    }
+
+    var memoryConsolidationModel: String = UserDefaults.standard.string(forKey: "memoryConsolidationModel") ?? "light" {
+        didSet { UserDefaults.standard.set(memoryConsolidationModel, forKey: "memoryConsolidationModel") }
+    }
+
+    var memoryConsolidationBannerEnabled: Bool = UserDefaults.standard.object(forKey: "memoryConsolidationBannerEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(memoryConsolidationBannerEnabled, forKey: "memoryConsolidationBannerEnabled") }
+    }
+
+    var memoryWorkspaceSizeLimit: Int = UserDefaults.standard.object(forKey: "memoryWorkspaceSizeLimit") as? Int ?? 10000 {
+        didSet { UserDefaults.standard.set(memoryWorkspaceSizeLimit, forKey: "memoryWorkspaceSizeLimit") }
+    }
+
+    var memoryAgentSizeLimit: Int = UserDefaults.standard.object(forKey: "memoryAgentSizeLimit") as? Int ?? 5000 {
+        didSet { UserDefaults.standard.set(memoryAgentSizeLimit, forKey: "memoryAgentSizeLimit") }
+    }
+
+    var memoryPersonalSizeLimit: Int = UserDefaults.standard.object(forKey: "memoryPersonalSizeLimit") as? Int ?? 8000 {
+        didSet { UserDefaults.standard.set(memoryPersonalSizeLimit, forKey: "memoryPersonalSizeLimit") }
+    }
+
+    var memoryAutoArchiveEnabled: Bool = UserDefaults.standard.object(forKey: "memoryAutoArchiveEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(memoryAutoArchiveEnabled, forKey: "memoryAutoArchiveEnabled") }
+    }
+
     // MARK: - RAG (I-1)
 
     var ragEnabled: Bool = UserDefaults.standard.object(forKey: "ragEnabled") as? Bool ?? false {
