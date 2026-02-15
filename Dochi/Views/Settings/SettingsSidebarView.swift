@@ -18,6 +18,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case tools = "tools"
     case integrations = "integrations"
     case shortcuts = "shortcuts"
+    case devices = "devices"
     case account = "account"
     case guide = "guide"
 
@@ -40,6 +41,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .tools: return "도구"
         case .integrations: return "통합 서비스"
         case .shortcuts: return "단축어"
+        case .devices: return "디바이스"
         case .account: return "계정/동기화"
         case .guide: return "가이드"
         }
@@ -62,6 +64,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .tools: return "wrench.and.screwdriver"
         case .integrations: return "puzzlepiece"
         case .shortcuts: return "square.grid.3x3.square"
+        case .devices: return "laptopcomputer.and.iphone"
         case .account: return "person.circle"
         case .guide: return "play.rectangle"
         }
@@ -73,7 +76,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .voice: return .voice
         case .interface, .wakeWord, .heartbeat: return .general
         case .family, .agent: return .people
-        case .tools, .integrations, .shortcuts, .account: return .connection
+        case .tools, .integrations, .shortcuts, .devices, .account: return .connection
         case .guide: return .help
         }
     }
@@ -110,6 +113,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             return ["텔레그램", "MCP", "봇", "웹훅"]
         case .shortcuts:
             return ["단축어", "Shortcuts", "Siri", "AppIntent", "자동화", "automation"]
+        case .devices:
+            return ["디바이스", "기기", "device", "멀티", "정책", "우선순위", "priority", "데스크탑", "모바일", "CLI", "응답"]
         case .account:
             return ["Supabase", "동기화", "로그인", "인증"]
         case .guide:

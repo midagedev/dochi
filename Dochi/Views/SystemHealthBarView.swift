@@ -8,6 +8,7 @@ struct SystemHealthBarView: View {
     var heartbeatService: HeartbeatService?
     var supabaseService: SupabaseServiceProtocol?
     var syncEngine: SyncEngine?
+    var devicePolicyService: DevicePolicyServiceProtocol?
     var isOfflineFallbackActive: Bool = false
     var localServerStatus: LocalServerStatus = .unknown
 
@@ -17,6 +18,7 @@ struct SystemHealthBarView: View {
     let onHeartbeatTap: () -> Void
     let onTokenTap: () -> Void
     var onSyncConflictTap: (() -> Void)?
+    var onDeviceTap: (() -> Void)?
 
     private var sessionSummary: SessionMetricsSummary {
         metricsCollector.sessionSummary
@@ -109,6 +111,28 @@ struct SystemHealthBarView: View {
                 }
                 .buttonStyle(IndicatorButtonStyle())
                 .help("동기화 상태")
+
+                divider
+            }
+
+            // 2.5. Device indicator (J-1: shown when 2+ devices registered)
+            if let deviceService = devicePolicyService,
+               deviceService.registeredDevices.count >= 2 {
+                Button {
+                    onDeviceTap?()
+                } label: {
+                    indicator {
+                        HStack(spacing: 4) {
+                            let onlineCount = deviceService.registeredDevices.filter { $0.isOnline || $0.isCurrentDevice }.count
+                            Image(systemName: deviceService.currentDevice?.deviceType.iconName ?? "laptopcomputer.and.iphone")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                            Text("\(onlineCount)/\(deviceService.registeredDevices.count)")
+                        }
+                    }
+                }
+                .buttonStyle(IndicatorButtonStyle())
+                .help("연결된 디바이스")
 
                 divider
             }

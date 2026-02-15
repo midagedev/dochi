@@ -51,6 +51,7 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case consolidateMemory
         case memoryChangeHistory
         case memorySettings
+        case openConnectedDevices
         case custom(id: String)
     }
 }
@@ -402,6 +403,23 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .settings,
             action: .memorySettings
+        ),
+        // J-1: 디바이스 정책
+        CommandPaletteItem(
+            id: "connected-devices",
+            icon: "laptopcomputer.and.iphone",
+            title: "연결된 디바이스",
+            subtitle: "",
+            category: .navigation,
+            action: .openConnectedDevices
+        ),
+        CommandPaletteItem(
+            id: "settings.open.devices",
+            icon: "laptopcomputer.and.iphone",
+            title: "디바이스 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "devices")
         ),
         // G-3: 동기화 명령
         CommandPaletteItem(

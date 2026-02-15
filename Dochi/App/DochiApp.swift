@@ -245,6 +245,11 @@ struct DochiApp: App {
                     let feedbackStore = FeedbackStore()
                     viewModel.configureFeedbackStore(feedbackStore)
 
+                    // Configure DevicePolicyService (J-1)
+                    let devicePolicyService = DevicePolicyService(settings: settings)
+                    viewModel.configureDevicePolicyService(devicePolicyService)
+                    Task { await devicePolicyService.registerCurrentDevice() }
+
                     // Wire notification callbacks (H-3)
                     notificationManager.onReply = { [weak viewModel] text, category, originalBody in
                         guard let viewModel else { return }
@@ -352,6 +357,7 @@ struct DochiApp: App {
                 mcpService: mcpService,
                 supabaseService: supabaseService,
                 toolService: toolService,
+                devicePolicyService: viewModel.devicePolicyService,
                 heartbeatService: heartbeatService,
                 notificationManager: notificationManager,
                 metricsCollector: viewModel.metricsCollector,

@@ -49,6 +49,9 @@ struct ContentView: View {
     @State private var showMemoryDiffSheet = false
     @State private var showMemoryConflictSheet = false
 
+    // J-1: 디바이스 정책
+    @State private var showConnectedDevicesPopover = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -356,14 +359,27 @@ struct ContentView: View {
                 heartbeatService: heartbeatService,
                 supabaseService: supabaseService,
                 syncEngine: viewModel.syncEngine,
+                devicePolicyService: viewModel.devicePolicyService,
                 isOfflineFallbackActive: viewModel.isOfflineFallbackActive,
                 localServerStatus: viewModel.localServerStatus,
                 onModelTap: { showQuickModelPopover = true },
                 onSyncTap: { showSystemStatusSheet = true },
                 onHeartbeatTap: { showSystemStatusSheet = true },
                 onTokenTap: { showSystemStatusSheet = true },
-                onSyncConflictTap: { showSyncConflictSheet = true }
+                onSyncConflictTap: { showSyncConflictSheet = true },
+                onDeviceTap: { showConnectedDevicesPopover = true }
             )
+            .popover(isPresented: $showConnectedDevicesPopover) {
+                if let deviceService = viewModel.devicePolicyService {
+                    ConnectedDevicesPopoverView(
+                        devicePolicyService: deviceService,
+                        onOpenSettings: {
+                            showConnectedDevicesPopover = false
+                            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                        }
+                    )
+                }
+            }
             .popover(isPresented: $showQuickModelPopover) {
                 QuickModelPopoverView(
                     settings: viewModel.settings,
@@ -674,6 +690,8 @@ struct ContentView: View {
             if let appDelegate = NSApp.delegate as? AppDelegate {
                 appDelegate.menuBarManager?.togglePopover()
             }
+        case .openConnectedDevices:
+            showConnectedDevicesPopover = true
         case .openShortcutsApp:
             NSWorkspace.shared.open(URL(string: "shortcuts://")!)
         case .custom(let id):
