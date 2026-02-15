@@ -336,6 +336,28 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(menuBarGlobalShortcutEnabled, forKey: "menuBarGlobalShortcutEnabled") }
     }
 
+    // MARK: - Spotlight (H-4)
+
+    var spotlightIndexingEnabled: Bool = UserDefaults.standard.object(forKey: "spotlightIndexingEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(spotlightIndexingEnabled, forKey: "spotlightIndexingEnabled") }
+    }
+
+    var spotlightIndexConversations: Bool = UserDefaults.standard.object(forKey: "spotlightIndexConversations") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(spotlightIndexConversations, forKey: "spotlightIndexConversations") }
+    }
+
+    var spotlightIndexPersonalMemory: Bool = UserDefaults.standard.object(forKey: "spotlightIndexPersonalMemory") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(spotlightIndexPersonalMemory, forKey: "spotlightIndexPersonalMemory") }
+    }
+
+    var spotlightIndexAgentMemory: Bool = UserDefaults.standard.object(forKey: "spotlightIndexAgentMemory") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(spotlightIndexAgentMemory, forKey: "spotlightIndexAgentMemory") }
+    }
+
+    var spotlightIndexWorkspaceMemory: Bool = UserDefaults.standard.object(forKey: "spotlightIndexWorkspaceMemory") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(spotlightIndexWorkspaceMemory, forKey: "spotlightIndexWorkspaceMemory") }
+    }
+
     // MARK: - Computed
 
     var currentProvider: LLMProvider {

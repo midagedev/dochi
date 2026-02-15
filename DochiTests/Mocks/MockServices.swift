@@ -551,3 +551,54 @@ final class MockUsageStore: UsageStoreProtocol {
         stubbedCost
     }
 }
+
+// MARK: - MockSpotlightIndexer
+
+@MainActor
+final class MockSpotlightIndexer: SpotlightIndexerProtocol {
+    var indexedItemCount: Int = 0
+    var isRebuilding: Bool = false
+    var rebuildProgress: Double = 0.0
+    var lastIndexedAt: Date? = nil
+
+    var indexedConversations: [Conversation] = []
+    var removedConversationIds: [UUID] = []
+    var indexedMemories: [(scope: String, identifier: String, title: String, content: String)] = []
+    var removedMemoryIdentifiers: [String] = []
+    var rebuildCallCount = 0
+    var clearCallCount = 0
+
+    func indexConversation(_ conversation: Conversation) {
+        indexedConversations.append(conversation)
+        indexedItemCount += 1
+        lastIndexedAt = Date()
+    }
+
+    func removeConversation(id: UUID) {
+        removedConversationIds.append(id)
+        indexedItemCount = max(0, indexedItemCount - 1)
+    }
+
+    func indexMemory(scope: String, identifier: String, title: String, content: String) {
+        indexedMemories.append((scope: scope, identifier: identifier, title: title, content: content))
+        indexedItemCount += 1
+        lastIndexedAt = Date()
+    }
+
+    func removeMemory(identifier: String) {
+        removedMemoryIdentifiers.append(identifier)
+        indexedItemCount = max(0, indexedItemCount - 1)
+    }
+
+    func rebuildAllIndices(conversations: [Conversation], contextService: ContextServiceProtocol, sessionContext: SessionContext) async {
+        rebuildCallCount += 1
+        indexedItemCount = conversations.count
+        lastIndexedAt = Date()
+    }
+
+    func clearAllIndices() async {
+        clearCallCount += 1
+        indexedItemCount = 0
+        lastIndexedAt = nil
+    }
+}

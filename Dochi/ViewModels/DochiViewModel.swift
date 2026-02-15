@@ -37,6 +37,14 @@ final class DochiViewModel {
     /// Set by notification handlers to request showing the memory panel.
     var notificationShowMemoryPanel: Bool = false
 
+    // MARK: - Spotlight (H-4)
+    private(set) var spotlightIndexer: SpotlightIndexerProtocol?
+
+    /// @Observable 관찰 추적을 위해 구체 타입으로 캐스팅하여 반환
+    var concreteSpotlightIndexer: SpotlightIndexer? {
+        spotlightIndexer as? SpotlightIndexer
+    }
+
     // MARK: - Sync (G-3)
     private(set) var syncEngine: SyncEngine?
 
@@ -192,6 +200,93 @@ final class DochiViewModel {
     /// 동기화 토스트 제거
     func dismissSyncToast(id: UUID) {
         syncEngine?.dismissSyncToast(id: id)
+    }
+
+    // MARK: - Spotlight (H-4)
+
+    /// SpotlightIndexer 설정
+    func configureSpotlightIndexer(_ indexer: SpotlightIndexerProtocol) {
+        self.spotlightIndexer = indexer
+        Log.app.info("SpotlightIndexer configured")
+    }
+
+    /// 딥링크 처리 (dochi:// URL)
+    func handleDeepLink(url: URL) {
+        guard let deepLink = SpotlightIndexer.parseDeepLink(url: url) else {
+            Log.app.warning("Spotlight: 유효하지 않은 딥링크 — \(url.absoluteString)")
+            errorMessage = "유효하지 않은 링크입니다."
+            // Auto-dismiss error after 3 seconds
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                if self.errorMessage == "유효하지 않은 링크입니다." {
+                    self.errorMessage = nil
+                }
+            }
+            return
+        }
+
+        // Bring app to foreground
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first {
+            window.makeKeyAndOrderFront(nil)
+        }
+
+        switch deepLink {
+        case .conversation(let id):
+            selectConversation(id: id)
+            Log.app.info("Spotlight: 대화 딥링크 처리 — \(id)")
+        case .memoryUser(let userId):
+            // Navigate to memory panel — set notification properties to trigger UI
+            notificationShowMemoryPanel = true
+            Log.app.info("Spotlight: 사용자 메모리 딥링크 처리 — \(userId)")
+        case .memoryAgent(let wsId, let agentName):
+            notificationShowMemoryPanel = true
+            Log.app.info("Spotlight: 에이전트 메모리 딥링크 처리 — \(wsId)/\(agentName)")
+        case .memoryWorkspace(let wsId):
+            notificationShowMemoryPanel = true
+            Log.app.info("Spotlight: 워크스페이스 메모리 딥링크 처리 — \(wsId)")
+        }
+    }
+
+    /// 현재 대화를 Spotlight에 인덱싱
+    private func indexCurrentConversationIfNeeded() {
+        guard let conversation = currentConversation else { return }
+        spotlightIndexer?.indexConversation(conversation)
+    }
+
+    /// 메모리 저장/수정 시 Spotlight 인크리멘탈 인덱싱 (H-4)
+    private func indexMemoryForSpotlight(scope: MemoryToastEvent.Scope, content: String) {
+        guard let indexer = spotlightIndexer else { return }
+
+        switch scope {
+        case .personal:
+            guard let userId = sessionContext.currentUserId else { return }
+            let profiles = contextService.loadProfiles()
+            let userName = profiles.first(where: { $0.id.uuidString == userId })?.name ?? "사용자"
+            indexer.indexMemory(
+                scope: "personal",
+                identifier: "user-\(userId)",
+                title: "\(userName)의 개인 메모리",
+                content: content
+            )
+        case .workspace:
+            let wsId = sessionContext.workspaceId
+            indexer.indexMemory(
+                scope: "workspace",
+                identifier: "workspace-\(wsId.uuidString)",
+                title: "워크스페이스 메모리",
+                content: content
+            )
+        case .agent:
+            let wsId = sessionContext.workspaceId
+            let agentName = settings.activeAgentName
+            indexer.indexMemory(
+                scope: "agent",
+                identifier: "agent-\(wsId.uuidString)-\(agentName)",
+                title: "\(agentName) 에이전트 메모리",
+                content: content
+            )
+        }
     }
 
     // MARK: - Local Server Monitoring
@@ -478,6 +573,7 @@ final class DochiViewModel {
 
     func deleteConversation(id: UUID) {
         conversationService.delete(id: id)
+        spotlightIndexer?.removeConversation(id: id)
         if currentConversation?.id == id {
             currentConversation = nil
             streamingText = ""
@@ -1543,6 +1639,9 @@ final class DochiViewModel {
                             let action: MemoryToastEvent.Action = call.name == "save_memory" ? .saved : .updated
                             let preview = (call.arguments["content"] as? String) ?? (call.arguments["new_content"] as? String) ?? ""
                             showMemoryToast(scope: scope, action: action, contentPreview: preview)
+
+                            // H-4: 메모리 저장/수정 시 Spotlight 인크리멘탈 인덱싱
+                            indexMemoryForSpotlight(scope: scope, content: preview)
                         }
                     }
 
@@ -2116,6 +2215,7 @@ final class DochiViewModel {
 
         conversationService.save(conversation: currentConversation!)
         loadConversations()
+        indexCurrentConversationIfNeeded()
         Log.app.debug("Conversation saved: \(conversation.id)")
     }
 

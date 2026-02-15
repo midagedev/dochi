@@ -45,6 +45,7 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case cloudAccountSettings
         case toggleMenuBar
         case openShortcutsApp
+        case rebuildSpotlightIndex
         case custom(id: String)
     }
 }
@@ -328,6 +329,15 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .settings,
             action: .openSettingsSection(section: "shortcuts")
+        ),
+        // H-4: Spotlight 검색
+        CommandPaletteItem(
+            id: "rebuild-spotlight-index",
+            icon: "magnifyingglass",
+            title: "Spotlight 인덱스 재구축",
+            subtitle: "",
+            category: .tool,
+            action: .rebuildSpotlightIndex
         ),
         // G-3: 동기화 명령
         CommandPaletteItem(
