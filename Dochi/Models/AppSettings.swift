@@ -598,6 +598,28 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(proactiveSuggestionMenuBarEnabled, forKey: "proactiveSuggestionMenuBarEnabled") }
     }
 
+    // MARK: - Interest Discovery (K-3)
+
+    var interestDiscoveryEnabled: Bool = UserDefaults.standard.object(forKey: "interestDiscoveryEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(interestDiscoveryEnabled, forKey: "interestDiscoveryEnabled") }
+    }
+
+    var interestDiscoveryMode: String = UserDefaults.standard.string(forKey: "interestDiscoveryMode") ?? "auto" {
+        didSet { UserDefaults.standard.set(interestDiscoveryMode, forKey: "interestDiscoveryMode") }
+    }
+
+    var interestExpirationDays: Int = UserDefaults.standard.object(forKey: "interestExpirationDays") as? Int ?? 30 {
+        didSet { UserDefaults.standard.set(interestExpirationDays, forKey: "interestExpirationDays") }
+    }
+
+    var interestMinDetectionCount: Int = UserDefaults.standard.object(forKey: "interestMinDetectionCount") as? Int ?? 3 {
+        didSet { UserDefaults.standard.set(interestMinDetectionCount, forKey: "interestMinDetectionCount") }
+    }
+
+    var interestIncludeInPrompt: Bool = UserDefaults.standard.object(forKey: "interestIncludeInPrompt") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(interestIncludeInPrompt, forKey: "interestIncludeInPrompt") }
+    }
+
     // MARK: - Guide (UX-9)
 
     /// 인앱 힌트 표시 여부 (hintsGloballyDisabled의 반전)

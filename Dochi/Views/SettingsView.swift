@@ -121,6 +121,14 @@ struct SettingsView: View {
                 unavailableView(title: "가족 구성원", message: "컨텍스트 서비스가 초기화되지 않았습니다.")
             }
 
+        case .interest:
+            InterestSettingsView(
+                settings: settings,
+                interestService: viewModel?.interestDiscoveryService,
+                contextService: contextService,
+                userId: sessionContext?.currentUserId
+            )
+
         case .agent:
             if let contextService, let sessionContext {
                 AgentSettingsView(
