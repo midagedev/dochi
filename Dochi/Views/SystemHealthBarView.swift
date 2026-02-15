@@ -1,23 +1,29 @@
 import SwiftUI
 
 /// Always-visible bar at the top of the chat area showing system health indicators.
+/// Each indicator is a separate clickable area with its own callback.
 struct SystemHealthBarView: View {
     let settings: AppSettings
     let metricsCollector: MetricsCollector
     var heartbeatService: HeartbeatService?
     var supabaseService: SupabaseServiceProtocol?
-    let onTap: () -> Void
+
+    // UX-10: Individual indicator callbacks
+    let onModelTap: () -> Void
+    let onSyncTap: () -> Void
+    let onHeartbeatTap: () -> Void
+    let onTokenTap: () -> Void
 
     private var sessionSummary: SessionMetricsSummary {
         metricsCollector.sessionSummary
     }
 
     var body: some View {
-        Button {
-            onTap()
-        } label: {
-            HStack(spacing: 0) {
-                // 1. Current model
+        HStack(spacing: 0) {
+            // 1. Current model (clickable -> QuickModelPopover)
+            Button {
+                onModelTap()
+            } label: {
                 indicator {
                     HStack(spacing: 4) {
                         Image(systemName: "cpu")
@@ -25,13 +31,22 @@ struct SystemHealthBarView: View {
                             .foregroundStyle(.secondary)
                         Text(settings.llmModel)
                             .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 7))
+                            .foregroundStyle(.quaternary)
                     }
                 }
+            }
+            .buttonStyle(IndicatorButtonStyle())
+            .help("모델 빠른 변경 (\u{2318}\u{21E7}M)")
 
-                divider
+            divider
 
-                // 2. Cloud sync status
-                if let supabase = supabaseService, supabase.authState.isSignedIn {
+            // 2. Cloud sync status
+            if let supabase = supabaseService, supabase.authState.isSignedIn {
+                Button {
+                    onSyncTap()
+                } label: {
                     indicator {
                         HStack(spacing: 4) {
                             Circle()
@@ -40,12 +55,18 @@ struct SystemHealthBarView: View {
                             Text("동기화")
                         }
                     }
-
-                    divider
                 }
+                .buttonStyle(IndicatorButtonStyle())
+                .help("동기화 상태")
 
-                // 3. Heartbeat status
-                if let heartbeat = heartbeatService, settings.heartbeatEnabled {
+                divider
+            }
+
+            // 3. Heartbeat status
+            if let heartbeat = heartbeatService, settings.heartbeatEnabled {
+                Button {
+                    onHeartbeatTap()
+                } label: {
                     indicator {
                         HStack(spacing: 4) {
                             Image(systemName: "heart.fill")
@@ -58,11 +79,17 @@ struct SystemHealthBarView: View {
                             }
                         }
                     }
-
-                    divider
                 }
+                .buttonStyle(IndicatorButtonStyle())
+                .help("하트비트 상태")
 
-                // 4. Session token usage
+                divider
+            }
+
+            // 4. Session token usage
+            Button {
+                onTokenTap()
+            } label: {
                 indicator {
                     HStack(spacing: 4) {
                         Image(systemName: "number")
@@ -76,14 +103,14 @@ struct SystemHealthBarView: View {
                     }
                 }
             }
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .frame(height: 28)
-            .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial)
+            .buttonStyle(IndicatorButtonStyle())
+            .help("시스템 상태 (\u{2318}\u{21E7}S)")
         }
-        .buttonStyle(.plain)
-        .help("시스템 상태 (⌘⇧S)")
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .frame(height: 28)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
     }
 
     // MARK: - Helpers
@@ -128,5 +155,24 @@ struct SystemHealthBarView: View {
         } else {
             return .orange
         }
+    }
+}
+
+// MARK: - IndicatorButtonStyle
+
+/// Button style for indicator areas: adds hover background for discoverability.
+struct IndicatorButtonStyle: ButtonStyle {
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isHovering ? Color.secondary.opacity(0.08) : Color.clear)
+            )
+            .onHover { hovering in
+                isHovering = hovering
+            }
     }
 }

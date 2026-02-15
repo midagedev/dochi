@@ -34,6 +34,9 @@ struct ContentView: View {
     // UX-9: 기능 투어
     @State private var showFeatureTour = false
 
+    // UX-10: 빠른 모델 팝오버
+    @State private var showQuickModelPopover = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -264,8 +267,17 @@ struct ContentView: View {
                 metricsCollector: viewModel.metricsCollector,
                 heartbeatService: heartbeatService,
                 supabaseService: supabaseService,
-                onTap: { showSystemStatusSheet = true }
+                onModelTap: { showQuickModelPopover = true },
+                onSyncTap: { showSystemStatusSheet = true },
+                onHeartbeatTap: { showSystemStatusSheet = true },
+                onTokenTap: { showSystemStatusSheet = true }
             )
+            .popover(isPresented: $showQuickModelPopover) {
+                QuickModelPopoverView(
+                    settings: viewModel.settings,
+                    keychainService: viewModel.keychainService
+                )
+            }
 
             // Tool confirmation banner
             if let confirmation = viewModel.pendingToolConfirmation {
@@ -407,9 +419,9 @@ struct ContentView: View {
             return .handled
         }
 
-        // ⌘⇧M: Toggle multi-select mode
+        // ⌘⇧M: Quick model popover (UX-10)
         if hasCommand && hasShift && chars == "m" {
-            viewModel.toggleMultiSelectMode()
+            showQuickModelPopover.toggle()
             return .handled
         }
 
@@ -492,6 +504,11 @@ struct ContentView: View {
         case .resetHints:
             viewModel.settings.resetAllHints()
             HintManager.shared.resetAllHints()
+        case .openQuickModelPopover:
+            showQuickModelPopover = true
+        case .openSettingsSection:
+            // Open settings window (the section deep-link is handled by Settings scene)
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         case .custom(let id):
             if id.hasPrefix("switchUser-") {
                 let userIdStr = String(id.dropFirst("switchUser-".count))

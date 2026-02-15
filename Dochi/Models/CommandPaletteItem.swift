@@ -38,6 +38,8 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case createAgent
         case openFeatureTour
         case resetHints
+        case openQuickModelPopover
+        case openSettingsSection(section: String)
         case custom(id: String)
     }
 }
@@ -195,7 +197,7 @@ enum CommandPaletteRegistry {
             id: "toggle-multi-select",
             icon: "checklist",
             title: "일괄 선택 모드",
-            subtitle: "⌘⇧M",
+            subtitle: "",
             category: .navigation,
             action: .toggleMultiSelect
         ),
@@ -222,6 +224,63 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .settings,
             action: .resetHints
+        ),
+        // UX-10: 설정 관련 팔레트 명령
+        CommandPaletteItem(
+            id: "settings.model",
+            icon: "cpu",
+            title: "모델 빠르게 변경",
+            subtitle: "\u{2318}\u{21E7}M",
+            category: .settings,
+            action: .openQuickModelPopover
+        ),
+        CommandPaletteItem(
+            id: "settings.open.ai",
+            icon: "brain",
+            title: "AI 모델 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "ai-model")
+        ),
+        CommandPaletteItem(
+            id: "settings.open.apikey",
+            icon: "key",
+            title: "API 키 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "api-key")
+        ),
+        CommandPaletteItem(
+            id: "settings.open.voice",
+            icon: "speaker.wave.2",
+            title: "음성 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "voice")
+        ),
+        CommandPaletteItem(
+            id: "settings.open.agent",
+            icon: "person.crop.rectangle.stack",
+            title: "에이전트 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "agent")
+        ),
+        CommandPaletteItem(
+            id: "settings.open.integration",
+            icon: "puzzlepiece",
+            title: "통합 서비스 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "integrations")
+        ),
+        CommandPaletteItem(
+            id: "settings.open.account",
+            icon: "person.circle",
+            title: "계정/동기화 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "account")
         ),
     ]
 
