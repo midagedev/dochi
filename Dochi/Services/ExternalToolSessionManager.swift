@@ -285,15 +285,19 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }
 
         // Auto-restart dead sessions if enabled
+        // Collect dead session info first to avoid mutating during iteration
         if settings.externalToolAutoRestart {
-            for session in sessions where session.status == .dead {
-                let profileId = session.profileId
-                sessions.removeAll { $0.id == session.id }
+            let deadEntries = sessions
+                .filter { $0.status == .dead }
+                .map { (id: $0.id, profileId: $0.profileId) }
+
+            for entry in deadEntries {
+                sessions.removeAll { $0.id == entry.id }
                 do {
-                    try await startSession(profileId: profileId)
-                    Log.app.info("Auto-restarted external tool session for profile \(profileId)")
+                    try await startSession(profileId: entry.profileId)
+                    Log.app.info("Auto-restarted external tool session for profile \(entry.profileId)")
                 } catch {
-                    Log.app.warning("Auto-restart failed for profile \(profileId): \(error.localizedDescription)")
+                    Log.app.warning("Auto-restart failed for profile \(entry.profileId): \(error.localizedDescription)")
                 }
             }
         }
@@ -355,25 +359,29 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private func runProcess(_ arguments: [String]) async -> (output: String, exitCode: Int32) {
         guard !arguments.isEmpty else { return ("", 1) }
 
-        return await withCheckedContinuation { continuation in
+        let args = arguments
+        return await Task.detached {
             let process = Process()
             let pipe = Pipe()
 
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = arguments
+            process.arguments = args
             process.standardOutput = pipe
             process.standardError = pipe
 
             do {
                 try process.run()
+
+                // Read pipe data BEFORE waitUntilExit to avoid deadlock
+                // when output exceeds pipe buffer (64KB)
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
 
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 let output = String(data: data, encoding: .utf8) ?? ""
-                continuation.resume(returning: (output, process.terminationStatus))
+                return (output, process.terminationStatus)
             } catch {
-                continuation.resume(returning: ("", 1))
+                return ("", Int32(1))
             }
-        }
+        }.value
     }
 }
