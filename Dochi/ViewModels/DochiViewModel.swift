@@ -28,6 +28,10 @@ final class DochiViewModel {
     var toolExecutions: [ToolExecution] = []
     var allToolCardsCollapsed: Bool = true
 
+    // MARK: - Image Attachments (I-3)
+    var pendingImages: [ImageAttachment] = []
+    var visionWarningDismissed: Bool = false
+
     // MARK: - Memory Toast (UX-8)
     var memoryToastEvents: [MemoryToastEvent] = []
 
@@ -441,7 +445,8 @@ final class DochiViewModel {
 
     func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let hasImages = !pendingImages.isEmpty
+        guard !text.isEmpty || hasImages else { return }
         guard interactionState == .idle else {
             Log.app.warning("Cannot send message: not idle (current: \(String(describing: self.interactionState)))")
             return
@@ -457,19 +462,114 @@ final class DochiViewModel {
         // Barge-in: if TTS is playing in text mode, stop it
         ttsService.stopAndClear()
 
+        // Check vision support early (before clearing state)
+        var shouldProcessImages = false
+        if hasImages {
+            let provider = settings.currentProvider
+            let model = settings.llmModel
+            if !provider.supportsVision(model: model) {
+                Log.app.warning("Vision not supported by \(model). Images will not be sent.")
+                if !visionWarningDismissed {
+                    errorMessage = "현재 모델(\(model))은 이미지 입력을 지원하지 않습니다. 텍스트만 전송됩니다."
+                }
+            } else {
+                shouldProcessImages = true
+            }
+        }
+
+        let finalText = text.isEmpty ? "이미지를 분석해주세요." : text
+        let imagesToProcess = shouldProcessImages ? pendingImages : []
         inputText = ""
+        pendingImages = []
+        visionWarningDismissed = false
         errorMessage = nil
 
         ensureConversation()
-        appendUserMessage(text)
 
-        transition(to: .processing)
-        processingSubState = .streaming
-        llmStreamActive = true
+        if imagesToProcess.isEmpty {
+            // No images — send immediately
+            appendUserMessage(finalText, imageData: nil)
+            transition(to: .processing)
+            processingSubState = .streaming
+            llmStreamActive = true
+            processingTask = Task {
+                await processLLMLoop()
+            }
+        } else {
+            // Process images off main thread, then send
+            transition(to: .processing)
+            processingSubState = .streaming
+            llmStreamActive = true
+            processingTask = Task {
+                let imageContents = await Task.detached { () -> [ImageContent] in
+                    var processed: [ImageContent] = []
+                    for attachment in imagesToProcess {
+                        if let content = ImageProcessor.processForLLM(attachment.image) {
+                            processed.append(content)
+                        } else {
+                            Log.app.warning("Failed to process image: \(attachment.fileName)")
+                        }
+                    }
+                    return processed
+                }.value
 
-        processingTask = Task {
-            await processLLMLoop()
+                if !imageContents.isEmpty {
+                    Log.app.info("Attached \(imageContents.count) image(s) to message")
+                }
+                appendUserMessage(finalText, imageData: imageContents.isEmpty ? nil : imageContents)
+                await processLLMLoop()
+            }
         }
+    }
+
+    // MARK: - Image Attachment Actions (I-3)
+
+    func addImage(_ image: NSImage, fileName: String = "image") {
+        guard pendingImages.count < ImageAttachment.maxCount else {
+            errorMessage = "이미지는 최대 \(ImageAttachment.maxCount)장까지 첨부할 수 있습니다."
+            Log.app.warning("Image attachment limit reached (\(ImageAttachment.maxCount))")
+            return
+        }
+
+        if let attachment = ImageProcessor.createAttachment(from: image, fileName: fileName) {
+            pendingImages.append(attachment)
+            Log.app.info("Image attached: \(fileName) (\(attachment.data.count) bytes)")
+        } else {
+            errorMessage = "이미지를 처리할 수 없습니다. 지원되는 형식인지 확인하세요."
+            Log.app.warning("Failed to create image attachment: \(fileName)")
+        }
+    }
+
+    func addImageFromData(_ data: Data, fileName: String = "image") {
+        guard pendingImages.count < ImageAttachment.maxCount else {
+            errorMessage = "이미지는 최대 \(ImageAttachment.maxCount)장까지 첨부할 수 있습니다."
+            return
+        }
+
+        let ext = (fileName as NSString).pathExtension
+        let mimeType = ImageProcessor.mimeType(for: ext)
+
+        if let attachment = ImageProcessor.createAttachment(from: data, mimeType: mimeType, fileName: fileName) {
+            pendingImages.append(attachment)
+            Log.app.info("Image attached from data: \(fileName) (\(data.count) bytes)")
+        } else {
+            errorMessage = "이미지를 처리할 수 없습니다."
+            Log.app.warning("Failed to create image attachment from data: \(fileName)")
+        }
+    }
+
+    func removeImage(id: UUID) {
+        pendingImages.removeAll { $0.id == id }
+    }
+
+    func clearPendingImages() {
+        pendingImages = []
+        visionWarningDismissed = false
+    }
+
+    /// Whether the current model supports Vision input.
+    var currentModelSupportsVision: Bool {
+        settings.currentProvider.supportsVision(model: settings.llmModel)
     }
 
     func cancelRequest() {
@@ -2248,8 +2348,8 @@ final class DochiViewModel {
         }
     }
 
-    private func appendUserMessage(_ text: String) {
-        currentConversation?.messages.append(Message(role: .user, content: text))
+    private func appendUserMessage(_ text: String, imageData: [ImageContent]? = nil) {
+        currentConversation?.messages.append(Message(role: .user, content: text, imageData: imageData))
         currentConversation?.updatedAt = Date()
     }
 

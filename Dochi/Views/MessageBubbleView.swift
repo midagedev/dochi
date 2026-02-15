@@ -51,6 +51,11 @@ struct MessageBubbleView: View {
                     }
                 }
 
+                // I-3: Inline base64 images (Vision)
+                if let images = message.imageData, !images.isEmpty {
+                    inlineImageDataView(images: images)
+                }
+
                 // Image URLs
                 if let imageURLs = message.imageURLs, !imageURLs.isEmpty {
                     ForEach(imageURLs, id: \.absoluteString) { url in
@@ -168,6 +173,21 @@ struct MessageBubbleView: View {
         return AttributedString(message.content)
     }
 
+    // MARK: - Inline Image Data Display (I-3)
+
+    @ViewBuilder
+    private func inlineImageDataView(images: [ImageContent]) -> some View {
+        let columns = images.count == 1
+            ? [GridItem(.flexible())]
+            : [GridItem(.flexible()), GridItem(.flexible())]
+
+        LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(Array(images.enumerated()), id: \.offset) { _, imageContent in
+                InlineImageContentView(imageContent: imageContent)
+            }
+        }
+    }
+
     // MARK: - Tool Call Display
 
     private func toolCallView(_ call: CodableToolCall) -> some View {
@@ -216,6 +236,57 @@ struct MessageBubbleView: View {
 
     private var foregroundColor: Color {
         message.role == .user ? .white : .primary
+    }
+}
+
+// MARK: - Inline Image Content View (I-3)
+
+/// Displays a single base64-encoded image from ImageContent with click-to-enlarge.
+struct InlineImageContentView: View {
+    let imageContent: ImageContent
+    @State private var showFullSize = false
+    @State private var nsImage: NSImage?
+
+    var body: some View {
+        Group {
+            if let image = nsImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 200, maxHeight: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .onTapGesture {
+                        showFullSize = true
+                    }
+                    .popover(isPresented: $showFullSize) {
+                        VStack(spacing: 8) {
+                            Image(nsImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 600, maxHeight: 600)
+
+                            HStack(spacing: 12) {
+                                Text("\(imageContent.width) x \(imageContent.height)")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                Text(imageContent.mimeType)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(12)
+                    }
+                    .help("클릭하여 원본 크기로 보기")
+            } else {
+                Label("이미지 표시 불가", systemImage: "photo.badge.exclamationmark")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task {
+            guard let data = Data(base64Encoded: imageContent.base64Data) else { return }
+            nsImage = NSImage(data: data)
+        }
     }
 }
 

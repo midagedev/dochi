@@ -42,12 +42,13 @@ struct Message: Codable, Identifiable, Sendable {
     var toolCalls: [CodableToolCall]?
     var toolCallId: String?
     var imageURLs: [URL]?
+    var imageData: [ImageContent]?
     var metadata: MessageMetadata?
     var toolExecutionRecords: [ToolExecutionRecord]?
     var memoryContextInfo: MemoryContextInfo?
     var ragContextInfo: RAGContextInfo?
 
-    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCalls: [CodableToolCall]? = nil, toolCallId: String? = nil, imageURLs: [URL]? = nil, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil, memoryContextInfo: MemoryContextInfo? = nil, ragContextInfo: RAGContextInfo? = nil) {
+    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCalls: [CodableToolCall]? = nil, toolCallId: String? = nil, imageURLs: [URL]? = nil, imageData: [ImageContent]? = nil, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil, memoryContextInfo: MemoryContextInfo? = nil, ragContextInfo: RAGContextInfo? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -55,6 +56,7 @@ struct Message: Codable, Identifiable, Sendable {
         self.toolCalls = toolCalls
         self.toolCallId = toolCallId
         self.imageURLs = imageURLs
+        self.imageData = imageData
         self.metadata = metadata
         self.toolExecutionRecords = toolExecutionRecords
         self.memoryContextInfo = memoryContextInfo
@@ -70,6 +72,7 @@ struct Message: Codable, Identifiable, Sendable {
         toolCalls = try container.decodeIfPresent([CodableToolCall].self, forKey: .toolCalls)
         toolCallId = try container.decodeIfPresent(String.self, forKey: .toolCallId)
         imageURLs = try container.decodeIfPresent([URL].self, forKey: .imageURLs)
+        imageData = try container.decodeIfPresent([ImageContent].self, forKey: .imageData)
         metadata = try container.decodeIfPresent(MessageMetadata.self, forKey: .metadata)
         toolExecutionRecords = try container.decodeIfPresent([ToolExecutionRecord].self, forKey: .toolExecutionRecords)
         memoryContextInfo = try container.decodeIfPresent(MemoryContextInfo.self, forKey: .memoryContextInfo)

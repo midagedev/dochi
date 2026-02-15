@@ -72,6 +72,27 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
         allCases.filter { $0.isLocal }
     }
 
+    /// Whether a given model supports Vision (image) input.
+    func supportsVision(model: String) -> Bool {
+        switch self {
+        case .openai:
+            // GPT-4o family and GPT-4 Turbo support vision
+            let visionModels = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
+            return visionModels.contains(model) || model.hasPrefix("gpt-4o")
+        case .anthropic:
+            // All Claude 3+ models support vision
+            return model.hasPrefix("claude-3") || model.hasPrefix("claude-sonnet-4") || model.hasPrefix("claude-opus-4")
+        case .zai:
+            // Z.AI GLM-5 supports vision, GLM-4 does not
+            return model.hasPrefix("glm-5")
+        case .ollama, .lmStudio:
+            // Local vision models: llava, bakllava, moondream, etc.
+            let visionKeywords = ["llava", "bakllava", "moondream", "cogvlm", "yi-vl", "obsidian"]
+            let lowerModel = model.lowercased()
+            return visionKeywords.contains(where: { lowerModel.contains($0) })
+        }
+    }
+
     /// Context window size (max input tokens) per model.
     func contextWindowTokens(for model: String) -> Int {
         switch self {

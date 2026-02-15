@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     enum MainSection: String, CaseIterable {
@@ -1230,6 +1231,7 @@ struct ErrorBannerView: View {
 struct InputBarView: View {
     @Bindable var viewModel: DochiViewModel
     @State private var showSlashCommands = false
+    @State private var isDraggingOver = false
 
     private var matchingCommands: [SlashCommand] {
         FeatureCatalog.matchingCommands(for: viewModel.inputText)
@@ -1237,6 +1239,22 @@ struct InputBarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // I-3: Vision warning banner
+            if !viewModel.pendingImages.isEmpty && !viewModel.currentModelSupportsVision && !viewModel.visionWarningDismissed {
+                VisionWarningBannerView(
+                    modelName: viewModel.settings.llmModel,
+                    onDismiss: { viewModel.visionWarningDismissed = true }
+                )
+            }
+
+            // I-3: Image attachment bar
+            if !viewModel.pendingImages.isEmpty {
+                ImageAttachmentBarView(
+                    attachments: viewModel.pendingImages,
+                    onRemove: { id in viewModel.removeImage(id: id) }
+                )
+            }
+
             // 슬래시 명령 팝업
             if showSlashCommands && !matchingCommands.isEmpty {
                 SlashCommandPopoverView(
@@ -1254,6 +1272,19 @@ struct InputBarView: View {
                 // Microphone button (voice mode)
                 if viewModel.isVoiceMode {
                     microphoneButton
+                }
+
+                // I-3: Image attachment button
+                if viewModel.interactionState == .idle {
+                    Button {
+                        openImagePicker()
+                    } label: {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("이미지 첨부 (최대 \(ImageAttachment.maxCount)장)")
                 }
 
                 TextField("메시지 입력... \u{2318}K 빠른 명령 \u{00B7} /로 명령어", text: $viewModel.inputText, axis: .vertical)
@@ -1311,6 +1342,30 @@ struct InputBarView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
+        // I-3: Drag-and-drop support for images
+        .onDrop(of: [.image, .fileURL], isTargeted: $isDraggingOver) { providers in
+            let hasImageProvider = providers.contains { $0.canLoadObject(ofClass: NSImage.self) }
+            guard hasImageProvider else { return false }
+            handleDrop(providers: providers)
+            return true
+        }
+        .overlay {
+            if isDraggingOver {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.accentColor, lineWidth: 2)
+                    .background(Color.accentColor.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        // I-3: Cmd+V paste image support
+        .onKeyPress(phases: .down) { press in
+            if press.modifiers.contains(.command) && press.characters == "v" {
+                if pasteImageFromClipboard() {
+                    return .handled
+                }
+            }
+            return .ignored
+        }
     }
 
     @ViewBuilder
@@ -1340,7 +1395,7 @@ struct InputBarView: View {
 
     private var canSend: Bool {
         viewModel.interactionState == .idle &&
-        !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (!viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.pendingImages.isEmpty)
     }
 
     private func applySlashCommand(_ command: SlashCommand) {
@@ -1354,6 +1409,96 @@ struct InputBarView: View {
             viewModel.inputText = command.description
         }
         viewModel.sendMessage()
+    }
+
+    // MARK: - Image Input Helpers (I-3)
+
+    private func openImagePicker() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.png, .jpeg, .gif, .heic, .tiff]
+        panel.message = "첨부할 이미지를 선택하세요 (최대 \(ImageAttachment.maxCount)장)"
+
+        let remaining = ImageAttachment.maxCount - viewModel.pendingImages.count
+        guard remaining > 0 else {
+            viewModel.errorMessage = "이미지는 최대 \(ImageAttachment.maxCount)장까지 첨부할 수 있습니다."
+            return
+        }
+
+        panel.begin { response in
+            guard response == .OK else { return }
+            let urls = Array(panel.urls.prefix(remaining))
+            for url in urls {
+                if let data = try? Data(contentsOf: url) {
+                    let fileName = url.lastPathComponent
+                    viewModel.addImageFromData(data, fileName: fileName)
+                }
+            }
+        }
+    }
+
+    private func pasteImageFromClipboard() -> Bool {
+        let pasteboard = NSPasteboard.general
+
+        // Check for image data on clipboard
+        guard let types = pasteboard.types else { return false }
+
+        // Try to get image from pasteboard
+        let imageTypes: [NSPasteboard.PasteboardType] = [.tiff, .png]
+        for imageType in imageTypes {
+            if types.contains(imageType), let data = pasteboard.data(forType: imageType) {
+                if let image = NSImage(data: data) {
+                    viewModel.addImage(image, fileName: "clipboard")
+                    return true
+                }
+            }
+        }
+
+        // Try file URLs that are images
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] {
+            for url in urls {
+                let ext = url.pathExtension.lowercased()
+                guard ImageAttachment.supportedExtensions.contains(ext) else { continue }
+                if let data = try? Data(contentsOf: url) {
+                    viewModel.addImageFromData(data, fileName: url.lastPathComponent)
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    private func handleDrop(providers: [NSItemProvider]) {
+        for provider in providers {
+            // Try loading as NSImage
+            if provider.canLoadObject(ofClass: NSImage.self) {
+                _ = provider.loadObject(ofClass: NSImage.self) { image, _ in
+                    if let nsImage = image as? NSImage {
+                        Task { @MainActor in
+                            viewModel.addImage(nsImage, fileName: "dropped")
+                        }
+                    }
+                }
+            }
+            // Try loading as file URL
+            else if provider.hasItemConformingToTypeIdentifier("public.file-url") {
+                provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                    if let data = item as? Data,
+                       let url = URL(dataRepresentation: data, relativeTo: nil) {
+                        let ext = url.pathExtension.lowercased()
+                        guard ImageAttachment.supportedExtensions.contains(ext) else { return }
+                        if let fileData = try? Data(contentsOf: url) {
+                            Task { @MainActor in
+                                viewModel.addImageFromData(fileData, fileName: url.lastPathComponent)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
