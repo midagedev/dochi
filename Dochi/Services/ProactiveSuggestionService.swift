@@ -36,10 +36,8 @@ final class ProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
 
     init(
         settings: AppSettings,
-        llmService: LLMServiceProtocol? = nil,
         contextService: ContextServiceProtocol,
-        conversationService: ConversationServiceProtocol = ConversationService(),
-        keychainService: KeychainServiceProtocol? = nil,
+        conversationService: ConversationServiceProtocol,
         sessionContext: SessionContext
     ) {
         self.settings = settings
@@ -108,16 +106,14 @@ final class ProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
         currentSuggestion = nil
         state = .cooldown
 
-        // Disable this suggestion type via per-type settings key
-        let key = suggestion.type.settingsKey
-        switch key {
-        case "suggestionTypeNewsEnabled": settings.suggestionTypeNewsEnabled = false
-        case "suggestionTypeDeepDiveEnabled": settings.suggestionTypeDeepDiveEnabled = false
-        case "suggestionTypeResearchEnabled": settings.suggestionTypeResearchEnabled = false
-        case "suggestionTypeKanbanEnabled": settings.suggestionTypeKanbanEnabled = false
-        case "suggestionTypeMemoryEnabled": settings.suggestionTypeMemoryEnabled = false
-        case "suggestionTypeCostEnabled": settings.suggestionTypeCostEnabled = false
-        default: break
+        // Disable this suggestion type
+        switch suggestion.type {
+        case .newsTrend: settings.suggestionTypeNewsEnabled = false
+        case .deepDive: settings.suggestionTypeDeepDiveEnabled = false
+        case .relatedResearch: settings.suggestionTypeResearchEnabled = false
+        case .kanbanCheck: settings.suggestionTypeKanbanEnabled = false
+        case .memoryRemind: settings.suggestionTypeMemoryEnabled = false
+        case .costReport: settings.suggestionTypeCostEnabled = false
         }
         Log.app.info("Suggestion type dismissed: \(suggestion.type.rawValue)")
     }
@@ -369,9 +365,13 @@ final class ProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
         }
     }
 
-    private static func dateString(from date: Date) -> String {
+    private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    private static func dateString(from date: Date) -> String {
+        dayFormatter.string(from: date)
     }
 }

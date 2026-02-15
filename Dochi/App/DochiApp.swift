@@ -61,7 +61,7 @@ struct DochiApp: App {
     private let pluginManager: PluginManager
     private let resourceOptimizer: any ResourceOptimizerProtocol
     private let terminalService: any TerminalServiceProtocol
-    private let proactiveSuggestionService: ProactiveSuggestionService
+    private let proactiveSuggestionService: any ProactiveSuggestionServiceProtocol
 
     init() {
         let settings = AppSettings()
@@ -153,10 +153,8 @@ struct DochiApp: App {
         // Proactive Suggestion Service (K-2)
         let proactiveSuggestionService = ProactiveSuggestionService(
             settings: settings,
-            llmService: llmService,
             contextService: contextService,
             conversationService: conversationService,
-            keychainService: keychainService,
             sessionContext: sessionContext
         )
         self.proactiveSuggestionService = proactiveSuggestionService
