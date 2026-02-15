@@ -59,6 +59,9 @@ final class DochiViewModel {
     private(set) var delegationManager: DelegationManager?
     var showDelegationMonitor: Bool = false
 
+    // MARK: - Scheduler (J-3)
+    private(set) var schedulerService: SchedulerServiceProtocol?
+
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
     var showConnectedDevicesPopover: Bool = false
@@ -259,6 +262,17 @@ final class DochiViewModel {
     func configureDelegationManager(_ manager: DelegationManager) {
         self.delegationManager = manager
         Log.app.info("DelegationManager configured")
+    }
+
+    func configureSchedulerService(_ service: SchedulerServiceProtocol) {
+        self.schedulerService = service
+        Log.app.info("SchedulerService configured")
+    }
+
+    func dismissScheduleExecutionBanner() {
+        if let service = schedulerService as? SchedulerService {
+            service.clearCurrentExecution()
+        }
     }
 
     /// 피드백 제출 (I-4)

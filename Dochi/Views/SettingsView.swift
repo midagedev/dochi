@@ -15,6 +15,7 @@ struct SettingsView: View {
     var supabaseService: SupabaseServiceProtocol?
     var toolService: BuiltInToolService?
     var devicePolicyService: DevicePolicyServiceProtocol?
+    var schedulerService: SchedulerServiceProtocol?
     var heartbeatService: HeartbeatService?
     var notificationManager: NotificationManager?
     var metricsCollector: MetricsCollector?
@@ -97,6 +98,9 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
             .padding()
+
+        case .automation:
+            AutomationSettingsView(settings: settings, schedulerService: schedulerService)
 
         case .family:
             if let contextService, let sessionContext {

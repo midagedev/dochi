@@ -57,6 +57,7 @@ struct DochiApp: App {
     private let documentIndexer: DocumentIndexer
     private let memoryConsolidator: MemoryConsolidator
     private let delegationManager: DelegationManager
+    private let schedulerService: SchedulerService
 
     init() {
         let settings = AppSettings()
@@ -103,6 +104,9 @@ struct DochiApp: App {
 
         let delegationManager = DelegationManager()
         self.delegationManager = delegationManager
+
+        let schedulerService = SchedulerService(settings: settings)
+        self.schedulerService = schedulerService
 
         let toolService = BuiltInToolService(
             contextService: contextService,
@@ -254,6 +258,15 @@ struct DochiApp: App {
                     // Configure DelegationManager (J-2)
                     viewModel.configureDelegationManager(delegationManager)
 
+                    // Configure SchedulerService (J-3)
+                    viewModel.configureSchedulerService(schedulerService)
+                    schedulerService.setExecutionHandler { [weak viewModel] schedule in
+                        guard let viewModel else { return }
+                        Log.app.info("Scheduler executing: \(schedule.name) — \(schedule.prompt)")
+                        viewModel.injectProactiveMessage(schedule.prompt)
+                    }
+                    schedulerService.start()
+
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)
                     viewModel.configureDevicePolicyService(devicePolicyService)
@@ -301,6 +314,7 @@ struct DochiApp: App {
                 }
                 .onDisappear {
                     heartbeatService.stop()
+                    schedulerService.stop()
                 }
                 .onChange(of: settings.heartbeatEnabled) { _, _ in
                     heartbeatService.restart()
@@ -322,6 +336,9 @@ struct DochiApp: App {
                 }
                 .onChange(of: settings.heartbeatQuietHoursEnd) { _, _ in
                     heartbeatService.restart()
+                }
+                .onChange(of: settings.automationEnabled) { _, _ in
+                    schedulerService.restart()
                 }
                 .onChange(of: settings.menuBarEnabled) { _, _ in
                     appDelegate.menuBarManager?.handleSettingsChange()
@@ -367,6 +384,7 @@ struct DochiApp: App {
                 supabaseService: supabaseService,
                 toolService: toolService,
                 devicePolicyService: viewModel.devicePolicyService,
+                schedulerService: schedulerService,
                 heartbeatService: heartbeatService,
                 notificationManager: notificationManager,
                 metricsCollector: viewModel.metricsCollector,

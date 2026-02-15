@@ -438,6 +438,16 @@ struct ContentView: View {
                 )
             }
 
+            // J-3: Schedule execution banner
+            if let execution = viewModel.schedulerService?.currentExecution {
+                ScheduleExecutionBannerView(
+                    execution: execution,
+                    onDismiss: {
+                        viewModel.dismissScheduleExecutionBanner()
+                    }
+                )
+            }
+
             // Error banner
             if let error = viewModel.errorMessage {
                 ErrorBannerView(message: error) {

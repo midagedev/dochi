@@ -244,6 +244,12 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(heartbeatQuietHoursEnd, forKey: "heartbeatQuietHoursEnd") }
     }
 
+    // MARK: - Automation / Scheduler (J-3)
+
+    var automationEnabled: Bool = UserDefaults.standard.object(forKey: "automationEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(automationEnabled, forKey: "automationEnabled") }
+    }
+
     // MARK: - Budget Settings (G-4)
 
     var budgetEnabled: Bool = UserDefaults.standard.object(forKey: "budgetEnabled") as? Bool ?? false {

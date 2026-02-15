@@ -431,6 +431,23 @@ enum CommandPaletteRegistry {
             category: .agent,
             action: .openDelegationMonitor
         ),
+        // J-3: 자동화 스케줄
+        CommandPaletteItem(
+            id: "settings.open.automation",
+            icon: "clock.badge.checkmark",
+            title: "자동화 설정 열기",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "automation")
+        ),
+        CommandPaletteItem(
+            id: "automation.create",
+            icon: "plus.circle",
+            title: "새 자동화 스케줄 만들기",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "automation")
+        ),
         // G-3: 동기화 명령
         CommandPaletteItem(
             id: "sync-now",
