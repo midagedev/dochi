@@ -130,11 +130,11 @@ DochiApp (entry point)
 | InitialSyncWizardView | `Views/InitialSyncWizardView.swift` | AccountSettingsView "초기 업로드" | 3단계 위저드: 안내→진행률→완료 (480x420pt) (G-3) |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
-### 설정 (SettingsView — NavigationSplitView, 13섹션 6그룹) (UX-10 리디자인, G-4 추가)
+### 설정 (SettingsView — NavigationSplitView, 14섹션 6그룹) (UX-10 리디자인, G-4, H-2 추가)
 
 SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 NavigationSplitView 구조.
 사이드바: 검색 필드 + 6개 그룹별 섹션 목록 (호버/선택 하이라이트).
-창 크기: 780×540pt (이상), 680×440pt (최소). 사이드바 폭 180pt.
+창 크기: 780x540pt (이상), 680x440pt (최소). 사이드바 폭 180pt.
 
 | 그룹 | 섹션 (rawValue) | 아이콘 | 파일 | 내용 |
 |------|----------------|--------|------|------|
@@ -149,6 +149,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | 사람 | 에이전트 (`agent`) | person.crop.rectangle | `Views/Settings/AgentSettingsView.swift` → `Views/Agent/AgentCardGridView.swift` | 에이전트 카드 그리드 |
 | 연결 | 도구 (`tools`) | wrench.and.screwdriver | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
 | 연결 | 통합 (`integrations`) | puzzlepiece | `Views/Settings/IntegrationsSettingsView.swift` | 텔레그램, MCP, 채팅 매핑 |
+| 연결 | 단축어 (`shortcuts`) | square.grid.3x3.square | `Views/Settings/ShortcutsSettingsView.swift` | Apple Shortcuts/Siri 연동 상태, 4개 액션 카드, 실행 기록 (H-2) |
 | 연결 | 계정 (`account`) | person.crop.circle | `Views/Settings/AccountSettingsView.swift` | Supabase 인증, 동기화(SyncState 표시+충돌 건수+수동/전체 동기화), 동기화 설정(자동/실시간/대상 선택/충돌 전략), 데이터 관리(초기 업로드) (G-3 확장) |
 | 도움말 | 가이드 (`guide`) | play.rectangle | `Views/SettingsView.swift` 내 GuideSettingsContent | 투어/힌트 관리 |
 
@@ -157,6 +158,10 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 - `Models/UsageModels.swift` — UsageEntry, DailyUsageRecord, MonthlyUsageFile, MonthlyUsageSummary, ModelPricingTable (G-4)
 - `Services/UsageStore.swift` — UsageStore (파일 기반 영구 저장, 5초 디바운스) (G-4)
 - `Services/Protocols/UsageStoreProtocol.swift` — UsageStoreProtocol (G-4)
+- `App/DochiAppIntents.swift` — 4개 AppIntent (AskDochiIntent, AddMemoIntent, CreateKanbanCardIntent, TodayBriefingIntent) (H-2)
+- `App/DochiShortcuts.swift` — AppShortcutsProvider, Siri 문구 등록 (H-2)
+- `Services/ShortcutService.swift` — DochiShortcutService 싱글턴, ShortcutError (H-2)
+- `Models/ShortcutExecutionLog.swift` — ShortcutExecutionLog 모델, ShortcutExecutionLogStore (H-2)
 
 ---
 
@@ -446,6 +451,26 @@ ONNX 모델 관리:
   settings.menuBarGlobalShortcutEnabled → 글로벌 단축키 등록/해제
 ```
 
+### Apple Shortcuts 연동 (H-2 추가)
+```
+AppIntents 프레임워크 등록 (앱 포함 시 자동)
+  -> DochiShortcuts (AppShortcutsProvider) -> macOS Shortcuts 앱에 4개 액션 노출
+  -> Siri 문구 등록: "도치에게 물어보기", "도치 메모 추가", "도치 칸반 카드 생성", "도치 오늘 브리핑"
+액션 실행: Shortcuts 앱 / Siri -> AppIntent.perform()
+  -> DochiShortcutService.shared 접근 (서비스 주입은 DochiApp.init()에서)
+  -> AskDochiIntent: LLMService.send() (safe 도구만, 단일 턴)
+  -> AddMemoIntent: ContextService.appendUserMemory() 또는 appendWorkspaceMemory()
+  -> CreateKanbanCardIntent: KanbanManager.shared.addCard() (첫 번째 보드, 첫 번째 컬럼)
+  -> TodayBriefingIntent: HeartbeatService 데이터 수집 + LLM 요약
+  -> 실행 결과 -> ShortcutExecutionLogStore 기록 (FIFO, 최대 50건)
+설정: 설정 > 연결 > 단축어 -> ShortcutsSettingsView
+  -> 상태 표시 + Shortcuts/Siri 앱 열기 버튼
+  -> 4개 액션 카드 (아이콘, 설명, Siri 문구)
+  -> 최근 실행 기록 (최대 10건 표시, 성공/실패 배지)
+커맨드 팔레트: "단축어 앱 열기" -> openShortcutsApp 액션
+  "단축어 설정" -> openSettingsSection(section: "shortcuts")
+```
+
 ### 가이드/온보딩 (UX-9 추가)
 ```
 기능 투어: 온보딩 완료 → "기능 둘러보기" 버튼 → FeatureTourView (4단계)
@@ -530,7 +555,8 @@ ONNX 모델 관리:
 | 설정 도움말 버튼 (? + popover) | SettingsHelpButton | 섹션 헤더 "?" 아이콘, 클릭 시 설명 팝오버 (280pt) |
 | 투어 단계 (step indicator + 콘텐츠) | FeatureTourView | 4단계 워크스루 (이전/다음/건너뛰기/시작) |
 | 인디케이터 버튼 (ButtonStyle + onHover) | SystemHealthBarView | 호버 시 배경색 표시, 개별 클릭 영역 (UX-10) |
-| 설정 사이드바 (List + 그룹 섹션) | SettingsSidebarView | 검색 필드 + 6그룹 12섹션, 호버/선택 하이라이트 (UX-10) |
+| 설정 사이드바 (List + 그룹 섹션) | SettingsSidebarView | 검색 필드 + 6그룹 14섹션, 호버/선택 하이라이트 (UX-10, H-2 추가) |
+| 액션 카드 (HStack + 아이콘 배경 + 제목/설명/Siri문구) | ShortcutsSettingsView | Shortcuts 액션 카드 (아이콘, 설명, Siri 문구 표시) (H-2) |
 
 ---
 
@@ -550,6 +576,7 @@ ONNX 모델 관리:
 | 투어 미완료 (건너뜀) | "도치의 주요 기능을 알아보세요" 배너 + "둘러보기" | EmptyConversationView |
 | 첫 대화 힌트 | "첫 대화를 시작해보세요!" 힌트 버블 | EmptyConversationView |
 | 메뉴바 빈 대화 | 도치 아이콘 + "무엇이든 물어보세요" + 제안 칩 3개 | MenuBarPopoverView |
+| Shortcuts 실행 기록 없음 | 시계 아이콘 + "아직 실행 기록이 없습니다" + 안내 문구 | ShortcutsSettingsView |
 
 ---
 
@@ -567,6 +594,7 @@ ONNX 모델 관리:
 | 워크스페이스 | `~/Library/Application Support/Dochi/workspaces/{wsId}/` | 워크스페이스 데이터 |
 | 에이전트 템플릿 | `~/Library/Application Support/Dochi/agent_templates.json` | 커스텀 에이전트 템플릿 |
 | 사용량 데이터 | `~/Library/Application Support/Dochi/usage/{yyyy-MM}.json` | 월별 API 사용량/비용 기록 (G-4) |
+| Shortcuts 실행 기록 | `~/Library/Application Support/Dochi/shortcut_logs.json` | Shortcuts/Siri 실행 기록 (최대 50건, FIFO) (H-2) |
 
 ---
 
@@ -611,6 +639,17 @@ ONNX 모델 관리:
 | `action` | `Action` | saved/updated |
 | `contentPreview` | `String` | 저장 내용 미리보기 (80자) |
 
+### ShortcutExecutionLog (H-2 추가)
+
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `id` | `UUID` | 실행 기록 ID |
+| `actionName` | `String` | 실행된 액션 이름 |
+| `timestamp` | `Date` | 실행 시각 |
+| `success` | `Bool` | 성공 여부 |
+| `resultSummary` | `String` | 결과 요약 (최대 200자) |
+| `errorMessage` | `String?` | 오류 메시지 (실패 시) |
+
 ---
 
-*최종 업데이트: 2026-02-15 (H-1 메뉴바 퀵 액세스 머지 후)*
+*최종 업데이트: 2026-02-15 (H-2 Apple Shortcuts 연동 추가)*

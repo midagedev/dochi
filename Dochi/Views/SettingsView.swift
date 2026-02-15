@@ -114,6 +114,9 @@ struct SettingsView: View {
                 settings: settings
             )
 
+        case .shortcuts:
+            ShortcutsSettingsView()
+
         case .account:
             AccountSettingsView(
                 supabaseService: supabaseService,

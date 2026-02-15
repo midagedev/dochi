@@ -575,6 +575,8 @@ struct ContentView: View {
             if let appDelegate = NSApp.delegate as? AppDelegate {
                 appDelegate.menuBarManager?.togglePopover()
             }
+        case .openShortcutsApp:
+            NSWorkspace.shared.open(URL(string: "shortcuts://")!)
         case .custom(let id):
             if id.hasPrefix("switchUser-") {
                 let userIdStr = String(id.dropFirst("switchUser-".count))
