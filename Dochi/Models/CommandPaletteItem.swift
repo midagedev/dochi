@@ -44,6 +44,7 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case syncConflicts
         case cloudAccountSettings
         case toggleMenuBar
+        case openShortcutsApp
         case custom(id: String)
     }
 }
@@ -310,6 +311,23 @@ enum CommandPaletteRegistry {
             subtitle: "⌘⇧D",
             category: .navigation,
             action: .toggleMenuBar
+        ),
+        // H-2: Apple Shortcuts
+        CommandPaletteItem(
+            id: "open-shortcuts-app",
+            icon: "square.grid.3x3.square",
+            title: "단축어 앱 열기",
+            subtitle: "",
+            category: .navigation,
+            action: .openShortcutsApp
+        ),
+        CommandPaletteItem(
+            id: "settings.open.shortcuts",
+            icon: "square.grid.3x3.square",
+            title: "단축어 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "shortcuts")
         ),
         // G-3: 동기화 명령
         CommandPaletteItem(

@@ -127,6 +127,15 @@ struct DochiApp: App {
 
         contextService.migrateIfNeeded()
 
+        // Configure Shortcuts service (H-2)
+        DochiShortcutService.shared.configure(
+            contextService: contextService,
+            keychainService: keychainService,
+            settings: settings,
+            llmService: llmService,
+            heartbeatService: heartbeatService
+        )
+
         heartbeatService.configure(contextService: contextService, sessionContext: sessionContext)
         heartbeatService.setProactiveHandler { [weak viewModel] message in
             guard let viewModel else { return }
