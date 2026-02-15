@@ -57,6 +57,8 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case newTerminalSession
         case closeTerminalSession
         case clearTerminalOutput
+        case toggleProactiveSuggestion
+        case showSuggestionHistory
         case custom(id: String)
     }
 }
@@ -494,6 +496,31 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .settings,
             action: .openSettingsSection(section: "terminal")
+        ),
+        // K-2: 프로액티브 제안
+        CommandPaletteItem(
+            id: "toggle-proactive-suggestion",
+            icon: "lightbulb",
+            title: "제안 일시 중지/재개",
+            subtitle: "",
+            category: .navigation,
+            action: .toggleProactiveSuggestion
+        ),
+        CommandPaletteItem(
+            id: "settings.open.proactive-suggestion",
+            icon: "lightbulb",
+            title: "프로액티브 제안 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "proactive-suggestion")
+        ),
+        CommandPaletteItem(
+            id: "suggestion-history",
+            icon: "clock.arrow.circlepath",
+            title: "제안 기록",
+            subtitle: "",
+            category: .navigation,
+            action: .showSuggestionHistory
         ),
         // G-3: 동기화 명령
         CommandPaletteItem(

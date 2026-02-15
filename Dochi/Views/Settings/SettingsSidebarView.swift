@@ -20,6 +20,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case shortcuts = "shortcuts"
     case automation = "automation"
     case plugins = "plugins"
+    case proactiveSuggestion = "proactive-suggestion"
     case terminal = "terminal"
     case devices = "devices"
     case account = "account"
@@ -39,6 +40,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .interface: return "인터페이스"
         case .wakeWord: return "웨이크워드"
         case .heartbeat: return "하트비트"
+        case .proactiveSuggestion: return "프로액티브 제안"
         case .automation: return "자동화"
         case .family: return "가족 구성원"
         case .agent: return "에이전트"
@@ -65,6 +67,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .interface: return "textformat.size"
         case .wakeWord: return "mic"
         case .heartbeat: return "heart"
+        case .proactiveSuggestion: return "lightbulb"
         case .automation: return "clock.badge.checkmark"
         case .family: return "person.2"
         case .agent: return "person.crop.rectangle.stack"
@@ -83,7 +86,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .aiModel, .apiKey, .usage, .rag, .memory, .feedback: return .ai
         case .voice: return .voice
-        case .interface, .wakeWord, .heartbeat, .automation: return .general
+        case .interface, .wakeWord, .heartbeat, .proactiveSuggestion, .automation: return .general
         case .family, .agent: return .people
         case .terminal: return .development
         case .tools, .integrations, .shortcuts, .plugins, .devices, .account: return .connection
@@ -113,6 +116,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             return ["웨이크워드", "마이크", "침묵", "음성 입력"]
         case .heartbeat:
             return ["하트비트", "주기", "캘린더", "칸반", "미리알림", "조용한 시간"]
+        case .proactiveSuggestion:
+            return ["프로액티브", "제안", "suggestion", "유휴", "idle", "쿨다운", "cooldown", "트렌드", "심층", "리서치", "칸반", "메모리", "비용"]
         case .automation:
             return ["자동화", "스케줄", "크론", "cron", "반복", "타이머", "예약", "브리핑", "리포트", "automation"]
         case .family:

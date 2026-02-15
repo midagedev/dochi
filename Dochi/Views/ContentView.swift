@@ -204,6 +204,14 @@ struct ContentView: View {
                     DelegationMonitorView(delegationManager: manager)
                 }
             }
+            .sheet(isPresented: Binding(
+                get: { viewModel.showSuggestionHistory },
+                set: { viewModel.showSuggestionHistory = $0 }
+            )) {
+                SuggestionHistoryView(
+                    history: viewModel.proactiveSuggestionService?.suggestionHistory ?? []
+                )
+            }
     }
 
     // MARK: - Main Content (split to help type checker)
@@ -233,6 +241,16 @@ struct ContentView: View {
                     onDismiss: { id in viewModel.dismissSyncToast(id: id) }
                 )
             }
+
+            // K-2: Suggestion toast overlay (좌측 하단)
+            SuggestionToastContainerView(
+                events: viewModel.suggestionToastEvents,
+                onTap: {
+                    // 토스트 클릭 시 대화 영역으로 스크롤 (제안 버블이 표시됨)
+                    selectedSection = .chat
+                },
+                onDismiss: { id in viewModel.dismissSuggestionToast(id: id) }
+            )
 
             // UX-8: Memory toast overlay
             MemoryToastContainerView(
@@ -512,6 +530,19 @@ struct ContentView: View {
                 )
             }
 
+            // K-2: Proactive suggestion bubble
+            if let suggestion = viewModel.currentSuggestion {
+                SuggestionBubbleView(
+                    suggestion: suggestion,
+                    onAccept: { withAnimation(.easeOut(duration: 0.25)) { viewModel.acceptSuggestion(suggestion) } },
+                    onDefer: { withAnimation(.easeOut(duration: 0.25)) { viewModel.deferSuggestion(suggestion) } },
+                    onDismissType: { withAnimation(.easeOut(duration: 0.25)) { viewModel.dismissSuggestionType(suggestion) } }
+                )
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+
             Divider()
 
             // Input area
@@ -746,6 +777,10 @@ struct ContentView: View {
             viewModel.closeTerminalSession()
         case .clearTerminalOutput:
             viewModel.clearTerminalOutput()
+        case .toggleProactiveSuggestion:
+            viewModel.toggleProactiveSuggestionPause()
+        case .showSuggestionHistory:
+            viewModel.showSuggestionHistory = true
         case .openShortcutsApp:
             NSWorkspace.shared.open(URL(string: "shortcuts://")!)
         case .custom(let id):

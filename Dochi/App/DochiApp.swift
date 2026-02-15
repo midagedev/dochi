@@ -61,6 +61,7 @@ struct DochiApp: App {
     private let pluginManager: PluginManager
     private let resourceOptimizer: any ResourceOptimizerProtocol
     private let terminalService: any TerminalServiceProtocol
+    private let proactiveSuggestionService: ProactiveSuggestionService
 
     init() {
         let settings = AppSettings()
@@ -148,6 +149,17 @@ struct DochiApp: App {
             commandTimeout: settings.terminalCommandTimeout
         )
         self.terminalService = terminalService
+
+        // Proactive Suggestion Service (K-2)
+        let proactiveSuggestionService = ProactiveSuggestionService(
+            settings: settings,
+            llmService: llmService,
+            contextService: contextService,
+            conversationService: conversationService,
+            keychainService: keychainService,
+            sessionContext: sessionContext
+        )
+        self.proactiveSuggestionService = proactiveSuggestionService
 
         // Spotlight indexer (H-4)
         let spotlightIndexer = SpotlightIndexer(settings: settings)
@@ -297,6 +309,10 @@ struct DochiApp: App {
                     viewModel.configureTerminalService(terminalService)
                     toolService.configureTerminalService(terminalService)
 
+                    // Configure ProactiveSuggestionService (K-2)
+                    viewModel.configureProactiveSuggestionService(proactiveSuggestionService)
+                    proactiveSuggestionService.start()
+
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)
                     viewModel.configureDevicePolicyService(devicePolicyService)
@@ -345,6 +361,7 @@ struct DochiApp: App {
                 .onDisappear {
                     heartbeatService.stop()
                     schedulerService.stop()
+                    proactiveSuggestionService.stop()
                 }
                 .onChange(of: settings.heartbeatEnabled) { _, _ in
                     heartbeatService.restart()
@@ -369,6 +386,13 @@ struct DochiApp: App {
                 }
                 .onChange(of: settings.automationEnabled) { _, _ in
                     schedulerService.restart()
+                }
+                .onChange(of: settings.proactiveSuggestionEnabled) { _, newValue in
+                    if newValue {
+                        proactiveSuggestionService.start()
+                    } else {
+                        proactiveSuggestionService.stop()
+                    }
                 }
                 .onChange(of: settings.menuBarEnabled) { _, _ in
                     appDelegate.menuBarManager?.handleSettingsChange()
