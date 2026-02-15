@@ -52,6 +52,7 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case memoryChangeHistory
         case memorySettings
         case openConnectedDevices
+        case openDelegationMonitor
         case custom(id: String)
     }
 }
@@ -420,6 +421,15 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .settings,
             action: .openSettingsSection(section: "devices")
+        ),
+        // J-2: 위임 모니터
+        CommandPaletteItem(
+            id: "delegation-monitor",
+            icon: "arrow.triangle.branch",
+            title: "위임 상태 보기",
+            subtitle: "",
+            category: .agent,
+            action: .openDelegationMonitor
         ),
         // G-3: 동기화 명령
         CommandPaletteItem(

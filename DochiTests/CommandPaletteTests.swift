@@ -166,8 +166,8 @@ final class CommandPaletteItemTests: XCTestCase {
         )
 
         let agentItems = items.filter { $0.category == .agent }
-        // 2 agent switch items + 1 static "새 에이전트 생성" item
-        XCTAssertEqual(agentItems.count, 3)
+        // 2 agent switch items + 1 static "새 에이전트 생성" item + 1 static "위임 상태 보기" item
+        XCTAssertEqual(agentItems.count, 4)
     }
 }
 

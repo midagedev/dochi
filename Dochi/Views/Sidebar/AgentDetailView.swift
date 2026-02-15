@@ -31,6 +31,13 @@ struct AgentDetailView: View {
     @State private var shellConfirmText: String = ""
     @State private var shellAllowedText: String = ""
 
+    // Delegation policy
+    @State private var canDelegate: Bool = true
+    @State private var canReceiveDelegation: Bool = true
+    @State private var delegationAllowedTargetsText: String = ""
+    @State private var delegationBlockedTargetsText: String = ""
+    @State private var delegationMaxChainDepth: Int = 3
+
     // Persona
     @State private var personaText: String = ""
     @State private var personaSaved: Bool = false
@@ -151,6 +158,31 @@ struct AgentDetailView: View {
                     }
                 }
 
+                Section("위임 정책") {
+                    Toggle("다른 에이전트에게 위임 가능", isOn: $canDelegate)
+                    Toggle("다른 에이전트로부터 위임 수신", isOn: $canReceiveDelegation)
+
+                    Stepper("최대 체인 깊이: \(delegationMaxChainDepth)", value: $delegationMaxChainDepth, in: 1...10)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("허용 대상 (비어있으면 전체 허용)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("에이전트1, 에이전트2 ...", text: $delegationAllowedTargetsText)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("차단 대상")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("에이전트3, 에이전트4 ...", text: $delegationBlockedTargetsText)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+                    }
+                }
+
                 Section {
                     HStack {
                         Spacer()
@@ -260,6 +292,13 @@ struct AgentDetailView: View {
             shellBlockedText = shell.blockedCommands.joined(separator: ", ")
             shellConfirmText = shell.confirmCommands.joined(separator: ", ")
             shellAllowedText = shell.allowedCommands.joined(separator: ", ")
+
+            let delegation = config.effectiveDelegationPolicy
+            canDelegate = delegation.canDelegate
+            canReceiveDelegation = delegation.canReceiveDelegation
+            delegationAllowedTargetsText = delegation.allowedTargets?.joined(separator: ", ") ?? ""
+            delegationBlockedTargetsText = delegation.blockedTargets?.joined(separator: ", ") ?? ""
+            delegationMaxChainDepth = delegation.maxChainDepth
         } else {
             let shell = ShellPermissionConfig.default
             shellBlockedText = shell.blockedCommands.joined(separator: ", ")
@@ -282,13 +321,25 @@ struct AgentDetailView: View {
             allowedCommands: parseCommaSeparated(shellAllowedText)
         )
 
+        let allowedTargets = parseCommaSeparated(delegationAllowedTargetsText)
+        let blockedTargets = parseCommaSeparated(delegationBlockedTargetsText)
+
+        let delegationPolicy = DelegationPolicy(
+            canDelegate: canDelegate,
+            canReceiveDelegation: canReceiveDelegation,
+            allowedTargets: allowedTargets.isEmpty ? nil : allowedTargets,
+            blockedTargets: blockedTargets.isEmpty ? nil : blockedTargets,
+            maxChainDepth: delegationMaxChainDepth
+        )
+
         let config = AgentConfig(
             name: agentName,
             wakeWord: wakeWord.isEmpty ? nil : wakeWord,
             description: agentDescription.isEmpty ? nil : agentDescription,
             defaultModel: defaultModel.isEmpty ? nil : defaultModel,
             permissions: permissions,
-            shellPermissions: shellPermissions
+            shellPermissions: shellPermissions,
+            delegationPolicy: delegationPolicy
         )
 
         contextService.saveAgentConfig(workspaceId: workspaceId, config: config)
