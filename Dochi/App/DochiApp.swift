@@ -60,6 +60,7 @@ struct DochiApp: App {
     private let schedulerService: SchedulerService
     private let pluginManager: PluginManager
     private let resourceOptimizer: any ResourceOptimizerProtocol
+    private let terminalService: any TerminalServiceProtocol
 
     init() {
         let settings = AppSettings()
@@ -138,6 +139,15 @@ struct DochiApp: App {
         // Resource Optimizer (J-5)
         let resourceOptimizer = ResourceOptimizerService(baseURL: appSupportURL, usageStore: usageStore)
         self.resourceOptimizer = resourceOptimizer
+
+        // Terminal Service (K-1)
+        let terminalService = TerminalService(
+            maxSessions: settings.terminalMaxSessions,
+            maxBufferLines: settings.terminalMaxBufferLines,
+            defaultShellPath: settings.terminalShellPath,
+            commandTimeout: settings.terminalCommandTimeout
+        )
+        self.terminalService = terminalService
 
         // Spotlight indexer (H-4)
         let spotlightIndexer = SpotlightIndexer(settings: settings)
@@ -282,6 +292,10 @@ struct DochiApp: App {
                         viewModel.injectProactiveMessage(schedule.prompt)
                     }
                     schedulerService.start()
+
+                    // Configure TerminalService (K-1)
+                    viewModel.configureTerminalService(terminalService)
+                    toolService.configureTerminalService(terminalService)
 
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)

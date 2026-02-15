@@ -68,6 +68,10 @@ final class DochiViewModel {
     // MARK: - Resource Optimizer (J-5)
     private(set) var resourceOptimizer: (any ResourceOptimizerProtocol)?
 
+    // MARK: - Terminal (K-1)
+    private(set) var terminalService: TerminalServiceProtocol?
+    var showTerminalPanel: Bool = false
+
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
     var showConnectedDevicesPopover: Bool = false
@@ -285,6 +289,43 @@ final class DochiViewModel {
     func configureResourceOptimizer(_ optimizer: any ResourceOptimizerProtocol) {
         self.resourceOptimizer = optimizer
         Log.app.info("ResourceOptimizerService configured")
+    }
+
+    // MARK: - Terminal (K-1)
+
+    func configureTerminalService(_ service: TerminalServiceProtocol) {
+        self.terminalService = service
+        Log.app.info("TerminalService configured")
+    }
+
+    func toggleTerminalPanel() {
+        showTerminalPanel.toggle()
+        if showTerminalPanel, let service = terminalService, service.sessions.isEmpty {
+            service.createSession(name: nil, shellPath: settings.terminalShellPath)
+        }
+    }
+
+    func createTerminalSession() {
+        guard let service = terminalService else { return }
+        service.createSession(name: nil, shellPath: settings.terminalShellPath)
+        if !showTerminalPanel && settings.terminalAutoShowPanel {
+            showTerminalPanel = true
+        }
+    }
+
+    func closeTerminalSession() {
+        guard let service = terminalService,
+              let activeId = service.activeSessionId else { return }
+        service.closeSession(id: activeId)
+        if service.sessions.isEmpty {
+            showTerminalPanel = false
+        }
+    }
+
+    func clearTerminalOutput() {
+        guard let service = terminalService,
+              let activeId = service.activeSessionId else { return }
+        service.clearOutput(for: activeId)
     }
 
     func dismissScheduleExecutionBanner() {

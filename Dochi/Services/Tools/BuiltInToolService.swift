@@ -11,6 +11,10 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
             if let shellTool = registry.tool(named: "shell.execute") as? ShellCommandTool {
                 shellTool.confirmationHandler = confirmationHandler
             }
+            // Forward to TerminalRunTool for confirmAlways handling (C-4)
+            if let terminalTool = registry.tool(named: "terminal.run") as? TerminalRunTool {
+                terminalTool.confirmationHandler = confirmationHandler
+            }
         }
     }
 
@@ -231,6 +235,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(CodingSessionPauseTool(sessionManager: codingSessionManager))
         registry.register(CodingSessionEndTool(sessionManager: codingSessionManager))
 
+        // Terminal (conditional, restricted) (K-1)
+        registry.register(TerminalRunTool(settings: settings, terminalService: nil))
+
         // MCP settings (conditional, sensitive)
         registry.register(MCPAddServerTool(mcpService: mcpService))
         registry.register(MCPUpdateServerTool(mcpService: mcpService))
@@ -238,6 +245,16 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
         let toolCount = registry.allToolNames.count
         Log.tool.info("BuiltInToolService initialized with \(toolCount) tools")
+    }
+
+    // MARK: - Terminal Service Injection (C-6)
+
+    /// TerminalRunTool이 nil로 등록되므로, 이후 서비스 생성 후 주입
+    func configureTerminalService(_ service: TerminalServiceProtocol) {
+        if let terminalTool = registry.tool(named: "terminal.run") as? TerminalRunTool {
+            terminalTool.updateTerminalService(service)
+            Log.tool.info("TerminalService injected into TerminalRunTool")
+        }
     }
 
     // MARK: - Tool Info (for UI)
@@ -306,7 +323,8 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
         // Sensitive/restricted tools require user confirmation
         // ShellCommandTool handles its own permission flow (allowed/confirm/blocked/default)
-        let skipConfirmation = resolvedName == "shell.execute"
+        // TerminalRunTool handles its own confirm flow via terminalLLMConfirmAlways (C-4)
+        let skipConfirmation = resolvedName == "shell.execute" || resolvedName == "terminal.run"
         if !skipConfirmation && (tool.category == .sensitive || tool.category == .restricted) {
             if let handler = confirmationHandler {
                 let approved = await handler(tool.name, tool.description)

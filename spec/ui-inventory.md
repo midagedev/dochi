@@ -66,6 +66,10 @@ DochiApp (entry point)
     │   └── [칸반 탭]
     │       └── KanbanWorkspaceView
     │           └── KanbanBoardView → KanbanColumnView → KanbanCardView
+    ├── [Bottom Panel] TerminalPanelView — 하단 터미널 패널 (Ctrl+` 토글, VSplitView) (K-1)
+    │   ├── 탭 바 — 세션 탭 + 새 세션/출력 지우기 버튼
+    │   ├── TerminalSessionView — 개별 세션: 출력 ScrollView + 입력 라인
+    │   └── 빈 상태 — "터미널 세션이 없습니다" + 새 세션 버튼
     ├── [Inspector] MemoryPanelView — 메모리 인스펙터 패널 (⌘I 토글) (UX-8)
     │   └── MemoryNodeView — 계층별 메모리 노드 (접기/펼치기 + 인라인 편집)
     ├── [Overlay] CommandPaletteView — ⌘K 커맨드 팔레트 (ZStack 오버레이)
@@ -115,6 +119,14 @@ DochiApp (entry point)
 | MemoryToastContainerView | `Views/MemoryToastView.swift` | 자동 | 여러 토스트 스택 관리 |
 | MemoryReferenceBadgeView | `Views/MemoryReferenceBadgeView.swift` | assistant 메시지 자동 | "메모리 N계층" 배지, 호버 시 계층별 글자수 팝오버 |
 
+### 터미널 (K-1)
+
+| 화면 | 파일 | 접근 방법 | 설명 |
+|------|------|-----------|------|
+| TerminalPanelView | `Views/Terminal/TerminalPanelView.swift` | Ctrl+` 또는 커맨드 팔레트 | 하단 패널 컨테이너: 탭 바 + 세션 뷰 + 액션 버튼 |
+| TerminalSessionView | `Views/Terminal/TerminalSessionView.swift` | TerminalPanelView 내 자동 | 개별 터미널: 출력 ScrollView + 입력 라인 |
+| TerminalSettingsView | `Views/Settings/TerminalSettingsView.swift` | 설정 > 터미널 | 쉘 경로, 폰트, LLM 연동 설정 |
+
 ### 칸반
 
 | 화면 | 파일 | 접근 방법 | 설명 |
@@ -154,10 +166,10 @@ DochiApp (entry point)
 | InitialSyncWizardView | `Views/InitialSyncWizardView.swift` | AccountSettingsView "초기 업로드" | 3단계 위저드: 안내→진행률→완료 (480x420pt) (G-3) |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
-### 설정 (SettingsView — NavigationSplitView, 17섹션 6그룹) (UX-10 리디자인, G-4, H-2, I-1, J-3, J-4 추가)
+### 설정 (SettingsView — NavigationSplitView, 21섹션 7그룹) (UX-10 리디자인, G-4, H-2, I-1, J-3, J-4, K-1 추가)
 
 SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 NavigationSplitView 구조.
-사이드바: 검색 필드 + 6개 그룹별 섹션 목록 (호버/선택 하이라이트).
+사이드바: 검색 필드 + 7개 그룹별 섹션 목록 (호버/선택 하이라이트).
 창 크기: 780x540pt (이상), 680x440pt (최소). 사이드바 폭 180pt.
 
 | 그룹 | 섹션 (rawValue) | 아이콘 | 파일 | 내용 |
@@ -177,12 +189,13 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | 연결 | 도구 (`tools`) | wrench.and.screwdriver | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
 | 연결 | 통합 (`integrations`) | puzzlepiece | `Views/Settings/IntegrationsSettingsView.swift` | 텔레그램, MCP, 채팅 매핑 |
 | 연결 | 단축어 (`shortcuts`) | square.grid.3x3.square | `Views/Settings/ShortcutsSettingsView.swift` | Apple Shortcuts/Siri 연동 상태, 4개 액션 카드, 실행 기록 (H-2) |
+| 개발 | 터미널 (`terminal`) | terminal | `Views/Settings/TerminalSettingsView.swift` | 쉘 경로, 폰트 크기, 최대 버퍼/세션, LLM 연동 토글, 단축키 안내 (K-1) |
 | 연결 | 플러그인 (`plugins`) | puzzlepiece.extension | `Views/Settings/PluginSettingsView.swift` + `PluginDetailSheet.swift` | 플러그인 디렉토리 관리, 매니페스트 파싱, 활성화/비활성화, 권한 관리, 상세 시트 (J-4) |
 | 연결 | 계정 (`account`) | person.crop.circle | `Views/Settings/AccountSettingsView.swift` | Supabase 인증, 동기화(SyncState 표시+충돌 건수+수동/전체 동기화), 동기화 설정(자동/실시간/대상 선택/충돌 전략), 데이터 관리(초기 업로드) (G-3 확장) |
 | 도움말 | 가이드 (`guide`) | play.rectangle | `Views/SettingsView.swift` 내 GuideSettingsContent | 투어/힌트 관리 |
 
 지원 파일:
-- `Views/Settings/SettingsSidebarView.swift` — SettingsSection enum, SettingsSectionGroup enum, SettingsSidebarView, SettingsSidebarRow
+- `Views/Settings/SettingsSidebarView.swift` — SettingsSection enum (21개), SettingsSectionGroup enum (7개: AI/음성/일반/사람/개발/연결/도움말), SettingsSidebarView, SettingsSidebarRow
 - `Models/PluginModels.swift` — PluginManifest, PluginCapabilityEntry, PluginCapability, PluginStatus, PluginInfo, PluginStateFile (J-4)
 - `Services/Protocols/PluginManagerProtocol.swift` — PluginManagerProtocol (J-4)
 - `Services/PluginManager.swift` — PluginManager (@Observable, 파일 기반 플러그인 관리) (J-4)
@@ -190,6 +203,10 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 - `Models/ResourceOptimizerModels.swift` — SubscriptionPlan, ResourceUtilization, WasteRiskLevel, AutoTaskType, AutoTaskRecord, SubscriptionsFile (J-5)
 - `Services/Protocols/ResourceOptimizerProtocol.swift` — ResourceOptimizerProtocol (J-5)
 - `Services/ResourceOptimizerService.swift` — ResourceOptimizerService (@Observable, 구독 CRUD, 위험도 계산, 자동 작업 큐잉, 파일 기반 persist) (J-5)
+- `Models/TerminalModels.swift` — TerminalSession, TerminalOutputLine, OutputType (K-1)
+- `Services/Protocols/TerminalServiceProtocol.swift` — TerminalServiceProtocol (K-1)
+- `Services/Terminal/TerminalService.swift` — TerminalService (@Observable, Process/Pipe 기반 쉘 세션 관리, 비동기 출력, 히스토리) (K-1)
+- `Services/Tools/TerminalRunTool.swift` — terminal.run 도구 (restricted, LLM 터미널 명령 실행) (K-1)
 - `Views/Settings/SubscriptionEditSheet.swift` — 구독 등록/편집 시트 (J-5)
 - `Services/UsageStore.swift` — UsageStore (파일 기반 영구 저장, 5초 디바운스) (G-4)
 - `Services/Protocols/UsageStoreProtocol.swift` — UsageStoreProtocol (G-4)
@@ -239,6 +256,8 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | `memoryToastEvents` | `[MemoryToastEvent]` | 메모리 저장 토스트 이벤트 큐 | MemoryToastContainerView |
 | `syncEngine` | `SyncEngine?` | 동기화 엔진 (G-3) | SystemHealthBarView, CloudSyncTabView, AccountSettingsView, SyncToastContainerView |
 | `spotlightIndexer` | `SpotlightIndexerProtocol?` | Spotlight 인덱싱 서비스 (H-4) | InterfaceSettingsContent (Spotlight 섹션) |
+| `terminalService` | `TerminalServiceProtocol?` | 터미널 서비스 (K-1) | TerminalPanelView |
+| `showTerminalPanel` | `Bool` | 터미널 패널 표시 여부 (K-1) | ContentView (VSplitView) |
 
 ### 대화 정리 상태 (UX-4 추가)
 
@@ -386,6 +405,7 @@ RAGReference 필드:
 | Spotlight (H-4) | `spotlightIndexingEnabled`, `spotlightIndexConversations`, `spotlightIndexPersonalMemory`, `spotlightIndexAgentMemory`, `spotlightIndexWorkspaceMemory` |
 | RAG (I-1) | `ragEnabled`, `ragEmbeddingProvider`, `ragEmbeddingModel`, `ragTopK`, `ragMinSimilarity`, `ragAutoSearch`, `ragChunkSize`, `ragChunkOverlap` |
 | 리소스 최적화 (J-5) | `resourceAutoTaskEnabled`, `resourceAutoTaskOnlyWasteRisk`, `resourceAutoTaskTypes` |
+| 터미널 (K-1) | `terminalShellPath`, `terminalFontSize`, `terminalMaxBufferLines`, `terminalCommandTimeout`, `terminalMaxSessions`, `terminalConfirmOnClose`, `terminalLLMEnabled`, `terminalLLMConfirmAlways`, `terminalAutoShowPanel`, `terminalPanelHeight` |
 | 기타 | `chatFontSize`, `currentWorkspaceId`, `defaultUserId`, `activeAgentName` |
 
 ---
@@ -664,6 +684,38 @@ AppSettings: memoryConsolidationEnabled, memoryConsolidationMinMessages, memoryC
 일괄 내보내기: BulkActionToolbar 내보내기 메뉴 -> 개별 파일 / 합치기(Markdown)
 ```
 
+### 통합 터미널 (K-1 추가)
+```
+터미널 패널 열기: ^` / 커맨드 팔레트 "터미널 열기/닫기" / 설정 autoShowPanel
+  -> viewModel.toggleTerminalPanel() -> showTerminalPanel 토글
+  -> ContentView VSplitView 하단에 TerminalPanelView 표시/숨김
+세션 관리: TerminalPanelView 탭바
+  -> "+" 버튼 / ^⇧` / 커맨드 팔레트 "새 터미널 세션"
+  -> terminalService.createSession() -> Process/Pipe 기반 쉘 시작 (login shell)
+  -> 탭 닫기(×) -> terminalService.closeSession(id:) -> 프로세스 terminate
+명령 실행: TerminalSessionView 입력 필드
+  -> Enter -> terminalService.executeCommand(command, in: sessionId)
+  -> stdin Pipe 쓰기 -> stdout/stderr 비동기 읽기 -> outputLines 배열 갱신
+  -> ScrollView 자동 스크롤 (scrollPosition anchor: .bottom)
+출력 표시: TerminalSessionView ScrollView
+  -> stdout: 기본색, stderr: 빨강, system: 회색 이탤릭, llmCommand: 보라
+  -> 버퍼 제한: maxBufferLines (기본 10000) 초과 시 앞부분 제거
+히스토리: ↑/↓ -> terminalService.navigateHistory(sessionId:direction:) -> 입력 필드 갱신
+인터럽트: ^C -> terminalService.interrupt(sessionId:) -> 프로세스 SIGINT
+LLM 연동: terminal.run 도구 (restricted 카테고리)
+  -> settings.terminalLLMEnabled 확인
+  -> TerminalService.runCommand(command, timeout:) -> 별도 Process 실행 -> 결과 반환
+  -> 출력 최대 8000자 제한
+설정: 설정 > 개발 > 터미널 -> TerminalSettingsView
+  -> 쉘 경로, 최대 세션 수, 타임아웃, 폰트 크기, 버퍼 크기
+  -> 동작: 닫기 확인, 자동 패널 표시
+  -> LLM 연동: 활성화, 항상 확인
+커맨드 팔레트: "터미널 열기/닫기" / "새 터미널 세션" / "터미널 설정"
+AppSettings: terminalShellPath, terminalFontSize, terminalMaxBufferLines, terminalCommandTimeout,
+  terminalMaxSessions, terminalConfirmOnClose, terminalLLMEnabled, terminalLLMConfirmAlways,
+  terminalAutoShowPanel, terminalPanelHeight
+```
+
 ---
 
 ## 키보드 단축키
@@ -689,6 +741,11 @@ AppSettings: memoryConsolidationEnabled, memoryConsolidationMinMessages, memoryC
 | ⌘⇧M | 모델 빠른 변경 (QuickModelPopover) | ContentView (onKeyPress) (UX-10 변경, 기존 일괄선택은 커맨드 팔레트/툴바로 접근) |
 | ⌘⇧D | 메뉴바 퀵 액세스 토글 (글로벌) | MenuBarManager (NSEvent monitor) (H-1) |
 | ⌘⇧T | 도구 카드 일괄 접기/펼치기 | ContentView (hidden button) |
+| ^` | 터미널 패널 토글 | ContentView (onKeyPress) (K-1) |
+| ^⇧` | 새 터미널 세션 | ContentView (onKeyPress) (K-1) |
+| ⌘L | 터미널 출력 지우기 | TerminalSessionView (K-1) |
+| ↑/↓ | 터미널 명령 히스토리 | TerminalSessionView (K-1) |
+| ^C | 터미널 프로세스 인터럽트 | TerminalSessionView (K-1) |
 | Escape | 요청 취소 / 확인 배너 거부 / 팔레트 닫기 | ContentView (onKeyPress) |
 | Enter | 확인 배너 허용 / 메시지 전송 | ContentView (onKeyPress) / InputBarView |
 | ⇧Enter | 줄바꿈 | InputBarView |
@@ -707,6 +764,7 @@ AppSettings: memoryConsolidationEnabled, memoryConsolidationMinMessages, memoryC
 | 카드 (VStack + padding + 배경 + 라운드) | CapabilityCatalog 도구 카드, 칸반 카드, ExportOptions 형식 카드 | 정보 블록 |
 | 호버 오버레이 (overlay + onHover) | MessageBubbleView 복사 버튼 | 호버 시 나타나는 액션 버튼 |
 | 분할 뷰 (HSplitView / HStack) | CapabilityCatalog (목록+상세), ToolsSettings | 좌우 2패널 |
+| 분할 뷰 (VSplitView) | ContentView (대화+터미널) | 상하 2패널, 드래그 리사이즈 (K-1) |
 | 키캡 (Text + 둥근 테두리) | KeyboardShortcutHelpView | 단축키 키 표시 |
 | FlowLayout (커스텀 Layout) | ConversationFilterView 태그 칩 | 줄바꿈 가능한 가로 배치 |
 | 접을 수 있는 카드 (VStack + Button + chevron) | ToolExecutionCardView, ToolExecutionRecordCardView | 상태별 색상, 클릭 접기/펼치기 |
@@ -719,7 +777,7 @@ AppSettings: memoryConsolidationEnabled, memoryConsolidationMinMessages, memoryC
 | 설정 도움말 버튼 (? + popover) | SettingsHelpButton | 섹션 헤더 "?" 아이콘, 클릭 시 설명 팝오버 (280pt) |
 | 투어 단계 (step indicator + 콘텐츠) | FeatureTourView | 4단계 워크스루 (이전/다음/건너뛰기/시작) |
 | 인디케이터 버튼 (ButtonStyle + onHover) | SystemHealthBarView | 호버 시 배경색 표시, 개별 클릭 영역 (UX-10) |
-| 설정 사이드바 (List + 그룹 섹션) | SettingsSidebarView | 검색 필드 + 6그룹 14섹션, 호버/선택 하이라이트 (UX-10, H-2 추가) |
+| 설정 사이드바 (List + 그룹 섹션) | SettingsSidebarView | 검색 필드 + 7그룹 21섹션, 호버/선택 하이라이트 (UX-10, H-2, K-1 추가) |
 | 알림 권한 상태 (Circle + Text) | NotificationAuthorizationStatusView | 초록(허용)/빨강(거부)/노랑(미결정) 원 + 상태 텍스트 (H-3) |
 | 액션 카드 (HStack + 아이콘 배경 + 제목/설명/Siri문구) | ShortcutsSettingsView | Shortcuts 액션 카드 (아이콘, 설명, Siri 문구 표시) (H-2) |
 
@@ -818,4 +876,4 @@ AppSettings: memoryConsolidationEnabled, memoryConsolidationMinMessages, memoryC
 
 ---
 
-*최종 업데이트: 2026-02-15 (J-5 리소스 활용 최적화 추가)*
+*최종 업데이트: 2026-02-15 (K-1 통합 터미널 추가)*

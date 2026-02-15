@@ -55,6 +55,9 @@ struct ContentView: View {
     // J-2: 위임 모니터
     @State private var showDelegationMonitor = false
 
+    // K-1: 터미널 패널
+    @State private var terminalPanelHeight: CGFloat = 200
+
     var body: some View {
         mainContent
             .onAppear {
@@ -336,10 +339,20 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        if selectedSection == .chat {
-            chatDetailView
-        } else {
-            KanbanWorkspaceView()
+        VSplitView {
+            if selectedSection == .chat {
+                chatDetailView
+            } else {
+                KanbanWorkspaceView()
+            }
+
+            if viewModel.showTerminalPanel, let terminalService = viewModel.terminalService {
+                TerminalPanelView(
+                    terminalService: terminalService,
+                    settings: viewModel.settings
+                )
+                .frame(minHeight: 100, idealHeight: terminalPanelHeight, maxHeight: 500)
+            }
         }
     }
 
@@ -571,7 +584,20 @@ struct ContentView: View {
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
         let hasCommand = press.modifiers.contains(.command)
         let hasShift = press.modifiers.contains(.shift)
+        let hasControl = press.modifiers.contains(.control)
         let chars = press.characters
+
+        // Ctrl+Shift+`: New terminal session
+        if hasControl && hasShift && chars == "`" {
+            viewModel.createTerminalSession()
+            return .handled
+        }
+
+        // Ctrl+`: Toggle terminal panel
+        if hasControl && !hasShift && chars == "`" {
+            viewModel.toggleTerminalPanel()
+            return .handled
+        }
 
         // ⌘⇧K: Toggle kanban/chat (check before ⌘K)
         if hasCommand && hasShift && chars == "k" {
@@ -712,6 +738,14 @@ struct ContentView: View {
             showConnectedDevicesPopover = true
         case .openDelegationMonitor:
             showDelegationMonitor = true
+        case .toggleTerminal:
+            viewModel.toggleTerminalPanel()
+        case .newTerminalSession:
+            viewModel.createTerminalSession()
+        case .closeTerminalSession:
+            viewModel.closeTerminalSession()
+        case .clearTerminalOutput:
+            viewModel.clearTerminalOutput()
         case .openShortcutsApp:
             NSWorkspace.shared.open(URL(string: "shortcuts://")!)
         case .custom(let id):

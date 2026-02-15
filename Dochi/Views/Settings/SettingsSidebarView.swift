@@ -20,6 +20,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case shortcuts = "shortcuts"
     case automation = "automation"
     case plugins = "plugins"
+    case terminal = "terminal"
     case devices = "devices"
     case account = "account"
     case guide = "guide"
@@ -45,6 +46,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .integrations: return "통합 서비스"
         case .shortcuts: return "단축어"
         case .plugins: return "플러그인"
+        case .terminal: return "터미널"
         case .devices: return "디바이스"
         case .account: return "계정/동기화"
         case .guide: return "가이드"
@@ -70,6 +72,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .integrations: return "puzzlepiece"
         case .shortcuts: return "square.grid.3x3.square"
         case .plugins: return "puzzlepiece.extension"
+        case .terminal: return "terminal"
         case .devices: return "laptopcomputer.and.iphone"
         case .account: return "person.circle"
         case .guide: return "play.rectangle"
@@ -82,6 +85,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .voice: return .voice
         case .interface, .wakeWord, .heartbeat, .automation: return .general
         case .family, .agent: return .people
+        case .terminal: return .development
         case .tools, .integrations, .shortcuts, .plugins, .devices, .account: return .connection
         case .guide: return .help
         }
@@ -123,6 +127,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             return ["단축어", "Shortcuts", "Siri", "AppIntent", "자동화", "automation"]
         case .plugins:
             return ["플러그인", "plugin", "확장", "extension", "도구", "커스텀", "설치"]
+        case .terminal:
+            return ["터미널", "terminal", "쉘", "shell", "명령", "command", "zsh", "bash", "콘솔", "console"]
         case .devices:
             return ["디바이스", "기기", "device", "멀티", "정책", "우선순위", "priority", "데스크탑", "모바일", "CLI", "응답"]
         case .account:
@@ -147,6 +153,7 @@ enum SettingsSectionGroup: String, CaseIterable {
     case voice = "음성"
     case general = "일반"
     case people = "사람"
+    case development = "개발"
     case connection = "연결"
     case help = "도움말"
 
