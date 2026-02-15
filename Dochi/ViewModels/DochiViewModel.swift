@@ -40,6 +40,10 @@ final class DochiViewModel {
     // MARK: - Spotlight (H-4)
     private(set) var spotlightIndexer: SpotlightIndexerProtocol?
 
+    // MARK: - RAG (I-1)
+    private(set) var documentIndexer: DocumentIndexer?
+    private var ragLastContextInfo: RAGContextInfo?
+
     /// @Observable 관찰 추적을 위해 구체 타입으로 캐스팅하여 반환
     var concreteSpotlightIndexer: SpotlightIndexer? {
         spotlightIndexer as? SpotlightIndexer
@@ -208,6 +212,12 @@ final class DochiViewModel {
     func configureSpotlightIndexer(_ indexer: SpotlightIndexerProtocol) {
         self.spotlightIndexer = indexer
         Log.app.info("SpotlightIndexer configured")
+    }
+
+    /// RAG DocumentIndexer 설정
+    func configureDocumentIndexer(_ indexer: DocumentIndexer) {
+        self.documentIndexer = indexer
+        Log.app.info("DocumentIndexer configured")
     }
 
     /// 딥링크 처리 (dochi:// URL)
@@ -1484,7 +1494,44 @@ final class DochiViewModel {
         await compressContextIfNeeded()
 
         // Compose context (after potential compression)
-        let systemPrompt = composeSystemPrompt()
+        var systemPrompt = composeSystemPrompt()
+
+        // RAG: Search for relevant documents and inject context (I-1)
+        ragLastContextInfo = nil
+        if settings.ragEnabled && settings.ragAutoSearch, let indexer = documentIndexer {
+            do {
+                let results = try await indexer.search(query: lastUserText)
+                if !results.isEmpty {
+                    var ragSection = "\n\n## 참조 문서"
+                    var totalChars = 0
+                    var refs: [RAGReference] = []
+
+                    for result in results {
+                        let snippet = result.content
+                        ragSection += "\n\n### \(result.fileName)"
+                        if let section = result.sectionTitle {
+                            ragSection += " > \(section)"
+                        }
+                        ragSection += " (유사도: \(result.similarityPercent))\n\(snippet)"
+                        totalChars += snippet.count
+
+                        refs.append(RAGReference(
+                            documentId: result.documentId.uuidString,
+                            fileName: result.fileName,
+                            sectionTitle: result.sectionTitle,
+                            similarity: result.similarity,
+                            snippetPreview: String(snippet.prefix(100))
+                        ))
+                    }
+
+                    systemPrompt += ragSection
+                    ragLastContextInfo = RAGContextInfo(references: refs, totalCharsInjected: totalChars)
+                    Log.storage.info("RAG: Injected \(results.count) references (\(totalChars) chars)")
+                }
+            } catch {
+                Log.storage.error("RAG search failed: \(error.localizedDescription)")
+            }
+        }
 
         // Get available tool schemas
         let agentPermissions = currentAgentPermissions()
@@ -2150,7 +2197,7 @@ final class DochiViewModel {
 
     private func appendAssistantMessage(_ text: String, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil) {
         let memoryInfo = buildMemoryContextInfo()
-        currentConversation?.messages.append(Message(role: .assistant, content: text, metadata: metadata, toolExecutionRecords: toolExecutionRecords, memoryContextInfo: memoryInfo.hasAnyMemory ? memoryInfo : nil))
+        currentConversation?.messages.append(Message(role: .assistant, content: text, metadata: metadata, toolExecutionRecords: toolExecutionRecords, memoryContextInfo: memoryInfo.hasAnyMemory ? memoryInfo : nil, ragContextInfo: ragLastContextInfo))
         currentConversation?.updatedAt = Date()
     }
 

@@ -41,6 +41,9 @@ struct ContentView: View {
     @State private var showSyncConflictSheet = false
     @State private var showInitialSyncWizard = false
 
+    // I-1: RAG 문서 라이브러리
+    @State private var showDocumentLibrary = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -154,6 +157,11 @@ struct ContentView: View {
                         showFeatureTour = false
                     }
                 )
+            }
+            .sheet(isPresented: $showDocumentLibrary) {
+                if let indexer = viewModel.documentIndexer {
+                    DocumentLibraryView(documentIndexer: indexer)
+                }
             }
     }
 
@@ -598,6 +606,12 @@ struct ContentView: View {
                         sessionContext: viewModel.sessionContext
                     )
                 }
+            }
+        case .openDocumentLibrary:
+            showDocumentLibrary = true
+        case .reindexDocuments:
+            if let indexer = viewModel.documentIndexer {
+                Task { await indexer.reindexAll() }
             }
         case .toggleMenuBar:
             // Toggle menu bar popover via AppDelegate

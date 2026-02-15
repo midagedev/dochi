@@ -18,6 +18,7 @@ struct SettingsView: View {
     var notificationManager: NotificationManager?
     var metricsCollector: MetricsCollector?
     var viewModel: DochiViewModel?
+    var documentIndexer: DocumentIndexer?
 
     @State var selectedSection: SettingsSection = .aiModel
     @State private var searchText: String = ""
@@ -53,6 +54,9 @@ struct SettingsView: View {
             } else {
                 unavailableView(title: "사용량", message: "메트릭 수집기가 초기화되지 않았습니다.")
             }
+
+        case .rag:
+            RAGSettingsView(settings: settings, documentIndexer: documentIndexer)
 
         case .voice:
             VoiceSettingsView(settings: settings, keychainService: keychainService, ttsService: ttsService, downloadManager: downloadManager)

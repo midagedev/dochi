@@ -95,6 +95,11 @@ struct MessageBubbleView: View {
                         if let memoryInfo = message.memoryContextInfo {
                             MemoryReferenceBadgeView(info: memoryInfo)
                         }
+
+                        // I-1: RAG context badge
+                        if let ragInfo = message.ragContextInfo, ragInfo.hasReferences {
+                            RAGContextBadgeView(info: ragInfo)
+                        }
                     }
                 }
 

@@ -6,7 +6,7 @@ import XCTest
 final class SettingsSectionTests: XCTestCase {
 
     func testAllCasesCount() {
-        XCTAssertEqual(SettingsSection.allCases.count, 14, "There should be 14 settings sections")
+        XCTAssertEqual(SettingsSection.allCases.count, 15, "There should be 15 settings sections")
     }
 
     func testTitleNotEmpty() {
@@ -182,10 +182,11 @@ final class SettingsSectionGroupTests: XCTestCase {
 
     func testAIGroupSections() {
         let sections = SettingsSectionGroup.ai.sections
-        XCTAssertEqual(sections.count, 3)
+        XCTAssertEqual(sections.count, 4)
         XCTAssertTrue(sections.contains(.aiModel))
         XCTAssertTrue(sections.contains(.apiKey))
         XCTAssertTrue(sections.contains(.usage))
+        XCTAssertTrue(sections.contains(.rag))
     }
 
     func testGeneralGroupSections() {

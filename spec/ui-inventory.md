@@ -140,7 +140,7 @@ DochiApp (entry point)
 | InitialSyncWizardView | `Views/InitialSyncWizardView.swift` | AccountSettingsView "초기 업로드" | 3단계 위저드: 안내→진행률→완료 (480x420pt) (G-3) |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
-### 설정 (SettingsView — NavigationSplitView, 14섹션 6그룹) (UX-10 리디자인, G-4, H-2 추가)
+### 설정 (SettingsView — NavigationSplitView, 15섹션 6그룹) (UX-10 리디자인, G-4, H-2, I-1 추가)
 
 SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 NavigationSplitView 구조.
 사이드바: 검색 필드 + 6개 그룹별 섹션 목록 (호버/선택 하이라이트).
@@ -151,6 +151,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택 (클라우드/로컬 그룹), Ollama 설정, LM Studio 설정, 오프라인 폴백, 태스크 라우팅 |
 | AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
 | AI | 사용량 (`usage`) | chart.bar.xaxis | `Views/Settings/UsageDashboardView.swift` | 기간별 사용량 (오늘/주/월/전체), 요약 카드 (교환수/토큰/비용), Swift Charts 일별 차트 (비용/토큰 모드), 모델별/에이전트별 분류 테이블, 예산 설정 (월 한도/알림/차단) (G-4) |
+| AI | 문서 검색 (`rag`) | doc.text.magnifyingglass | `Views/Settings/RAGSettingsView.swift` | RAG 활성화, 임베딩 설정 (프로바이더/모델), 검색 설정 (자동/topK/최소유사도), 청킹 설정 (크기/오버랩), 문서 통계, 유지보수 (재인덱싱/초기화) (I-1) |
 | 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더 (시스템/Google Cloud/ONNX), 음성, 속도/피치, ONNX 모델 관리 (ONNXModelManagerView), 디퓨전 스텝, TTS 오프라인 폴백 |
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타, Spotlight 검색 (H-4) |
 | 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
@@ -175,6 +176,13 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 - `Models/ShortcutExecutionLog.swift` — ShortcutExecutionLog 모델, ShortcutExecutionLogStore (H-2)
 - `Services/SpotlightIndexer.swift` — SpotlightIndexer (CoreSpotlight 인덱싱 + 딥링크 파싱) (H-4)
 - `Services/Protocols/SpotlightIndexerProtocol.swift` — SpotlightIndexerProtocol (H-4)
+- `Services/RAG/ChunkSplitter.swift` — 텍스트 청크 분할 (마크다운 섹션/문단, 오버랩) (I-1)
+- `Services/RAG/VectorStore.swift` — SQLite 기반 벡터 저장소 (cosine similarity 검색) (I-1)
+- `Services/RAG/EmbeddingService.swift` — OpenAI text-embedding API 호출 (I-1)
+- `Services/RAG/DocumentIndexer.swift` — 문서 파싱/청킹/임베딩/인덱싱 오케스트레이터 (I-1)
+- `Models/RAGModels.swift` — RAGDocument, RAGReference, RAGContextInfo, RAGIndexingState 등 (I-1)
+- `Views/RAG/DocumentLibraryView.swift` — 문서 라이브러리 시트 (파일/폴더 추가, 인덱싱) (I-1)
+- `Views/RAGContextBadgeView.swift` — assistant 메시지 "문서 N건 참조" 배지 (I-1)
 
 ---
 
@@ -264,6 +272,27 @@ MemoryContextInfo 필드:
 | `agentMemoryLength` | `Int` | 에이전트 메모리 글자수 |
 | `personalMemoryLength` | `Int` | 개인 메모리 글자수 |
 
+### Message.ragContextInfo (I-1 추가)
+
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `ragContextInfo` | `RAGContextInfo?` | 이 응답 생성 시 참조된 RAG 문서 정보 (하위호환: decodeIfPresent) |
+
+RAGContextInfo 필드:
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `references` | `[RAGReference]` | 참조된 문서 목록 |
+| `totalCharsInjected` | `Int` | 시스템 프롬프트에 주입된 총 글자수 |
+
+RAGReference 필드:
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `documentId` | `String` | 문서 UUID |
+| `fileName` | `String` | 파일명 |
+| `sectionTitle` | `String?` | 섹션 제목 |
+| `similarity` | `Double` | 코사인 유사도 |
+| `snippetPreview` | `String` | 참조 내용 미리보기 |
+
 ### MemoryToastEvent (UX-8 추가)
 
 | 프로퍼티 | 타입 | 설명 |
@@ -328,6 +357,7 @@ MemoryContextInfo 필드:
 | 동기화 (G-3) | `autoSyncEnabled`, `realtimeSyncEnabled`, `syncConversations`, `syncMemory`, `syncKanban`, `syncProfiles`, `conflictResolutionStrategy` |
 | 메뉴바 (H-1) | `menuBarEnabled`, `menuBarGlobalShortcutEnabled` |
 | Spotlight (H-4) | `spotlightIndexingEnabled`, `spotlightIndexConversations`, `spotlightIndexPersonalMemory`, `spotlightIndexAgentMemory`, `spotlightIndexWorkspaceMemory` |
+| RAG (I-1) | `ragEnabled`, `ragEmbeddingProvider`, `ragEmbeddingModel`, `ragTopK`, `ragMinSimilarity`, `ragAutoSearch`, `ragChunkSize`, `ragChunkOverlap` |
 | 기타 | `chatFontSize`, `currentWorkspaceId`, `defaultUserId`, `activeAgentName` |
 
 ---
@@ -538,6 +568,28 @@ HeartbeatService tick -> 카테고리별 컨텍스트 수집
 설정: 설정 > 일반 > 인터페이스 > Spotlight 검색
   → 활성화 토글, 범위 체크박스 (대화/개인메모리/에이전트메모리/워크스페이스메모리)
   → 인덱싱 상태 (N건), 재구축/초기화 버튼, 진행률 ProgressView
+```
+
+### RAG 문서 검색 (I-1 추가)
+```
+문서 추가: 커맨드 팔레트 "문서 라이브러리" → DocumentLibraryView 시트 (600x500pt)
+  → 파일 추가 (PDF/MD/TXT) / 폴더 추가
+  → DocumentIndexer.indexFile(at:) → 텍스트 추출 → ChunkSplitter → EmbeddingService → VectorStore
+인덱싱 상태: DocumentIndexer.indexingState (@Observable) → RAGIndexingState
+  → idle / indexing(progress, fileName) / completed / failed
+대화 시 자동 검색: sendMessage() → processLLMLoop()
+  → settings.ragEnabled && ragAutoSearch일 때
+  → DocumentIndexer.search(query:) → VectorStore.search(queryEmbedding:topK:minSimilarity:)
+  → 결과를 시스템 프롬프트 "## 참조 문서" 섹션으로 주입
+  → 응답 완료 시 Message.ragContextInfo에 RAGContextInfo 저장
+배지: MessageBubbleView → RAGContextBadgeView (파란색 "문서 N건 참조")
+  → 호버 시 팝오버: 파일명, 섹션, 유사도, 스니펫 표시
+설정: 설정 > AI > 문서 검색 (RAGSettingsView)
+  → 활성화, 임베딩 모델, 자동 검색, topK, 최소 유사도, 청크 크기, 오버랩
+  → 문서 통계, 재인덱싱/초기화 버튼
+데이터: ~/Library/Application Support/Dochi/rag/{workspaceId}/vectors.sqlite
+모델: RAGDocument, RAGReference, RAGContextInfo, RAGSearchResult, RAGFileType, RAGIndexingStatus, RAGIndexingState
+커맨드 팔레트: "문서 라이브러리" / "문서 재인덱싱" / "문서 검색 설정"
 ```
 
 ### 내보내기/공유 (UX-5 추가)

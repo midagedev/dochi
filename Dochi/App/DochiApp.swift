@@ -53,6 +53,8 @@ struct DochiApp: App {
     private let modelDownloadManager: ModelDownloadManager
     private let usageStore: UsageStore
     private let spotlightIndexer: SpotlightIndexer
+    private let vectorStore: VectorStore
+    private let documentIndexer: DocumentIndexer
 
     init() {
         let settings = AppSettings()
@@ -119,6 +121,13 @@ struct DochiApp: App {
         // Spotlight indexer (H-4)
         let spotlightIndexer = SpotlightIndexer(settings: settings)
         self.spotlightIndexer = spotlightIndexer
+
+        // RAG services (I-1)
+        let vectorStore = VectorStore(workspaceId: workspaceId)
+        let embeddingService = EmbeddingService(keychainService: keychainService, model: settings.ragEmbeddingModel)
+        let documentIndexer = DocumentIndexer(vectorStore: vectorStore, embeddingService: embeddingService, settings: settings)
+        self.vectorStore = vectorStore
+        self.documentIndexer = documentIndexer
 
         _viewModel = State(initialValue: DochiViewModel(
             llmService: llmService,
@@ -216,6 +225,9 @@ struct DochiApp: App {
 
                     // Configure Spotlight indexer (H-4)
                     viewModel.configureSpotlightIndexer(spotlightIndexer)
+
+                    // Configure RAG DocumentIndexer (I-1)
+                    viewModel.configureDocumentIndexer(documentIndexer)
 
                     // Wire notification callbacks (H-3)
                     notificationManager.onReply = { [weak viewModel] text, category, originalBody in
@@ -327,7 +339,8 @@ struct DochiApp: App {
                 heartbeatService: heartbeatService,
                 notificationManager: notificationManager,
                 metricsCollector: viewModel.metricsCollector,
-                viewModel: viewModel
+                viewModel: viewModel,
+                documentIndexer: documentIndexer
             )
         }
         .commands {

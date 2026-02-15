@@ -46,6 +46,8 @@ struct CommandPaletteItem: Identifiable, Sendable {
         case toggleMenuBar
         case openShortcutsApp
         case rebuildSpotlightIndex
+        case openDocumentLibrary
+        case reindexDocuments
         case custom(id: String)
     }
 }
@@ -338,6 +340,31 @@ enum CommandPaletteRegistry {
             subtitle: "",
             category: .tool,
             action: .rebuildSpotlightIndex
+        ),
+        // I-1: RAG 문서 검색
+        CommandPaletteItem(
+            id: "open-document-library",
+            icon: "doc.text.magnifyingglass",
+            title: "문서 라이브러리",
+            subtitle: "",
+            category: .tool,
+            action: .openDocumentLibrary
+        ),
+        CommandPaletteItem(
+            id: "reindex-documents",
+            icon: "arrow.triangle.2.circlepath",
+            title: "문서 재인덱싱",
+            subtitle: "",
+            category: .tool,
+            action: .reindexDocuments
+        ),
+        CommandPaletteItem(
+            id: "settings.open.rag",
+            icon: "doc.text.magnifyingglass",
+            title: "문서 검색 설정",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "rag")
         ),
         // G-3: 동기화 명령
         CommandPaletteItem(
