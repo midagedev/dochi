@@ -44,8 +44,9 @@ struct Message: Codable, Identifiable, Sendable {
     var imageURLs: [URL]?
     var metadata: MessageMetadata?
     var toolExecutionRecords: [ToolExecutionRecord]?
+    var memoryContextInfo: MemoryContextInfo?
 
-    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCalls: [CodableToolCall]? = nil, toolCallId: String? = nil, imageURLs: [URL]? = nil, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil) {
+    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCalls: [CodableToolCall]? = nil, toolCallId: String? = nil, imageURLs: [URL]? = nil, metadata: MessageMetadata? = nil, toolExecutionRecords: [ToolExecutionRecord]? = nil, memoryContextInfo: MemoryContextInfo? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -55,6 +56,7 @@ struct Message: Codable, Identifiable, Sendable {
         self.imageURLs = imageURLs
         self.metadata = metadata
         self.toolExecutionRecords = toolExecutionRecords
+        self.memoryContextInfo = memoryContextInfo
     }
 
     init(from decoder: Decoder) throws {
@@ -68,5 +70,6 @@ struct Message: Codable, Identifiable, Sendable {
         imageURLs = try container.decodeIfPresent([URL].self, forKey: .imageURLs)
         metadata = try container.decodeIfPresent(MessageMetadata.self, forKey: .metadata)
         toolExecutionRecords = try container.decodeIfPresent([ToolExecutionRecord].self, forKey: .toolExecutionRecords)
+        memoryContextInfo = try container.decodeIfPresent(MemoryContextInfo.self, forKey: .memoryContextInfo)
     }
 }

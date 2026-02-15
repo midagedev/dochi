@@ -84,9 +84,18 @@ struct MessageBubbleView: View {
                     }
                 }
 
-                // Metadata badge (assistant messages only)
-                if message.role == .assistant, let metadata = message.metadata {
-                    MessageMetadataBadgeView(metadata: metadata)
+                // Metadata badges (assistant messages only)
+                if message.role == .assistant {
+                    HStack(spacing: 4) {
+                        if let metadata = message.metadata {
+                            MessageMetadataBadgeView(metadata: metadata)
+                        }
+
+                        // UX-8: Memory reference badge
+                        if let memoryInfo = message.memoryContextInfo {
+                            MemoryReferenceBadgeView(info: memoryInfo)
+                        }
+                    }
                 }
 
                 // Timestamp

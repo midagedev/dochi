@@ -40,7 +40,8 @@ struct KeyboardShortcutHelpView: View {
             title: "패널",
             icon: "sidebar.squares.leading",
             entries: [
-                ShortcutEntry(keys: "⌘I", description: "컨텍스트 인스펙터"),
+                ShortcutEntry(keys: "⌘I", description: "메모리 인스펙터 패널"),
+                ShortcutEntry(keys: "⌘⌥I", description: "컨텍스트 인스펙터 (시트)"),
                 ShortcutEntry(keys: "⌘⇧S", description: "시스템 상태"),
                 ShortcutEntry(keys: "⌘⇧F", description: "기능 카탈로그"),
                 ShortcutEntry(keys: "⌘,", description: "설정"),

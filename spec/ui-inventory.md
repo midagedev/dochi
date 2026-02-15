@@ -25,12 +25,14 @@ DochiApp (entry point)
     │   │   ├── SystemHealthBarView — 시스템 상태 바 (모델/동기화/하트비트/토큰) [항상 표시]
     │   │   ├── StatusBarView — 상태/토큰 (처리 중에만 표시)
     │   │   ├── ToolConfirmationBannerView — 민감 도구 승인 (카운트다운 타이머, Enter/Escape 단축키)
+    │   │   ├── SystemPromptBannerView — 시스템 프롬프트 접기/펼치기 배너 (UX-8)
     │   │   ├── ErrorBannerView — 에러 표시
     │   │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
     │   │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크 + 단축키 힌트 + 에이전트 힌트 카드)
     │   │   │   또는 ConversationView — 메시지 목록
     │   │   │       ├── MessageBubbleView — 개별 메시지 버블 (호버 시 복사 버튼)
     │   │   │       │   ├── MessageMetadataBadgeView — 모델/응답시간 배지 (assistant만, 호버 팝오버)
+    │   │   │       │   ├── MemoryReferenceBadgeView — 메모리 참조 배지 (assistant만, 호버 팝오버) (UX-8)
     │   │   │       │   └── ToolExecutionRecordCardView — 과거 도구 실행 기록 카드 (접을 수 있음)
     │   │   │       ├── ToolExecutionCardView — 실시간 도구 실행 카드 (상태별 스타일, 접을 수 있음)
     │   │   │       └── ToolChainProgressView — 도구 체인 진행 표시 (2개 이상 도구 실행 시)
@@ -40,7 +42,10 @@ DochiApp (entry point)
     │   └── [칸반 탭]
     │       └── KanbanWorkspaceView
     │           └── KanbanBoardView → KanbanColumnView → KanbanCardView
-    └── [Overlay] CommandPaletteView — ⌘K 커맨드 팔레트 (ZStack 오버레이)
+    ├── [Inspector] MemoryPanelView — 메모리 인스펙터 패널 (⌘I 토글) (UX-8)
+    │   └── MemoryNodeView — 계층별 메모리 노드 (접기/펼치기 + 인라인 편집)
+    ├── [Overlay] CommandPaletteView — ⌘K 커맨드 팔레트 (ZStack 오버레이)
+    └── [Overlay] MemoryToastContainerView — 메모리 저장 토스트 (우측 하단) (UX-8)
 ```
 
 ---
@@ -70,6 +75,12 @@ DochiApp (entry point)
 | ToolExecutionRecordCardView | `Views/ToolExecutionCardView.swift` | 과거 assistant 메시지 자동 | 아카이브된 도구 실행 기록 카드 (접힌 상태 기본) |
 | ToolChainProgressView | `Views/ToolChainProgressView.swift` | 도구 2개 이상 실행 시 자동 | 단계별 원형 인디케이터 + 연결선 + 전체 소요 시간 |
 | AvatarView | `Views/AvatarView.swift` | 설정 활성화 시 | VRM 3D 아바타 (RealityKit, macOS 15+) |
+| MemoryPanelView | `Views/MemoryPanelView.swift` | 툴바 "메모리" 버튼 (⌘I) | 우측 인스펙터: 메모리 계층 트리 (5단계), 인라인 편집, 글자수/토큰 표시 |
+| MemoryNodeView | `Views/MemoryPanelView.swift` | MemoryPanelView 내 자동 | 접기/펼치기 카드: 아이콘+제목+글자수+미리보기 / TextEditor+저장 |
+| SystemPromptBannerView | `Views/SystemPromptBannerView.swift` | 대화 상단 항상 표시 | 접힌: 미리보기+편집 / 펼침: TextEditor+저장, UserDefaults 상태 기억 |
+| MemoryToastView | `Views/MemoryToastView.swift` | save_memory/update_memory 도구 실행 시 자동 | 우측 하단 토스트: scope+action+미리보기+"보기" 버튼, 5초 자동 fade |
+| MemoryToastContainerView | `Views/MemoryToastView.swift` | 자동 | 여러 토스트 스택 관리 |
+| MemoryReferenceBadgeView | `Views/MemoryReferenceBadgeView.swift` | assistant 메시지 자동 | "메모리 N계층" 배지, 호버 시 계층별 글자수 팝오버 |
 
 ### 칸반
 
@@ -84,7 +95,7 @@ DochiApp (entry point)
 |------|------|-----------|------|
 | SystemStatusSheetView | `Views/SystemStatusSheetView.swift` | 툴바 "상태" 버튼 (⌘⇧S) 또는 SystemHealthBar 클릭 | 3탭 상세: LLM 교환 이력, 하트비트 틱 기록, 클라우드 동기화 |
 | CapabilityCatalogView | `Views/CapabilityCatalogView.swift` | 툴바 "기능" 버튼 (⌘⇧F) | 전체 도구 그룹별 카탈로그 |
-| ContextInspectorView | `Views/ContextInspectorView.swift` | 툴바 "컨텍스트" 버튼 (⌘I) | 시스템 프롬프트 / 에이전트 / 메모리 탭 |
+| ContextInspectorView | `Views/ContextInspectorView.swift` | ⌘⌥I 또는 커맨드 팔레트 | 시스템 프롬프트 / 에이전트 / 메모리 탭 (시트) |
 | KeyboardShortcutHelpView | `Views/KeyboardShortcutHelpView.swift` | ⌘/ 또는 커맨드 팔레트 | 4섹션 키보드 단축키 도움말 (480x520) |
 | CommandPaletteView | `Views/CommandPaletteView.swift` | ⌘K | VS Code 스타일 커맨드 팔레트 오버레이 (퍼지 검색, 그룹 섹션) |
 | QuickSwitcherView | `Views/QuickSwitcherView.swift` | ⌘⇧A / ⌘⇧W / ⌘⇧U | 에이전트/워크스페이스/사용자 빠른 전환 시트 |
@@ -137,6 +148,7 @@ DochiApp (entry point)
 | `metricsCollector` | `MetricsCollector` | LLM 교환 메트릭 수집 | SystemHealthBarView, SystemStatusSheetView |
 | `toolExecutions` | `[ToolExecution]` | 현재 턴 도구 실행 목록 | ConversationView (ToolExecutionCardView, ToolChainProgressView) |
 | `allToolCardsCollapsed` | `Bool` | 도구 카드 일괄 접기/펼치기 상태 | ⌘⇧T 토글 |
+| `memoryToastEvents` | `[MemoryToastEvent]` | 메모리 저장 토스트 이벤트 큐 | MemoryToastContainerView |
 
 ### 대화 정리 상태 (UX-4 추가)
 
@@ -181,6 +193,31 @@ ToolExecutionRecord 필드:
 | `isError` | `Bool` | 오류 여부 |
 | `durationSeconds` | `TimeInterval?` | 소요 시간 |
 | `resultSummary` | `String?` | 결과 요약 |
+
+### Message.memoryContextInfo (UX-8 추가)
+
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `memoryContextInfo` | `MemoryContextInfo?` | 이 응답 생성 시 사용된 메모리 계층 정보 (하위호환: decodeIfPresent) |
+
+MemoryContextInfo 필드:
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `systemPromptLength` | `Int` | 시스템 프롬프트 글자수 |
+| `agentPersonaLength` | `Int` | 에이전트 페르소나 글자수 |
+| `workspaceMemoryLength` | `Int` | 워크스페이스 메모리 글자수 |
+| `agentMemoryLength` | `Int` | 에이전트 메모리 글자수 |
+| `personalMemoryLength` | `Int` | 개인 메모리 글자수 |
+
+### MemoryToastEvent (UX-8 추가)
+
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `id` | `UUID` | 이벤트 ID |
+| `scope` | `Scope` | workspace/personal/agent |
+| `action` | `Action` | saved/updated |
+| `contentPreview` | `String` | 저장 내용 미리보기 (80자 이내) |
+| `timestamp` | `Date` | 발생 시각 |
 
 ### 누락된 상태 (현재 UI에 노출 안 됨)
 
@@ -266,6 +303,24 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 민감 도구 확인: ToolConfirmationBannerView + 30초 카운트다운 타이머 + Enter(허용)/Escape(거부) 단축키
 ```
 
+### 컨텍스트/메모리 관리 (UX-8 추가)
+```
+메모리 인스펙터: ⌘I -> showMemoryPanel 토글 -> .inspector modifier -> MemoryPanelView
+  -> 계층 트리: 시스템프롬프트 / 에이전트페르소나 / 워크스페이스메모리 / 에이전트메모리 / 개인메모리
+  -> 각 MemoryNodeView: 접기(미리보기) / 펼치기(TextEditor + 저장 버튼)
+  -> 푸터: 총 N자 / ~M토큰
+시스템프롬프트 배너: 대화 상단 SystemPromptBannerView
+  -> 접힌: "시스템 프롬프트: 미리보기... [편집]" / 펼침: TextEditor + 저장
+  -> UserDefaults로 접힌/펼친 상태 기억
+메모리 토스트: save_memory/update_memory 도구 실행 -> MemoryToastEvent 생성
+  -> viewModel.memoryToastEvents 배열에 추가
+  -> MemoryToastContainerView (우측 하단): 5초 자동 fade + "보기" -> 메모리 패널 열기
+메모리 참조 배지: appendAssistantMessage() -> buildMemoryContextInfo() -> Message.memoryContextInfo
+  -> MessageBubbleView -> MemoryReferenceBadgeView: "메모리 N계층" 배지
+  -> 호버 팝오버: 계층별 사용 여부 + 글자수
+기존 컨텍스트 인스펙터: ⌘⌥I -> showContextInspector -> ContextInspectorView (시트)
+```
+
 ### 내보내기/공유 (UX-5 추가)
 ```
 빠른 내보내기: ⌘E -> viewModel.exportConversation(format: .markdown) -> NSSavePanel
@@ -290,7 +345,8 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 | ⌘1~9 | N번째 대화 선택 | ContentView (onKeyPress) |
 | ⌘E | 현재 대화 빠른 내보내기 (Markdown) | ContentView (hidden button) |
 | ⌘⇧E | 내보내기 옵션 시트 | ContentView 툴바 |
-| ⌘I | 컨텍스트 인스펙터 | ContentView 툴바 |
+| ⌘I | 메모리 인스펙터 패널 토글 | ContentView 툴바 (UX-8 변경) |
+| ⌘⌥I | 컨텍스트 인스펙터 (시트) | ContentView hidden button (UX-8 신규) |
 | ⌘, | 설정 | macOS 자동 (Settings scene) |
 | ⌘⇧S | 시스템 상태 시트 | ContentView 툴바 |
 | ⌘⇧F | 기능 카탈로그 | ContentView 툴바 |
@@ -323,6 +379,10 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 | FlowLayout (커스텀 Layout) | ConversationFilterView 태그 칩 | 줄바꿈 가능한 가로 배치 |
 | 접을 수 있는 카드 (VStack + Button + chevron) | ToolExecutionCardView, ToolExecutionRecordCardView | 상태별 색상, 클릭 접기/펼치기 |
 | 진행 체인 (HStack + Circle + Rectangle) | ToolChainProgressView | 단계별 아이콘 + 연결선 |
+| 인스펙터 (.inspector modifier) | MemoryPanelView | 우측 사이드 패널 (260~360pt) |
+| 접기/펼치기 배너 (VStack + Button) | SystemPromptBannerView | 접힌: 미리보기, 펼침: TextEditor |
+| 토스트 (HStack + material + shadow) | MemoryToastView | 우측 하단 알림 (5초 자동 fade) |
+| 메모리 노드 카드 (VStack + chevron) | MemoryNodeView | 접기/펼치기 + 인라인 편집 + 저장 |
 
 ---
 
@@ -336,6 +396,9 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 | 필터 결과 0개 | "조건에 맞는 대화가 없습니다" + 필터 초기화 | ConversationListView |
 | 에이전트 0개 | "에이전트가 없습니다" + 생성 버튼 | AgentCardGridView |
 | 에이전트 0개 (대화) | 에이전트 생성 힌트 카드 | EmptyConversationView |
+| 시스템 프롬프트 없음 | "시스템 프롬프트가 설정되지 않았습니다 [작성하기]" | SystemPromptBannerView |
+| 메모리 노드 비어 있음 | 노드별 안내 문구 + "작성하기" 버튼 | MemoryNodeView |
+| 개인 메모리 없음 (사용자 미설정) | "사용자가 설정되지 않아 표시할 수 없습니다" | MemoryPanelView |
 
 ---
 
@@ -377,4 +440,25 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 
 ---
 
-*최종 업데이트: 2026-02-15 (UX-7 머지 후)*
+### MemoryContextInfo (UX-8 추가)
+
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `systemPromptLength` | `Int` | 시스템 프롬프트 글자수 |
+| `agentPersonaLength` | `Int` | 에이전트 페르소나 글자수 |
+| `workspaceMemoryLength` | `Int` | 워크스페이스 메모리 글자수 |
+| `agentMemoryLength` | `Int` | 에이전트 메모리 글자수 |
+| `personalMemoryLength` | `Int` | 개인 메모리 글자수 |
+
+### MemoryToastEvent (UX-8 추가)
+
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `id` | `UUID` | 이벤트 ID |
+| `scope` | `Scope` | workspace/personal/agent |
+| `action` | `Action` | saved/updated |
+| `contentPreview` | `String` | 저장 내용 미리보기 (80자) |
+
+---
+
+*최종 업데이트: 2026-02-15 (UX-8 머지 후)*
