@@ -52,6 +52,9 @@ final class DochiViewModel {
     private(set) var memoryConsolidator: MemoryConsolidator?
     private var lastConsolidatedConversationId: UUID?
 
+    // MARK: - Feedback (I-4)
+    private(set) var feedbackStore: FeedbackStoreProtocol?
+
     /// @Observable 관찰 추적을 위해 구체 타입으로 캐스팅하여 반환
     var concreteSpotlightIndexer: SpotlightIndexer? {
         spotlightIndexer as? SpotlightIndexer
@@ -232,6 +235,52 @@ final class DochiViewModel {
     func configureMemoryConsolidator(_ consolidator: MemoryConsolidator) {
         self.memoryConsolidator = consolidator
         Log.app.info("MemoryConsolidator configured")
+    }
+
+    /// FeedbackStore 설정 (I-4)
+    func configureFeedbackStore(_ store: FeedbackStoreProtocol) {
+        self.feedbackStore = store
+        Log.app.info("FeedbackStore configured")
+    }
+
+    /// 피드백 제출 (I-4)
+    func submitFeedback(messageId: UUID, conversationId: UUID, rating: FeedbackRating, category: FeedbackCategory? = nil, comment: String? = nil) {
+        // Look up the message's actual provider/model from metadata (C-1 fix)
+        let message = findMessage(id: messageId, in: conversationId)
+        let provider = message?.metadata?.provider ?? settings.llmProvider
+        let model = message?.metadata?.model ?? settings.llmModel
+
+        let entry = FeedbackEntry(
+            messageId: messageId,
+            conversationId: conversationId,
+            rating: rating,
+            category: category,
+            comment: comment,
+            agentName: settings.activeAgentName,
+            provider: provider,
+            model: model
+        )
+        feedbackStore?.add(entry)
+    }
+
+    /// 피드백 삭제 (I-4)
+    func removeFeedback(messageId: UUID) {
+        feedbackStore?.remove(messageId: messageId)
+    }
+
+    /// 대화에서 메시지를 찾기 (C-1: 메시지 메타데이터 조회용)
+    private func findMessage(id messageId: UUID, in conversationId: UUID) -> Message? {
+        // Check currentConversation first (most common case)
+        if currentConversation?.id == conversationId,
+           let msg = currentConversation?.messages.first(where: { $0.id == messageId }) {
+            return msg
+        }
+        // Fall back to conversations list
+        if let conv = conversations.first(where: { $0.id == conversationId }),
+           let msg = conv.messages.first(where: { $0.id == messageId }) {
+            return msg
+        }
+        return nil
     }
 
     /// 딥링크 처리 (dochi:// URL)

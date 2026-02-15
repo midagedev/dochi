@@ -19,6 +19,7 @@ struct SettingsView: View {
     var metricsCollector: MetricsCollector?
     var viewModel: DochiViewModel?
     var documentIndexer: DocumentIndexer?
+    var feedbackStore: FeedbackStoreProtocol?
 
     @State var selectedSection: SettingsSection = .aiModel
     @State private var searchText: String = ""
@@ -60,6 +61,17 @@ struct SettingsView: View {
 
         case .memory:
             MemorySettingsView(settings: settings, memoryConsolidator: viewModel?.memoryConsolidator)
+
+        case .feedback:
+            if let feedbackStore {
+                FeedbackStatsView(
+                    feedbackStore: feedbackStore,
+                    settings: settings,
+                    viewModel: viewModel
+                )
+            } else {
+                unavailableView(title: "피드백 통계", message: "피드백 저장소가 초기화되지 않았습니다.")
+            }
 
         case .voice:
             VoiceSettingsView(settings: settings, keychainService: keychainService, ttsService: ttsService, downloadManager: downloadManager)

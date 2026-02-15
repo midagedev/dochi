@@ -602,3 +602,66 @@ final class MockSpotlightIndexer: SpotlightIndexerProtocol {
         lastIndexedAt = nil
     }
 }
+
+// MARK: - MockFeedbackStore (I-4)
+
+@MainActor
+final class MockFeedbackStore: FeedbackStoreProtocol {
+    var entries: [FeedbackEntry] = []
+    var addCallCount = 0
+    var removeCallCount = 0
+
+    func add(_ entry: FeedbackEntry) {
+        entries.removeAll { $0.messageId == entry.messageId }
+        entries.append(entry)
+        addCallCount += 1
+    }
+
+    func remove(messageId: UUID) {
+        entries.removeAll { $0.messageId == messageId }
+        removeCallCount += 1
+    }
+
+    func rating(for messageId: UUID) -> FeedbackRating? {
+        entries.first(where: { $0.messageId == messageId })?.rating
+    }
+
+    func satisfactionRate(model: String?, agent: String?) -> Double {
+        var filtered = entries
+        if let model { filtered = filtered.filter { $0.model == model } }
+        if let agent { filtered = filtered.filter { $0.agentName == agent } }
+        guard !filtered.isEmpty else { return 0.0 }
+        let positive = filtered.filter { $0.rating == .positive }.count
+        return Double(positive) / Double(filtered.count)
+    }
+
+    func recentNegative(limit: Int) -> [FeedbackEntry] {
+        let negative = entries.filter { $0.rating == .negative }
+        return Array(negative.sorted { $0.timestamp > $1.timestamp }.prefix(limit))
+    }
+
+    func modelBreakdown() -> [ModelSatisfaction] {
+        let grouped = Dictionary(grouping: entries) { $0.model }
+        return grouped.map { model, entries in
+            let positive = entries.filter { $0.rating == .positive }.count
+            return ModelSatisfaction(model: model, provider: entries.first?.provider ?? "", totalCount: entries.count, positiveCount: positive)
+        }
+    }
+
+    func agentBreakdown() -> [AgentSatisfaction] {
+        let grouped = Dictionary(grouping: entries) { $0.agentName }
+        return grouped.map { agent, entries in
+            let positive = entries.filter { $0.rating == .positive }.count
+            return AgentSatisfaction(agentName: agent, totalCount: entries.count, positiveCount: positive)
+        }
+    }
+
+    func categoryDistribution() -> [CategoryCount] {
+        let categorized = entries.compactMap { entry -> (FeedbackCategory, FeedbackEntry)? in
+            guard entry.rating == .negative, let category = entry.category else { return nil }
+            return (category, entry)
+        }
+        let grouped = Dictionary(grouping: categorized) { $0.0 }
+        return grouped.map { cat, pairs in CategoryCount(category: cat, count: pairs.count) }
+    }
+}

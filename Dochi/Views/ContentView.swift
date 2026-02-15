@@ -368,7 +368,8 @@ struct ContentView: View {
                 QuickModelPopoverView(
                     settings: viewModel.settings,
                     keychainService: viewModel.keychainService,
-                    isOfflineFallbackActive: viewModel.isOfflineFallbackActive
+                    isOfflineFallbackActive: viewModel.isOfflineFallbackActive,
+                    feedbackStore: viewModel.feedbackStore
                 )
             }
 
@@ -450,7 +451,17 @@ struct ContentView: View {
                     currentToolName: viewModel.currentToolName,
                     processingSubState: viewModel.processingSubState,
                     fontSize: viewModel.settings.chatFontSize,
-                    toolExecutions: viewModel.toolExecutions
+                    toolExecutions: viewModel.toolExecutions,
+                    feedbackEnabled: viewModel.settings.feedbackEnabled,
+                    feedbackShowOnHover: viewModel.settings.feedbackShowOnHover,
+                    feedbackStore: viewModel.feedbackStore,
+                    onFeedback: { messageId, rating, category, comment in
+                        guard let convId = viewModel.currentConversation?.id else { return }
+                        viewModel.submitFeedback(messageId: messageId, conversationId: convId, rating: rating, category: category, comment: comment)
+                    },
+                    onRemoveFeedback: { messageId in
+                        viewModel.removeFeedback(messageId: messageId)
+                    }
                 )
             }
 

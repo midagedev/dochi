@@ -5,6 +5,7 @@ struct QuickModelPopoverView: View {
     var settings: AppSettings
     var keychainService: KeychainServiceProtocol?
     var isOfflineFallbackActive: Bool = false
+    var feedbackStore: FeedbackStoreProtocol?
 
     @State private var selectedProviderRaw: String = ""
     @State private var selectedModel: String = ""
@@ -31,6 +32,11 @@ struct QuickModelPopoverView: View {
         case .lmStudio: return lmStudioModels
         default: return []
         }
+    }
+
+    /// Cached model breakdown to avoid recomputation per row (N-2 fix)
+    private var cachedModelBreakdown: [ModelSatisfaction] {
+        feedbackStore?.modelBreakdown() ?? []
     }
 
     var body: some View {
@@ -279,6 +285,15 @@ struct QuickModelPopoverView: View {
                     Text("\(tokens / 1000)K")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.tertiary)
+                }
+
+                // I-4: Feedback warning badge (uses cached breakdown — N-2 fix)
+                if let modelStat = cachedModelBreakdown.first(where: { $0.model == model }),
+                   modelStat.isWarning {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 6, height: 6)
+                        .help("만족도 \(String(format: "%.0f%%", modelStat.satisfactionRate * 100)) (피드백 \(modelStat.totalCount)건)")
                 }
 
                 if isSelected {

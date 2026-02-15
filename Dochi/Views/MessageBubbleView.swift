@@ -4,12 +4,32 @@ import AppKit
 struct MessageBubbleView: View {
     let message: Message
     let fontSize: Double
+    var feedbackRating: FeedbackRating?
+    var feedbackEnabled: Bool = false
+    var feedbackShowOnHover: Bool = true
+    var onFeedback: ((UUID, FeedbackRating, FeedbackCategory?, String?) -> Void)?
+    var onRemoveFeedback: ((UUID) -> Void)?
+
     @State private var isHovering = false
     @State private var showCopied = false
+    @State private var showFeedbackSheet = false
 
-    init(message: Message, fontSize: Double = 14.0) {
+    init(
+        message: Message,
+        fontSize: Double = 14.0,
+        feedbackRating: FeedbackRating? = nil,
+        feedbackEnabled: Bool = false,
+        feedbackShowOnHover: Bool = true,
+        onFeedback: ((UUID, FeedbackRating, FeedbackCategory?, String?) -> Void)? = nil,
+        onRemoveFeedback: ((UUID) -> Void)? = nil
+    ) {
         self.message = message
         self.fontSize = fontSize
+        self.feedbackRating = feedbackRating
+        self.feedbackEnabled = feedbackEnabled
+        self.feedbackShowOnHover = feedbackShowOnHover
+        self.onFeedback = onFeedback
+        self.onRemoveFeedback = onRemoveFeedback
     }
 
     var body: some View {
@@ -32,7 +52,10 @@ struct MessageBubbleView: View {
                     .cornerRadius(12)
                     .foregroundStyle(foregroundColor)
                     .overlay(alignment: .topTrailing) {
-                        copyButton
+                        HStack(spacing: 2) {
+                            feedbackButtons
+                            copyButton
+                        }
                     }
                     .onHover { hovering in
                         isHovering = hovering
@@ -115,6 +138,68 @@ struct MessageBubbleView: View {
             }
 
             if message.role != .user { Spacer(minLength: 60) }
+        }
+    }
+
+    // MARK: - Feedback Buttons (I-4)
+
+    @ViewBuilder
+    private var feedbackButtons: some View {
+        if feedbackEnabled && message.role == .assistant && !message.content.isEmpty {
+            let showButtons = !feedbackShowOnHover || isHovering || feedbackRating != nil
+
+            HStack(spacing: 2) {
+                // Thumbs up
+                Button {
+                    if feedbackRating == .positive {
+                        onRemoveFeedback?(message.id)
+                    } else {
+                        onFeedback?(message.id, .positive, nil, nil)
+                    }
+                } label: {
+                    Image(systemName: feedbackRating == .positive ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        .font(.system(size: 10))
+                        .foregroundStyle(feedbackRating == .positive ? .green : .secondary)
+                        .padding(4)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("좋아요")
+
+                // Thumbs down
+                Button {
+                    if feedbackRating == .negative {
+                        onRemoveFeedback?(message.id)
+                    } else {
+                        showFeedbackSheet = true
+                    }
+                } label: {
+                    Image(systemName: feedbackRating == .negative ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        .font(.system(size: 10))
+                        .foregroundStyle(feedbackRating == .negative ? .red : .secondary)
+                        .padding(4)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("싫어요")
+                .popover(isPresented: $showFeedbackSheet, arrowEdge: .bottom) {
+                    FeedbackCommentSheet(
+                        messageId: message.id,
+                        onSubmit: { category, comment in
+                            showFeedbackSheet = false
+                            onFeedback?(message.id, .negative, category, comment)
+                        },
+                        onCancel: {
+                            showFeedbackSheet = false
+                        }
+                    )
+                }
+            }
+            .opacity(showButtons ? 1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: isHovering)
+            .animation(.easeInOut(duration: 0.15), value: feedbackRating)
         }
     }
 
