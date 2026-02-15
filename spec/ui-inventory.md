@@ -26,6 +26,7 @@ DochiApp (entry point)
     │   │   ├── StatusBarView — 상태/토큰 (처리 중에만 표시)
     │   │   ├── ToolConfirmationBannerView — 민감 도구 승인 (카운트다운 타이머, Enter/Escape 단축키)
     │   │   ├── OfflineFallbackBannerView — 오프라인 폴백 상태 배너 (로컬 모델 전환 알림 + 복구 버튼) (G-1)
+    │   │   ├── TTSFallbackBannerView — TTS 오프라인 폴백 배너 (로컬 TTS 전환 알림 + 복구 버튼) (G-2)
     │   │   ├── SystemPromptBannerView — 시스템 프롬프트 접기/펼치기 배너 (UX-8)
     │   │   ├── ErrorBannerView — 에러 표시
     │   │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
@@ -103,6 +104,8 @@ DochiApp (entry point)
 | TagManagementView | `Views/Sidebar/TagManagementView.swift` | 사이드바 "태그" 버튼 또는 컨텍스트 메뉴 "태그 관리" | 태그 CRUD 시트 (360x400pt), 9색 팔레트, 사용 수 |
 | QuickModelPopoverView | `Views/QuickModelPopoverView.swift` | SystemHealthBar 모델 클릭 또는 ⌘⇧M | 프로바이더 선택 (클라우드/로컬 그룹) + 모델 목록 (메타데이터 표시) + 자동 라우팅 토글 + 로컬 서버 연결 인디케이터 + 오프라인 폴백 정보 (320pt 폭) |
 | OfflineFallbackBannerView | `Views/ContentView.swift` 내 | 오프라인 폴백 발동 시 자동 표시 | 오프라인 전환 안내 + 모델명 + "원래 모델로 복구" 버튼 (G-1) |
+| TTSFallbackBannerView | `Views/ContentView.swift` 내 | TTS 오프라인 폴백 발동 시 자동 표시 | TTS 전환 안내 + 프로바이더명 + "원래 TTS로 복구" 버튼 (G-2) |
+| ONNXModelManagerView | `Views/Settings/ONNXModelManagerView.swift` | VoiceSettingsView 내 ONNX 선택 시 인라인 | ONNX 모델 카탈로그, 다운로드/삭제, 설치된 모델 Picker (G-2) |
 | OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 + 기능 투어 연결 |
 | FeatureTourView | `Views/Guide/FeatureTourViews.swift` | 온보딩 완료 후 / 설정 > 일반 > 가이드 / 커맨드 팔레트 | 4단계 기능 투어 (개요/대화/에이전트·워크스페이스/단축키) |
 | WorkspaceManagementView | `Views/Sidebar/WorkspaceManagementView.swift` | SidebarHeader 메뉴 | 워크스페이스 생성/삭제 |
@@ -123,7 +126,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 |------|----------------|--------|------|------|
 | AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택 (클라우드/로컬 그룹), Ollama 설정, LM Studio 설정, 오프라인 폴백, 태스크 라우팅 |
 | AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
-| 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더, 음성, 속도/피치 |
+| 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더 (시스템/Google Cloud/ONNX), 음성, 속도/피치, ONNX 모델 관리 (ONNXModelManagerView), 디퓨전 스텝, TTS 오프라인 폴백 |
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타 |
 | 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
 | 일반 | 하트비트 (`heartbeat`) | heart.circle | `Views/SettingsView.swift` 내 HeartbeatSettingsContent | Heartbeat 간격, 캘린더/칸반/미리알림 체크 |
@@ -233,6 +236,13 @@ MemoryContextInfo 필드:
 | `contentPreview` | `String` | 저장 내용 미리보기 (80자 이내) |
 | `timestamp` | `Date` | 발생 시각 |
 
+### TTS 폴백 상태 (G-2 추가)
+
+| 프로퍼티 | 타입 | 설명 | UI 사용처 |
+|----------|------|------|-----------|
+| `isTTSFallbackActive` | `Bool` | TTS 오프라인 폴백 활성 여부 | TTSFallbackBannerView |
+| `ttsFallbackProviderName` | `String?` | 폴백된 TTS 프로바이더 이름 | TTSFallbackBannerView |
+
 ### 누락된 상태 (현재 UI에 노출 안 됨)
 
 | 정보 | 소스 | 문제 |
@@ -247,7 +257,7 @@ MemoryContextInfo 필드:
 |------|-------------|
 | LLM | `llmProvider`, `llmModel`, `fallbackLLMProvider`, `fallbackLLMModel` |
 | 태스크 라우팅 | `taskRoutingEnabled`, `lightModelProvider/Name`, `heavyModelProvider/Name` |
-| 음성 | `ttsProvider`, `wakeWordEnabled`, `wakeWord`, `sttSilenceTimeout` |
+| 음성 | `ttsProvider`, `wakeWordEnabled`, `wakeWord`, `sttSilenceTimeout`, `onnxModelId`, `ttsOfflineFallbackEnabled`, `ttsDiffusionSteps` |
 | 통합 | `telegramEnabled`, `telegramStreamReplies`, `ollamaBaseURL` |
 | Heartbeat | `heartbeatEnabled`, `heartbeatIntervalMinutes`, `heartbeatCheckCalendar/Kanban/Reminders` |
 | 아바타 | `avatarEnabled` |
@@ -360,6 +370,23 @@ SystemHealthBarView 모델 클릭 / ⌘⇧M -> showQuickModelPopover = true
   -> "설정에서 더 보기" -> 설정 창 열기 (aiModel 섹션)
 커맨드 팔레트: "모델 빠르게 변경" -> openQuickModelPopover 액션
   "AI 모델 설정 열기" / "API 키 설정 열기" / ... -> openSettingsSection(section:) 액션
+```
+
+### TTS 오프라인 폴백 (G-2 추가)
+```
+클라우드 TTS 실패 (네트워크 오류 등)
+  -> settings.ttsOfflineFallbackEnabled 확인
+  -> TTSRouter.activateOfflineFallback()
+  -> ONNX 모델 설치 여부 확인 (settings.onnxModelId)
+  -> ONNX 사용 가능: SupertonicService로 전환
+  -> ONNX 불가: SystemTTSService로 전환
+  -> TTSFallbackBannerView 표시 (보라색 배경)
+  -> "원래 TTS로 복구" 클릭 -> viewModel.restoreTTSProvider()
+ONNX 모델 관리:
+  -> 설정 > 음성 합성 > ONNX 선택 -> ONNXModelManagerView 인라인
+  -> ModelDownloadManager.loadCatalog() -> 하드코딩된 Piper 한국어 모델 목록
+  -> 모델 다운로드 (ProgressView) / 취소 / 삭제
+  -> 설치된 모델 Picker로 선택 -> settings.onnxModelId 변경
 ```
 
 ### 가이드/온보딩 (UX-9 추가)
@@ -526,4 +553,4 @@ SystemHealthBarView 모델 클릭 / ⌘⇧M -> showQuickModelPopover = true
 
 ---
 
-*최종 업데이트: 2026-02-15 (UX-10 머지 후)*
+*최종 업데이트: 2026-02-15 (G-2 ONNX TTS 머지 후)*

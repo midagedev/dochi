@@ -14,6 +14,9 @@ final class SupertonicService: TTSServiceProtocol {
     private var playerNode: AVAudioPlayerNode?
     private let modelManager = ONNXModelManager()
 
+    /// The currently loaded model ID (set via loadModel).
+    private(set) var loadedModelId: String?
+
     // TTS settings
     var speed: Float = 1.0
     var diffusionSteps: Int = 3
@@ -23,12 +26,63 @@ final class SupertonicService: TTSServiceProtocol {
     private let sampleRate: Double = 22050
     private let channels: AVAudioChannelCount = 1
 
+    // MARK: - Model Management
+
+    /// Check if models are available for the given model ID.
+    func areModelsAvailable(modelId: String? = nil) -> Bool {
+        if let modelId, !modelId.isEmpty {
+            let modelDir = FileManager.default
+                .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                .appendingPathComponent("Dochi/models/\(modelId)")
+            let onnxPath = modelDir.appendingPathComponent("\(modelId).onnx")
+            return FileManager.default.fileExists(atPath: onnxPath.path)
+        }
+        return modelManager.areModelsAvailable()
+    }
+
+    /// Load a specific model by ID from the models directory.
+    func loadModel(modelId: String) async throws {
+        guard !modelId.isEmpty else {
+            Log.tts.warning("Empty model ID provided to loadModel")
+            return
+        }
+
+        let modelDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Dochi/models/\(modelId)")
+        let onnxPath = modelDir.appendingPathComponent("\(modelId).onnx")
+
+        guard FileManager.default.fileExists(atPath: onnxPath.path) else {
+            let errorMsg = "ONNX model file not found at \(onnxPath.path)"
+            Log.tts.error("\(errorMsg)")
+            throw SupertonicError.modelNotFound(modelId)
+        }
+
+        // Load using ONNXModelManager for the session management
+        // The actual ONNX session creation is handled there
+        loadedModelId = modelId
+        Log.tts.info("Model \(modelId) path verified: \(onnxPath.path)")
+
+        // Attempt to load ONNX sessions if available
+        let mgr = modelManager
+        if mgr.areModelsAvailable() {
+            do {
+                try await Task.detached {
+                    try mgr.loadModels()
+                }.value
+                Log.tts.info("ONNX sessions loaded for model: \(modelId)")
+            } catch {
+                Log.tts.warning("ONNX session load failed for \(modelId): \(error.localizedDescription) — running in placeholder mode")
+            }
+        }
+    }
+
     // MARK: - Engine Lifecycle
 
     func loadEngine() async throws {
         guard isUnloadedState || isErrorState else { return }
         engineState = .loading
-        Log.tts.info("Loading TTS engine...")
+        Log.tts.info("Loading Supertonic TTS engine...")
 
         // Load ONNX models if available
         let mgr = modelManager
@@ -47,15 +101,16 @@ final class SupertonicService: TTSServiceProtocol {
 
         setupAudioEngine()
         engineState = .ready
-        Log.tts.info("TTS engine ready (models loaded: \(mgr.isLoaded))")
+        Log.tts.info("Supertonic TTS engine ready (models loaded: \(mgr.isLoaded))")
     }
 
     func unloadEngine() {
         stopAndClear()
         teardownAudioEngine()
         modelManager.unloadModels()
+        loadedModelId = nil
         engineState = .unloaded
-        Log.tts.info("TTS engine unloaded")
+        Log.tts.info("Supertonic TTS engine unloaded")
     }
 
     // MARK: - Sentence Queue
@@ -73,7 +128,7 @@ final class SupertonicService: TTSServiceProtocol {
         playerNode?.stop()
         isSpeaking = false
         isProcessing = false
-        Log.tts.info("TTS stopped and queue cleared")
+        Log.tts.info("Supertonic TTS stopped and queue cleared")
     }
 
     // MARK: - Queue Processing
@@ -101,6 +156,7 @@ final class SupertonicService: TTSServiceProtocol {
             await synthesizeWithONNX(text)
         } else {
             // Placeholder: simulate synthesis time
+            Log.tts.debug("ONNX models not loaded — placeholder synthesis for: \(text.prefix(30))")
             try? await Task.sleep(for: .milliseconds(100))
         }
     }
@@ -136,7 +192,7 @@ final class SupertonicService: TTSServiceProtocol {
         playWaveform(waveform)
     }
 
-    /// Run the full ONNX inference pipeline (duration → acoustic → vocoder).
+    /// Run the full ONNX inference pipeline (duration -> acoustic -> vocoder).
     /// Called on a background thread via Task.detached.
     private nonisolated static func runInferencePipeline(
         phonemes: [String],
@@ -151,12 +207,14 @@ final class SupertonicService: TTSServiceProtocol {
             return nil
         }
 
-        // TODO: Implement actual ONNX inference when model format is finalized
-        // 1. phonemes → token IDs (vocab mapping)
-        // 2. durationSession.run(tokenIds, mask) → durations
-        // 3. acousticSession.run(tokenIds, durations) → mel spectrogram
-        // 4. vocoderSession.run(mel) → waveform [Float]
-        // 5. Apply speed adjustment
+        // TODO: Implement actual Piper ONNX inference when model format is finalized
+        // Pipeline steps:
+        // 1. phonemes -> token IDs (vocab mapping from model config JSON)
+        // 2. durationSession.run(tokenIds, mask) -> durations per phoneme
+        // 3. Expand token IDs using predicted durations
+        // 4. acousticSession.run(expandedTokenIds) -> mel spectrogram
+        // 5. vocoderSession.run(mel) -> waveform [Float]
+        // 6. Apply speed adjustment (time-stretch or resample)
 
         return nil
         #else
@@ -224,9 +282,9 @@ final class SupertonicService: TTSServiceProtocol {
         engine.connect(player, to: engine.mainMixerNode, format: format)
         do {
             try engine.start()
-            Log.tts.debug("Audio engine started")
+            Log.tts.debug("Supertonic audio engine started")
         } catch {
-            Log.tts.error("Audio engine start failed: \(error.localizedDescription)")
+            Log.tts.error("Supertonic audio engine start failed: \(error.localizedDescription)")
             engineState = .error(error.localizedDescription)
         }
     }
@@ -249,5 +307,21 @@ final class SupertonicService: TTSServiceProtocol {
     private var isErrorState: Bool {
         if case .error = engineState { return true }
         return false
+    }
+}
+
+// MARK: - Errors
+
+enum SupertonicError: Error, LocalizedError {
+    case modelNotFound(String)
+    case inferenceError(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .modelNotFound(let id):
+            "ONNX 모델을 찾을 수 없습니다: \(id)"
+        case .inferenceError(let reason):
+            "ONNX 추론 오류: \(reason)"
+        }
     }
 }

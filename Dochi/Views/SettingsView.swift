@@ -8,6 +8,7 @@ struct SettingsView: View {
     var contextService: ContextServiceProtocol?
     var sessionContext: SessionContext?
     var ttsService: TTSServiceProtocol?
+    var downloadManager: ModelDownloadManager?
     var telegramService: TelegramServiceProtocol?
     var mcpService: MCPServiceProtocol?
     var supabaseService: SupabaseServiceProtocol?
@@ -44,7 +45,7 @@ struct SettingsView: View {
             APIKeySettingsView(keychainService: keychainService)
 
         case .voice:
-            VoiceSettingsView(settings: settings, keychainService: keychainService, ttsService: ttsService)
+            VoiceSettingsView(settings: settings, keychainService: keychainService, ttsService: ttsService, downloadManager: downloadManager)
 
         case .interface:
             Form {

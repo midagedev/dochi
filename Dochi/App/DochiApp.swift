@@ -27,6 +27,7 @@ struct DochiApp: App {
     private let supabaseService: SupabaseService
     private let toolService: BuiltInToolService
     private let heartbeatService: HeartbeatService
+    private let modelDownloadManager: ModelDownloadManager
 
     init() {
         let settings = AppSettings()
@@ -50,6 +51,7 @@ struct DochiApp: App {
         self.mcpService = mcpService
         self.supabaseService = supabaseService
         self.heartbeatService = heartbeatService
+        self.modelDownloadManager = ModelDownloadManager()
 
         let workspaceId = UUID(uuidString: settings.currentWorkspaceId)
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
@@ -221,6 +223,7 @@ struct DochiApp: App {
                 contextService: contextService,
                 sessionContext: sessionContext,
                 ttsService: ttsService,
+                downloadManager: modelDownloadManager,
                 telegramService: telegramService,
                 mcpService: mcpService,
                 supabaseService: supabaseService,
