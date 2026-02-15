@@ -28,7 +28,7 @@ DochiApp (entry point)
     │   │   ├── SystemPromptBannerView — 시스템 프롬프트 접기/펼치기 배너 (UX-8)
     │   │   ├── ErrorBannerView — 에러 표시
     │   │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
-    │   │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크 + 단축키 힌트 + 에이전트 힌트 카드)
+    │   │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크 + 단축키 힌트 + 에이전트 힌트 카드 + 투어 리마인더 + 첫 대화 힌트)
     │   │   │   또는 ConversationView — 메시지 목록
     │   │   │       ├── MessageBubbleView — 개별 메시지 버블 (호버 시 복사 버튼)
     │   │   │       │   ├── MessageMetadataBadgeView — 모델/응답시간 배지 (assistant만, 호버 팝오버)
@@ -66,7 +66,7 @@ DochiApp (entry point)
 | BulkActionToolbarView | `Views/Sidebar/ConversationListView.swift` | 일괄선택 모드 활성 시 | N개 선택 + 폴더/태그/내보내기/즐겨찾기/삭제 |
 | ConversationView | `Views/ConversationView.swift` | 대화 선택 시 | 메시지 스크롤 뷰 |
 | MessageBubbleView | `Views/MessageBubbleView.swift` | 자동 | 개별 메시지 렌더링 (역할별 스타일), 호버 시 복사 버튼 오버레이 |
-| EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트, 에이전트 0개 시 생성 힌트 카드 |
+| EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트, 에이전트 0개 시 생성 힌트 카드, 투어 리마인더 배너, 첫 대화 힌트 버블 |
 | InputBarView | `Views/ContentView.swift` | 항상 표시 | 텍스트 입력, 마이크, 전송/취소 버튼, 슬래시 명령 |
 | SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 현재 모델, 동기화 상태, 하트비트, 세션 토큰 (클릭 → 상세 시트) |
 | MessageMetadataBadgeView | `Views/MessageBubbleView.swift` | assistant 메시지 자동 | 모델명·응답시간 배지, 호버 시 상세 팝오버 (토큰/프로바이더/폴백) |
@@ -100,7 +100,8 @@ DochiApp (entry point)
 | CommandPaletteView | `Views/CommandPaletteView.swift` | ⌘K | VS Code 스타일 커맨드 팔레트 오버레이 (퍼지 검색, 그룹 섹션) |
 | QuickSwitcherView | `Views/QuickSwitcherView.swift` | ⌘⇧A / ⌘⇧W / ⌘⇧U | 에이전트/워크스페이스/사용자 빠른 전환 시트 |
 | TagManagementView | `Views/Sidebar/TagManagementView.swift` | 사이드바 "태그" 버튼 또는 컨텍스트 메뉴 "태그 관리" | 태그 CRUD 시트 (360x400pt), 9색 팔레트, 사용 수 |
-| OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 |
+| OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 + 기능 투어 연결 |
+| FeatureTourView | `Views/Guide/FeatureTourViews.swift` | 온보딩 완료 후 / 설정 > 일반 > 가이드 / 커맨드 팔레트 | 4단계 기능 투어 (개요/대화/에이전트·워크스페이스/단축키) |
 | WorkspaceManagementView | `Views/Sidebar/WorkspaceManagementView.swift` | SidebarHeader 메뉴 | 워크스페이스 생성/삭제 |
 | AgentCreationView | `Views/Sidebar/AgentCreationView.swift` | (레거시 — AgentWizardView로 대체) | 에이전트 생성 폼 |
 | AgentWizardView | `Views/Agent/AgentWizardView.swift` | SidebarHeader [+], 커맨드 팔레트, EmptyConversationView 힌트 카드 | 5단계 에이전트 생성 위저드 (560x520pt), 템플릿 선택 → 기본 정보 → 페르소나 → 모델/권한 → 요약 |
@@ -113,7 +114,7 @@ DochiApp (entry point)
 
 | 탭 | 파일 | 내용 |
 |----|------|------|
-| 일반 | `Views/SettingsView.swift` 내 | 폰트, 인터랙션 모드, 웨이크워드, 아바타, Heartbeat |
+| 일반 | `Views/SettingsView.swift` 내 | 폰트, 인터랙션 모드, 웨이크워드, 아바타, Heartbeat, 가이드 (투어/힌트 관리) |
 | AI 모델 | `Views/SettingsView.swift` 내 | 프로바이더/모델 선택, Ollama, 태스크 라우팅, 폴백 |
 | API 키 | `Views/SettingsView.swift` 내 | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
 | 음성 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더, 음성, 속도/피치 |
@@ -237,6 +238,7 @@ MemoryContextInfo 필드:
 | 통합 | `telegramEnabled`, `telegramStreamReplies`, `ollamaBaseURL` |
 | Heartbeat | `heartbeatEnabled`, `heartbeatIntervalMinutes`, `heartbeatCheckCalendar/Kanban/Reminders` |
 | 아바타 | `avatarEnabled` |
+| 가이드 | `hintsEnabled`, `featureTourCompleted`, `featureTourSkipped`, `featureTourBannerDismissed` |
 | 기타 | `chatFontSize`, `currentWorkspaceId`, `defaultUserId`, `activeAgentName` |
 
 ---
@@ -321,6 +323,23 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 기존 컨텍스트 인스펙터: ⌘⌥I -> showContextInspector -> ContextInspectorView (시트)
 ```
 
+### 가이드/온보딩 (UX-9 추가)
+```
+기능 투어: 온보딩 완료 → "기능 둘러보기" 버튼 → FeatureTourView (4단계)
+  → 완료/건너뛰기 → UserDefaults(featureTourCompleted/Skipped) 기록
+투어 리마인더: EmptyConversationView → 투어 건너뛴 사용자에게 배너 표시
+  → "둘러보기" → FeatureTourView / "X" → featureTourBannerDismissed
+인앱 힌트: 뷰 진입 → HintBubbleModifier → HintManager.canShowHint() 확인
+  → 1.5초 후 fadeIn → "확인"/닫기 → markHintSeen() → UserDefaults 기록
+  → "다시 보지 않기" → disableAllHints() → 모든 힌트 전역 비활성화
+설정 도움말: SettingsSectionHeader → SettingsHelpButton → 클릭 → 팝오버
+가이드 관리: 설정 > 일반 > 가이드 섹션
+  → "기능 투어 다시 보기" → FeatureTourView 시트
+  → "인앱 힌트 초기화" → resetAllHints()
+  → "인앱 힌트 표시" 토글 → hintsEnabled get/set
+커맨드 팔레트: "기능 투어" → FeatureTourView 시트 / "인앱 힌트 초기화" → resetHints
+```
+
 ### 내보내기/공유 (UX-5 추가)
 ```
 빠른 내보내기: ⌘E -> viewModel.exportConversation(format: .markdown) -> NSSavePanel
@@ -383,6 +402,9 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 | 접기/펼치기 배너 (VStack + Button) | SystemPromptBannerView | 접힌: 미리보기, 펼침: TextEditor |
 | 토스트 (HStack + material + shadow) | MemoryToastView | 우측 하단 알림 (5초 자동 fade) |
 | 메모리 노드 카드 (VStack + chevron) | MemoryNodeView | 접기/펼치기 + 인라인 편집 + 저장 |
+| 힌트 버블 (ViewModifier + material) | HintBubbleModifier | 일회성 맥락 힌트 (1.5초 후 fadeIn, 최대 1개, "다시 보지 않기") |
+| 설정 도움말 버튼 (? + popover) | SettingsHelpButton | 섹션 헤더 "?" 아이콘, 클릭 시 설명 팝오버 (280pt) |
+| 투어 단계 (step indicator + 콘텐츠) | FeatureTourView | 4단계 워크스루 (이전/다음/건너뛰기/시작) |
 
 ---
 
@@ -399,6 +421,8 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 | 시스템 프롬프트 없음 | "시스템 프롬프트가 설정되지 않았습니다 [작성하기]" | SystemPromptBannerView |
 | 메모리 노드 비어 있음 | 노드별 안내 문구 + "작성하기" 버튼 | MemoryNodeView |
 | 개인 메모리 없음 (사용자 미설정) | "사용자가 설정되지 않아 표시할 수 없습니다" | MemoryPanelView |
+| 투어 미완료 (건너뜀) | "도치의 주요 기능을 알아보세요" 배너 + "둘러보기" | EmptyConversationView |
+| 첫 대화 힌트 | "첫 대화를 시작해보세요!" 힌트 버블 | EmptyConversationView |
 
 ---
 
@@ -461,4 +485,4 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 
 ---
 
-*최종 업데이트: 2026-02-15 (UX-8 머지 후)*
+*최종 업데이트: 2026-02-15 (UX-9 머지 후)*

@@ -31,6 +31,9 @@ struct ContentView: View {
     // UX-8: 메모리 패널
     @State private var showMemoryPanel = false
 
+    // UX-9: 기능 투어
+    @State private var showFeatureTour = false
+
     var body: some View {
         mainContent
             .onAppear {
@@ -90,6 +93,19 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showAgentWizard) {
                 AgentWizardView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $showFeatureTour) {
+                FeatureTourView(
+                    onComplete: {
+                        viewModel.settings.featureTourCompleted = true
+                        showFeatureTour = false
+                    },
+                    onSkip: {
+                        viewModel.settings.featureTourCompleted = true
+                        viewModel.settings.featureTourSkipped = true
+                        showFeatureTour = false
+                    }
+                )
             }
     }
 
@@ -290,7 +306,9 @@ struct ContentView: View {
                     },
                     onShowCatalog: { showCapabilityCatalog = true },
                     onCreateAgent: { showAgentWizard = true },
-                    agentCount: viewModel.contextService.listAgents(workspaceId: viewModel.sessionContext.workspaceId).count
+                    onShowTour: { showFeatureTour = true },
+                    agentCount: viewModel.contextService.listAgents(workspaceId: viewModel.sessionContext.workspaceId).count,
+                    isFirstConversation: viewModel.conversations.isEmpty
                 )
             } else {
                 ConversationView(
@@ -468,6 +486,12 @@ struct ContentView: View {
             viewModel.toggleMultiSelectMode()
         case .createAgent:
             showAgentWizard = true
+        case .openFeatureTour:
+            viewModel.settings.resetFeatureTour()
+            showFeatureTour = true
+        case .resetHints:
+            viewModel.settings.resetAllHints()
+            HintManager.shared.resetAllHints()
         case .custom(let id):
             if id.hasPrefix("switchUser-") {
                 let userIdStr = String(id.dropFirst("switchUser-".count))
@@ -1146,15 +1170,28 @@ struct EmptyConversationView: View {
     let onSelectPrompt: (String) -> Void
     var onShowCatalog: (() -> Void)?
     var onCreateAgent: (() -> Void)?
+    var onShowTour: (() -> Void)?
     var agentCount: Int = 1
+    var isFirstConversation: Bool = false
 
     private var contextualSuggestions: [FeatureSuggestion] {
         FeatureCatalog.contextualSuggestions()
     }
 
+    /// 투어를 건너뛴 사용자를 위한 재안내 배너 표시 여부
+    private var showTourBanner: Bool {
+        UserDefaults.standard.bool(forKey: "featureTourSkipped")
+        && !UserDefaults.standard.bool(forKey: "featureTourBannerDismissed")
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             Spacer()
+
+            // 투어 재안내 배너
+            if showTourBanner, let onShowTour {
+                tourReminderBanner(onShowTour: onShowTour)
+            }
 
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(.system(size: 36))
@@ -1169,6 +1206,13 @@ struct EmptyConversationView: View {
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+                .hintBubble(
+                    id: "firstConversation",
+                    title: "첫 대화를 시작해보세요",
+                    message: "아래 제안을 클릭하거나, 궁금한 것을 자유롭게 입력하세요. /로 시작하면 명령 목록도 볼 수 있어요.",
+                    edge: .bottom,
+                    condition: isFirstConversation
+                )
 
             // Agent hint card (when no agents)
             if agentCount == 0, let onCreateAgent {
@@ -1233,6 +1277,42 @@ struct EmptyConversationView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func tourReminderBanner(onShowTour: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.blue)
+                .font(.system(size: 14))
+
+            Text("기능 투어를 아직 보지 않았어요.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            Button("둘러보기") {
+                onShowTour()
+            }
+            .font(.system(size: 12, weight: .medium))
+            .buttonStyle(.plain)
+            .foregroundStyle(.blue)
+
+            Spacer()
+
+            Button {
+                UserDefaults.standard.set(true, forKey: "featureTourBannerDismissed")
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.blue.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 40)
     }
 
     @ViewBuilder

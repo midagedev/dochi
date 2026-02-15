@@ -49,6 +49,11 @@ struct ToolsSettingsView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
+                SettingsHelpButton(
+                    title: "도구",
+                    content: "도치가 사용할 수 있는 35개 내장 도구 목록입니다. \"기본 제공\" 도구는 항상 사용 가능하고, \"조건부\" 도구는 AI가 필요할 때 자동으로 활성화합니다. 권한 등급(safe/sensitive/restricted)에 따라 승인이 필요할 수 있습니다."
+                )
+
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)

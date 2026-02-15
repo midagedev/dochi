@@ -91,9 +91,11 @@ struct GeneralSettingsView: View {
     var settings: AppSettings
     var heartbeatService: HeartbeatService?
 
+    @State private var showFeatureTourSheet = false
+
     var body: some View {
         Form {
-            Section("글꼴") {
+            Section {
                 HStack {
                     Text("채팅 글꼴 크기: \(Int(settings.chatFontSize))pt")
                     Slider(value: Binding(
@@ -105,9 +107,14 @@ struct GeneralSettingsView: View {
                 Text("미리보기 텍스트")
                     .font(.system(size: settings.chatFontSize))
                     .foregroundStyle(.secondary)
+            } header: {
+                SettingsSectionHeader(
+                    title: "글꼴",
+                    helpContent: "대화 영역의 글꼴 크기를 조절합니다. 시스템 설정의 접근성 글꼴과 독립적입니다."
+                )
             }
 
-            Section("상호작용 모드") {
+            Section {
                 Picker("모드", selection: Binding(
                     get: { settings.interactionMode },
                     set: { settings.interactionMode = $0 }
@@ -116,9 +123,14 @@ struct GeneralSettingsView: View {
                     Text("텍스트 전용").tag(InteractionMode.textOnly.rawValue)
                 }
                 .pickerStyle(.radioGroup)
+            } header: {
+                SettingsSectionHeader(
+                    title: "상호작용 모드",
+                    helpContent: "\"음성 + 텍스트\"는 마이크 버튼과 웨이크워드를 활성화합니다. \"텍스트 전용\"은 음성 기능을 비활성화합니다."
+                )
             }
 
-            Section("웨이크워드") {
+            Section {
                 Toggle("웨이크워드 감지", isOn: Binding(
                     get: { settings.wakeWordEnabled },
                     set: { settings.wakeWordEnabled = $0 }
@@ -142,28 +154,48 @@ struct GeneralSettingsView: View {
                     get: { settings.wakeWordAlwaysOn },
                     set: { settings.wakeWordAlwaysOn = $0 }
                 ))
-                .help("앱이 활성화되어 있는 동안 항상 웨이크워드를 감지합니다")
+
+                Text("앱이 활성화되어 있는 동안 항상 웨이크워드를 감지합니다")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                SettingsSectionHeader(
+                    title: "웨이크워드",
+                    helpContent: "지정한 단어를 말하면 자동으로 음성 입력이 시작됩니다. \"항상 대기 모드\"를 켜면 앱이 활성화된 동안 계속 감지합니다."
+                )
             }
 
-            Section("아바타") {
+            Section {
                 Toggle("3D 아바타 표시", isOn: Binding(
                     get: { settings.avatarEnabled },
                     set: { settings.avatarEnabled = $0 }
                 ))
-                    .help("VRM 3D 아바타를 대화 영역 위에 표시합니다")
+
+                Text("VRM 3D 아바타를 대화 영역 위에 표시합니다 (macOS 15+)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if settings.avatarEnabled {
                     Text("Dochi/Resources/Models/ 디렉토리에 default_avatar.vrm 파일을 배치해주세요")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            } header: {
+                SettingsSectionHeader(
+                    title: "아바타",
+                    helpContent: "VRM 형식의 3D 아바타를 대화 영역 위에 표시합니다. macOS 15 이상에서 사용 가능합니다. Resources/Models/에 VRM 파일이 필요합니다."
+                )
             }
 
-            Section("하트비트") {
+            Section {
                 Toggle("하트비트 활성화", isOn: Binding(
                     get: { settings.heartbeatEnabled },
                     set: { settings.heartbeatEnabled = $0 }
                 ))
+
+                Text("주기적으로 일정과 할 일을 점검하여 자동 알림")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 HStack {
                     Text("점검 주기: \(settings.heartbeatIntervalMinutes)분")
@@ -189,6 +221,11 @@ struct GeneralSettingsView: View {
                     get: { settings.heartbeatCheckReminders },
                     set: { settings.heartbeatCheckReminders = $0 }
                 ))
+            } header: {
+                SettingsSectionHeader(
+                    title: "하트비트",
+                    helpContent: "주기적으로 캘린더, 칸반, 미리알림을 점검하여 알려줄 내용이 있으면 자동으로 메시지를 보냅니다. 조용한 시간 동안에는 알림을 보내지 않습니다."
+                )
             }
 
             Section("하트비트 조용한 시간") {
@@ -268,9 +305,52 @@ struct GeneralSettingsView: View {
                     }
                 }
             }
+
+            // UX-9: 가이드 섹션
+            Section("가이드") {
+                Button {
+                    settings.resetFeatureTour()
+                    showFeatureTourSheet = true
+                } label: {
+                    HStack {
+                        Image(systemName: "play.rectangle")
+                            .foregroundStyle(.secondary)
+                        Text("기능 투어 다시 보기")
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    settings.resetAllHints()
+                    HintManager.shared.resetAllHints()
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.counterclockwise")
+                            .foregroundStyle(.secondary)
+                        Text("인앱 힌트 초기화")
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Toggle("인앱 힌트 표시", isOn: Binding(
+                    get: { settings.hintsEnabled },
+                    set: { newValue in
+                        settings.hintsEnabled = newValue
+                        if !newValue {
+                            HintManager.shared.disableAllHints()
+                        }
+                    }
+                ))
+            }
         }
         .formStyle(.grouped)
         .padding()
+        .sheet(isPresented: $showFeatureTourSheet) {
+            FeatureTourView(
+                onComplete: { showFeatureTourSheet = false },
+                onSkip: { showFeatureTourSheet = false }
+            )
+        }
     }
 }
 
@@ -299,13 +379,14 @@ struct ModelSettingsView: View {
 
     var body: some View {
         Form {
-            Section("LLM 프로바이더") {
+            Section {
                 Picker("프로바이더", selection: $selectedProviderRaw) {
                     ForEach(LLMProvider.allCases, id: \.self) { provider in
                         Text(provider.displayName).tag(provider.rawValue)
                     }
                 }
                 .onChange(of: selectedProviderRaw) { _, newValue in
+
                     settings.llmProvider = newValue
                     let provider = LLMProvider(rawValue: newValue) ?? .openai
                     if provider == .ollama {
@@ -338,6 +419,11 @@ struct ModelSettingsView: View {
                         settings.llmModel = newValue
                     }
                 }
+            } header: {
+                SettingsSectionHeader(
+                    title: "LLM 프로바이더",
+                    helpContent: "AI 응답을 생성하는 서비스를 선택합니다. 각 프로바이더는 다른 모델과 가격 체계를 갖고 있습니다. API 키가 필요합니다."
+                )
             }
 
             if selectedProvider == .ollama {
@@ -376,7 +462,7 @@ struct ModelSettingsView: View {
                 }
             }
 
-            Section("컨텍스트") {
+            Section {
                 HStack {
                     Text("컨텍스트 윈도우")
                     Spacer()
@@ -385,14 +471,22 @@ struct ModelSettingsView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
+            } header: {
+                SettingsSectionHeader(
+                    title: "컨텍스트",
+                    helpContent: "모델이 한 번에 처리할 수 있는 텍스트 양(토큰)입니다. 대화가 길어지면 오래된 메시지는 자동으로 압축됩니다."
+                )
             }
 
-            Section("용도별 모델 라우팅") {
+            Section {
                 Toggle("자동 모델 선택", isOn: Binding(
                     get: { settings.taskRoutingEnabled },
                     set: { settings.taskRoutingEnabled = $0 }
                 ))
-                .help("메시지 복잡도에 따라 경량/고급 모델을 자동 선택합니다")
+
+                Text("메시지 복잡도에 따라 경량/고급 모델을 자동 선택합니다")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if settings.taskRoutingEnabled {
                     VStack(alignment: .leading, spacing: 4) {
@@ -449,6 +543,11 @@ struct ModelSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            } header: {
+                SettingsSectionHeader(
+                    title: "용도별 모델 라우팅",
+                    helpContent: "메시지 복잡도를 자동으로 판단하여 간단한 질문은 빠른 모델에, 복잡한 작업은 고급 모델에 보냅니다. 비용 절약과 속도 개선에 유용합니다."
+                )
             }
         }
         .formStyle(.grouped)
@@ -501,17 +600,24 @@ struct APIKeySettingsView: View {
 
     var body: some View {
         Form {
-            Section("LLM API 키") {
+            Section {
                 Toggle("키 표시", isOn: $showKeys)
 
                 apiKeyRow(label: "OpenAI", key: $openaiKey, account: LLMProvider.openai.keychainAccount)
                 apiKeyRow(label: "Anthropic", key: $anthropicKey, account: LLMProvider.anthropic.keychainAccount)
                 apiKeyRow(label: "Z.AI", key: $zaiKey, account: LLMProvider.zai.keychainAccount)
+            } header: {
+                SettingsSectionHeader(
+                    title: "LLM API 키",
+                    helpContent: "API 키는 macOS 키체인에 암호화되어 저장됩니다. 각 프로바이더 웹사이트에서 키를 발급받을 수 있습니다. 키를 입력하지 않은 프로바이더의 모델은 사용할 수 없습니다."
+                )
             }
 
             Section("티어별 API 키") {
                 Toggle("티어별 키 관리", isOn: $showTierKeys)
-                    .help("용도별 모델 라우팅 시 프리미엄/경제 티어 전용 키를 사용합니다")
+                Text("용도별 모델 라우팅 시 프리미엄/경제 티어 전용 키를 사용합니다")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if showTierKeys {
                     Group {
