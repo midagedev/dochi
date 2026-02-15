@@ -18,6 +18,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case tools = "tools"
     case integrations = "integrations"
     case shortcuts = "shortcuts"
+    case automation = "automation"
     case devices = "devices"
     case account = "account"
     case guide = "guide"
@@ -36,6 +37,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .interface: return "인터페이스"
         case .wakeWord: return "웨이크워드"
         case .heartbeat: return "하트비트"
+        case .automation: return "자동화"
         case .family: return "가족 구성원"
         case .agent: return "에이전트"
         case .tools: return "도구"
@@ -59,6 +61,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .interface: return "textformat.size"
         case .wakeWord: return "mic"
         case .heartbeat: return "heart"
+        case .automation: return "clock.badge.checkmark"
         case .family: return "person.2"
         case .agent: return "person.crop.rectangle.stack"
         case .tools: return "wrench.and.screwdriver"
@@ -74,7 +77,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .aiModel, .apiKey, .usage, .rag, .memory, .feedback: return .ai
         case .voice: return .voice
-        case .interface, .wakeWord, .heartbeat: return .general
+        case .interface, .wakeWord, .heartbeat, .automation: return .general
         case .family, .agent: return .people
         case .tools, .integrations, .shortcuts, .devices, .account: return .connection
         case .guide: return .help
@@ -103,6 +106,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             return ["웨이크워드", "마이크", "침묵", "음성 입력"]
         case .heartbeat:
             return ["하트비트", "주기", "캘린더", "칸반", "미리알림", "조용한 시간"]
+        case .automation:
+            return ["자동화", "스케줄", "크론", "cron", "반복", "타이머", "예약", "브리핑", "리포트", "automation"]
         case .family:
             return ["가족", "구성원", "프로필", "사용자"]
         case .agent:

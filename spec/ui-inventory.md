@@ -137,6 +137,10 @@ DochiApp (entry point)
 | OfflineFallbackBannerView | `Views/ContentView.swift` 내 | 오프라인 폴백 발동 시 자동 표시 | 오프라인 전환 안내 + 모델명 + "원래 모델로 복구" 버튼 (G-1) |
 | TTSFallbackBannerView | `Views/ContentView.swift` 내 | TTS 오프라인 폴백 발동 시 자동 표시 | TTS 전환 안내 + 프로바이더명 + "원래 TTS로 복구" 버튼 (G-2) |
 | ONNXModelManagerView | `Views/Settings/ONNXModelManagerView.swift` | VoiceSettingsView 내 ONNX 선택 시 인라인 | ONNX 모델 카탈로그, 다운로드/삭제, 설치된 모델 Picker (G-2) |
+| AutomationSettingsView | `Views/Settings/AutomationSettingsView.swift` | 설정 > 일반 > 자동화 | 마스터 토글, 스케줄 리스트 CRUD, 템플릿 추가, 실행 이력 (J-3) |
+| ScheduleEditSheet | `Views/Settings/ScheduleEditSheet.swift` | AutomationSettingsView에서 시트 | 스케줄 생성/편집 (이름/반복유형/크론식/프롬프트/에이전트/활성화) (J-3) |
+| ScheduleTemplateSheet | `Views/Settings/ScheduleTemplateSheet.swift` | AutomationSettingsView에서 시트 | 기본 제공 3개 템플릿 선택 (아침 브리핑/주간 리포트/메모리 정리) (J-3) |
+| ScheduleExecutionBannerView | `Views/ScheduleExecutionBannerView.swift` | 대화 화면 상단 자동 표시 | 스케줄 실행 상태 배너 (실행 중/완료/실패) (J-3) |
 | OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 + 기능 투어 연결 |
 | FeatureTourView | `Views/Guide/FeatureTourViews.swift` | 온보딩 완료 후 / 설정 > 일반 > 가이드 / 커맨드 팔레트 | 4단계 기능 투어 (개요/대화/에이전트·워크스페이스/단축키) |
 | WorkspaceManagementView | `Views/Sidebar/WorkspaceManagementView.swift` | SidebarHeader 메뉴 | 워크스페이스 생성/삭제 |
@@ -150,7 +154,7 @@ DochiApp (entry point)
 | InitialSyncWizardView | `Views/InitialSyncWizardView.swift` | AccountSettingsView "초기 업로드" | 3단계 위저드: 안내→진행률→완료 (480x420pt) (G-3) |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
-### 설정 (SettingsView — NavigationSplitView, 15섹션 6그룹) (UX-10 리디자인, G-4, H-2, I-1 추가)
+### 설정 (SettingsView — NavigationSplitView, 16섹션 6그룹) (UX-10 리디자인, G-4, H-2, I-1, J-3 추가)
 
 SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 NavigationSplitView 구조.
 사이드바: 검색 필드 + 6개 그룹별 섹션 목록 (호버/선택 하이라이트).
@@ -167,6 +171,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타, Spotlight 검색 (H-4) |
 | 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
 | 일반 | 하트비트 (`heartbeat`) | heart.circle | `Views/SettingsView.swift` 내 HeartbeatSettingsContent | Heartbeat 간격, 캘린더/칸반/미리알림 체크, 알림 센터 설정 (권한 상태, 소리/답장 토글, 카테고리별 알림 토글) (H-3) |
+| 일반 | 자동화 (`automation`) | clock.badge.checkmark | `Views/Settings/AutomationSettingsView.swift` | 마스터 토글, 스케줄 CRUD (크론식), 템플릿 추가, 실행 이력 (J-3) |
 | 사람 | 가족 (`family`) | person.2 | `Views/Settings/FamilySettingsView.swift` | 사용자 프로필 CRUD |
 | 사람 | 에이전트 (`agent`) | person.crop.rectangle | `Views/Settings/AgentSettingsView.swift` → `Views/Agent/AgentCardGridView.swift` | 에이전트 카드 그리드 |
 | 연결 | 도구 (`tools`) | wrench.and.screwdriver | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
@@ -185,6 +190,9 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 - `App/DochiShortcuts.swift` — AppShortcutsProvider, Siri 문구 등록 (H-2)
 - `Services/ShortcutService.swift` — DochiShortcutService 싱글턴, ShortcutError (H-2)
 - `Models/ShortcutExecutionLog.swift` — ShortcutExecutionLog 모델, ShortcutExecutionLogStore (H-2)
+- `Models/ScheduleModels.swift` — ScheduleEntry, ScheduleTemplate, ScheduleExecutionRecord, RepeatType, CronExpression (J-3)
+- `Services/SchedulerService.swift` — SchedulerService (파일 기반 스케줄 저장, 1분 Timer, 크론 파싱, 실행 이력 FIFO) (J-3)
+- `Services/Protocols/SchedulerServiceProtocol.swift` — SchedulerServiceProtocol (J-3)
 - `Services/SpotlightIndexer.swift` — SpotlightIndexer (CoreSpotlight 인덱싱 + 딥링크 파싱) (H-4)
 - `Services/Protocols/SpotlightIndexerProtocol.swift` — SpotlightIndexerProtocol (H-4)
 - `Services/RAG/ChunkSplitter.swift` — 텍스트 청크 분할 (마크다운 섹션/문단, 오버랩) (I-1)
