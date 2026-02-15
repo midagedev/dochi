@@ -21,6 +21,7 @@ final class HeartbeatService: Observable {
     private var contextService: ContextServiceProtocol?
     private var sessionContext: SessionContext?
     private var onProactiveMessage: ((String) -> Void)?
+    private var notificationManager: NotificationManager?
 
     // Observable state
     private(set) var lastTickDate: Date?
@@ -38,6 +39,11 @@ final class HeartbeatService: Observable {
     func configure(contextService: ContextServiceProtocol, sessionContext: SessionContext) {
         self.contextService = contextService
         self.sessionContext = sessionContext
+    }
+
+    /// Inject NotificationManager for actionable notifications (H-3).
+    func setNotificationManager(_ manager: NotificationManager) {
+        self.notificationManager = manager
     }
 
     /// Set a callback for when the heartbeat decides to proactively message the user.
@@ -93,30 +99,34 @@ final class HeartbeatService: Observable {
         var contextParts: [String] = []
         var checksPerformed: [String] = []
         var errorMessage: String?
+        var calendarContext = ""
+        var kanbanContext = ""
+        var reminderContext = ""
+        var memoryWarning: String?
 
         do {
-            // 1. Calendar — upcoming events
+            // 1. Calendar -- upcoming events
             if settings.heartbeatCheckCalendar {
                 checksPerformed.append("calendar")
-                let calendarContext = await gatherCalendarContext()
+                calendarContext = await gatherCalendarContext()
                 if !calendarContext.isEmpty {
                     contextParts.append("📅 다가오는 일정:\n\(calendarContext)")
                 }
             }
 
-            // 2. Kanban — cards in progress
+            // 2. Kanban -- cards in progress
             if settings.heartbeatCheckKanban {
                 checksPerformed.append("kanban")
-                let kanbanContext = gatherKanbanContext()
+                kanbanContext = gatherKanbanContext()
                 if !kanbanContext.isEmpty {
                     contextParts.append("📋 칸반 진행 중:\n\(kanbanContext)")
                 }
             }
 
-            // 3. Reminders — due soon
+            // 3. Reminders -- due soon
             if settings.heartbeatCheckReminders {
                 checksPerformed.append("reminders")
-                let reminderContext = await gatherReminderContext()
+                reminderContext = await gatherReminderContext()
                 if !reminderContext.isEmpty {
                     contextParts.append("⏰ 마감 임박 미리알림:\n\(reminderContext)")
                 }
@@ -125,7 +135,7 @@ final class HeartbeatService: Observable {
             // 4. Memory size check
             if let contextService, let sessionContext {
                 checksPerformed.append("memory")
-                let memoryWarning = checkMemorySize(
+                memoryWarning = checkMemorySize(
                     contextService: contextService,
                     workspaceId: sessionContext.workspaceId
                 )
@@ -149,7 +159,24 @@ final class HeartbeatService: Observable {
             let message = composeProactiveMessage(context: fullContext)
             if let message {
                 Log.app.info("HeartbeatService: sending proactive notification")
-                sendNotification(message: message)
+                // Delegate to NotificationManager for category-specific notifications (H-3)
+                if let notificationManager {
+                    if !calendarContext.isEmpty {
+                        notificationManager.sendCalendarNotification(events: calendarContext)
+                    }
+                    if !kanbanContext.isEmpty {
+                        notificationManager.sendKanbanNotification(tasks: kanbanContext)
+                    }
+                    if !reminderContext.isEmpty {
+                        notificationManager.sendReminderNotification(reminders: reminderContext)
+                    }
+                    if let memoryWarning {
+                        notificationManager.sendMemoryNotification(warning: memoryWarning)
+                    }
+                } else {
+                    // Fallback: send generic notification if NotificationManager is not set
+                    sendNotification(message: message)
+                }
                 onProactiveMessage?(message)
                 notificationSent = true
             } else {

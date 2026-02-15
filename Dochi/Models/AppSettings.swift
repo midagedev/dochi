@@ -300,6 +300,32 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(conflictResolutionStrategy, forKey: "conflictResolutionStrategy") }
     }
 
+    // MARK: - Notification Center (H-3)
+
+    var notificationCalendarEnabled: Bool = UserDefaults.standard.object(forKey: "notificationCalendarEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notificationCalendarEnabled, forKey: "notificationCalendarEnabled") }
+    }
+
+    var notificationKanbanEnabled: Bool = UserDefaults.standard.object(forKey: "notificationKanbanEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notificationKanbanEnabled, forKey: "notificationKanbanEnabled") }
+    }
+
+    var notificationReminderEnabled: Bool = UserDefaults.standard.object(forKey: "notificationReminderEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notificationReminderEnabled, forKey: "notificationReminderEnabled") }
+    }
+
+    var notificationMemoryEnabled: Bool = UserDefaults.standard.object(forKey: "notificationMemoryEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notificationMemoryEnabled, forKey: "notificationMemoryEnabled") }
+    }
+
+    var notificationSoundEnabled: Bool = UserDefaults.standard.object(forKey: "notificationSoundEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notificationSoundEnabled, forKey: "notificationSoundEnabled") }
+    }
+
+    var notificationReplyEnabled: Bool = UserDefaults.standard.object(forKey: "notificationReplyEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notificationReplyEnabled, forKey: "notificationReplyEnabled") }
+    }
+
     // MARK: - Menu Bar (H-1)
 
     var menuBarEnabled: Bool = UserDefaults.standard.object(forKey: "menuBarEnabled") as? Bool ?? true {

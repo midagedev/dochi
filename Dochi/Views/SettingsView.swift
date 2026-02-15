@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 // MARK: - SettingsView (NavigationSplitView)
 
@@ -14,6 +15,7 @@ struct SettingsView: View {
     var supabaseService: SupabaseServiceProtocol?
     var toolService: BuiltInToolService?
     var heartbeatService: HeartbeatService?
+    var notificationManager: NotificationManager?
     var metricsCollector: MetricsCollector?
     var viewModel: DochiViewModel?
 
@@ -71,7 +73,7 @@ struct SettingsView: View {
 
         case .heartbeat:
             Form {
-                HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService)
+                HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService, notificationManager: notificationManager)
             }
             .formStyle(.grouped)
             .padding()
@@ -291,6 +293,7 @@ struct WakeWordSettingsContent: View {
 struct HeartbeatSettingsContent: View {
     var settings: AppSettings
     var heartbeatService: HeartbeatService?
+    var notificationManager: NotificationManager?
 
     var body: some View {
         Section {
@@ -333,6 +336,95 @@ struct HeartbeatSettingsContent: View {
                 helpContent: "주기적으로 캘린더, 칸반, 미리알림을 점검하여 알려줄 내용이 있으면 자동으로 메시지를 보냅니다. 조용한 시간 동안에는 알림을 보내지 않습니다."
             )
         }
+
+        // MARK: - Notification Center (H-3)
+        Section {
+            // Authorization status row
+            if let notificationManager {
+                HStack {
+                    Text("알림 권한")
+                    Spacer()
+                    NotificationAuthorizationStatusView(status: notificationManager.authorizationStatus)
+                }
+            }
+
+            Toggle("알림 소리", isOn: Binding(
+                get: { settings.notificationSoundEnabled },
+                set: { settings.notificationSoundEnabled = $0 }
+            ))
+
+            Toggle("알림에서 답장", isOn: Binding(
+                get: { settings.notificationReplyEnabled },
+                set: { settings.notificationReplyEnabled = $0 }
+            ))
+
+            // Category toggles
+            HStack {
+                Image(systemName: "calendar")
+                    .foregroundStyle(.blue)
+                    .frame(width: 20)
+                VStack(alignment: .leading) {
+                    Toggle("캘린더 알림", isOn: Binding(
+                        get: { settings.notificationCalendarEnabled },
+                        set: { settings.notificationCalendarEnabled = $0 }
+                    ))
+                    Text("다가오는 일정을 알림 센터에 표시")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                Image(systemName: "list.bullet.rectangle")
+                    .foregroundStyle(.orange)
+                    .frame(width: 20)
+                VStack(alignment: .leading) {
+                    Toggle("칸반 알림", isOn: Binding(
+                        get: { settings.notificationKanbanEnabled },
+                        set: { settings.notificationKanbanEnabled = $0 }
+                    ))
+                    Text("진행 중인 칸반 작업을 알림 센터에 표시")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                Image(systemName: "bell")
+                    .foregroundStyle(.green)
+                    .frame(width: 20)
+                VStack(alignment: .leading) {
+                    Toggle("미리알림 알림", isOn: Binding(
+                        get: { settings.notificationReminderEnabled },
+                        set: { settings.notificationReminderEnabled = $0 }
+                    ))
+                    Text("마감 임박한 미리알림을 알림 센터에 표시")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                Image(systemName: "externaldrive")
+                    .foregroundStyle(.purple)
+                    .frame(width: 20)
+                VStack(alignment: .leading) {
+                    Toggle("메모리 알림", isOn: Binding(
+                        get: { settings.notificationMemoryEnabled },
+                        set: { settings.notificationMemoryEnabled = $0 }
+                    ))
+                    Text("메모리 크기 경고를 알림 센터에 표시")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            SettingsSectionHeader(
+                title: "알림 센터",
+                helpContent: "하트비트 알림을 macOS 알림 센터로 전달합니다. 카테고리별로 알림을 켜거나 끌 수 있으며, 알림에서 바로 답장할 수 있습니다."
+            )
+        }
+        .disabled(!settings.heartbeatEnabled)
 
         Section("하트비트 조용한 시간") {
             Stepper(
@@ -414,6 +506,50 @@ struct HeartbeatSettingsContent: View {
     }
 }
 
+/// Displays notification authorization status with colored indicator.
+struct NotificationAuthorizationStatusView: View {
+    let status: UNAuthorizationStatus
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .authorized, .provisional:
+            return .green
+        case .denied:
+            return .red
+        case .notDetermined:
+            return .yellow
+        @unknown default:
+            return .gray
+        }
+    }
+
+    private var statusText: String {
+        switch status {
+        case .authorized:
+            return "허용됨"
+        case .denied:
+            return "거부됨"
+        case .notDetermined:
+            return "미결정"
+        case .provisional:
+            return "임시 허용"
+        @unknown default:
+            return "알 수 없음"
+        }
+    }
+}
+
 // MARK: - Guide Settings Content (split from GeneralSettingsView)
 
 struct GuideSettingsContent: View {
@@ -471,12 +607,13 @@ struct GuideSettingsContent: View {
 struct GeneralSettingsView: View {
     var settings: AppSettings
     var heartbeatService: HeartbeatService?
+    var notificationManager: NotificationManager?
 
     var body: some View {
         Form {
             InterfaceSettingsContent(settings: settings)
             WakeWordSettingsContent(settings: settings)
-            HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService)
+            HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService, notificationManager: notificationManager)
             GuideSettingsContent(settings: settings)
         }
         .formStyle(.grouped)

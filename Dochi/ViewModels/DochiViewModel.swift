@@ -1095,6 +1095,51 @@ final class DochiViewModel {
         Log.app.info("Injected proactive message into conversation")
     }
 
+    // MARK: - Notification Reply Handling (H-3)
+
+    /// Handle user reply from a notification action.
+    /// Injects the original notification as assistant context and the user's reply, then sends to LLM.
+    func handleNotificationReply(text: String, category: String, originalBody: String) {
+        Log.app.info("Notification reply from category \(category): \(text)")
+
+        // Inject original notification body as assistant context
+        injectProactiveMessage("[알림] \(originalBody)")
+
+        // Set user input and send
+        inputText = text
+        sendMessage()
+    }
+
+    /// Handle "Open App" action from a notification.
+    /// Activates the app and navigates based on notification category.
+    func handleNotificationOpenApp(category: String) {
+        Log.app.info("Notification open app for category: \(category)")
+
+        // Bring app to foreground
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first {
+            window.makeKeyAndOrderFront(nil)
+        }
+
+        // Navigate based on category
+        switch category {
+        case NotificationManager.Category.calendar.rawValue:
+            // Focus on main conversation
+            Log.app.info("Notification: navigating to conversation for calendar")
+        case NotificationManager.Category.kanban.rawValue:
+            // Switch to kanban tab
+            Log.app.info("Notification: navigating to kanban")
+        case NotificationManager.Category.reminder.rawValue:
+            // Focus on main conversation
+            Log.app.info("Notification: navigating to conversation for reminders")
+        case NotificationManager.Category.memory.rawValue:
+            // Focus on main conversation
+            Log.app.info("Notification: navigating to conversation for memory")
+        default:
+            break
+        }
+    }
+
     // MARK: - Telegram Message Handling
 
     func handleTelegramMessage(_ update: TelegramUpdate) async {
