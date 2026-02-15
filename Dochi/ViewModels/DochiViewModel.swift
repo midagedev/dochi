@@ -45,7 +45,7 @@ final class DochiViewModel {
     var allToolInfos: [ToolInfo] { toolService.allToolInfos }
     let contextService: ContextServiceProtocol
     private let conversationService: ConversationServiceProtocol
-    private let keychainService: KeychainServiceProtocol
+    private(set) var keychainService: KeychainServiceProtocol
     private let speechService: SpeechServiceProtocol
     private var ttsService: TTSServiceProtocol
     private let soundService: SoundServiceProtocol

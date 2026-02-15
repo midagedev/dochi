@@ -1,5 +1,7 @@
 import SwiftUI
 
+// MARK: - SettingsView (NavigationSplitView)
+
 struct SettingsView: View {
     var settings: AppSettings
     var keychainService: KeychainServiceProtocol
@@ -13,344 +15,432 @@ struct SettingsView: View {
     var heartbeatService: HeartbeatService?
     var viewModel: DochiViewModel?
 
+    @State var selectedSection: SettingsSection = .aiModel
+    @State private var searchText: String = ""
+
     var body: some View {
-        TabView {
-            GeneralSettingsView(settings: settings, heartbeatService: heartbeatService)
-                .tabItem {
-                    Label("일반", systemImage: "gear")
-                }
+        NavigationSplitView {
+            SettingsSidebarView(
+                selectedSection: $selectedSection,
+                searchText: $searchText
+            )
+        } detail: {
+            settingsContent(for: selectedSection)
+        }
+        .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 180)
+        .frame(minWidth: 680, minHeight: 440)
+        .frame(idealWidth: 780, idealHeight: 540)
+    }
 
+    // MARK: - Content Router
+
+    @ViewBuilder
+    private func settingsContent(for section: SettingsSection) -> some View {
+        switch section {
+        case .aiModel:
             ModelSettingsView(settings: settings)
-                .tabItem {
-                    Label("AI 모델", systemImage: "brain")
-                }
 
+        case .apiKey:
             APIKeySettingsView(keychainService: keychainService)
-                .tabItem {
-                    Label("API 키", systemImage: "key")
-                }
 
+        case .voice:
             VoiceSettingsView(settings: settings, keychainService: keychainService, ttsService: ttsService)
-                .tabItem {
-                    Label("음성", systemImage: "speaker.wave.2")
-                }
 
+        case .interface:
+            Form {
+                InterfaceSettingsContent(settings: settings)
+            }
+            .formStyle(.grouped)
+            .padding()
+
+        case .wakeWord:
+            Form {
+                WakeWordSettingsContent(settings: settings)
+            }
+            .formStyle(.grouped)
+            .padding()
+
+        case .heartbeat:
+            Form {
+                HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService)
+            }
+            .formStyle(.grouped)
+            .padding()
+
+        case .family:
             if let contextService, let sessionContext {
                 FamilySettingsView(
                     contextService: contextService,
                     settings: settings,
                     sessionContext: sessionContext
                 )
-                .tabItem {
-                    Label("가족", systemImage: "person.2")
-                }
+            } else {
+                unavailableView(title: "가족 구성원", message: "컨텍스트 서비스가 초기화되지 않았습니다.")
+            }
 
+        case .agent:
+            if let contextService, let sessionContext {
                 AgentSettingsView(
                     contextService: contextService,
                     settings: settings,
                     sessionContext: sessionContext,
                     viewModel: viewModel
                 )
-                .tabItem {
-                    Label("에이전트", systemImage: "person.crop.rectangle.stack")
-                }
+            } else {
+                unavailableView(title: "에이전트", message: "컨텍스트 서비스가 초기화되지 않았습니다.")
             }
 
+        case .tools:
             if let toolService {
                 ToolsSettingsView(toolService: toolService)
-                    .tabItem {
-                        Label("도구", systemImage: "wrench.and.screwdriver")
-                    }
+            } else {
+                unavailableView(title: "도구", message: "도구 서비스가 초기화되지 않았습니다.")
             }
 
+        case .integrations:
             IntegrationsSettingsView(
                 keychainService: keychainService,
                 telegramService: telegramService,
                 mcpService: mcpService,
                 settings: settings
             )
-            .tabItem {
-                Label("통합", systemImage: "puzzlepiece")
-            }
 
+        case .account:
             AccountSettingsView(
                 supabaseService: supabaseService,
                 settings: settings
             )
-            .tabItem {
-                Label("계정", systemImage: "person.circle")
+
+        case .guide:
+            Form {
+                GuideSettingsContent(settings: settings)
             }
+            .formStyle(.grouped)
+            .padding()
         }
-        .frame(width: 600, height: 480)
+    }
+
+    @ViewBuilder
+    private func unavailableView(title: String, message: String) -> some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-// MARK: - General Settings
+// MARK: - Interface Settings Content (split from GeneralSettingsView)
 
-struct GeneralSettingsView: View {
+struct InterfaceSettingsContent: View {
+    var settings: AppSettings
+
+    var body: some View {
+        Section {
+            HStack {
+                Text("채팅 글꼴 크기: \(Int(settings.chatFontSize))pt")
+                Slider(value: Binding(
+                    get: { settings.chatFontSize },
+                    set: { settings.chatFontSize = $0 }
+                ), in: 10...24, step: 1)
+            }
+
+            Text("미리보기 텍스트")
+                .font(.system(size: settings.chatFontSize))
+                .foregroundStyle(.secondary)
+        } header: {
+            SettingsSectionHeader(
+                title: "글꼴",
+                helpContent: "대화 영역의 글꼴 크기를 조절합니다. 시스템 설정의 접근성 글꼴과 독립적입니다."
+            )
+        }
+
+        Section {
+            Picker("모드", selection: Binding(
+                get: { settings.interactionMode },
+                set: { settings.interactionMode = $0 }
+            )) {
+                Text("음성 + 텍스트").tag(InteractionMode.voiceAndText.rawValue)
+                Text("텍스트 전용").tag(InteractionMode.textOnly.rawValue)
+            }
+            .pickerStyle(.radioGroup)
+        } header: {
+            SettingsSectionHeader(
+                title: "상호작용 모드",
+                helpContent: "\"음성 + 텍스트\"는 마이크 버튼과 웨이크워드를 활성화합니다. \"텍스트 전용\"은 음성 기능을 비활성화합니다."
+            )
+        }
+
+        Section {
+            Toggle("3D 아바타 표시", isOn: Binding(
+                get: { settings.avatarEnabled },
+                set: { settings.avatarEnabled = $0 }
+            ))
+
+            Text("VRM 3D 아바타를 대화 영역 위에 표시합니다 (macOS 15+)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if settings.avatarEnabled {
+                Text("Dochi/Resources/Models/ 디렉토리에 default_avatar.vrm 파일을 배치해주세요")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            SettingsSectionHeader(
+                title: "아바타",
+                helpContent: "VRM 형식의 3D 아바타를 대화 영역 위에 표시합니다. macOS 15 이상에서 사용 가능합니다. Resources/Models/에 VRM 파일이 필요합니다."
+            )
+        }
+    }
+}
+
+// MARK: - WakeWord Settings Content (split from GeneralSettingsView)
+
+struct WakeWordSettingsContent: View {
+    var settings: AppSettings
+
+    var body: some View {
+        Section {
+            Toggle("웨이크워드 감지", isOn: Binding(
+                get: { settings.wakeWordEnabled },
+                set: { settings.wakeWordEnabled = $0 }
+            ))
+
+            TextField("웨이크워드", text: Binding(
+                get: { settings.wakeWord },
+                set: { settings.wakeWord = $0 }
+            ))
+            .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Text("침묵 타임아웃: \(String(format: "%.1f", settings.sttSilenceTimeout))초")
+                Slider(value: Binding(
+                    get: { settings.sttSilenceTimeout },
+                    set: { settings.sttSilenceTimeout = $0 }
+                ), in: 1...5, step: 0.5)
+            }
+
+            Toggle("항상 대기 모드", isOn: Binding(
+                get: { settings.wakeWordAlwaysOn },
+                set: { settings.wakeWordAlwaysOn = $0 }
+            ))
+
+            Text("앱이 활성화되어 있는 동안 항상 웨이크워드를 감지합니다")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            SettingsSectionHeader(
+                title: "웨이크워드",
+                helpContent: "지정한 단어를 말하면 자동으로 음성 입력이 시작됩니다. \"항상 대기 모드\"를 켜면 앱이 활성화된 동안 계속 감지합니다."
+            )
+        }
+    }
+}
+
+// MARK: - Heartbeat Settings Content (split from GeneralSettingsView)
+
+struct HeartbeatSettingsContent: View {
     var settings: AppSettings
     var heartbeatService: HeartbeatService?
+
+    var body: some View {
+        Section {
+            Toggle("하트비트 활성화", isOn: Binding(
+                get: { settings.heartbeatEnabled },
+                set: { settings.heartbeatEnabled = $0 }
+            ))
+
+            Text("주기적으로 일정과 할 일을 점검하여 자동 알림")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("점검 주기: \(settings.heartbeatIntervalMinutes)분")
+                Slider(
+                    value: Binding(
+                        get: { Double(settings.heartbeatIntervalMinutes) },
+                        set: { settings.heartbeatIntervalMinutes = Int($0.rounded()) }
+                    ),
+                    in: 5...120,
+                    step: 5
+                )
+            }
+
+            Toggle("캘린더 점검", isOn: Binding(
+                get: { settings.heartbeatCheckCalendar },
+                set: { settings.heartbeatCheckCalendar = $0 }
+            ))
+            Toggle("칸반 점검", isOn: Binding(
+                get: { settings.heartbeatCheckKanban },
+                set: { settings.heartbeatCheckKanban = $0 }
+            ))
+            Toggle("미리알림 점검", isOn: Binding(
+                get: { settings.heartbeatCheckReminders },
+                set: { settings.heartbeatCheckReminders = $0 }
+            ))
+        } header: {
+            SettingsSectionHeader(
+                title: "하트비트",
+                helpContent: "주기적으로 캘린더, 칸반, 미리알림을 점검하여 알려줄 내용이 있으면 자동으로 메시지를 보냅니다. 조용한 시간 동안에는 알림을 보내지 않습니다."
+            )
+        }
+
+        Section("하트비트 조용한 시간") {
+            Stepper(
+                "시작: \(settings.heartbeatQuietHoursStart):00",
+                value: Binding(
+                    get: { settings.heartbeatQuietHoursStart },
+                    set: { settings.heartbeatQuietHoursStart = min(max($0, 0), 23) }
+                ),
+                in: 0...23
+            )
+
+            Stepper(
+                "종료: \(settings.heartbeatQuietHoursEnd):00",
+                value: Binding(
+                    get: { settings.heartbeatQuietHoursEnd },
+                    set: { settings.heartbeatQuietHoursEnd = min(max($0, 0), 23) }
+                ),
+                in: 0...23
+            )
+        }
+
+        if let heartbeatService {
+            Section("하트비트 상태") {
+                if let lastTick = heartbeatService.lastTickDate {
+                    HStack {
+                        Text("마지막 실행")
+                        Spacer()
+                        Text(lastTick, style: .relative)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("아직 실행되지 않음")
+                        .foregroundStyle(.secondary)
+                }
+
+                if let result = heartbeatService.lastTickResult {
+                    HStack {
+                        Text("점검 항목")
+                        Spacer()
+                        Text(result.checksPerformed.joined(separator: ", "))
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+                    HStack {
+                        Text("발견 항목")
+                        Spacer()
+                        Text("\(result.itemsFound)건")
+                            .foregroundStyle(result.itemsFound > 0 ? .primary : .secondary)
+                    }
+                    if result.notificationSent {
+                        Text("알림 전송됨")
+                            .foregroundStyle(.green)
+                            .font(.caption)
+                    }
+                    if let error = result.error {
+                        Text("오류: \(error)")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                    }
+                }
+
+                HStack {
+                    Text("실행 이력")
+                    Spacer()
+                    Text("\(heartbeatService.tickHistory.count)건")
+                        .foregroundStyle(.secondary)
+                }
+
+                if heartbeatService.consecutiveErrors > 0 {
+                    HStack {
+                        Text("연속 오류")
+                        Spacer()
+                        Text("\(heartbeatService.consecutiveErrors)회")
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Guide Settings Content (split from GeneralSettingsView)
+
+struct GuideSettingsContent: View {
+    var settings: AppSettings
 
     @State private var showFeatureTourSheet = false
 
     var body: some View {
-        Form {
-            Section {
+        Section("가이드") {
+            Button {
+                settings.resetFeatureTour()
+                showFeatureTourSheet = true
+            } label: {
                 HStack {
-                    Text("채팅 글꼴 크기: \(Int(settings.chatFontSize))pt")
-                    Slider(value: Binding(
-                        get: { settings.chatFontSize },
-                        set: { settings.chatFontSize = $0 }
-                    ), in: 10...24, step: 1)
-                }
-
-                Text("미리보기 텍스트")
-                    .font(.system(size: settings.chatFontSize))
-                    .foregroundStyle(.secondary)
-            } header: {
-                SettingsSectionHeader(
-                    title: "글꼴",
-                    helpContent: "대화 영역의 글꼴 크기를 조절합니다. 시스템 설정의 접근성 글꼴과 독립적입니다."
-                )
-            }
-
-            Section {
-                Picker("모드", selection: Binding(
-                    get: { settings.interactionMode },
-                    set: { settings.interactionMode = $0 }
-                )) {
-                    Text("음성 + 텍스트").tag(InteractionMode.voiceAndText.rawValue)
-                    Text("텍스트 전용").tag(InteractionMode.textOnly.rawValue)
-                }
-                .pickerStyle(.radioGroup)
-            } header: {
-                SettingsSectionHeader(
-                    title: "상호작용 모드",
-                    helpContent: "\"음성 + 텍스트\"는 마이크 버튼과 웨이크워드를 활성화합니다. \"텍스트 전용\"은 음성 기능을 비활성화합니다."
-                )
-            }
-
-            Section {
-                Toggle("웨이크워드 감지", isOn: Binding(
-                    get: { settings.wakeWordEnabled },
-                    set: { settings.wakeWordEnabled = $0 }
-                ))
-
-                TextField("웨이크워드", text: Binding(
-                    get: { settings.wakeWord },
-                    set: { settings.wakeWord = $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-
-                HStack {
-                    Text("침묵 타임아웃: \(String(format: "%.1f", settings.sttSilenceTimeout))초")
-                    Slider(value: Binding(
-                        get: { settings.sttSilenceTimeout },
-                        set: { settings.sttSilenceTimeout = $0 }
-                    ), in: 1...5, step: 0.5)
-                }
-
-                Toggle("항상 대기 모드", isOn: Binding(
-                    get: { settings.wakeWordAlwaysOn },
-                    set: { settings.wakeWordAlwaysOn = $0 }
-                ))
-
-                Text("앱이 활성화되어 있는 동안 항상 웨이크워드를 감지합니다")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } header: {
-                SettingsSectionHeader(
-                    title: "웨이크워드",
-                    helpContent: "지정한 단어를 말하면 자동으로 음성 입력이 시작됩니다. \"항상 대기 모드\"를 켜면 앱이 활성화된 동안 계속 감지합니다."
-                )
-            }
-
-            Section {
-                Toggle("3D 아바타 표시", isOn: Binding(
-                    get: { settings.avatarEnabled },
-                    set: { settings.avatarEnabled = $0 }
-                ))
-
-                Text("VRM 3D 아바타를 대화 영역 위에 표시합니다 (macOS 15+)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if settings.avatarEnabled {
-                    Text("Dochi/Resources/Models/ 디렉토리에 default_avatar.vrm 파일을 배치해주세요")
-                        .font(.caption)
+                    Image(systemName: "play.rectangle")
                         .foregroundStyle(.secondary)
+                    Text("기능 투어 다시 보기")
                 }
-            } header: {
-                SettingsSectionHeader(
-                    title: "아바타",
-                    helpContent: "VRM 형식의 3D 아바타를 대화 영역 위에 표시합니다. macOS 15 이상에서 사용 가능합니다. Resources/Models/에 VRM 파일이 필요합니다."
-                )
             }
+            .buttonStyle(.plain)
 
-            Section {
-                Toggle("하트비트 활성화", isOn: Binding(
-                    get: { settings.heartbeatEnabled },
-                    set: { settings.heartbeatEnabled = $0 }
-                ))
-
-                Text("주기적으로 일정과 할 일을 점검하여 자동 알림")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
+            Button {
+                settings.resetAllHints()
+                HintManager.shared.resetAllHints()
+            } label: {
                 HStack {
-                    Text("점검 주기: \(settings.heartbeatIntervalMinutes)분")
-                    Slider(
-                        value: Binding(
-                            get: { Double(settings.heartbeatIntervalMinutes) },
-                            set: { settings.heartbeatIntervalMinutes = Int($0.rounded()) }
-                        ),
-                        in: 5...120,
-                        step: 5
-                    )
-                }
-
-                Toggle("캘린더 점검", isOn: Binding(
-                    get: { settings.heartbeatCheckCalendar },
-                    set: { settings.heartbeatCheckCalendar = $0 }
-                ))
-                Toggle("칸반 점검", isOn: Binding(
-                    get: { settings.heartbeatCheckKanban },
-                    set: { settings.heartbeatCheckKanban = $0 }
-                ))
-                Toggle("미리알림 점검", isOn: Binding(
-                    get: { settings.heartbeatCheckReminders },
-                    set: { settings.heartbeatCheckReminders = $0 }
-                ))
-            } header: {
-                SettingsSectionHeader(
-                    title: "하트비트",
-                    helpContent: "주기적으로 캘린더, 칸반, 미리알림을 점검하여 알려줄 내용이 있으면 자동으로 메시지를 보냅니다. 조용한 시간 동안에는 알림을 보내지 않습니다."
-                )
-            }
-
-            Section("하트비트 조용한 시간") {
-                Stepper(
-                    "시작: \(settings.heartbeatQuietHoursStart):00",
-                    value: Binding(
-                        get: { settings.heartbeatQuietHoursStart },
-                        set: { settings.heartbeatQuietHoursStart = min(max($0, 0), 23) }
-                    ),
-                    in: 0...23
-                )
-
-                Stepper(
-                    "종료: \(settings.heartbeatQuietHoursEnd):00",
-                    value: Binding(
-                        get: { settings.heartbeatQuietHoursEnd },
-                        set: { settings.heartbeatQuietHoursEnd = min(max($0, 0), 23) }
-                    ),
-                    in: 0...23
-                )
-            }
-
-            if let heartbeatService {
-                Section("하트비트 상태") {
-                    if let lastTick = heartbeatService.lastTickDate {
-                        HStack {
-                            Text("마지막 실행")
-                            Spacer()
-                            Text(lastTick, style: .relative)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Text("아직 실행되지 않음")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let result = heartbeatService.lastTickResult {
-                        HStack {
-                            Text("점검 항목")
-                            Spacer()
-                            Text(result.checksPerformed.joined(separator: ", "))
-                                .foregroundStyle(.secondary)
-                                .font(.caption)
-                        }
-                        HStack {
-                            Text("발견 항목")
-                            Spacer()
-                            Text("\(result.itemsFound)건")
-                                .foregroundStyle(result.itemsFound > 0 ? .primary : .secondary)
-                        }
-                        if result.notificationSent {
-                            Text("알림 전송됨")
-                                .foregroundStyle(.green)
-                                .font(.caption)
-                        }
-                        if let error = result.error {
-                            Text("오류: \(error)")
-                                .foregroundStyle(.red)
-                                .font(.caption)
-                        }
-                    }
-
-                    HStack {
-                        Text("실행 이력")
-                        Spacer()
-                        Text("\(heartbeatService.tickHistory.count)건")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if heartbeatService.consecutiveErrors > 0 {
-                        HStack {
-                            Text("연속 오류")
-                            Spacer()
-                            Text("\(heartbeatService.consecutiveErrors)회")
-                                .foregroundStyle(.red)
-                        }
-                    }
+                    Image(systemName: "arrow.counterclockwise")
+                        .foregroundStyle(.secondary)
+                    Text("인앱 힌트 초기화")
                 }
             }
+            .buttonStyle(.plain)
 
-            // UX-9: 가이드 섹션
-            Section("가이드") {
-                Button {
-                    settings.resetFeatureTour()
-                    showFeatureTourSheet = true
-                } label: {
-                    HStack {
-                        Image(systemName: "play.rectangle")
-                            .foregroundStyle(.secondary)
-                        Text("기능 투어 다시 보기")
+            Toggle("인앱 힌트 표시", isOn: Binding(
+                get: { settings.hintsEnabled },
+                set: { newValue in
+                    settings.hintsEnabled = newValue
+                    if !newValue {
+                        HintManager.shared.disableAllHints()
                     }
                 }
-                .buttonStyle(.plain)
-
-                Button {
-                    settings.resetAllHints()
-                    HintManager.shared.resetAllHints()
-                } label: {
-                    HStack {
-                        Image(systemName: "arrow.counterclockwise")
-                            .foregroundStyle(.secondary)
-                        Text("인앱 힌트 초기화")
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Toggle("인앱 힌트 표시", isOn: Binding(
-                    get: { settings.hintsEnabled },
-                    set: { newValue in
-                        settings.hintsEnabled = newValue
-                        if !newValue {
-                            HintManager.shared.disableAllHints()
-                        }
-                    }
-                ))
-            }
+            ))
         }
-        .formStyle(.grouped)
-        .padding()
         .sheet(isPresented: $showFeatureTourSheet) {
             FeatureTourView(
                 onComplete: { showFeatureTourSheet = false },
                 onSkip: { showFeatureTourSheet = false }
             )
         }
+    }
+}
+
+// MARK: - GeneralSettingsView (backward compatibility wrapper)
+
+struct GeneralSettingsView: View {
+    var settings: AppSettings
+    var heartbeatService: HeartbeatService?
+
+    var body: some View {
+        Form {
+            InterfaceSettingsContent(settings: settings)
+            WakeWordSettingsContent(settings: settings)
+            HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService)
+            GuideSettingsContent(settings: settings)
+        }
+        .formStyle(.grouped)
+        .padding()
     }
 }
 

@@ -22,7 +22,7 @@ DochiApp (entry point)
     │   └── SidebarAuthStatusView — Supabase 로그인 상태
     ├── [Detail]
     │   ├── [대화 탭]
-    │   │   ├── SystemHealthBarView — 시스템 상태 바 (모델/동기화/하트비트/토큰) [항상 표시]
+    │   │   ├── SystemHealthBarView — 시스템 상태 바 (개별 클릭 가능: 모델→QuickModel팝오버/동기화/하트비트/토큰→상태시트) [항상 표시]
     │   │   ├── StatusBarView — 상태/토큰 (처리 중에만 표시)
     │   │   ├── ToolConfirmationBannerView — 민감 도구 승인 (카운트다운 타이머, Enter/Escape 단축키)
     │   │   ├── SystemPromptBannerView — 시스템 프롬프트 접기/펼치기 배너 (UX-8)
@@ -68,7 +68,7 @@ DochiApp (entry point)
 | MessageBubbleView | `Views/MessageBubbleView.swift` | 자동 | 개별 메시지 렌더링 (역할별 스타일), 호버 시 복사 버튼 오버레이 |
 | EmptyConversationView | `Views/ContentView.swift` | 빈 대화 | 카테고리별 제안 프롬프트, "모든 기능 보기" 링크, 단축키 힌트, 에이전트 0개 시 생성 힌트 카드, 투어 리마인더 배너, 첫 대화 힌트 버블 |
 | InputBarView | `Views/ContentView.swift` | 항상 표시 | 텍스트 입력, 마이크, 전송/취소 버튼, 슬래시 명령 |
-| SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 현재 모델, 동기화 상태, 하트비트, 세션 토큰 (클릭 → 상세 시트) |
+| SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 4개 독립 버튼: 모델(→QuickModelPopover), 동기화(→상태시트), 하트비트(→상태시트), 토큰(→상태시트). IndicatorButtonStyle 호버 |
 | MessageMetadataBadgeView | `Views/MessageBubbleView.swift` | assistant 메시지 자동 | 모델명·응답시간 배지, 호버 시 상세 팝오버 (토큰/프로바이더/폴백) |
 | StatusBarView | `Views/ContentView.swift` | 처리 중 자동 | 상태 아이콘 + 텍스트 + 토큰 사용량 |
 | ToolExecutionCardView | `Views/ToolExecutionCardView.swift` | 도구 실행 시 자동 | 접을 수 있는 실시간 도구 실행 카드 (상태 아이콘, 도구명, 입력 요약, 소요 시간, 카테고리 배지) |
@@ -100,6 +100,7 @@ DochiApp (entry point)
 | CommandPaletteView | `Views/CommandPaletteView.swift` | ⌘K | VS Code 스타일 커맨드 팔레트 오버레이 (퍼지 검색, 그룹 섹션) |
 | QuickSwitcherView | `Views/QuickSwitcherView.swift` | ⌘⇧A / ⌘⇧W / ⌘⇧U | 에이전트/워크스페이스/사용자 빠른 전환 시트 |
 | TagManagementView | `Views/Sidebar/TagManagementView.swift` | 사이드바 "태그" 버튼 또는 컨텍스트 메뉴 "태그 관리" | 태그 CRUD 시트 (360x400pt), 9색 팔레트, 사용 수 |
+| QuickModelPopoverView | `Views/QuickModelPopoverView.swift` | SystemHealthBar 모델 클릭 또는 ⌘⇧M | 프로바이더 선택 + 모델 목록 + 자동 라우팅 토글 (320pt 폭) |
 | OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 + 기능 투어 연결 |
 | FeatureTourView | `Views/Guide/FeatureTourViews.swift` | 온보딩 완료 후 / 설정 > 일반 > 가이드 / 커맨드 팔레트 | 4단계 기능 투어 (개요/대화/에이전트·워크스페이스/단축키) |
 | WorkspaceManagementView | `Views/Sidebar/WorkspaceManagementView.swift` | SidebarHeader 메뉴 | 워크스페이스 생성/삭제 |
@@ -110,19 +111,29 @@ DochiApp (entry point)
 | ExportOptionsView | `Views/ExportOptionsView.swift` | 툴바 "내보내기" 버튼 (⌘⇧E) 또는 커맨드 팔레트 | 4형식 선택(Md/JSON/PDF/텍스트), 3옵션 토글, 3액션(클립보드/공유/파일 저장), 400x480pt |
 | LoginSheet | `Views/Settings/LoginSheet.swift` | 계정 설정에서 | Supabase 로그인/가입 |
 
-### 설정 (SettingsView — 9개 탭)
+### 설정 (SettingsView — NavigationSplitView, 12섹션 6그룹) (UX-10 리디자인)
 
-| 탭 | 파일 | 내용 |
-|----|------|------|
-| 일반 | `Views/SettingsView.swift` 내 | 폰트, 인터랙션 모드, 웨이크워드, 아바타, Heartbeat, 가이드 (투어/힌트 관리) |
-| AI 모델 | `Views/SettingsView.swift` 내 | 프로바이더/모델 선택, Ollama, 태스크 라우팅, 폴백 |
-| API 키 | `Views/SettingsView.swift` 내 | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
-| 음성 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더, 음성, 속도/피치 |
-| 가족 | `Views/Settings/FamilySettingsView.swift` | 사용자 프로필 CRUD |
-| 에이전트 | `Views/Settings/AgentSettingsView.swift` → `Views/Agent/AgentCardGridView.swift` | 에이전트 카드 그리드 (편집/복제/템플릿저장/삭제 + 위저드로 생성) |
-| 도구 | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
-| 통합 | `Views/Settings/IntegrationsSettingsView.swift` | 텔레그램, MCP, 채팅 매핑 |
-| 계정 | `Views/Settings/AccountSettingsView.swift` | Supabase 인증, 동기화 |
+SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 NavigationSplitView 구조.
+사이드바: 검색 필드 + 6개 그룹별 섹션 목록 (호버/선택 하이라이트).
+창 크기: 780×540pt (이상), 680×440pt (최소). 사이드바 폭 180pt.
+
+| 그룹 | 섹션 (rawValue) | 아이콘 | 파일 | 내용 |
+|------|----------------|--------|------|------|
+| AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택, Ollama, 태스크 라우팅, 폴백 |
+| AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
+| 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더, 음성, 속도/피치 |
+| 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타 |
+| 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
+| 일반 | 하트비트 (`heartbeat`) | heart.circle | `Views/SettingsView.swift` 내 HeartbeatSettingsContent | Heartbeat 간격, 캘린더/칸반/미리알림 체크 |
+| 사람 | 가족 (`family`) | person.2 | `Views/Settings/FamilySettingsView.swift` | 사용자 프로필 CRUD |
+| 사람 | 에이전트 (`agent`) | person.crop.rectangle | `Views/Settings/AgentSettingsView.swift` → `Views/Agent/AgentCardGridView.swift` | 에이전트 카드 그리드 |
+| 연결 | 도구 (`tools`) | wrench.and.screwdriver | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
+| 연결 | 통합 (`integrations`) | puzzlepiece | `Views/Settings/IntegrationsSettingsView.swift` | 텔레그램, MCP, 채팅 매핑 |
+| 연결 | 계정 (`account`) | person.crop.circle | `Views/Settings/AccountSettingsView.swift` | Supabase 인증, 동기화 |
+| 도움말 | 가이드 (`guide`) | play.rectangle | `Views/SettingsView.swift` 내 GuideSettingsContent | 투어/힌트 관리 |
+
+지원 파일:
+- `Views/Settings/SettingsSidebarView.swift` — SettingsSection enum, SettingsSectionGroup enum, SettingsSidebarView, SettingsSidebarRow
 
 ---
 
@@ -275,7 +286,7 @@ CommandPaletteView (⌘K) -> executePaletteAction() -> 동일 흐름
 즐겨찾기: 컨텍스트 메뉴 -> viewModel.toggleFavorite() -> 대화 저장 -> 목록 리로드
 태그: 컨텍스트 메뉴/TagManagementView -> viewModel.toggleTagOnConversation() -> 대화 저장
 폴더: 컨텍스트 메뉴/드래그앤드롭 -> viewModel.moveConversationToFolder() -> 대화 저장
-일괄 선택: ⌘⇧M -> viewModel.toggleMultiSelectMode() -> BulkActionToolbar 표시
+일괄 선택: 커맨드 팔레트/툴바 -> viewModel.toggleMultiSelectMode() -> BulkActionToolbar 표시
   -> bulkDelete/bulkMoveToFolder/bulkSetFavorite/bulkAddTag
 필터: 필터 버튼 -> ConversationFilterView 팝오버 -> filter 바인딩 -> filteredConversations 업데이트
 ```
@@ -321,6 +332,18 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
   -> MessageBubbleView -> MemoryReferenceBadgeView: "메모리 N계층" 배지
   -> 호버 팝오버: 계층별 사용 여부 + 글자수
 기존 컨텍스트 인스펙터: ⌘⌥I -> showContextInspector -> ContextInspectorView (시트)
+```
+
+### 모델 빠른 변경 (UX-10 추가)
+```
+SystemHealthBarView 모델 클릭 / ⌘⇧M -> showQuickModelPopover = true
+  -> QuickModelPopoverView (320pt popover)
+  -> 프로바이더 라디오 버튼 선택 -> settings.llmProvider 변경
+  -> 모델 목록 선택 -> settings.llmModel 변경
+  -> "자동 모델 선택" 토글 -> settings.taskRoutingEnabled 변경
+  -> "설정에서 더 보기" -> 설정 창 열기 (aiModel 섹션)
+커맨드 팔레트: "모델 빠르게 변경" -> openQuickModelPopover 액션
+  "AI 모델 설정 열기" / "API 키 설정 열기" / ... -> openSettingsSection(section:) 액션
 ```
 
 ### 가이드/온보딩 (UX-9 추가)
@@ -374,7 +397,7 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 | ⌘⇧U | 사용자 빠른 전환 | ContentView (hidden button) |
 | ⌘⇧K | 칸반/대화 전환 | ContentView (onKeyPress) |
 | ⌘⇧L | 즐겨찾기 필터 토글 | ContentView (onKeyPress) |
-| ⌘⇧M | 일괄 선택 모드 토글 | ContentView (onKeyPress) |
+| ⌘⇧M | 모델 빠른 변경 (QuickModelPopover) | ContentView (onKeyPress) (UX-10 변경, 기존 일괄선택은 커맨드 팔레트/툴바로 접근) |
 | ⌘⇧T | 도구 카드 일괄 접기/펼치기 | ContentView (hidden button) |
 | Escape | 요청 취소 / 확인 배너 거부 / 팔레트 닫기 | ContentView (onKeyPress) |
 | Enter | 확인 배너 허용 / 메시지 전송 | ContentView (onKeyPress) / InputBarView |
@@ -405,6 +428,8 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 | 힌트 버블 (ViewModifier + material) | HintBubbleModifier | 일회성 맥락 힌트 (1.5초 후 fadeIn, 최대 1개, "다시 보지 않기") |
 | 설정 도움말 버튼 (? + popover) | SettingsHelpButton | 섹션 헤더 "?" 아이콘, 클릭 시 설명 팝오버 (280pt) |
 | 투어 단계 (step indicator + 콘텐츠) | FeatureTourView | 4단계 워크스루 (이전/다음/건너뛰기/시작) |
+| 인디케이터 버튼 (ButtonStyle + onHover) | SystemHealthBarView | 호버 시 배경색 표시, 개별 클릭 영역 (UX-10) |
+| 설정 사이드바 (List + 그룹 섹션) | SettingsSidebarView | 검색 필드 + 6그룹 12섹션, 호버/선택 하이라이트 (UX-10) |
 
 ---
 
@@ -485,4 +510,4 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 
 ---
 
-*최종 업데이트: 2026-02-15 (UX-9 머지 후)*
+*최종 업데이트: 2026-02-15 (UX-10 머지 후)*
