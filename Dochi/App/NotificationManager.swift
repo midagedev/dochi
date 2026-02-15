@@ -45,6 +45,7 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
     // MARK: - Setup
 
     /// Register notification categories and actions. Call at app launch.
+    /// Respects `settings.notificationReplyEnabled` to include or exclude reply actions.
     func registerCategories() {
         let replyAction = UNTextInputNotificationAction(
             identifier: ActionIdentifier.reply.rawValue,
@@ -66,9 +67,16 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
             options: .destructive
         )
 
+        let replyEnabled = settings.notificationReplyEnabled
+
+        // Calendar and reminder categories support reply when enabled
+        let calendarActions: [UNNotificationAction] = replyEnabled
+            ? [replyAction, openAppAction, dismissAction]
+            : [openAppAction, dismissAction]
+
         let calendarCategory = UNNotificationCategory(
             identifier: Category.calendar.rawValue,
-            actions: [replyAction, openAppAction, dismissAction],
+            actions: calendarActions,
             intentIdentifiers: [],
             options: []
         )
@@ -80,9 +88,13 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
             options: []
         )
 
+        let reminderActions: [UNNotificationAction] = replyEnabled
+            ? [replyAction, openAppAction, dismissAction]
+            : [openAppAction, dismissAction]
+
         let reminderCategory = UNNotificationCategory(
             identifier: Category.reminder.rawValue,
-            actions: [replyAction, openAppAction, dismissAction],
+            actions: reminderActions,
             intentIdentifiers: [],
             options: []
         )
@@ -97,7 +109,7 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
         UNUserNotificationCenter.current().setNotificationCategories([
             calendarCategory, kanbanCategory, reminderCategory, memoryCategory
         ])
-        Log.app.info("NotificationManager: registered 4 notification categories")
+        Log.app.info("NotificationManager: registered 4 notification categories (replyEnabled: \(replyEnabled))")
     }
 
     /// Request notification permission if not already granted.

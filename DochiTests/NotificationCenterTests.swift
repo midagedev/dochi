@@ -261,6 +261,180 @@ final class NotificationCenterTests: XCTestCase {
         viewModel.handleNotificationOpenApp(category: "unknown-category")
     }
 
+    // MARK: - C-1: registerCategories respects notificationReplyEnabled
+
+    func testRegisterCategoriesWithReplyDisabled() {
+        let settings = AppSettings()
+        settings.notificationReplyEnabled = false
+        let manager = NotificationManager(settings: settings)
+        // Should not crash when reply is disabled
+        manager.registerCategories()
+
+        // Restore
+        settings.notificationReplyEnabled = true
+    }
+
+    func testRegisterCategoriesWithReplyEnabled() {
+        let settings = AppSettings()
+        settings.notificationReplyEnabled = true
+        let manager = NotificationManager(settings: settings)
+        // Should not crash when reply is enabled
+        manager.registerCategories()
+    }
+
+    // MARK: - C-2: handleNotificationReply creates conversation when nil
+
+    func testHandleNotificationReplyCreatesConversationWhenNil() {
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        // Do NOT set currentConversation — it starts nil
+        XCTAssertNil(viewModel.currentConversation)
+
+        // Handle notification reply — should auto-create a conversation
+        viewModel.handleNotificationReply(
+            text: "확인",
+            category: "dochi-calendar",
+            originalBody: "14:00 미팅이 있습니다"
+        )
+
+        // Conversation should now exist with the injected context
+        XCTAssertNotNil(viewModel.currentConversation)
+
+        // The injected assistant message should contain the original notification body
+        let messages = viewModel.currentConversation?.messages ?? []
+        let hasNotificationContext = messages.contains { $0.role == .assistant && $0.content.contains("14:00 미팅이 있습니다") }
+        XCTAssertTrue(hasNotificationContext, "Notification context should be injected as assistant message")
+    }
+
+    // MARK: - C-3: handleNotificationOpenApp sets navigation properties
+
+    func testHandleNotificationOpenAppNavigatesToKanban() {
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        viewModel.handleNotificationOpenApp(category: NotificationManager.Category.kanban.rawValue)
+        XCTAssertEqual(viewModel.notificationRequestedSection, "kanban")
+    }
+
+    func testHandleNotificationOpenAppNavigatesToChatForCalendar() {
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        viewModel.handleNotificationOpenApp(category: NotificationManager.Category.calendar.rawValue)
+        XCTAssertEqual(viewModel.notificationRequestedSection, "chat")
+    }
+
+    func testHandleNotificationOpenAppNavigatesToChatForReminder() {
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        viewModel.handleNotificationOpenApp(category: NotificationManager.Category.reminder.rawValue)
+        XCTAssertEqual(viewModel.notificationRequestedSection, "chat")
+    }
+
+    func testHandleNotificationOpenAppShowsMemoryPanelForMemory() {
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        viewModel.handleNotificationOpenApp(category: NotificationManager.Category.memory.rawValue)
+        XCTAssertEqual(viewModel.notificationRequestedSection, "chat")
+        XCTAssertTrue(viewModel.notificationShowMemoryPanel)
+    }
+
+    func testHandleNotificationOpenAppUnknownCategoryNoNavigation() {
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        viewModel.handleNotificationOpenApp(category: "unknown-category")
+        XCTAssertNil(viewModel.notificationRequestedSection)
+        XCTAssertFalse(viewModel.notificationShowMemoryPanel)
+    }
+
     // MARK: - NotificationAuthorizationStatusView
 
     func testAuthorizationStatusViewStates() {

@@ -46,6 +46,25 @@ struct ContentView: View {
             .onAppear {
                 viewModel.loadConversations()
             }
+            // H-3: Handle notification-driven navigation
+            .onChange(of: viewModel.notificationRequestedSection) { _, newValue in
+                guard let section = newValue else { return }
+                switch section {
+                case "kanban":
+                    selectedSection = .kanban
+                case "chat":
+                    selectedSection = .chat
+                default:
+                    break
+                }
+                viewModel.notificationRequestedSection = nil
+            }
+            .onChange(of: viewModel.notificationShowMemoryPanel) { _, newValue in
+                if newValue {
+                    showMemoryPanel = true
+                    viewModel.notificationShowMemoryPanel = false
+                }
+            }
             .sheet(isPresented: $showContextInspector) {
                 ContextInspectorView(
                     contextService: viewModel.contextService,

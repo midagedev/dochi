@@ -31,6 +31,12 @@ final class DochiViewModel {
     // MARK: - Memory Toast (UX-8)
     var memoryToastEvents: [MemoryToastEvent] = []
 
+    // MARK: - Notification Navigation (H-3)
+    /// Set by notification handlers to request ContentView navigate to a specific section.
+    var notificationRequestedSection: String?
+    /// Set by notification handlers to request showing the memory panel.
+    var notificationShowMemoryPanel: Bool = false
+
     // MARK: - Sync (G-3)
     private(set) var syncEngine: SyncEngine?
 
@@ -1099,8 +1105,12 @@ final class DochiViewModel {
 
     /// Handle user reply from a notification action.
     /// Injects the original notification as assistant context and the user's reply, then sends to LLM.
+    /// If no current conversation exists, one is created first to preserve the notification context.
     func handleNotificationReply(text: String, category: String, originalBody: String) {
         Log.app.info("Notification reply from category \(category): \(text)")
+
+        // Ensure a conversation exists so the notification context is not lost
+        ensureConversation()
 
         // Inject original notification body as assistant context
         injectProactiveMessage("[알림] \(originalBody)")
@@ -1121,20 +1131,22 @@ final class DochiViewModel {
             window.makeKeyAndOrderFront(nil)
         }
 
-        // Navigate based on category
+        // Navigate based on category by setting observable properties
+        // ContentView observes these and performs the actual UI navigation.
         switch category {
         case NotificationManager.Category.calendar.rawValue:
-            // Focus on main conversation
+            notificationRequestedSection = "chat"
             Log.app.info("Notification: navigating to conversation for calendar")
         case NotificationManager.Category.kanban.rawValue:
-            // Switch to kanban tab
+            notificationRequestedSection = "kanban"
             Log.app.info("Notification: navigating to kanban")
         case NotificationManager.Category.reminder.rawValue:
-            // Focus on main conversation
+            notificationRequestedSection = "chat"
             Log.app.info("Notification: navigating to conversation for reminders")
         case NotificationManager.Category.memory.rawValue:
-            // Focus on main conversation
-            Log.app.info("Notification: navigating to conversation for memory")
+            notificationRequestedSection = "chat"
+            notificationShowMemoryPanel = true
+            Log.app.info("Notification: navigating to memory panel")
         default:
             break
         }
