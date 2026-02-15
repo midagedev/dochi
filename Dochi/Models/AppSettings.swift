@@ -376,6 +376,40 @@ final class AppSettings {
         TTSProvider(rawValue: ttsProvider) ?? .system
     }
 
+    // MARK: - RAG (I-1)
+
+    var ragEnabled: Bool = UserDefaults.standard.object(forKey: "ragEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(ragEnabled, forKey: "ragEnabled") }
+    }
+
+    var ragEmbeddingProvider: String = UserDefaults.standard.string(forKey: "ragEmbeddingProvider") ?? "openai" {
+        didSet { UserDefaults.standard.set(ragEmbeddingProvider, forKey: "ragEmbeddingProvider") }
+    }
+
+    var ragEmbeddingModel: String = UserDefaults.standard.string(forKey: "ragEmbeddingModel") ?? "text-embedding-3-small" {
+        didSet { UserDefaults.standard.set(ragEmbeddingModel, forKey: "ragEmbeddingModel") }
+    }
+
+    var ragTopK: Int = UserDefaults.standard.object(forKey: "ragTopK") as? Int ?? 3 {
+        didSet { UserDefaults.standard.set(ragTopK, forKey: "ragTopK") }
+    }
+
+    var ragMinSimilarity: Double = UserDefaults.standard.object(forKey: "ragMinSimilarity") as? Double ?? 0.3 {
+        didSet { UserDefaults.standard.set(ragMinSimilarity, forKey: "ragMinSimilarity") }
+    }
+
+    var ragAutoSearch: Bool = UserDefaults.standard.object(forKey: "ragAutoSearch") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(ragAutoSearch, forKey: "ragAutoSearch") }
+    }
+
+    var ragChunkSize: Int = UserDefaults.standard.object(forKey: "ragChunkSize") as? Int ?? 500 {
+        didSet { UserDefaults.standard.set(ragChunkSize, forKey: "ragChunkSize") }
+    }
+
+    var ragChunkOverlap: Int = UserDefaults.standard.object(forKey: "ragChunkOverlap") as? Int ?? 100 {
+        didSet { UserDefaults.standard.set(ragChunkOverlap, forKey: "ragChunkOverlap") }
+    }
+
     // MARK: - Guide (UX-9)
 
     /// 인앱 힌트 표시 여부 (hintsGloballyDisabled의 반전)
