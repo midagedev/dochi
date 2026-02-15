@@ -101,10 +101,13 @@ final class FeedbackStore: FeedbackStoreProtocol {
     }
 
     func categoryDistribution() -> [CategoryCount] {
-        let negative = entries.filter { $0.rating == .negative && $0.category != nil }
-        let grouped = Dictionary(grouping: negative) { $0.category! }
-        return grouped.map { category, entries in
-            CategoryCount(category: category, count: entries.count)
+        let categorized = entries.compactMap { entry -> (FeedbackCategory, FeedbackEntry)? in
+            guard entry.rating == .negative, let category = entry.category else { return nil }
+            return (category, entry)
+        }
+        let grouped = Dictionary(grouping: categorized) { $0.0 }
+        return grouped.map { category, pairs in
+            CategoryCount(category: category, count: pairs.count)
         }.sorted { $0.count > $1.count }
     }
 

@@ -108,9 +108,6 @@ struct FeedbackAnalysisSheetView: View {
         }
         .padding(20)
         .frame(width: 520, height: 440)
-        .onAppear {
-            runAnalysis()
-        }
     }
 
     // MARK: - Analysis

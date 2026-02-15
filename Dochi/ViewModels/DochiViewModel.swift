@@ -245,6 +245,11 @@ final class DochiViewModel {
 
     /// 피드백 제출 (I-4)
     func submitFeedback(messageId: UUID, conversationId: UUID, rating: FeedbackRating, category: FeedbackCategory? = nil, comment: String? = nil) {
+        // Look up the message's actual provider/model from metadata (C-1 fix)
+        let message = findMessage(id: messageId, in: conversationId)
+        let provider = message?.metadata?.provider ?? settings.llmProvider
+        let model = message?.metadata?.model ?? settings.llmModel
+
         let entry = FeedbackEntry(
             messageId: messageId,
             conversationId: conversationId,
@@ -252,39 +257,30 @@ final class DochiViewModel {
             category: category,
             comment: comment,
             agentName: settings.activeAgentName,
-            provider: settings.llmProvider,
-            model: settings.llmModel
+            provider: provider,
+            model: model
         )
         feedbackStore?.add(entry)
-
-        // Update message's feedbackRating for visual state
-        if let convIdx = conversations.firstIndex(where: { $0.id == conversationId }) {
-            if let msgIdx = conversations[convIdx].messages.firstIndex(where: { $0.id == messageId }) {
-                conversations[convIdx].messages[msgIdx].feedbackRating = rating
-            }
-        }
-        if currentConversation?.id == conversationId {
-            if let msgIdx = currentConversation?.messages.firstIndex(where: { $0.id == messageId }) {
-                currentConversation?.messages[msgIdx].feedbackRating = rating
-            }
-        }
     }
 
     /// 피드백 삭제 (I-4)
     func removeFeedback(messageId: UUID) {
         feedbackStore?.remove(messageId: messageId)
+    }
 
-        // Clear message's feedbackRating
-        if let convId = currentConversation?.id {
-            if let convIdx = conversations.firstIndex(where: { $0.id == convId }) {
-                if let msgIdx = conversations[convIdx].messages.firstIndex(where: { $0.id == messageId }) {
-                    conversations[convIdx].messages[msgIdx].feedbackRating = nil
-                }
-            }
-            if let msgIdx = currentConversation?.messages.firstIndex(where: { $0.id == messageId }) {
-                currentConversation?.messages[msgIdx].feedbackRating = nil
-            }
+    /// 대화에서 메시지를 찾기 (C-1: 메시지 메타데이터 조회용)
+    private func findMessage(id messageId: UUID, in conversationId: UUID) -> Message? {
+        // Check currentConversation first (most common case)
+        if currentConversation?.id == conversationId,
+           let msg = currentConversation?.messages.first(where: { $0.id == messageId }) {
+            return msg
         }
+        // Fall back to conversations list
+        if let conv = conversations.first(where: { $0.id == conversationId }),
+           let msg = conv.messages.first(where: { $0.id == messageId }) {
+            return msg
+        }
+        return nil
     }
 
     /// 딥링크 처리 (dochi:// URL)

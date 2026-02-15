@@ -34,6 +34,11 @@ struct QuickModelPopoverView: View {
         }
     }
 
+    /// Cached model breakdown to avoid recomputation per row (N-2 fix)
+    private var cachedModelBreakdown: [ModelSatisfaction] {
+        feedbackStore?.modelBreakdown() ?? []
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
@@ -282,16 +287,13 @@ struct QuickModelPopoverView: View {
                         .foregroundStyle(.tertiary)
                 }
 
-                // I-4: Feedback warning badge
-                if let store = feedbackStore {
-                    let breakdown = store.modelBreakdown()
-                    if let modelStat = breakdown.first(where: { $0.model == model }),
-                       modelStat.isWarning {
-                        Circle()
-                            .fill(Color.orange)
-                            .frame(width: 6, height: 6)
-                            .help("만족도 \(String(format: "%.0f%%", modelStat.satisfactionRate * 100)) (피드백 \(modelStat.totalCount)건)")
-                    }
+                // I-4: Feedback warning badge (uses cached breakdown — N-2 fix)
+                if let modelStat = cachedModelBreakdown.first(where: { $0.model == model }),
+                   modelStat.isWarning {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 6, height: 6)
+                        .help("만족도 \(String(format: "%.0f%%", modelStat.satisfactionRate * 100)) (피드백 \(modelStat.totalCount)건)")
                 }
 
                 if isSelected {

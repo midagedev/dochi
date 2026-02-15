@@ -507,3 +507,157 @@ final class FeedbackSettingsSectionTests: XCTestCase {
         XCTAssertTrue(aiSections.contains(.feedback))
     }
 }
+
+// MARK: - C-1: submitFeedback Model Attribution Tests
+
+@MainActor
+final class FeedbackModelAttributionTests: XCTestCase {
+
+    private var viewModel: DochiViewModel!
+    private var mockFeedbackStore: MockFeedbackStore!
+    private var settings: AppSettings!
+
+    override func setUp() {
+        super.setUp()
+        settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+        let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let sessionContext = SessionContext(workspaceId: wsId)
+
+        viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: sessionContext
+        )
+        mockFeedbackStore = MockFeedbackStore()
+        viewModel.configureFeedbackStore(mockFeedbackStore)
+    }
+
+    func testSubmitFeedbackUsesMessageMetadataModel() {
+        // Set up a conversation with a message that has metadata
+        let msgId = UUID()
+        let convId = UUID()
+        let metadata = MessageMetadata(
+            provider: "anthropic",
+            model: "claude-3-5-sonnet",
+            inputTokens: 100,
+            outputTokens: 200,
+            totalLatency: 1.5,
+            wasFallback: false
+        )
+        let message = Message(id: msgId, role: .assistant, content: "테스트 응답", metadata: metadata)
+        let conversation = Conversation(id: convId, messages: [message])
+
+        viewModel.currentConversation = conversation
+
+        // Set different settings (simulating user switching models)
+        settings.llmProvider = "openai"
+        settings.llmModel = "gpt-4o"
+
+        // Submit feedback
+        viewModel.submitFeedback(messageId: msgId, conversationId: convId, rating: .positive)
+
+        // Verify it used the message metadata, not settings
+        XCTAssertEqual(mockFeedbackStore.entries.count, 1)
+        XCTAssertEqual(mockFeedbackStore.entries.first?.provider, "anthropic")
+        XCTAssertEqual(mockFeedbackStore.entries.first?.model, "claude-3-5-sonnet")
+    }
+
+    func testSubmitFeedbackFallsBackToSettingsWhenNoMetadata() {
+        // Set up a conversation with a message that has NO metadata
+        let msgId = UUID()
+        let convId = UUID()
+        let message = Message(id: msgId, role: .assistant, content: "테스트 응답")
+        let conversation = Conversation(id: convId, messages: [message])
+
+        viewModel.currentConversation = conversation
+
+        settings.llmProvider = "openai"
+        settings.llmModel = "gpt-4o"
+
+        // Submit feedback
+        viewModel.submitFeedback(messageId: msgId, conversationId: convId, rating: .negative)
+
+        // Should fall back to settings values
+        XCTAssertEqual(mockFeedbackStore.entries.count, 1)
+        XCTAssertEqual(mockFeedbackStore.entries.first?.provider, "openai")
+        XCTAssertEqual(mockFeedbackStore.entries.first?.model, "gpt-4o")
+    }
+
+    func testSubmitFeedbackFallsBackToSettingsWhenMessageNotFound() {
+        // Message not in any conversation
+        let msgId = UUID()
+        let convId = UUID()
+
+        settings.llmProvider = "zai"
+        settings.llmModel = "gemini-2.0-flash"
+
+        viewModel.submitFeedback(messageId: msgId, conversationId: convId, rating: .positive)
+
+        // Should fall back to settings values
+        XCTAssertEqual(mockFeedbackStore.entries.count, 1)
+        XCTAssertEqual(mockFeedbackStore.entries.first?.provider, "zai")
+        XCTAssertEqual(mockFeedbackStore.entries.first?.model, "gemini-2.0-flash")
+    }
+
+    func testSubmitFeedbackFindsMessageInConversationsList() {
+        // Message is in conversations list, not currentConversation
+        let msgId = UUID()
+        let convId = UUID()
+        let metadata = MessageMetadata(
+            provider: "anthropic",
+            model: "claude-3-opus",
+            inputTokens: 50,
+            outputTokens: 150,
+            totalLatency: 2.0,
+            wasFallback: false
+        )
+        let message = Message(id: msgId, role: .assistant, content: "테스트", metadata: metadata)
+        let conversation = Conversation(id: convId, messages: [message])
+
+        viewModel.conversations = [conversation]
+        viewModel.currentConversation = nil
+
+        settings.llmProvider = "openai"
+        settings.llmModel = "gpt-4o"
+
+        viewModel.submitFeedback(messageId: msgId, conversationId: convId, rating: .negative, category: .inaccurate)
+
+        XCTAssertEqual(mockFeedbackStore.entries.count, 1)
+        XCTAssertEqual(mockFeedbackStore.entries.first?.provider, "anthropic")
+        XCTAssertEqual(mockFeedbackStore.entries.first?.model, "claude-3-opus")
+        XCTAssertEqual(mockFeedbackStore.entries.first?.category, .inaccurate)
+    }
+
+    func testRemoveFeedbackDoesNotMutateMessages() {
+        // Set up a conversation with a message
+        let msgId = UUID()
+        let convId = UUID()
+        let message = Message(id: msgId, role: .assistant, content: "테스트 응답", feedbackRating: .positive)
+        let conversation = Conversation(id: convId, messages: [message])
+
+        viewModel.currentConversation = conversation
+        viewModel.conversations = [conversation]
+
+        // Add then remove feedback
+        viewModel.submitFeedback(messageId: msgId, conversationId: convId, rating: .positive)
+        viewModel.removeFeedback(messageId: msgId)
+
+        // feedbackStore should be empty
+        XCTAssertTrue(mockFeedbackStore.entries.isEmpty)
+
+        // Message's feedbackRating should NOT have been mutated by removeFeedback (S-2)
+        // The feedbackRating in conversations/currentConversation should remain unchanged
+        // since we no longer mutate it
+        XCTAssertEqual(viewModel.currentConversation?.messages.first?.feedbackRating, .positive)
+        XCTAssertEqual(viewModel.conversations.first?.messages.first?.feedbackRating, .positive)
+    }
+}

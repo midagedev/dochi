@@ -657,8 +657,11 @@ final class MockFeedbackStore: FeedbackStoreProtocol {
     }
 
     func categoryDistribution() -> [CategoryCount] {
-        let negative = entries.filter { $0.rating == .negative && $0.category != nil }
-        let grouped = Dictionary(grouping: negative) { $0.category! }
-        return grouped.map { cat, entries in CategoryCount(category: cat, count: entries.count) }
+        let categorized = entries.compactMap { entry -> (FeedbackCategory, FeedbackEntry)? in
+            guard entry.rating == .negative, let category = entry.category else { return nil }
+            return (category, entry)
+        }
+        let grouped = Dictionary(grouping: categorized) { $0.0 }
+        return grouped.map { cat, pairs in CategoryCount(category: cat, count: pairs.count) }
     }
 }
