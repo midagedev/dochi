@@ -5,6 +5,7 @@ import SwiftUI
 enum SettingsSection: String, CaseIterable, Identifiable {
     case aiModel = "ai-model"
     case apiKey = "api-key"
+    case usage = "usage"
     case voice = "voice"
     case interface = "interface"
     case wakeWord = "wake-word"
@@ -22,6 +23,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .aiModel: return "AI 모델"
         case .apiKey: return "API 키"
+        case .usage: return "사용량"
         case .voice: return "음성 합성"
         case .interface: return "인터페이스"
         case .wakeWord: return "웨이크워드"
@@ -39,6 +41,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .aiModel: return "brain"
         case .apiKey: return "key"
+        case .usage: return "chart.bar.xaxis"
         case .voice: return "speaker.wave.2"
         case .interface: return "textformat.size"
         case .wakeWord: return "mic"
@@ -54,7 +57,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var group: SettingsSectionGroup {
         switch self {
-        case .aiModel, .apiKey: return .ai
+        case .aiModel, .apiKey, .usage: return .ai
         case .voice: return .voice
         case .interface, .wakeWord, .heartbeat: return .general
         case .family, .agent: return .people
@@ -69,6 +72,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             return ["모델", "프로바이더", "OpenAI", "Anthropic", "Z.AI", "Ollama", "LM Studio", "로컬", "오프라인", "local", "라우팅", "폴백"]
         case .apiKey:
             return ["API", "키", "key", "OpenAI", "Anthropic", "Tavily", "Fal", "티어"]
+        case .usage:
+            return ["사용량", "비용", "cost", "토큰", "token", "예산", "budget", "대시보드", "dashboard"]
         case .voice:
             return ["음성", "TTS", "속도", "피치", "Google Cloud", "프로바이더"]
         case .interface:

@@ -81,6 +81,13 @@ struct DochiApp: App {
         )
         self.toolService = toolService
 
+        let metricsCollector = MetricsCollector()
+        let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Dochi")
+        let usageStore = UsageStore(baseURL: appSupportURL)
+        metricsCollector.usageStore = usageStore
+        metricsCollector.settings = settings
+
         _viewModel = State(initialValue: DochiViewModel(
             llmService: llmService,
             toolService: toolService,
@@ -91,7 +98,8 @@ struct DochiApp: App {
             ttsService: ttsService,
             soundService: soundService,
             settings: settings,
-            sessionContext: sessionContext
+            sessionContext: sessionContext,
+            metricsCollector: metricsCollector
         ))
 
         contextService.migrateIfNeeded()
@@ -229,6 +237,7 @@ struct DochiApp: App {
                 supabaseService: supabaseService,
                 toolService: toolService,
                 heartbeatService: heartbeatService,
+                metricsCollector: viewModel.metricsCollector,
                 viewModel: viewModel
             )
         }

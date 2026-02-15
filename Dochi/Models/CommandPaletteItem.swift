@@ -286,6 +286,14 @@ enum CommandPaletteRegistry {
             action: .openSettingsSection(section: "account")
         ),
         CommandPaletteItem(
+            id: "settings.open.usage",
+            icon: "chart.bar.xaxis",
+            title: "사용량 대시보드",
+            subtitle: "",
+            category: .settings,
+            action: .openSettingsSection(section: "usage")
+        ),
+        CommandPaletteItem(
             id: "settings.open.localllm",
             icon: "desktopcomputer",
             title: "로컬 LLM 설정",

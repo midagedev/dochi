@@ -111,17 +111,40 @@ private struct LLMExchangeTabView: View {
     }
 
     private var summarySection: some View {
-        HStack(spacing: 20) {
-            summaryItem("교환 수", "\(summary.totalExchanges)")
-            summaryItem("입력 토큰", formatTokens(summary.totalInputTokens))
-            summaryItem("출력 토큰", formatTokens(summary.totalOutputTokens))
-            summaryItem("평균 응답", String(format: "%.1f초", summary.averageLatency))
-            if summary.fallbackCount > 0 {
-                summaryItem("폴백", "\(summary.fallbackCount)회")
+        VStack(spacing: 8) {
+            HStack(spacing: 20) {
+                summaryItem("교환 수", "\(summary.totalExchanges)")
+                summaryItem("입력 토큰", formatTokens(summary.totalInputTokens))
+                summaryItem("출력 토큰", formatTokens(summary.totalOutputTokens))
+                summaryItem("평균 응답", String(format: "%.1f초", summary.averageLatency))
+                summaryItem("추정 비용", formatCost(metricsCollector.sessionCostUSD))
+                if summary.fallbackCount > 0 {
+                    summaryItem("폴백", "\(summary.fallbackCount)회")
+                }
             }
+
+            Button {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 10))
+                    Text("상세 대시보드 열기")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
         }
         .padding()
         .background(.secondary.opacity(0.04))
+    }
+
+    private func formatCost(_ cost: Double) -> String {
+        if cost > 0 {
+            return String(format: "$%.2f", cost)
+        }
+        return "$0.00"
     }
 
     private func summaryItem(_ label: String, _ value: String) -> some View {

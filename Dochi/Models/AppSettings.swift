@@ -244,6 +244,32 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(heartbeatQuietHoursEnd, forKey: "heartbeatQuietHoursEnd") }
     }
 
+    // MARK: - Budget Settings (G-4)
+
+    var budgetEnabled: Bool = UserDefaults.standard.object(forKey: "budgetEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(budgetEnabled, forKey: "budgetEnabled") }
+    }
+
+    var monthlyBudgetUSD: Double = UserDefaults.standard.object(forKey: "monthlyBudgetUSD") as? Double ?? 10.0 {
+        didSet { UserDefaults.standard.set(monthlyBudgetUSD, forKey: "monthlyBudgetUSD") }
+    }
+
+    var budgetAlert50: Bool = UserDefaults.standard.object(forKey: "budgetAlert50") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(budgetAlert50, forKey: "budgetAlert50") }
+    }
+
+    var budgetAlert80: Bool = UserDefaults.standard.object(forKey: "budgetAlert80") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(budgetAlert80, forKey: "budgetAlert80") }
+    }
+
+    var budgetAlert100: Bool = UserDefaults.standard.object(forKey: "budgetAlert100") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(budgetAlert100, forKey: "budgetAlert100") }
+    }
+
+    var budgetBlockOnExceed: Bool = UserDefaults.standard.object(forKey: "budgetBlockOnExceed") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(budgetBlockOnExceed, forKey: "budgetBlockOnExceed") }
+    }
+
     // MARK: - Sync Settings (G-3)
 
     var autoSyncEnabled: Bool = UserDefaults.standard.object(forKey: "autoSyncEnabled") as? Bool ?? true {

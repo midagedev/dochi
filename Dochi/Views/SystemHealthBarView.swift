@@ -137,7 +137,7 @@ struct SystemHealthBarView: View {
                 divider
             }
 
-            // 4. Session token usage
+            // 4. Session token usage + cost
             Button {
                 onTokenTap()
             } label: {
@@ -147,7 +147,13 @@ struct SystemHealthBarView: View {
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
                         if sessionSummary.totalExchanges > 0 {
-                            Text("\(formatTokens(sessionSummary.totalInputTokens + sessionSummary.totalOutputTokens)) 토큰")
+                            let totalTokens = sessionSummary.totalInputTokens + sessionSummary.totalOutputTokens
+                            let cost = metricsCollector.sessionCostUSD
+                            if cost > 0 {
+                                Text("\(formatTokens(totalTokens)) 토큰 \u{00B7} $\(String(format: "%.2f", cost))")
+                            } else {
+                                Text("\(formatTokens(totalTokens)) 토큰")
+                            }
                         } else {
                             Text("0 토큰")
                         }
