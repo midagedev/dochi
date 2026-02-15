@@ -365,11 +365,13 @@ final class TerminalService: TerminalServiceProtocol {
             }
 
             Task.detached {
-                proc.waitUntilExit()
-                timeoutTask.cancel()
-
+                // Read pipe data BEFORE waitUntilExit to avoid deadlock
+                // when output exceeds pipe buffer (64KB)
                 let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+                proc.waitUntilExit()
+                timeoutTask.cancel()
 
                 let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
                 let stderr = String(data: stderrData, encoding: .utf8) ?? ""

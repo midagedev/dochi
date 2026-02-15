@@ -210,4 +210,14 @@ final class TerminalServiceTests: XCTestCase {
 
         XCTAssertTrue(result.output.contains("test output"))
     }
+
+    func testRunCommandLargeOutput() async {
+        // Verify no deadlock with output exceeding pipe buffer (64KB)
+        let service = TerminalService(maxSessions: 4)
+        let result = await service.runCommand("python3 -c \"print('A' * 100000)\"", timeout: 10)
+
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertFalse(result.output.isEmpty)
+    }
 }

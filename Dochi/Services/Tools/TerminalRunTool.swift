@@ -11,12 +11,41 @@ final class TerminalRunTool: BuiltInToolProtocol {
     private nonisolated(unsafe) static let maxOutputSize = 8000
     private nonisolated(unsafe) static let defaultTimeout = 30
 
-    private let settings: AppSettings
-    private weak var terminalService: TerminalService?
+    /// 위험 명령 차단 패턴 (C-3)
+    static let dangerousPatterns: [String] = [
+        "rm -rf /",
+        "rm -rf /*",
+        "sudo ",
+        "shutdown",
+        "reboot",
+        "mkfs",
+        "dd if=",
+        ":(){:|:&};:",
+        "chmod -R 777 /",
+        "mv /* ",
+        "> /dev/sda",
+        "curl | bash",
+        "curl | sh",
+        "wget | bash",
+        "wget | sh",
+        "| bash",
+        "| sh -",
+    ]
 
-    init(settings: AppSettings, terminalService: TerminalService?) {
+    private let settings: AppSettings
+    private weak var terminalService: (any TerminalServiceProtocol)?
+
+    /// Confirmation handler — BuiltInToolService에서 주입 (C-4)
+    var confirmationHandler: ToolConfirmationHandler?
+
+    init(settings: AppSettings, terminalService: (any TerminalServiceProtocol)?) {
         self.settings = settings
         self.terminalService = terminalService
+    }
+
+    /// 서비스 후주입 (C-6)
+    func updateTerminalService(_ service: TerminalServiceProtocol) {
+        self.terminalService = service
     }
 
     var inputSchema: [String: Any] {
@@ -47,6 +76,31 @@ final class TerminalRunTool: BuiltInToolProtocol {
             )
         }
 
+        // C-3: 위험 명령 차단
+        if let blockedPattern = Self.checkDangerousCommand(command) {
+            Log.tool.warning("terminal.run blocked dangerous command: \(command) (pattern: \(blockedPattern))")
+            return ToolResult(
+                toolCallId: "",
+                content: "위험한 명령이 차단되었습니다: \(blockedPattern)",
+                isError: true
+            )
+        }
+
+        // C-4: terminalLLMConfirmAlways가 true이면 사용자 확인 요청
+        if settings.terminalLLMConfirmAlways {
+            if let handler = confirmationHandler {
+                let approved = await handler(name, "터미널 명령 실행: \(command)")
+                if !approved {
+                    Log.tool.info("terminal.run denied by user: \(command)")
+                    return ToolResult(
+                        toolCallId: "",
+                        content: "명령 실행이 사용자에 의해 거부되었습니다.",
+                        isError: true
+                    )
+                }
+            }
+        }
+
         let timeout = arguments["timeout"] as? Int ?? Self.defaultTimeout
 
         guard let service = terminalService else {
@@ -66,6 +120,19 @@ final class TerminalRunTool: BuiltInToolProtocol {
             content: "[\(statusText)]\n\(output)",
             isError: result.isError
         )
+    }
+
+    /// 위험 명령 패턴 검사 (C-3). 차단된 패턴 문자열을 반환, 안전하면 nil
+    static func checkDangerousCommand(_ command: String) -> String? {
+        let lowered = command.lowercased()
+        // Normalize pipe whitespace for pattern matching
+        let normalized = lowered.replacingOccurrences(of: "\\s*\\|\\s*", with: " | ", options: .regularExpression)
+        for pattern in dangerousPatterns {
+            if normalized.contains(pattern.lowercased()) {
+                return pattern
+            }
+        }
+        return nil
     }
 
     private func executeDirectly(command: String, timeout: Int) async -> ToolResult {
@@ -96,11 +163,13 @@ final class TerminalRunTool: BuiltInToolProtocol {
             }
 
             Task.detached {
-                process.waitUntilExit()
-                timeoutTask.cancel()
-
+                // Read pipe data BEFORE waitUntilExit to avoid deadlock
+                // when output exceeds pipe buffer (64KB)
                 let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+                process.waitUntilExit()
+                timeoutTask.cancel()
 
                 let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
                 let stderr = String(data: stderrData, encoding: .utf8) ?? ""

@@ -60,7 +60,7 @@ struct DochiApp: App {
     private let schedulerService: SchedulerService
     private let pluginManager: PluginManager
     private let resourceOptimizer: any ResourceOptimizerProtocol
-    private let terminalService: TerminalService
+    private let terminalService: any TerminalServiceProtocol
 
     init() {
         let settings = AppSettings()
@@ -295,6 +295,7 @@ struct DochiApp: App {
 
                     // Configure TerminalService (K-1)
                     viewModel.configureTerminalService(terminalService)
+                    toolService.configureTerminalService(terminalService)
 
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)

@@ -28,6 +28,12 @@ protocol TerminalServiceProtocol: AnyObject {
     /// 현재 실행 중인 프로세스 종료 (Ctrl+C)
     func interrupt(sessionId: UUID)
 
+    /// 명령 히스토리 탐색 (direction: -1=이전, 1=다음)
+    func navigateHistory(sessionId: UUID, direction: Int) -> String?
+
+    /// LLM 도구용 명령 실행 및 결과 반환 (C-2)
+    func runCommand(_ command: String, timeout: Int?) async -> (output: String, exitCode: Int32, isError: Bool)
+
     /// 세션 출력 변경 콜백
     var onOutputUpdate: ((UUID) -> Void)? { get set }
 

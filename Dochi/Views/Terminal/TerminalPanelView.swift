@@ -30,14 +30,12 @@ struct TerminalPanelView: View {
                         inputText = ""
                     },
                     onHistoryUp: {
-                        if let service = terminalService as? TerminalService,
-                           let text = service.navigateHistory(sessionId: session.id, direction: -1) {
+                        if let text = terminalService.navigateHistory(sessionId: session.id, direction: -1) {
                             inputText = text
                         }
                     },
                     onHistoryDown: {
-                        if let service = terminalService as? TerminalService,
-                           let text = service.navigateHistory(sessionId: session.id, direction: 1) {
+                        if let text = terminalService.navigateHistory(sessionId: session.id, direction: 1) {
                             inputText = text
                         }
                     },

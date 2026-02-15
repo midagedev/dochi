@@ -772,6 +772,14 @@ final class MockTerminalService: TerminalServiceProtocol {
     var executeCommandCallCount = 0
     var clearOutputCallCount = 0
     var interruptCallCount = 0
+    var runCommandCallCount = 0
+    var navigateHistoryCallCount = 0
+
+    /// Stubbed result for runCommand
+    var stubbedRunResult: (output: String, exitCode: Int32, isError: Bool) = (output: "", exitCode: 0, isError: false)
+
+    /// Stubbed result for navigateHistory
+    var stubbedHistoryResult: String? = nil
 
     @discardableResult
     func createSession(name: String?, shellPath: String?) -> UUID {
@@ -806,5 +814,15 @@ final class MockTerminalService: TerminalServiceProtocol {
 
     func interrupt(sessionId: UUID) {
         interruptCallCount += 1
+    }
+
+    func navigateHistory(sessionId: UUID, direction: Int) -> String? {
+        navigateHistoryCallCount += 1
+        return stubbedHistoryResult
+    }
+
+    func runCommand(_ command: String, timeout: Int?) async -> (output: String, exitCode: Int32, isError: Bool) {
+        runCommandCallCount += 1
+        return stubbedRunResult
     }
 }
