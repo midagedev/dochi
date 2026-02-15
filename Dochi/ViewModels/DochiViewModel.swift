@@ -655,13 +655,15 @@ final class DochiViewModel {
                 continuation: continuation
             )
 
-            // Start 30s timeout — auto-deny if no response
+            // Safety-net timeout — banner UI handles the primary countdown + timeout
+            // message display (~32s total). This fires only if the banner somehow
+            // fails to call onDeny (e.g., view removed from hierarchy).
             self.confirmationTimeoutTask?.cancel()
             self.confirmationTimeoutTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(Self.toolConfirmationTimeout))
+                try? await Task.sleep(for: .seconds(Self.toolConfirmationTimeout + 5))
                 guard !Task.isCancelled else { return }
                 if self?.pendingToolConfirmation?.toolName == toolName {
-                    Log.tool.warning("Tool confirmation timed out: \(toolName)")
+                    Log.tool.warning("Tool confirmation safety-net timeout: \(toolName)")
                     self?.respondToToolConfirmation(approved: false)
                 }
             }

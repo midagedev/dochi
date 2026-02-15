@@ -931,14 +931,18 @@ struct ToolConfirmationBannerView: View {
             }
 
             guard timerActive else { return }
+            timerActive = false
 
-            // Timeout reached
+            // Timeout reached — show message then deny
             withAnimation(.easeInOut(duration: 0.3)) {
                 showTimeoutMessage = true
             }
 
-            // Auto-dismiss after 2 seconds
+            // Brief delay so user sees the timeout message
             try? await Task.sleep(for: .seconds(2))
+
+            // Notify ViewModel to auto-deny (also cancels ViewModel's timeout task)
+            onDeny()
         }
     }
 }
