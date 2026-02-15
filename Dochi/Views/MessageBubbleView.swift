@@ -38,8 +38,14 @@ struct MessageBubbleView: View {
                         isHovering = hovering
                     }
 
-                // Tool calls display (for assistant messages that include tool calls)
-                if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+                // UX-7: Archived tool execution records (preferred over raw tool calls)
+                if let records = message.toolExecutionRecords, !records.isEmpty {
+                    ForEach(records) { record in
+                        ToolExecutionRecordCardView(record: record)
+                    }
+                }
+                // Fallback: Raw tool calls display (for messages without execution records)
+                else if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                     ForEach(toolCalls, id: \.id) { call in
                         toolCallView(call)
                     }

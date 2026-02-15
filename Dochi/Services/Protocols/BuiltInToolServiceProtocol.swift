@@ -20,4 +20,13 @@ protocol BuiltInToolServiceProtocol {
     func enableTools(names: [String])
     func enableToolsTTL(minutes: Int)
     func resetRegistry()
+
+    /// Look up tool info by name.
+    func toolInfo(named: String) -> ToolInfo?
+}
+
+extension BuiltInToolServiceProtocol {
+    func toolInfo(named name: String) -> ToolInfo? {
+        allToolInfos.first { $0.name == name }
+    }
 }

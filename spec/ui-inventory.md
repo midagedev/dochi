@@ -24,13 +24,16 @@ DochiApp (entry point)
     │   ├── [대화 탭]
     │   │   ├── SystemHealthBarView — 시스템 상태 바 (모델/동기화/하트비트/토큰) [항상 표시]
     │   │   ├── StatusBarView — 상태/토큰 (처리 중에만 표시)
-    │   │   ├── ToolConfirmationBannerView — 민감 도구 승인
+    │   │   ├── ToolConfirmationBannerView — 민감 도구 승인 (카운트다운 타이머, Enter/Escape 단축키)
     │   │   ├── ErrorBannerView — 에러 표시
     │   │   ├── AvatarView — 3D 아바타 (macOS 15+, 선택적)
     │   │   ├── EmptyConversationView — 빈 대화 시작 (카테고리 제안 + 카탈로그 링크 + 단축키 힌트 + 에이전트 힌트 카드)
     │   │   │   또는 ConversationView — 메시지 목록
-    │   │   │       └── MessageBubbleView — 개별 메시지 버블 (호버 시 복사 버튼)
-    │   │   │           └── MessageMetadataBadgeView — 모델/응답시간 배지 (assistant만, 호버 팝오버)
+    │   │   │       ├── MessageBubbleView — 개별 메시지 버블 (호버 시 복사 버튼)
+    │   │   │       │   ├── MessageMetadataBadgeView — 모델/응답시간 배지 (assistant만, 호버 팝오버)
+    │   │   │       │   └── ToolExecutionRecordCardView — 과거 도구 실행 기록 카드 (접을 수 있음)
+    │   │   │       ├── ToolExecutionCardView — 실시간 도구 실행 카드 (상태별 스타일, 접을 수 있음)
+    │   │   │       └── ToolChainProgressView — 도구 체인 진행 표시 (2개 이상 도구 실행 시)
     │   │   ├── Divider
     │   │   └── InputBarView — 텍스트 입력 + 마이크 + 슬래시 명령
     │   │       └── SlashCommandPopoverView — / 자동완성 팝업
@@ -63,6 +66,9 @@ DochiApp (entry point)
 | SystemHealthBarView | `Views/SystemHealthBarView.swift` | 항상 표시 | 현재 모델, 동기화 상태, 하트비트, 세션 토큰 (클릭 → 상세 시트) |
 | MessageMetadataBadgeView | `Views/MessageBubbleView.swift` | assistant 메시지 자동 | 모델명·응답시간 배지, 호버 시 상세 팝오버 (토큰/프로바이더/폴백) |
 | StatusBarView | `Views/ContentView.swift` | 처리 중 자동 | 상태 아이콘 + 텍스트 + 토큰 사용량 |
+| ToolExecutionCardView | `Views/ToolExecutionCardView.swift` | 도구 실행 시 자동 | 접을 수 있는 실시간 도구 실행 카드 (상태 아이콘, 도구명, 입력 요약, 소요 시간, 카테고리 배지) |
+| ToolExecutionRecordCardView | `Views/ToolExecutionCardView.swift` | 과거 assistant 메시지 자동 | 아카이브된 도구 실행 기록 카드 (접힌 상태 기본) |
+| ToolChainProgressView | `Views/ToolChainProgressView.swift` | 도구 2개 이상 실행 시 자동 | 단계별 원형 인디케이터 + 연결선 + 전체 소요 시간 |
 | AvatarView | `Views/AvatarView.swift` | 설정 활성화 시 | VRM 3D 아바타 (RealityKit, macOS 15+) |
 
 ### 칸반
@@ -129,6 +135,8 @@ DochiApp (entry point)
 | `lastOutputTokens` | `Int?` | 마지막 출력 토큰 | StatusBarView |
 | `contextWindowTokens` | `Int` | 모델 컨텍스트 윈도우 | StatusBarView |
 | `metricsCollector` | `MetricsCollector` | LLM 교환 메트릭 수집 | SystemHealthBarView, SystemStatusSheetView |
+| `toolExecutions` | `[ToolExecution]` | 현재 턴 도구 실행 목록 | ConversationView (ToolExecutionCardView, ToolChainProgressView) |
+| `allToolCardsCollapsed` | `Bool` | 도구 카드 일괄 접기/펼치기 상태 | ⌘⇧T 토글 |
 
 ### 대화 정리 상태 (UX-4 추가)
 
@@ -157,6 +165,22 @@ DochiApp (entry point)
 | `outputTokens` | `Int?` | 출력 토큰 |
 | `totalLatency` | `TimeInterval?` | 응답 시간 |
 | `wasFallback` | `Bool` | 폴백 모델 사용 여부 |
+
+### Message.toolExecutionRecords (UX-7 추가)
+
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `toolExecutionRecords` | `[ToolExecutionRecord]?` | 이 메시지의 도구 실행 이력 (하위호환: decodeIfPresent) |
+
+ToolExecutionRecord 필드:
+| 프로퍼티 | 타입 | 설명 |
+|----------|------|------|
+| `toolName` | `String` | 도구 이름 |
+| `displayName` | `String` | 도구 설명 (표시용) |
+| `inputSummary` | `String` | 입력 요약 (80자 이내, 비밀값 마스킹) |
+| `isError` | `Bool` | 오류 여부 |
+| `durationSeconds` | `TimeInterval?` | 소요 시간 |
+| `resultSummary` | `String?` | 결과 요약 |
 
 ### 누락된 상태 (현재 UI에 노출 안 됨)
 
@@ -231,6 +255,17 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
   -> 더보기 메뉴: 편집(AgentDetailView) / 복제 / 템플릿으로 저장 / 삭제
 ```
 
+### 도구 실행 피드백 (UX-7 추가)
+```
+도구 실행 시작: processLLMLoop() -> ToolExecution 생성 -> toolExecutions 배열에 추가
+  -> ConversationView에서 ToolExecutionCardView로 실시간 표시 (상태: running/blue/스피너)
+  -> 완료/실패 시: execution.complete()/fail() -> 카드 상태 갱신 (success/green, error/red)
+  -> 도구 2개 이상: ToolChainProgressView 자동 표시 (단계별 인디케이터 + 전체 소요 시간)
+턴 완료 시: toolExecutions -> ToolExecutionRecord로 변환 -> Message.toolExecutionRecords에 아카이브
+과거 메시지 표시: MessageBubbleView에서 ToolExecutionRecordCardView (접힌 상태 기본)
+민감 도구 확인: ToolConfirmationBannerView + 30초 카운트다운 타이머 + Enter(허용)/Escape(거부) 단축키
+```
+
 ### 내보내기/공유 (UX-5 추가)
 ```
 빠른 내보내기: ⌘E -> viewModel.exportConversation(format: .markdown) -> NSSavePanel
@@ -265,8 +300,9 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 | ⌘⇧K | 칸반/대화 전환 | ContentView (onKeyPress) |
 | ⌘⇧L | 즐겨찾기 필터 토글 | ContentView (onKeyPress) |
 | ⌘⇧M | 일괄 선택 모드 토글 | ContentView (onKeyPress) |
-| Escape | 요청 취소 / 팔레트 닫기 | ContentView (onKeyPress) |
-| Enter | 메시지 전송 | InputBarView |
+| ⌘⇧T | 도구 카드 일괄 접기/펼치기 | ContentView (hidden button) |
+| Escape | 요청 취소 / 확인 배너 거부 / 팔레트 닫기 | ContentView (onKeyPress) |
+| Enter | 확인 배너 허용 / 메시지 전송 | ContentView (onKeyPress) / InputBarView |
 | ⇧Enter | 줄바꿈 | InputBarView |
 
 ---
@@ -285,6 +321,8 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 | 분할 뷰 (HSplitView / HStack) | CapabilityCatalog (목록+상세), ToolsSettings | 좌우 2패널 |
 | 키캡 (Text + 둥근 테두리) | KeyboardShortcutHelpView | 단축키 키 표시 |
 | FlowLayout (커스텀 Layout) | ConversationFilterView 태그 칩 | 줄바꿈 가능한 가로 배치 |
+| 접을 수 있는 카드 (VStack + Button + chevron) | ToolExecutionCardView, ToolExecutionRecordCardView | 상태별 색상, 클릭 접기/펼치기 |
+| 진행 체인 (HStack + Circle + Rectangle) | ToolChainProgressView | 단계별 아이콘 + 연결선 |
 
 ---
 
@@ -339,4 +377,4 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
 
 ---
 
-*최종 업데이트: 2026-02-15 (UX-6 머지 후)*
+*최종 업데이트: 2026-02-15 (UX-7 머지 후)*
