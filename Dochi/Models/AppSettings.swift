@@ -548,6 +548,56 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(terminalPanelHeight, forKey: "terminalPanelHeight") }
     }
 
+    // MARK: - Proactive Suggestions (K-2)
+
+    var proactiveSuggestionEnabled: Bool = UserDefaults.standard.object(forKey: "proactiveSuggestionEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(proactiveSuggestionEnabled, forKey: "proactiveSuggestionEnabled") }
+    }
+
+    var proactiveSuggestionIdleMinutes: Int = UserDefaults.standard.object(forKey: "proactiveSuggestionIdleMinutes") as? Int ?? 30 {
+        didSet { UserDefaults.standard.set(proactiveSuggestionIdleMinutes, forKey: "proactiveSuggestionIdleMinutes") }
+    }
+
+    var proactiveSuggestionCooldownMinutes: Int = UserDefaults.standard.object(forKey: "proactiveSuggestionCooldownMinutes") as? Int ?? 60 {
+        didSet { UserDefaults.standard.set(proactiveSuggestionCooldownMinutes, forKey: "proactiveSuggestionCooldownMinutes") }
+    }
+
+    var proactiveSuggestionQuietHoursEnabled: Bool = UserDefaults.standard.object(forKey: "proactiveSuggestionQuietHoursEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(proactiveSuggestionQuietHoursEnabled, forKey: "proactiveSuggestionQuietHoursEnabled") }
+    }
+
+    var suggestionTypeNewsEnabled: Bool = UserDefaults.standard.object(forKey: "suggestionTypeNewsEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(suggestionTypeNewsEnabled, forKey: "suggestionTypeNewsEnabled") }
+    }
+
+    var suggestionTypeDeepDiveEnabled: Bool = UserDefaults.standard.object(forKey: "suggestionTypeDeepDiveEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(suggestionTypeDeepDiveEnabled, forKey: "suggestionTypeDeepDiveEnabled") }
+    }
+
+    var suggestionTypeResearchEnabled: Bool = UserDefaults.standard.object(forKey: "suggestionTypeResearchEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(suggestionTypeResearchEnabled, forKey: "suggestionTypeResearchEnabled") }
+    }
+
+    var suggestionTypeKanbanEnabled: Bool = UserDefaults.standard.object(forKey: "suggestionTypeKanbanEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(suggestionTypeKanbanEnabled, forKey: "suggestionTypeKanbanEnabled") }
+    }
+
+    var suggestionTypeMemoryEnabled: Bool = UserDefaults.standard.object(forKey: "suggestionTypeMemoryEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(suggestionTypeMemoryEnabled, forKey: "suggestionTypeMemoryEnabled") }
+    }
+
+    var suggestionTypeCostEnabled: Bool = UserDefaults.standard.object(forKey: "suggestionTypeCostEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(suggestionTypeCostEnabled, forKey: "suggestionTypeCostEnabled") }
+    }
+
+    var notificationProactiveSuggestionEnabled: Bool = UserDefaults.standard.object(forKey: "notificationProactiveSuggestionEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(notificationProactiveSuggestionEnabled, forKey: "notificationProactiveSuggestionEnabled") }
+    }
+
+    var proactiveSuggestionMenuBarEnabled: Bool = UserDefaults.standard.object(forKey: "proactiveSuggestionMenuBarEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(proactiveSuggestionMenuBarEnabled, forKey: "proactiveSuggestionMenuBarEnabled") }
+    }
+
     // MARK: - Guide (UX-9)
 
     /// 인앱 힌트 표시 여부 (hintsGloballyDisabled의 반전)

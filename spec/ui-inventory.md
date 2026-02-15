@@ -57,6 +57,7 @@ DochiApp (entry point)
     │   │   │       │   └── ToolExecutionRecordCardView — 과거 도구 실행 기록 카드 (접을 수 있음)
     │   │   │       ├── ToolExecutionCardView — 실시간 도구 실행 카드 (상태별 스타일, 접을 수 있음)
     │   │   │       └── ToolChainProgressView — 도구 체인 진행 표시 (2개 이상 도구 실행 시)
+    │   │   ├── SuggestionBubbleView — 프로액티브 제안 버블 (유휴 시 자동 표시, 수락/나중에/끄기) (K-2)
     │   │   ├── Divider
     │   │   ├── VisionWarningBannerView — Vision 미지원 모델 경고 배너 (주황색, 닫기 가능) (I-3)
     │   │   ├── ImageAttachmentBarView — 이미지 첨부 미리보기 바 (가로 스크롤, 최대 4장) (I-3)
@@ -74,6 +75,7 @@ DochiApp (entry point)
     │   └── MemoryNodeView — 계층별 메모리 노드 (접기/펼치기 + 인라인 편집)
     ├── [Overlay] CommandPaletteView — ⌘K 커맨드 팔레트 (ZStack 오버레이)
     ├── [Overlay] SyncToastContainerView — 동기화 이벤트 토스트 (우측 하단, 메모리 토스트 위) (G-3)
+    ├── [Overlay] SuggestionToastContainerView — 프로액티브 제안 토스트 (좌측 하단, 6초 fade) (K-2)
     └── [Overlay] MemoryToastContainerView — 메모리 저장 토스트 (우측 하단) (UX-8)
 ```
 
@@ -126,6 +128,16 @@ DochiApp (entry point)
 | TerminalPanelView | `Views/Terminal/TerminalPanelView.swift` | Ctrl+` 또는 커맨드 팔레트 | 하단 패널 컨테이너: 탭 바 + 세션 뷰 + 액션 버튼 |
 | TerminalSessionView | `Views/Terminal/TerminalSessionView.swift` | TerminalPanelView 내 자동 | 개별 터미널: 출력 ScrollView + 입력 라인 |
 | TerminalSettingsView | `Views/Settings/TerminalSettingsView.swift` | 설정 > 터미널 | 쉘 경로, 폰트, LLM 연동 설정 |
+
+### 프로액티브 제안 (K-2)
+
+| 화면 | 파일 | 접근 방법 | 설명 |
+|------|------|-----------|------|
+| SuggestionBubbleView | `Views/SuggestionBubbleView.swift` | 유휴 감지 후 자동 표시 (대화 영역 하단) | 노란 좌측 border, ultraThinMaterial 배경, 유형 배지, 수락/나중에/끄기 버튼 |
+| SuggestionToastView | `Views/SuggestionToastView.swift` | 제안 발생 시 좌측 하단 토스트 (6초 auto fade) | 라이트벌브 아이콘 + 제안 제목 + 유형 배지 |
+| SuggestionToastContainerView | `Views/SuggestionToastView.swift` | 제안 발생 시 자동 | 토스트 스택 컨테이너, 좌측 하단 고정 |
+| SuggestionHistoryView | `Views/SuggestionHistoryView.swift` | 커맨드 팔레트 "제안 기록" | 제안 기록 시트 (400x480pt): 오늘 요약 + 최근 20건 리스트 + 상태 배지 |
+| ProactiveSuggestionSettingsView | `Views/Settings/ProactiveSuggestionSettingsView.swift` | 설정 > 프로액티브 제안 | 활성화, 유휴 감지 시간, 쿨다운, 조용한 시간, 유형별 토글 |
 
 ### 칸반
 

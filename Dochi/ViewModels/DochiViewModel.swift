@@ -72,6 +72,10 @@ final class DochiViewModel {
     private(set) var terminalService: TerminalServiceProtocol?
     var showTerminalPanel: Bool = false
 
+    // MARK: - Proactive Suggestions (K-2)
+    private(set) var proactiveSuggestionService: ProactiveSuggestionServiceProtocol?
+    var showSuggestionHistory: Bool = false
+
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
     var showConnectedDevicesPopover: Bool = false
@@ -328,6 +332,62 @@ final class DochiViewModel {
         service.clearOutput(for: activeId)
     }
 
+    // MARK: - Proactive Suggestions (K-2)
+
+    func configureProactiveSuggestionService(_ service: ProactiveSuggestionServiceProtocol) {
+        self.proactiveSuggestionService = service
+        Log.app.info("ProactiveSuggestionService configured")
+    }
+
+    var currentSuggestion: ProactiveSuggestion? {
+        proactiveSuggestionService?.currentSuggestion
+    }
+
+    var suggestionHistory: [ProactiveSuggestion] {
+        proactiveSuggestionService?.suggestionHistory ?? []
+    }
+
+    var proactiveSuggestionState: ProactiveSuggestionState {
+        proactiveSuggestionService?.state ?? .disabled
+    }
+
+    var isSuggestionPaused: Bool {
+        get { proactiveSuggestionService?.isPaused ?? false }
+        set { proactiveSuggestionService?.isPaused = newValue }
+    }
+
+    var suggestionToastEvents: [SuggestionToastEvent] {
+        proactiveSuggestionService?.toastEvents ?? []
+    }
+
+    func recordUserActivity() {
+        proactiveSuggestionService?.recordActivity()
+    }
+
+    func acceptSuggestion(_ suggestion: ProactiveSuggestion) {
+        proactiveSuggestionService?.acceptSuggestion(suggestion)
+        inputText = suggestion.suggestedPrompt
+        sendMessage()
+    }
+
+    func deferSuggestion(_ suggestion: ProactiveSuggestion) {
+        proactiveSuggestionService?.deferSuggestion(suggestion)
+    }
+
+    func dismissSuggestionType(_ suggestion: ProactiveSuggestion) {
+        proactiveSuggestionService?.dismissSuggestionType(suggestion)
+    }
+
+    func dismissSuggestionToast(id: UUID) {
+        proactiveSuggestionService?.dismissToast(id: id)
+    }
+
+    func toggleProactiveSuggestionPause() {
+        guard let service = proactiveSuggestionService else { return }
+        service.isPaused.toggle()
+        Log.app.info("Proactive suggestion \(service.isPaused ? "paused" : "resumed")")
+    }
+
     func dismissScheduleExecutionBanner() {
         schedulerService?.clearCurrentExecution()
     }
@@ -582,6 +642,7 @@ final class DochiViewModel {
     // MARK: - Text Actions
 
     func sendMessage() {
+        recordUserActivity()  // K-2: reset idle timer on send
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasImages = !pendingImages.isEmpty
         guard !text.isEmpty || hasImages else { return }

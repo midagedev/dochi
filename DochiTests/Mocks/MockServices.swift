@@ -826,3 +826,72 @@ final class MockTerminalService: TerminalServiceProtocol {
         return stubbedRunResult
     }
 }
+
+// MARK: - MockProactiveSuggestionService
+
+@MainActor
+final class MockProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
+    var currentSuggestion: ProactiveSuggestion?
+    var suggestionHistory: [ProactiveSuggestion] = []
+    var state: ProactiveSuggestionState = .disabled
+    var isPaused: Bool = false
+    var toastEvents: [SuggestionToastEvent] = []
+
+    var recordActivityCallCount = 0
+    var acceptSuggestionCallCount = 0
+    var deferSuggestionCallCount = 0
+    var dismissSuggestionTypeCallCount = 0
+    var dismissToastCallCount = 0
+    var startCallCount = 0
+    var stopCallCount = 0
+
+    var lastAcceptedSuggestion: ProactiveSuggestion?
+    var lastDeferredSuggestion: ProactiveSuggestion?
+    var lastDismissedSuggestion: ProactiveSuggestion?
+
+    func recordActivity() {
+        recordActivityCallCount += 1
+    }
+
+    func acceptSuggestion(_ suggestion: ProactiveSuggestion) {
+        acceptSuggestionCallCount += 1
+        lastAcceptedSuggestion = suggestion
+        if let index = suggestionHistory.firstIndex(where: { $0.id == suggestion.id }) {
+            suggestionHistory[index].status = .accepted
+        }
+        currentSuggestion = nil
+    }
+
+    func deferSuggestion(_ suggestion: ProactiveSuggestion) {
+        deferSuggestionCallCount += 1
+        lastDeferredSuggestion = suggestion
+        if let index = suggestionHistory.firstIndex(where: { $0.id == suggestion.id }) {
+            suggestionHistory[index].status = .deferred
+        }
+        currentSuggestion = nil
+    }
+
+    func dismissSuggestionType(_ suggestion: ProactiveSuggestion) {
+        dismissSuggestionTypeCallCount += 1
+        lastDismissedSuggestion = suggestion
+        if let index = suggestionHistory.firstIndex(where: { $0.id == suggestion.id }) {
+            suggestionHistory[index].status = .dismissed
+        }
+        currentSuggestion = nil
+    }
+
+    func dismissToast(id: UUID) {
+        dismissToastCallCount += 1
+        toastEvents.removeAll { $0.id == id }
+    }
+
+    func start() {
+        startCallCount += 1
+        state = .idle
+    }
+
+    func stop() {
+        stopCallCount += 1
+        state = .disabled
+    }
+}

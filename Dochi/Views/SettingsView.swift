@@ -101,6 +101,12 @@ struct SettingsView: View {
             .formStyle(.grouped)
             .padding()
 
+        case .proactiveSuggestion:
+            ProactiveSuggestionSettingsView(
+                settings: settings,
+                proactiveSuggestionService: viewModel?.proactiveSuggestionService
+            )
+
         case .automation:
             AutomationSettingsView(settings: settings, schedulerService: schedulerService)
 
@@ -644,6 +650,105 @@ struct HeartbeatSettingsContent: View {
                     }
                 }
             }
+        }
+
+        // MARK: - Proactive Suggestions (K-2)
+
+        Section {
+            Toggle("프로액티브 제안 활성화", isOn: Binding(
+                get: { settings.proactiveSuggestionEnabled },
+                set: { settings.proactiveSuggestionEnabled = $0 }
+            ))
+
+            Text("유휴 상태일 때 칸반/메모리/관심사 기반 제안을 자동 표시")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("유휴 감지: \(settings.proactiveSuggestionIdleMinutes)분")
+                Slider(
+                    value: Binding(
+                        get: { Double(settings.proactiveSuggestionIdleMinutes) },
+                        set: { settings.proactiveSuggestionIdleMinutes = Int($0.rounded()) }
+                    ),
+                    in: 5...120,
+                    step: 5
+                )
+            }
+
+            HStack {
+                Text("쿨다운: \(settings.proactiveSuggestionCooldownMinutes)분")
+                Slider(
+                    value: Binding(
+                        get: { Double(settings.proactiveSuggestionCooldownMinutes) },
+                        set: { settings.proactiveSuggestionCooldownMinutes = Int($0.rounded()) }
+                    ),
+                    in: 10...240,
+                    step: 10
+                )
+            }
+
+            Toggle("조용한 시간에 제안 중지", isOn: Binding(
+                get: { settings.proactiveSuggestionQuietHoursEnabled },
+                set: { settings.proactiveSuggestionQuietHoursEnabled = $0 }
+            ))
+        } header: {
+            SettingsSectionHeader(
+                title: "프로액티브 제안",
+                helpContent: "사용자가 일정 시간 유휴 상태일 때, 칸반 진행 상황/메모리 기한/대화 주제 등을 기반으로 자동 제안합니다. 조용한 시간 설정은 하트비트와 공유합니다."
+            )
+        }
+        .disabled(!settings.proactiveSuggestionEnabled && !settings.proactiveSuggestionEnabled)
+
+        Section("제안 유형") {
+            ForEach(SuggestionType.allCases, id: \.rawValue) { type in
+                Toggle(isOn: suggestionTypeBinding(for: type)) {
+                    HStack(spacing: 8) {
+                        Image(systemName: type.icon)
+                            .foregroundStyle(suggestionTypeBadgeColor(type))
+                            .frame(width: 20)
+                        Text(type.displayName)
+                    }
+                }
+            }
+        }
+        .disabled(!settings.proactiveSuggestionEnabled)
+    }
+
+    private func suggestionTypeBinding(for type: SuggestionType) -> Binding<Bool> {
+        Binding(
+            get: {
+                switch type {
+                case .newsTrend: return settings.suggestionTypeNewsEnabled
+                case .deepDive: return settings.suggestionTypeDeepDiveEnabled
+                case .relatedResearch: return settings.suggestionTypeResearchEnabled
+                case .kanbanCheck: return settings.suggestionTypeKanbanEnabled
+                case .memoryRemind: return settings.suggestionTypeMemoryEnabled
+                case .costReport: return settings.suggestionTypeCostEnabled
+                }
+            },
+            set: { newValue in
+                switch type {
+                case .newsTrend: settings.suggestionTypeNewsEnabled = newValue
+                case .deepDive: settings.suggestionTypeDeepDiveEnabled = newValue
+                case .relatedResearch: settings.suggestionTypeResearchEnabled = newValue
+                case .kanbanCheck: settings.suggestionTypeKanbanEnabled = newValue
+                case .memoryRemind: settings.suggestionTypeMemoryEnabled = newValue
+                case .costReport: settings.suggestionTypeCostEnabled = newValue
+                }
+            }
+        )
+    }
+
+    private func suggestionTypeBadgeColor(_ type: SuggestionType) -> Color {
+        switch type.badgeColor {
+        case "blue": return .blue
+        case "purple": return .purple
+        case "teal": return .teal
+        case "orange": return .orange
+        case "green": return .green
+        case "red": return .red
+        default: return .gray
         }
     }
 }
