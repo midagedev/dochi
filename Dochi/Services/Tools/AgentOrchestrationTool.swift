@@ -71,6 +71,11 @@ final class AgentDelegateTaskTool: BuiltInToolProtocol {
 
         let originAgent = settings.activeAgentName
 
+        // Self-delegation guard
+        guard originAgent.localizedCaseInsensitiveCompare(agentName) != .orderedSame else {
+            return ToolResult(toolCallId: "", content: "자기 자신에게 위임할 수 없습니다. 다른 에이전트를 지정하세요.", isError: true)
+        }
+
         // Load origin agent config and check delegation policy
         let originConfig = contextService.loadAgentConfig(workspaceId: workspaceId, agentName: originAgent)
         let originPolicy = originConfig?.effectiveDelegationPolicy ?? .default
@@ -159,8 +164,7 @@ final class AgentDelegateTaskTool: BuiltInToolProtocol {
         // Determine model and provider for the target agent
         let model = targetConfig?.defaultModel ?? settings.llmModel
         let provider = settings.currentProvider
-        let apiKeyName = provider.apiKeyName
-        let apiKey = keychainService.load(account: apiKeyName) ?? ""
+        let apiKey = keychainService.load(account: provider.keychainAccount) ?? ""
 
         let messages = [
             Message(role: .user, content: userContent)
@@ -212,19 +216,25 @@ final class AgentDelegateTaskTool: BuiltInToolProtocol {
         }
     }
 
-    /// Execute a delegation LLM call with a timeout.
-    private func withDelegationTimeout(seconds: Int, operation: @escaping @MainActor () async throws -> LLMResponse) async throws -> LLMResponse {
-        let timeoutTask = Task {
+    /// Execute a delegation LLM call with a timeout using task group racing.
+    private func withDelegationTimeout(seconds: Int, operation: @escaping @MainActor @Sendable () async throws -> LLMResponse) async throws -> LLMResponse {
+        let operationTask = Task<LLMResponse, Error> {
+            try await operation()
+        }
+        let timerTask = Task<LLMResponse, Error>.detached {
             try await Task.sleep(for: .seconds(seconds))
+            operationTask.cancel()
             throw DelegationError.timeout(seconds: seconds)
         }
 
         do {
-            let result = try await operation()
-            timeoutTask.cancel()
+            let result = try await operationTask.value
+            timerTask.cancel()
             return result
+        } catch is CancellationError {
+            throw DelegationError.timeout(seconds: seconds)
         } catch {
-            timeoutTask.cancel()
+            timerTask.cancel()
             throw error
         }
     }
@@ -340,11 +350,24 @@ final class DelegationManager {
         activeDelegations[index].status = .cancelled
         activeDelegations[index].completedAt = Date()
 
+        // Update chain
+        if let chainIndex = currentChain?.tasks.firstIndex(where: { $0.id == id }) {
+            currentChain?.tasks[chainIndex].status = .cancelled
+            currentChain?.tasks[chainIndex].completedAt = Date()
+        }
+
         let cancelled = activeDelegations.remove(at: index)
         recentDelegations.insert(cancelled, at: 0)
         if recentDelegations.count > Self.maxRecentDelegations {
             recentDelegations = Array(recentDelegations.prefix(Self.maxRecentDelegations))
         }
+
+        // Clear chain if complete
+        if currentChain?.isComplete == true {
+            currentChain = nil
+        }
+
+        Log.app.info("Delegation cancelled: \(id)")
     }
 
     /// Summary of all delegations for the status tool.
@@ -534,16 +557,3 @@ final class AgentCheckStatusTool: BuiltInToolProtocol {
     }
 }
 
-// MARK: - LLMProvider API Key Name Helper
-
-extension LLMProvider {
-    var apiKeyName: String {
-        switch self {
-        case .openai: return "openai_api_key"
-        case .anthropic: return "anthropic_api_key"
-        case .zai: return "zai_api_key"
-        case .ollama: return "ollama_api_key"
-        case .lmStudio: return "lmstudio_api_key"
-        }
-    }
-}

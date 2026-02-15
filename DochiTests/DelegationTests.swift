@@ -253,6 +253,37 @@ final class DelegationTests: XCTestCase {
         XCTAssertEqual(manager.recentDelegations.first?.status, .cancelled)
     }
 
+    func testDelegationManagerCancelDelegationUpdatesChain() {
+        let manager = DelegationManager()
+        let task1 = DelegationTask(originAgentName: "A", targetAgentName: "B", task: "t1", chainDepth: 1)
+        let task2 = DelegationTask(originAgentName: "B", targetAgentName: "C", task: "t2", chainDepth: 2)
+        manager.startDelegation(task1)
+        manager.startDelegation(task2)
+
+        // Cancel task2 — chain should update task2's status
+        manager.cancelDelegation(id: task2.id)
+
+        // Chain should still exist because task1 is still running
+        XCTAssertNotNil(manager.currentChain)
+        // Verify the cancelled task is reflected in the chain
+        let chainTask2 = manager.currentChain?.tasks.first(where: { $0.id == task2.id })
+        XCTAssertEqual(chainTask2?.status, .cancelled)
+        XCTAssertNotNil(chainTask2?.completedAt)
+    }
+
+    func testDelegationManagerCancelDelegationClearsChainWhenComplete() {
+        let manager = DelegationManager()
+        let task = DelegationTask(originAgentName: "A", targetAgentName: "B", task: "test")
+        manager.startDelegation(task)
+
+        XCTAssertNotNil(manager.currentChain)
+
+        // Cancel the only task — chain should be cleared
+        manager.cancelDelegation(id: task.id)
+
+        XCTAssertNil(manager.currentChain)
+    }
+
     func testDelegationManagerChainClearedOnComplete() {
         let manager = DelegationManager()
         let task = DelegationTask(originAgentName: "A", targetAgentName: "B", task: "test")
@@ -420,6 +451,44 @@ final class DelegationTests: XCTestCase {
         let result = await tool.execute(arguments: ["agent_name": "Unknown", "task": "do something"])
         XCTAssertTrue(result.isError)
         XCTAssertTrue(result.content.contains("찾을 수 없습니다"))
+    }
+
+    func testDelegateTaskToolRejectsSelfDelegation() async {
+        let contextService = MockContextService()
+        let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        contextService.agents[wsId] = ["도치"]
+        let settings = AppSettings()
+        settings.delegationEnabled = true
+        settings.activeAgentName = "도치"
+        let tool = createDelegateTool(contextService: contextService, settings: settings)
+        let result = await tool.execute(arguments: ["agent_name": "도치", "task": "do something"])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("자기 자신"))
+    }
+
+    func testDelegateTaskToolRejectsSelfDelegationCaseInsensitive() async {
+        let contextService = MockContextService()
+        let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        contextService.agents[wsId] = ["TestAgent"]
+        let settings = AppSettings()
+        settings.delegationEnabled = true
+        settings.activeAgentName = "TestAgent"
+        let tool = createDelegateTool(contextService: contextService, settings: settings)
+        let result = await tool.execute(arguments: ["agent_name": "testagent", "task": "do something"])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("자기 자신"))
+    }
+
+    // MARK: - C-1: Verify keychainAccount is used (not apiKeyName)
+
+    func testLLMProviderKeychainAccountReturnsRawValue() {
+        // Ensure keychainAccount returns the rawValue (e.g. "openai"),
+        // NOT a suffixed name like "openai_api_key"
+        XCTAssertEqual(LLMProvider.openai.keychainAccount, "openai")
+        XCTAssertEqual(LLMProvider.anthropic.keychainAccount, "anthropic")
+        XCTAssertEqual(LLMProvider.zai.keychainAccount, "zai")
+        XCTAssertEqual(LLMProvider.ollama.keychainAccount, "ollama")
+        XCTAssertEqual(LLMProvider.lmStudio.keychainAccount, "lmStudio")
     }
 
     // MARK: - AgentDelegationStatusTool Tests
