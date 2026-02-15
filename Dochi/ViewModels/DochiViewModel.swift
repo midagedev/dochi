@@ -700,8 +700,16 @@ final class DochiViewModel {
         ensureConversation()
 
         // K-3: Analyze message for interest discovery
-        if let conversationId = currentConversation?.id {
-            interestDiscoveryService?.analyzeMessage(finalText, conversationId: conversationId)
+        if let conversationId = currentConversation?.id,
+           let interestService = interestDiscoveryService {
+            let countBefore = interestService.profile.interests.count
+            interestService.analyzeMessage(finalText, conversationId: conversationId)
+            // Persist if new interest was inferred
+            if interestService.profile.interests.count > countBefore,
+               let userId = sessionContext.currentUserId {
+                interestService.saveProfile(userId: userId)
+                interestService.syncToMemory(contextService: contextService, userId: userId)
+            }
         }
 
         if imagesToProcess.isEmpty {
@@ -877,6 +885,8 @@ final class DochiViewModel {
         sessionContext.currentUserId = profile.id.uuidString
         settings.defaultUserId = profile.id.uuidString
         currentUserName = profile.name
+        // K-3: Reload interest profile for the new user
+        interestDiscoveryService?.loadProfile(userId: profile.id.uuidString)
         Log.app.info("Switched user to: \(profile.name)")
     }
 
