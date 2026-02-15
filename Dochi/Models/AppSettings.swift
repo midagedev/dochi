@@ -598,6 +598,32 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(proactiveSuggestionMenuBarEnabled, forKey: "proactiveSuggestionMenuBarEnabled") }
     }
 
+    // MARK: - External Tool (K-4)
+
+    var externalToolEnabled: Bool = UserDefaults.standard.object(forKey: "externalToolEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(externalToolEnabled, forKey: "externalToolEnabled") }
+    }
+
+    var externalToolHealthCheckIntervalSeconds: Int = UserDefaults.standard.object(forKey: "externalToolHealthCheckIntervalSeconds") as? Int ?? 30 {
+        didSet { UserDefaults.standard.set(externalToolHealthCheckIntervalSeconds, forKey: "externalToolHealthCheckIntervalSeconds") }
+    }
+
+    var externalToolOutputCaptureLines: Int = UserDefaults.standard.object(forKey: "externalToolOutputCaptureLines") as? Int ?? 100 {
+        didSet { UserDefaults.standard.set(externalToolOutputCaptureLines, forKey: "externalToolOutputCaptureLines") }
+    }
+
+    var externalToolAutoRestart: Bool = UserDefaults.standard.object(forKey: "externalToolAutoRestart") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(externalToolAutoRestart, forKey: "externalToolAutoRestart") }
+    }
+
+    var externalToolTmuxPath: String = UserDefaults.standard.string(forKey: "externalToolTmuxPath") ?? "/usr/bin/tmux" {
+        didSet { UserDefaults.standard.set(externalToolTmuxPath, forKey: "externalToolTmuxPath") }
+    }
+
+    var externalToolSessionPrefix: String = UserDefaults.standard.string(forKey: "externalToolSessionPrefix") ?? "dochi-" {
+        didSet { UserDefaults.standard.set(externalToolSessionPrefix, forKey: "externalToolSessionPrefix") }
+    }
+
     // MARK: - Interest Discovery (K-3)
 
     var interestDiscoveryEnabled: Bool = UserDefaults.standard.object(forKey: "interestDiscoveryEnabled") as? Bool ?? true {

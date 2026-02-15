@@ -23,6 +23,7 @@ final class HeartbeatService: Observable {
     private var onProactiveMessage: ((String) -> Void)?
     private var notificationManager: NotificationManager?
     private var interestDiscoveryService: InterestDiscoveryServiceProtocol?
+    private var externalToolManager: ExternalToolSessionManagerProtocol?
 
     // Observable state
     private(set) var lastTickDate: Date?
@@ -50,6 +51,11 @@ final class HeartbeatService: Observable {
     /// Inject InterestDiscoveryService for expiration checks (K-3).
     func setInterestDiscoveryService(_ service: InterestDiscoveryServiceProtocol) {
         self.interestDiscoveryService = service
+    }
+
+    /// Inject ExternalToolSessionManager for periodic health checks (K-4).
+    func setExternalToolManager(_ manager: ExternalToolSessionManagerProtocol) {
+        self.externalToolManager = manager
     }
 
     /// Set a callback for when the heartbeat decides to proactively message the user.
@@ -152,6 +158,11 @@ final class HeartbeatService: Observable {
 
             // 5. Interest expiration check (K-3)
             interestDiscoveryService?.checkExpirations()
+
+            // 6. External tool health check (K-4)
+            if settings.externalToolEnabled {
+                await externalToolManager?.checkAllHealth()
+            }
 
             consecutiveErrors = 0
         } catch {

@@ -165,6 +165,12 @@ struct SettingsView: View {
         case .terminal:
             TerminalSettingsView(settings: settings)
 
+        case .externalTool:
+            ExternalToolSettingsView(
+                settings: settings,
+                externalToolManager: viewModel?.externalToolManager
+            )
+
         case .devices:
             if let devicePolicyService {
                 DeviceSettingsView(

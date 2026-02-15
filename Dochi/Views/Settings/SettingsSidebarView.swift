@@ -23,6 +23,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case proactiveSuggestion = "proactive-suggestion"
     case interest = "interest"
     case terminal = "terminal"
+    case externalTool = "external-tool"
     case devices = "devices"
     case account = "account"
     case guide = "guide"
@@ -51,6 +52,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shortcuts: return "단축어"
         case .plugins: return "플러그인"
         case .terminal: return "터미널"
+        case .externalTool: return "외부 도구"
         case .devices: return "디바이스"
         case .account: return "계정/동기화"
         case .guide: return "가이드"
@@ -79,6 +81,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shortcuts: return "square.grid.3x3.square"
         case .plugins: return "puzzlepiece.extension"
         case .terminal: return "terminal"
+        case .externalTool: return "hammer"
         case .devices: return "laptopcomputer.and.iphone"
         case .account: return "person.circle"
         case .guide: return "play.rectangle"
@@ -91,7 +94,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .voice: return .voice
         case .interface, .wakeWord, .heartbeat, .proactiveSuggestion, .automation: return .general
         case .family, .agent, .interest: return .people
-        case .terminal: return .development
+        case .terminal, .externalTool: return .development
         case .tools, .integrations, .shortcuts, .plugins, .devices, .account: return .connection
         case .guide: return .help
         }
@@ -139,6 +142,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             return ["플러그인", "plugin", "확장", "extension", "도구", "커스텀", "설치"]
         case .terminal:
             return ["터미널", "terminal", "쉘", "shell", "명령", "command", "zsh", "bash", "콘솔", "console"]
+        case .externalTool:
+            return ["외부", "도구", "external", "tool", "tmux", "Claude Code", "Codex", "aider", "세션", "session", "SSH", "원격", "헬스체크"]
         case .devices:
             return ["디바이스", "기기", "device", "멀티", "정책", "우선순위", "priority", "데스크탑", "모바일", "CLI", "응답"]
         case .account:

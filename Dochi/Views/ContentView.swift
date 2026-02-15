@@ -5,6 +5,7 @@ struct ContentView: View {
     enum MainSection: String, CaseIterable {
         case chat = "대화"
         case kanban = "칸반"
+        case tools = "도구"
     }
 
     @Bindable var viewModel: DochiViewModel
@@ -58,6 +59,10 @@ struct ContentView: View {
     // K-1: 터미널 패널
     @State private var terminalPanelHeight: CGFloat = 200
 
+    // K-4: 외부 도구
+    @State private var selectedToolSessionId: UUID?
+    @State private var selectedToolProfileId: UUID?
+
     var body: some View {
         mainContent
             .onAppear {
@@ -71,6 +76,8 @@ struct ContentView: View {
                     selectedSection = .kanban
                 case "chat":
                     selectedSection = .chat
+                case "tools":
+                    selectedSection = .tools
                 default:
                     break
                 }
@@ -298,7 +305,9 @@ struct ContentView: View {
             SidebarView(
                 viewModel: viewModel,
                 supabaseService: supabaseService,
-                selectedSection: $selectedSection
+                selectedSection: $selectedSection,
+                selectedToolSessionId: $selectedToolSessionId,
+                selectedToolProfileId: $selectedToolProfileId
             )
         } detail: {
             detailContent
@@ -358,10 +367,13 @@ struct ContentView: View {
     @ViewBuilder
     private var detailContent: some View {
         VSplitView {
-            if selectedSection == .chat {
+            switch selectedSection {
+            case .chat:
                 chatDetailView
-            } else {
+            case .kanban:
                 KanbanWorkspaceView()
+            case .tools:
+                toolsDetailView
             }
 
             if viewModel.showTerminalPanel, let terminalService = viewModel.terminalService {
@@ -551,6 +563,43 @@ struct ContentView: View {
             } else {
                 InputBarView(viewModel: viewModel)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var toolsDetailView: some View {
+        if let manager = viewModel.externalToolManager {
+            if let sessionId = selectedToolSessionId,
+               let session = manager.sessions.first(where: { $0.id == sessionId }) {
+                ExternalToolDashboardView(
+                    manager: manager,
+                    session: session,
+                    settings: viewModel.settings
+                )
+            } else if let profileId = selectedToolProfileId {
+                // Profile selected but no session — show start prompt
+                VStack(spacing: 16) {
+                    Spacer()
+                    let profile = manager.profiles.first(where: { $0.id == profileId })
+                    Image(systemName: profile?.icon ?? "terminal.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.tertiary)
+                    Text(profile?.name ?? "")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                    Button("세션 시작") {
+                        Task { try? await manager.startSession(profileId: profileId) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ExternalToolEmptyDashboardView()
+            }
+        } else {
+            ExternalToolEmptyDashboardView()
         }
     }
 
@@ -781,6 +830,12 @@ struct ContentView: View {
             viewModel.toggleProactiveSuggestionPause()
         case .showSuggestionHistory:
             viewModel.showSuggestionHistory = true
+        case .openExternalToolDashboard:
+            selectedSection = .tools
+        case .externalToolHealthcheck:
+            if let manager = viewModel.externalToolManager {
+                Task { await manager.checkAllHealth() }
+            }
         case .openShortcutsApp:
             NSWorkspace.shared.open(URL(string: "shortcuts://")!)
         case .custom(let id):
@@ -866,6 +921,8 @@ struct SidebarView: View {
     @Bindable var viewModel: DochiViewModel
     var supabaseService: SupabaseServiceProtocol?
     @Binding var selectedSection: ContentView.MainSection
+    @Binding var selectedToolSessionId: UUID?
+    @Binding var selectedToolProfileId: UUID?
     @State private var searchText: String = ""
     @State private var showFilterPopover = false
     @State private var showNewFolderAlert = false
@@ -983,7 +1040,7 @@ struct SidebarView: View {
                         syncState: viewModel.syncEngine?.syncState
                     )
                 }
-            } else {
+            } else if selectedSection == .kanban {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("칸반 보드", systemImage: "rectangle.3.group")
                         .font(.system(size: 13, weight: .semibold))
@@ -993,6 +1050,24 @@ struct SidebarView: View {
                 }
                 .padding(12)
                 Spacer()
+            } else if selectedSection == .tools {
+                if let manager = viewModel.externalToolManager {
+                    ExternalToolListView(
+                        manager: manager,
+                        selectedSessionId: $selectedToolSessionId,
+                        selectedProfileId: $selectedToolProfileId
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("외부 도구", systemImage: "hammer")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("외부 AI 도구 관리가 초기화되지 않았습니다.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                    Spacer()
+                }
             }
         }
         .toolbar {
