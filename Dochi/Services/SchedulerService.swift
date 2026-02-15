@@ -16,29 +16,28 @@ final class SchedulerService: SchedulerServiceProtocol {
     // MARK: - Configuration
 
     private let settings: AppSettings
-    private var executionHandler: (@MainActor (ScheduleEntry) async -> Void)?
+    private var executionHandler: (@MainActor (ScheduleEntry) async throws -> Void)?
     private var timerTask: Task<Void, Never>?
     private let fileManager = FileManager.default
+    private let baseURL: URL
 
     private static let maxHistoryCount = 100
     private static let timerIntervalSeconds = 60
 
     private var schedulesFileURL: URL {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Dochi")
-        return appSupport.appendingPathComponent("schedules.json")
+        baseURL.appendingPathComponent("schedules.json")
     }
 
     private var historyFileURL: URL {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Dochi")
-        return appSupport.appendingPathComponent("schedule_history.json")
+        baseURL.appendingPathComponent("schedule_history.json")
     }
 
     // MARK: - Init
 
-    init(settings: AppSettings) {
+    init(settings: AppSettings, baseURL: URL? = nil) {
         self.settings = settings
+        self.baseURL = baseURL ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Dochi")
     }
 
     /// Clear current execution banner
@@ -78,17 +77,21 @@ final class SchedulerService: SchedulerServiceProtocol {
         decoder.dateDecodingStrategy = .iso8601
 
         // Load schedules
-        if let data = try? Data(contentsOf: schedulesFileURL),
-           let loaded = try? decoder.decode([ScheduleEntry].self, from: data) {
-            schedules = loaded
-            Log.app.info("Loaded \(loaded.count) schedule(s)")
+        do {
+            let data = try Data(contentsOf: schedulesFileURL)
+            self.schedules = try decoder.decode([ScheduleEntry].self, from: data)
+            Log.app.info("Loaded \(self.schedules.count) schedule(s)")
+        } catch {
+            Log.app.error("Failed to load schedules: \(error.localizedDescription)")
         }
 
         // Load history
-        if let data = try? Data(contentsOf: historyFileURL),
-           let loaded = try? decoder.decode([ScheduleExecutionRecord].self, from: data) {
-            executionHistory = loaded
-            Log.app.info("Loaded \(loaded.count) execution history record(s)")
+        do {
+            let data = try Data(contentsOf: historyFileURL)
+            self.executionHistory = try decoder.decode([ScheduleExecutionRecord].self, from: data)
+            Log.app.info("Loaded \(self.executionHistory.count) execution history record(s)")
+        } catch {
+            Log.app.error("Failed to load execution history: \(error.localizedDescription)")
         }
 
         // Recalculate next run dates
@@ -146,7 +149,7 @@ final class SchedulerService: SchedulerServiceProtocol {
         start()
     }
 
-    func setExecutionHandler(_ handler: @escaping @MainActor (ScheduleEntry) async -> Void) {
+    func setExecutionHandler(_ handler: @escaping @MainActor (ScheduleEntry) async throws -> Void) {
         self.executionHandler = handler
     }
 
@@ -187,15 +190,19 @@ final class SchedulerService: SchedulerServiceProtocol {
 
         Log.app.info("Executing schedule: \(schedule.name)")
 
-        do {
-            if let handler = executionHandler {
-                await handler(schedule)
+        if let handler = executionHandler {
+            do {
+                try await handler(schedule)
                 record.status = .success
-            } else {
-                Log.app.warning("No execution handler set for scheduler")
+            } catch {
                 record.status = .failure
-                record.errorMessage = "실행 핸들러가 설정되지 않았습니다"
+                record.errorMessage = error.localizedDescription
+                Log.app.error("Schedule \(schedule.name) execution failed: \(error.localizedDescription)")
             }
+        } else {
+            Log.app.warning("No execution handler set for scheduler")
+            record.status = .failure
+            record.errorMessage = "실행 핸들러가 설정되지 않았습니다"
         }
 
         record.completedAt = Date()

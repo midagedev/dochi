@@ -9,7 +9,7 @@ struct ScheduleEditSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String = ""
-    @State private var icon: String = "clock"
+    @State private var icon: String = "⏰"
     @State private var repeatType: RepeatType = .daily
     @State private var selectedHour: Int = 9
     @State private var selectedMinute: Int = 0
@@ -159,6 +159,10 @@ struct ScheduleEditSheet: View {
                             .foregroundStyle(.secondary)
                         TextField("에이전트 이름", text: $agentName)
                             .textFieldStyle(.roundedBorder)
+                            .disabled(true)
+                        Text("향후 지원 예정")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
 
                     // Enable toggle

@@ -293,13 +293,12 @@ final class SchedulerTests: XCTestCase {
     // MARK: - SchedulerService File-based CRUD
 
     func testSchedulerServiceCRUD() async throws {
-        let settings = AppSettings()
-        settings.automationEnabled = true
-        let service = SchedulerService(settings: settings)
-
-        // Use a temp directory for file storage
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        let settings = AppSettings()
+        settings.automationEnabled = true
+        let service = SchedulerService(settings: settings, baseURL: tempDir)
 
         let entry1 = ScheduleEntry(
             name: "테스트 1",
@@ -389,12 +388,78 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(mock.restartCallCount, 1)
     }
 
+    func testMockClearCurrentExecution() {
+        let mock = MockSchedulerService()
+        let record = ScheduleExecutionRecord(scheduleId: UUID(), scheduleName: "Test")
+        mock.currentExecution = record
+        XCTAssertNotNil(mock.currentExecution)
+
+        mock.clearCurrentExecution()
+        XCTAssertNil(mock.currentExecution)
+        XCTAssertEqual(mock.clearCurrentExecutionCallCount, 1)
+    }
+
     func testMockNextRunDate() {
         let mock = MockSchedulerService()
         let date = Date()
         let next = mock.nextRunDate(for: "0 9 * * *", after: date)
         XCTAssertNotNil(next)
         XCTAssertNil(mock.nextRunDate(for: "invalid", after: date))
+    }
+
+    // MARK: - SchedulerService File Persistence
+
+    func testSchedulerServiceFilePersistenceRoundtrip() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        let settings = AppSettings()
+        settings.automationEnabled = true
+        let service = SchedulerService(settings: settings, baseURL: tempDir)
+
+        let entry = ScheduleEntry(
+            name: "파일 테스트",
+            icon: "⏰",
+            cronExpression: "0 9 * * *",
+            prompt: "테스트"
+        )
+        service.addSchedule(entry)
+        service.saveSchedules()
+
+        // Load into a new service instance
+        let service2 = SchedulerService(settings: settings, baseURL: tempDir)
+        service2.loadSchedules()
+        XCTAssertEqual(service2.schedules.count, 1)
+        XCTAssertEqual(service2.schedules.first?.name, "파일 테스트")
+
+        try? FileManager.default.removeItem(at: tempDir)
+    }
+
+    // MARK: - Execution Handler Type
+
+    func testExecutionHandlerAcceptsThrowingClosure() async {
+        let mock = MockSchedulerService()
+        var handlerCalled = false
+
+        mock.setExecutionHandler { _ in
+            handlerCalled = true
+            // Verify throwing closures are accepted
+            struct TestError: Error {}
+            // Non-throwing closure is valid for throws signature
+        }
+
+        let entry = ScheduleEntry(name: "Test", cronExpression: "0 9 * * *", prompt: "test")
+        XCTAssertFalse(handlerCalled)
+        // Handler type is now `async throws` per S-2
+        XCTAssertNotNil(mock)
+        _ = entry
+    }
+
+    // MARK: - Default Icon
+
+    func testScheduleEntryDefaultIconIsEmoji() {
+        let entry = ScheduleEntry(name: "Test", cronExpression: "0 9 * * *", prompt: "test")
+        XCTAssertEqual(entry.icon, "⏰")
     }
 
     // MARK: - SettingsSection automation

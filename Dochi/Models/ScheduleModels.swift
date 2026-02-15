@@ -26,7 +26,7 @@ struct ScheduleEntry: Codable, Identifiable, Sendable, Equatable {
     init(
         id: UUID = UUID(),
         name: String,
-        icon: String = "clock",
+        icon: String = "⏰",
         cronExpression: String,
         prompt: String,
         agentName: String = "도치",

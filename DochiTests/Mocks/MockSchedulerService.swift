@@ -15,8 +15,9 @@ final class MockSchedulerService: SchedulerServiceProtocol {
     var startCallCount = 0
     var stopCallCount = 0
     var restartCallCount = 0
+    var clearCurrentExecutionCallCount = 0
 
-    private var executionHandler: (@MainActor (ScheduleEntry) async -> Void)?
+    private var executionHandler: (@MainActor (ScheduleEntry) async throws -> Void)?
 
     func addSchedule(_ entry: ScheduleEntry) {
         addCallCount += 1
@@ -57,12 +58,17 @@ final class MockSchedulerService: SchedulerServiceProtocol {
         restartCallCount += 1
     }
 
+    func clearCurrentExecution() {
+        clearCurrentExecutionCallCount += 1
+        currentExecution = nil
+    }
+
     func nextRunDate(for cronExpression: String, after date: Date) -> Date? {
         guard let cron = CronExpression.parse(cronExpression) else { return nil }
         return cron.nextDate(after: date)
     }
 
-    func setExecutionHandler(_ handler: @escaping @MainActor (ScheduleEntry) async -> Void) {
+    func setExecutionHandler(_ handler: @escaping @MainActor (ScheduleEntry) async throws -> Void) {
         self.executionHandler = handler
     }
 }

@@ -270,9 +270,7 @@ final class DochiViewModel {
     }
 
     func dismissScheduleExecutionBanner() {
-        if let service = schedulerService as? SchedulerService {
-            service.clearCurrentExecution()
-        }
+        schedulerService?.clearCurrentExecution()
     }
 
     /// 피드백 제출 (I-4)

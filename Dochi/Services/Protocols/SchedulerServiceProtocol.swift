@@ -39,6 +39,9 @@ protocol SchedulerServiceProtocol: AnyObject {
     /// Calculate next run date for a cron expression
     func nextRunDate(for cronExpression: String, after date: Date) -> Date?
 
+    /// Clear current execution banner
+    func clearCurrentExecution()
+
     /// Set the handler called when a schedule fires
-    func setExecutionHandler(_ handler: @escaping @MainActor (ScheduleEntry) async -> Void)
+    func setExecutionHandler(_ handler: @escaping @MainActor (ScheduleEntry) async throws -> Void)
 }

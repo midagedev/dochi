@@ -158,8 +158,7 @@ struct ScheduleRowView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(schedule.icon)
-                .font(.title3)
+            scheduleIconView
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -190,6 +189,17 @@ struct ScheduleRowView: View {
             .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var scheduleIconView: some View {
+        if schedule.icon.allSatisfy({ $0.isASCII }) && schedule.icon.count > 1 {
+            Image(systemName: schedule.icon)
+                .font(.title3)
+        } else {
+            Text(schedule.icon)
+                .font(.title3)
+        }
     }
 }
 
