@@ -106,7 +106,7 @@ final class SyncEngine {
         guard canSync() else { return }
 
         syncState = .syncing
-        syncProgress = SyncProgress(totalItems: 4, completedItems: 0, currentEntity: "", startedAt: Date())
+        syncProgress = SyncProgress(totalItems: 5, completedItems: 0, currentEntity: "", startedAt: Date())
 
         do {
             // 1. 오프라인 큐 flush
@@ -125,12 +125,18 @@ final class SyncEngine {
                 try await pushMemory()
             }
             syncProgress.completedItems = 3
+            syncProgress.currentEntity = "칸반"
+
+            if settings.syncKanban {
+                try await pushKanban()
+            }
+            syncProgress.completedItems = 4
             syncProgress.currentEntity = "프로필"
 
             if settings.syncProfiles {
                 try await pushProfiles()
             }
-            syncProgress.completedItems = 4
+            syncProgress.completedItems = 5
 
             // 3. Pull remote changes
             if settings.syncConversations {
@@ -138,6 +144,9 @@ final class SyncEngine {
             }
             if settings.syncMemory {
                 try await pullMemory()
+            }
+            if settings.syncKanban {
+                try await pullKanban()
             }
             if settings.syncProfiles {
                 try await pullProfiles()
@@ -195,6 +204,9 @@ final class SyncEngine {
             syncProgress = SyncProgress(totalItems: totalSteps, completedItems: completed, currentEntity: "칸반", startedAt: Date())
 
             // 칸반 (placeholder)
+            if settings.syncKanban {
+                try await pushKanban()
+            }
             completed += 1
             onProgress?(Double(completed) / Double(totalSteps))
             syncProgress = SyncProgress(totalItems: totalSteps, completedItems: completed, currentEntity: "프로필", startedAt: Date())
@@ -310,7 +322,7 @@ final class SyncEngine {
             counts[.memory] = 1 // workspace memory count
         }
         if settings.syncKanban {
-            counts[.kanban] = 0 // placeholder
+            counts[.kanban] = KanbanManager.shared.listBoards().count
         }
         if settings.syncProfiles {
             counts[.profile] = contextService.loadProfiles().count
@@ -395,6 +407,21 @@ final class SyncEngine {
         try await supabaseService.pushEntities(type: .profile, payload: data)
 
         addToast(direction: .outgoing, entityType: .profile, entityTitle: "프로필 \(profiles.count)건")
+    }
+
+    private func pushKanban() async throws {
+        let boards = KanbanManager.shared.listBoards()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(boards)
+        try await supabaseService.pushEntities(type: .kanban, payload: data)
+
+        for board in boards {
+            syncMetadata.entityTimestamps["kanban:\(board.id.uuidString)"] = board.updatedAt
+        }
+        saveMetadata()
+
+        addToast(direction: .outgoing, entityType: .kanban, entityTitle: "보드 \(boards.count)건")
     }
 
     // MARK: - Private: Pull
@@ -509,6 +536,50 @@ final class SyncEngine {
 
             contextService.saveProfiles(localProfiles)
         }
+    }
+
+    private func pullKanban() async throws {
+        guard let data = try await supabaseService.pullEntities(type: .kanban, since: syncMetadata.lastSyncTimestamp) else { return }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let remoteBoards = try decoder.decode([KanbanBoard].self, from: data)
+        guard !remoteBoards.isEmpty else { return }
+
+        for remoteBoard in remoteBoards {
+            if let localBoard = KanbanManager.shared.board(id: remoteBoard.id) {
+                guard localBoard.updatedAt != remoteBoard.updatedAt else { continue }
+
+                if settings.conflictResolutionStrategy == "lastWriteWins" {
+                    if remoteBoard.updatedAt > localBoard.updatedAt {
+                        KanbanManager.shared.upsertBoardFromSync(remoteBoard)
+                        addToast(direction: .incoming, entityType: .kanban, entityTitle: remoteBoard.name)
+                        syncMetadata.entityTimestamps["kanban:\(remoteBoard.id.uuidString)"] = remoteBoard.updatedAt
+                    }
+                } else if localBoard.updatedAt > (syncMetadata.entityTimestamps["kanban:\(remoteBoard.id.uuidString)"] ?? .distantPast) {
+                    let conflict = SyncConflict(
+                        entityType: .kanban,
+                        entityId: remoteBoard.id.uuidString,
+                        entityTitle: remoteBoard.name,
+                        localUpdatedAt: localBoard.updatedAt,
+                        remoteUpdatedAt: remoteBoard.updatedAt,
+                        localPreview: kanbanPreview(localBoard),
+                        remotePreview: kanbanPreview(remoteBoard)
+                    )
+                    syncConflicts.append(conflict)
+                } else {
+                    KanbanManager.shared.upsertBoardFromSync(remoteBoard)
+                    addToast(direction: .incoming, entityType: .kanban, entityTitle: remoteBoard.name)
+                    syncMetadata.entityTimestamps["kanban:\(remoteBoard.id.uuidString)"] = remoteBoard.updatedAt
+                }
+            } else {
+                KanbanManager.shared.upsertBoardFromSync(remoteBoard)
+                addToast(direction: .incoming, entityType: .kanban, entityTitle: remoteBoard.name)
+                syncMetadata.entityTimestamps["kanban:\(remoteBoard.id.uuidString)"] = remoteBoard.updatedAt
+            }
+        }
+
+        saveMetadata()
     }
 
     // MARK: - Private: Offline Queue
@@ -635,5 +706,13 @@ final class SyncEngine {
         if syncHistory.count > Self.maxHistoryEntries {
             syncHistory = Array(syncHistory.prefix(Self.maxHistoryEntries))
         }
+    }
+
+    private func kanbanPreview(_ board: KanbanBoard) -> String {
+        let titles = board.cards.prefix(3).map(\.title)
+        if titles.isEmpty {
+            return "카드 없음"
+        }
+        return titles.joined(separator: ", ")
     }
 }
