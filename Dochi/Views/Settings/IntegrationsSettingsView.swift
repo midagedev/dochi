@@ -54,26 +54,18 @@ struct IntegrationsSettingsView: View {
                 set: { newValue in
                     settings.telegramEnabled = newValue
                     if newValue {
-                        if let token = keychainService.load(account: "telegram_bot_token"), !token.isEmpty {
-                            let mode = TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling
-                            if mode == .webhook, !settings.telegramWebhookURL.isEmpty {
-                                Task {
-                                    try? await telegramService?.startWebhook(
-                                        token: token,
-                                        url: settings.telegramWebhookURL,
-                                        port: UInt16(settings.telegramWebhookPort)
-                                    )
-                                }
-                            } else {
-                                telegramService?.startPolling(token: token)
-                            }
-                        }
+                        startTelegramConnectionIfPossible()
                     } else {
-                        telegramService?.stopPolling()
-                        Task { try? await telegramService?.stopWebhook() }
+                        stopTelegramConnection()
                     }
                 }
             ))
+
+            if settings.telegramEnabled && !settings.isTelegramHost {
+                Text("현재 디바이스는 텔레그램 호스트가 아니므로 수신 폴링/웹훅을 시작하지 않습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             HStack {
                 SecureField("봇 토큰", text: $botToken)
@@ -201,9 +193,41 @@ struct IntegrationsSettingsView: View {
         let token = botToken.trimmingCharacters(in: .whitespaces)
         if token.isEmpty {
             try? keychainService.delete(account: "telegram_bot_token")
+            stopTelegramConnection()
         } else {
             try? keychainService.save(account: "telegram_bot_token", value: token)
+            if settings.telegramEnabled {
+                startTelegramConnectionIfPossible()
+            }
         }
+    }
+
+    private func startTelegramConnectionIfPossible() {
+        guard settings.isTelegramHost else { return }
+        guard let token = keychainService.load(account: "telegram_bot_token"), !token.isEmpty else {
+            return
+        }
+
+        // Reset existing connection before switching transport mode.
+        stopTelegramConnection()
+
+        let mode = TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling
+        if mode == .webhook, !settings.telegramWebhookURL.isEmpty {
+            Task {
+                try? await telegramService?.startWebhook(
+                    token: token,
+                    url: settings.telegramWebhookURL,
+                    port: UInt16(settings.telegramWebhookPort)
+                )
+            }
+        } else {
+            telegramService?.startPolling(token: token)
+        }
+    }
+
+    private func stopTelegramConnection() {
+        telegramService?.stopPolling()
+        Task { try? await telegramService?.stopWebhook() }
     }
 
     private func checkBot() {
@@ -231,7 +255,14 @@ struct IntegrationsSettingsView: View {
         Section("텔레그램 채팅 매핑") {
             Toggle("이 디바이스를 텔레그램 호스트로 사용", isOn: Binding(
                 get: { settings.isTelegramHost },
-                set: { settings.isTelegramHost = $0 }
+                set: { newValue in
+                    settings.isTelegramHost = newValue
+                    if newValue {
+                        startTelegramConnectionIfPossible()
+                    } else {
+                        stopTelegramConnection()
+                    }
+                }
             ))
             .help("활성화하면 이 디바이스가 텔레그램 메시지를 처리합니다")
 
