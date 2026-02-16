@@ -64,6 +64,7 @@ struct DochiApp: App {
     private let proactiveSuggestionService: any ProactiveSuggestionServiceProtocol
     private let interestDiscoveryService: InterestDiscoveryService
     private let externalToolManager: ExternalToolSessionManager
+    private let telegramProactiveRelay: TelegramProactiveRelay
 
     init() {
         let settings = AppSettings()
@@ -168,6 +169,16 @@ struct DochiApp: App {
             sessionContext: sessionContext
         )
         self.proactiveSuggestionService = proactiveSuggestionService
+
+        // Telegram Proactive Relay (K-6)
+        let telegramProactiveRelay = TelegramProactiveRelay(
+            settings: settings,
+            telegramService: telegramService,
+            keychainService: keychainService
+        )
+        self.telegramProactiveRelay = telegramProactiveRelay
+        heartbeatService.setTelegramRelay(telegramProactiveRelay)
+        proactiveSuggestionService.setTelegramRelay(telegramProactiveRelay)
 
         // Spotlight indexer (H-4)
         let spotlightIndexer = SpotlightIndexer(settings: settings)
@@ -320,6 +331,10 @@ struct DochiApp: App {
                     // Configure ProactiveSuggestionService (K-2)
                     viewModel.configureProactiveSuggestionService(proactiveSuggestionService)
                     proactiveSuggestionService.start()
+
+                    // Configure TelegramProactiveRelay (K-6)
+                    viewModel.configureTelegramProactiveRelay(telegramProactiveRelay)
+                    telegramProactiveRelay.start()
 
                     // Configure InterestDiscoveryService (K-3)
                     viewModel.configureInterestDiscoveryService(interestDiscoveryService)

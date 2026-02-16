@@ -1067,3 +1067,52 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         return Array(mockOutputLines.prefix(lines))
     }
 }
+
+// MARK: - MockTelegramProactiveRelay (K-6)
+
+@MainActor
+final class MockTelegramProactiveRelay: TelegramProactiveRelayProtocol {
+    var isActive: Bool = false
+    var todayTelegramNotificationCount: Int = 0
+
+    var startCallCount = 0
+    var stopCallCount = 0
+    var sendHeartbeatAlertCallCount = 0
+    var sendSuggestionCallCount = 0
+
+    var lastHeartbeatCalendar: String?
+    var lastHeartbeatKanban: String?
+    var lastHeartbeatReminder: String?
+    var lastHeartbeatMemory: String?
+    var lastSuggestion: ProactiveSuggestion?
+
+    func start() {
+        startCallCount += 1
+        isActive = true
+    }
+
+    func stop() {
+        stopCallCount += 1
+        isActive = false
+    }
+
+    func sendHeartbeatAlert(
+        calendar: String,
+        kanban: String,
+        reminder: String,
+        memory: String?
+    ) async {
+        sendHeartbeatAlertCallCount += 1
+        lastHeartbeatCalendar = calendar
+        lastHeartbeatKanban = kanban
+        lastHeartbeatReminder = reminder
+        lastHeartbeatMemory = memory
+        todayTelegramNotificationCount += 1
+    }
+
+    func sendSuggestion(_ suggestion: ProactiveSuggestion) async {
+        sendSuggestionCallCount += 1
+        lastSuggestion = suggestion
+        todayTelegramNotificationCount += 1
+    }
+}

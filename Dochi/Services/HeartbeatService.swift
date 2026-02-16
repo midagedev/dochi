@@ -24,6 +24,7 @@ final class HeartbeatService: Observable {
     private var notificationManager: NotificationManager?
     private var interestDiscoveryService: InterestDiscoveryServiceProtocol?
     private var externalToolManager: ExternalToolSessionManagerProtocol?
+    private var telegramRelay: TelegramProactiveRelayProtocol?
 
     // Observable state
     private(set) var lastTickDate: Date?
@@ -56,6 +57,11 @@ final class HeartbeatService: Observable {
     /// Inject ExternalToolSessionManager for periodic health checks (K-4).
     func setExternalToolManager(_ manager: ExternalToolSessionManagerProtocol) {
         self.externalToolManager = manager
+    }
+
+    /// Inject TelegramProactiveRelay for Telegram notification delivery (K-6).
+    func setTelegramRelay(_ relay: TelegramProactiveRelayProtocol) {
+        self.telegramRelay = relay
     }
 
     /// Set a callback for when the heartbeat decides to proactively message the user.
@@ -197,6 +203,17 @@ final class HeartbeatService: Observable {
                     // Fallback: send generic notification if NotificationManager is not set
                     sendNotification(message: message)
                 }
+
+                // Telegram relay (K-6)
+                if let telegramRelay {
+                    await telegramRelay.sendHeartbeatAlert(
+                        calendar: calendarContext,
+                        kanban: kanbanContext,
+                        reminder: reminderContext,
+                        memory: memoryWarning
+                    )
+                }
+
                 onProactiveMessage?(message)
                 notificationSent = true
             } else {

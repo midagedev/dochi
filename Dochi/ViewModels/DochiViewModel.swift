@@ -79,6 +79,9 @@ final class DochiViewModel {
     // MARK: - Interest Discovery (K-3)
     private(set) var interestDiscoveryService: InterestDiscoveryServiceProtocol?
 
+    // MARK: - Telegram Proactive (K-6)
+    private(set) var telegramProactiveRelay: TelegramProactiveRelayProtocol?
+
     // MARK: - External Tool (K-4)
     private(set) var externalToolManager: ExternalToolSessionManagerProtocol?
 
@@ -343,6 +346,13 @@ final class DochiViewModel {
     func configureProactiveSuggestionService(_ service: ProactiveSuggestionServiceProtocol) {
         self.proactiveSuggestionService = service
         Log.app.info("ProactiveSuggestionService configured")
+    }
+
+    // MARK: - Telegram Proactive (K-6)
+
+    func configureTelegramProactiveRelay(_ relay: TelegramProactiveRelayProtocol) {
+        self.telegramProactiveRelay = relay
+        Log.app.info("TelegramProactiveRelay configured")
     }
 
     // MARK: - External Tool (K-4)

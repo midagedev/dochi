@@ -210,7 +210,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더 (시스템/Google Cloud/ONNX), 음성, 속도/피치, ONNX 모델 관리 (ONNXModelManagerView), 디퓨전 스텝, TTS 오프라인 폴백 |
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타, Spotlight 검색 (H-4) |
 | 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
-| 일반 | 하트비트 (`heartbeat`) | heart.circle | `Views/SettingsView.swift` 내 HeartbeatSettingsContent | Heartbeat 간격, 캘린더/칸반/미리알림 체크, 알림 센터 설정 (권한 상태, 소리/답장 토글, 카테고리별 알림 토글) (H-3) |
+| 일반 | 하트비트 (`heartbeat`) | heart.circle | `Views/SettingsView.swift` 내 HeartbeatSettingsContent | Heartbeat 간격, 캘린더/칸반/미리알림 체크, 알림 센터 설정 (권한 상태, 소리/답장 토글, 카테고리별 알림 토글) (H-3), 텔레그램 알림 채널 설정 (K-6) |
 | 일반 | 자동화 (`automation`) | clock.badge.checkmark | `Views/Settings/AutomationSettingsView.swift` | 마스터 토글, 스케줄 CRUD (크론식), 템플릿 추가, 실행 이력 (J-3) |
 | 사람 | 가족 (`family`) | person.2 | `Views/Settings/FamilySettingsView.swift` | 사용자 프로필 CRUD |
 | 사람 | 에이전트 (`agent`) | person.crop.rectangle | `Views/Settings/AgentSettingsView.swift` → `Views/Agent/AgentCardGridView.swift` | 에이전트 카드 그리드 |

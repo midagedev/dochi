@@ -121,7 +121,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .wakeWord:
             return ["웨이크워드", "마이크", "침묵", "음성 입력"]
         case .heartbeat:
-            return ["하트비트", "주기", "캘린더", "칸반", "미리알림", "조용한 시간"]
+            return ["하트비트", "주기", "캘린더", "칸반", "미리알림", "조용한 시간", "텔레그램", "telegram", "알림 채널", "프로액티브 알림"]
         case .proactiveSuggestion:
             return ["프로액티브", "제안", "suggestion", "유휴", "idle", "쿨다운", "cooldown", "트렌드", "심층", "리서치", "칸반", "메모리", "비용"]
         case .interest:
