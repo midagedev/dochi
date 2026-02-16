@@ -20,6 +20,7 @@ final class SyncEngineTests: XCTestCase {
         mockConversation = MockConversationService()
         settings = AppSettings()
         settings.autoSyncEnabled = true
+        settings.realtimeSyncEnabled = true
         settings.syncConversations = true
         settings.syncMemory = true
         settings.syncProfiles = true
@@ -67,6 +68,34 @@ final class SyncEngineTests: XCTestCase {
     func testRestoreSyncStateWhenAutoSyncDisabled() {
         settings.autoSyncEnabled = false
         engine.restoreSyncState()
+        XCTAssertEqual(engine.syncState, .disabled)
+    }
+
+    func testRestoreSyncStateUsesRealtimeIntervalWhenEnabled() {
+        settings.realtimeSyncEnabled = true
+        engine.restoreSyncState()
+        XCTAssertEqual(engine.currentAutoSyncIntervalSeconds, 30)
+    }
+
+    func testRestoreSyncStateUsesPeriodicIntervalWhenRealtimeDisabled() {
+        settings.realtimeSyncEnabled = false
+        engine.restoreSyncState()
+        XCTAssertEqual(engine.currentAutoSyncIntervalSeconds, 300)
+    }
+
+    func testRefreshAutoSyncScheduleAppliesRealtimeSetting() {
+        settings.realtimeSyncEnabled = false
+        engine.restoreSyncState()
+        XCTAssertEqual(engine.currentAutoSyncIntervalSeconds, 300)
+
+        settings.realtimeSyncEnabled = true
+        engine.refreshAutoSyncSchedule()
+        XCTAssertEqual(engine.currentAutoSyncIntervalSeconds, 30)
+    }
+
+    func testRefreshAutoSyncScheduleDisablesWhenAutoSyncOff() {
+        settings.autoSyncEnabled = false
+        engine.refreshAutoSyncSchedule()
         XCTAssertEqual(engine.syncState, .disabled)
     }
 

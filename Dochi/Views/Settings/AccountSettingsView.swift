@@ -205,6 +205,10 @@ struct AccountSettingsView: View {
                 .font(.system(size: 13))
                 .disabled(!settings.autoSyncEnabled)
 
+                Text(syncIntervalDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 DisclosureGroup("동기화 대상") {
                     Toggle("대화", isOn: Binding(
                         get: { settings.syncConversations },
@@ -293,6 +297,15 @@ struct AccountSettingsView: View {
             return email
         }
         return nil
+    }
+
+    private var syncIntervalDescription: String {
+        guard settings.autoSyncEnabled else {
+            return "자동 동기화 OFF: 동기화 타이머가 중지됩니다."
+        }
+        return settings.realtimeSyncEnabled
+            ? "실시간 동기화 ON: 자동 동기화 주기 30초"
+            : "실시간 동기화 OFF: 자동 동기화 주기 5분"
     }
 
     private func configureSupabase() {

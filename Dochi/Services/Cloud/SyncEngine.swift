@@ -36,6 +36,7 @@ final class SyncEngine {
     /// deinit에서 Task cancel을 위한 nonisolated 참조 (deinit은 nonisolated이므로 @MainActor 속성 접근 불가)
     nonisolated(unsafe) private var _autoSyncTaskForCleanup: Task<Void, Never>?
     private var isOnline: Bool = true
+    private(set) var currentAutoSyncIntervalSeconds: TimeInterval = 30
 
     /// 오프라인 큐 파일 경로
     private let queueFileURL: URL
@@ -43,7 +44,8 @@ final class SyncEngine {
     private let metadataFileURL: URL
 
     private static let maxHistoryEntries = 20
-    private static let autoSyncIntervalSeconds: TimeInterval = 60
+    private static let realtimeAutoSyncIntervalSeconds: TimeInterval = 30
+    private static let periodicAutoSyncIntervalSeconds: TimeInterval = 300
 
     // MARK: - Init
 
@@ -323,15 +325,37 @@ final class SyncEngine {
         autoSyncTask = nil
     }
 
+    /// 설정 변경(autoSync/realtimeSync)에 맞춰 자동 동기화 스케줄을 재적용한다.
+    func refreshAutoSyncSchedule() {
+        guard supabaseService.isConfigured, supabaseService.authState.isSignedIn else {
+            stopAutoSync()
+            syncState = .disabled
+            return
+        }
+
+        guard settings.autoSyncEnabled else {
+            stopAutoSync()
+            syncState = .disabled
+            return
+        }
+
+        syncState = .idle
+        startAutoSync()
+    }
+
     // MARK: - Private: Auto Sync
 
     private func startAutoSync() {
         autoSyncTask?.cancel()
         guard settings.autoSyncEnabled else { return }
+        let interval = settings.realtimeSyncEnabled
+            ? Self.realtimeAutoSyncIntervalSeconds
+            : Self.periodicAutoSyncIntervalSeconds
+        currentAutoSyncIntervalSeconds = interval
 
         autoSyncTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(Self.autoSyncIntervalSeconds))
+                try? await Task.sleep(for: .seconds(interval))
                 guard !Task.isCancelled else { return }
                 await self?.sync()
             }

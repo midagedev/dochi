@@ -453,6 +453,7 @@ UX 정책 메모 (2026-02-16):
 - 리소스 자동 작업은 Heartbeat tick에서 조건을 평가해 큐에 등록하며, 동일 구독/동일 작업은 하루 1회까지만 큐잉한다.
 - `deviceCloudSyncEnabled`는 로그인/설정 상태와 함께 DeviceHeartbeatService 시작/정지를 직접 제어한다.
 - 프로액티브 제안 채널 토글은 저장값으로만 남기지 않고 실제 노출 경로(알림 센터 배너, 메뉴바 팝오버 카드)에 직접 연결한다.
+- `realtimeSyncEnabled`는 자동 동기화 주기를 직접 제어한다. ON일 때 30초, OFF일 때 5분 주기로 스케줄되며 토글 변경 즉시 재적용한다.
 
 ### 텍스트 메시지
 ```
@@ -556,6 +557,26 @@ UI 노출:
   -> 이미 실행 중이면 재등록 없이 updateWorkspaces()만 수행
 UI 노출:
   -> 토글 활성 상태에서 "30초마다 Supabase 동기화" 안내 문구 표시
+```
+
+### 자동 동기화 주기 정책 (G-3 보강, #184)
+```
+설정: 설정 > 연결 > 계정 > 동기화 설정
+  -> "자동 동기화(autoSyncEnabled)" ON + "실시간 동기화(realtimeSyncEnabled)" ON
+     -> SyncEngine auto-sync를 30초 주기로 실행
+  -> "자동 동기화(autoSyncEnabled)" ON + "실시간 동기화(realtimeSyncEnabled)" OFF
+     -> SyncEngine auto-sync를 5분 주기로 실행
+  -> "자동 동기화(autoSyncEnabled)" OFF
+     -> auto-sync 타이머 중지 + SyncState.disabled
+실행 트리거:
+  -> 앱 시작 시 SyncEngine.restoreSyncState()
+  -> autoSyncEnabled 변경 시 refreshAutoSyncSchedule()
+  -> realtimeSyncEnabled 변경 시 refreshAutoSyncSchedule()
+UI 노출:
+  -> AccountSettingsView 실시간 동기화 토글 아래 주기 안내 문구
+     autoSyncEnabled OFF: "자동 동기화 OFF: 동기화 타이머가 중지됩니다."
+     ON: "실시간 동기화가 활성화되어 30초마다 동기화합니다."
+     OFF: "실시간 동기화가 비활성화되어 5분마다 동기화합니다."
 ```
 
 ### 모델 빠른 변경 (UX-10 추가)
