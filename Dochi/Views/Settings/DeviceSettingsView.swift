@@ -263,6 +263,10 @@ struct DeviceSettingsView: View {
                     Text("Supabase 로그인이 필요합니다")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else if settings.deviceCloudSyncEnabled {
+                    Text("활성화 시 30초마다 현재 디바이스 상태를 Supabase에 동기화합니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 HStack {

@@ -21,17 +21,32 @@ final class DeviceHeartbeatService {
 
     /// Register this device and start sending heartbeats.
     func startHeartbeat(workspaceIds: [UUID]) async {
+        guard settings.deviceCloudSyncEnabled else {
+            stopHeartbeat()
+            Log.cloud.debug("DeviceHeartbeat: skipping — device cloud sync disabled")
+            return
+        }
+
         guard supabaseService.isConfigured, supabaseService.authState.userId != nil else {
             Log.cloud.debug("DeviceHeartbeat: skipping — not configured or not signed in")
             return
         }
+
+        let normalizedWorkspaceIds = Array(Set(workspaceIds))
+
+        if isRunning {
+            await updateWorkspaces(normalizedWorkspaceIds)
+            return
+        }
+
+        heartbeatTask?.cancel()
 
         // Register the device
         let deviceName = Host.current().localizedName ?? "Mac"
         do {
             let device = try await supabaseService.registerDevice(
                 name: deviceName,
-                workspaceIds: workspaceIds
+                workspaceIds: normalizedWorkspaceIds
             )
             currentDeviceId = device.id
             settings.deviceId = device.id.uuidString

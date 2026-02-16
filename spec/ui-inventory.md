@@ -450,6 +450,7 @@ UX 정책 메모 (2026-02-16):
 - 텔레그램 수신/라우팅 책임은 `isTelegramHost`가 켜진 디바이스에서만 활성화한다.
 - 외부도구 상태 확인은 Heartbeat 주기와 분리하고 `externalToolHealthCheckIntervalSeconds`(초) 전용 주기를 따른다.
 - 리소스 자동 작업은 Heartbeat tick에서 조건을 평가해 큐에 등록하며, 동일 구독/동일 작업은 하루 1회까지만 큐잉한다.
+- `deviceCloudSyncEnabled`는 로그인/설정 상태와 함께 DeviceHeartbeatService 시작/정지를 직접 제어한다.
 
 ### 텍스트 메시지
 ```
@@ -539,6 +540,20 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
   -> 동일 subscription + taskType은 같은 날짜에 중복 큐잉하지 않음
 UI 노출:
   -> 자동 작업 설정 카드에 "Heartbeat 주기 평가 + 하루 1회 큐잉" 정책 문구 명시
+```
+
+### 디바이스 클라우드 하트비트 (J-1 보강)
+```
+설정: 설정 > 연결 > 디바이스 > "Supabase 동기화(deviceCloudSyncEnabled)"
+  -> ON + Supabase 설정 완료 + 로그인 상태: DeviceHeartbeatService 시작
+  -> OFF 또는 로그아웃: DeviceHeartbeatService 정지
+실행 트리거: DochiApp.onAppear / deviceCloudSyncEnabled 변경 / workspace 변경 / auth userId 변경
+  -> syncDeviceHeartbeatLifecycle() 호출
+  -> startHeartbeat(workspaceIds: [currentWorkspaceId]) 또는 stopHeartbeat()
+중복 방지:
+  -> 이미 실행 중이면 재등록 없이 updateWorkspaces()만 수행
+UI 노출:
+  -> 토글 활성 상태에서 "30초마다 Supabase 동기화" 안내 문구 표시
 ```
 
 ### 모델 빠른 변경 (UX-10 추가)
