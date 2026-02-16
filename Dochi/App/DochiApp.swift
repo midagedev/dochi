@@ -512,6 +512,9 @@ struct DochiApp: App {
             return
         }
 
+        // Ensure we do not keep stale polling/webhook sessions when host role changes.
+        stopTelegramIngress()
+
         let mode = TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling
         if mode == .webhook, !settings.telegramWebhookURL.isEmpty {
             Task {

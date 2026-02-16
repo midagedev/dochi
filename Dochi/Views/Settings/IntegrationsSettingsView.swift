@@ -208,6 +208,9 @@ struct IntegrationsSettingsView: View {
             return
         }
 
+        // Reset existing connection before switching transport mode.
+        stopTelegramConnection()
+
         let mode = TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling
         if mode == .webhook, !settings.telegramWebhookURL.isEmpty {
             Task {
