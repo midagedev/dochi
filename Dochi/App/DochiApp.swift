@@ -237,8 +237,9 @@ struct DochiApp: App {
         notificationManager.registerCategories()
         UNUserNotificationCenter.current().delegate = notificationManager
 
-        // Start Telegram connection if enabled
-        if settings.telegramEnabled,
+        // Start Telegram connection only on the designated host device.
+        if settings.isTelegramHost,
+           settings.telegramEnabled,
            let token = keychainService.load(account: "telegram_bot_token"), !token.isEmpty {
             let mode = TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling
             if mode == .webhook, !settings.telegramWebhookURL.isEmpty {
@@ -286,6 +287,10 @@ struct DochiApp: App {
                     // Wire Telegram message handler
                     viewModel.setTelegramService(telegramService)
                     telegramService.onMessage = { [weak viewModel] update in
+                        guard settings.isTelegramHost else {
+                            Log.telegram.debug("isTelegramHost=false 이므로 텔레그램 메시지 처리를 건너뜀")
+                            return
+                        }
                         guard let viewModel else { return }
                         Task {
                             await viewModel.handleTelegramMessage(update)
@@ -335,7 +340,7 @@ struct DochiApp: App {
 
                     // Configure TelegramProactiveRelay (K-6)
                     viewModel.configureTelegramProactiveRelay(telegramProactiveRelay)
-                    telegramProactiveRelay.start()
+                    applyTelegramHostRole()
 
                     // Configure InterestDiscoveryService (K-3)
                     viewModel.configureInterestDiscoveryService(interestDiscoveryService)
@@ -489,6 +494,48 @@ struct DochiApp: App {
             feedbackStore: viewModel.feedbackStore,
             resourceOptimizer: resourceOptimizer
         )
+    }
+
+    private func applyTelegramHostRole() {
+        if settings.isTelegramHost {
+            startTelegramIngressIfNeeded()
+            telegramProactiveRelay.start()
+        } else {
+            stopTelegramIngress()
+            telegramProactiveRelay.stop()
+        }
+    }
+
+    private func startTelegramIngressIfNeeded() {
+        guard settings.isTelegramHost, settings.telegramEnabled else { return }
+        guard let token = keychainService.load(account: "telegram_bot_token"), !token.isEmpty else {
+            return
+        }
+
+        let mode = TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling
+        if mode == .webhook, !settings.telegramWebhookURL.isEmpty {
+            Task {
+                do {
+                    try await telegramService.startWebhook(
+                        token: token,
+                        url: settings.telegramWebhookURL,
+                        port: UInt16(settings.telegramWebhookPort)
+                    )
+                } catch {
+                    Log.telegram.error("웹훅 시작 실패: \(error.localizedDescription)")
+                    telegramService.startPolling(token: token)
+                }
+            }
+        } else {
+            telegramService.startPolling(token: token)
+        }
+    }
+
+    private func stopTelegramIngress() {
+        telegramService.stopPolling()
+        Task {
+            try? await telegramService.stopWebhook()
+        }
     }
 
     private func restoreMCPServers(mcpService: MCPService, json: String) {
