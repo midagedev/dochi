@@ -456,6 +456,7 @@ UX 정책 메모 (2026-02-16):
 - `realtimeSyncEnabled`는 자동 동기화 주기를 직접 제어한다. ON일 때 30초, OFF일 때 5분 주기로 스케줄되며 토글 변경 즉시 재적용한다.
 - 스케줄 `agentName`은 편집 UI(Picker)와 실행 경로 모두에서 동일하게 사용하며, 미존재 에이전트를 가리키면 실행 실패로 기록한다.
 - 관심사 발굴 모드의 단일 소스는 `settings.interestDiscoveryMode`이며, 서비스는 profile 값이 아니라 설정값을 기준으로 적극성과 분석 여부를 결정한다.
+- ONNX 로컬 TTS는 `settings.onnxModelId`를 런타임 로드 타깃으로 즉시 반영하고, 추론 실패/미구현 시 시스템 TTS 폴백을 사용자에게 명시한다.
 
 ### 텍스트 메시지
 ```
@@ -658,6 +659,20 @@ ONNX 모델 관리:
   -> ModelDownloadManager.loadCatalog() -> 하드코딩된 Piper 한국어 모델 목록
   -> 모델 다운로드 (ProgressView) / 취소 / 삭제
   -> 설치된 모델 Picker로 선택 -> settings.onnxModelId 변경
+```
+
+### ONNX 로컬 TTS 반영/노출 (K-3 보강, #181)
+```
+설정: 설정 > 음성 > TTS 프로바이더 = "로컬 TTS (ONNX)"
+  -> ONNXModelManagerView의 모델 Picker에서 settings.onnxModelId 선택
+  -> TTSRouter.syncSettings()가 현재 선택 모델 ID를 SupertonicService에 전달
+실행 동작:
+  -> SupertonicService는 문장 합성 전 selectedModelId 변경 여부를 확인하고 로드 경로(loadModel)를 재평가
+  -> ONNX 추론 성공 시 파형 재생
+  -> ONNX 추론 미구현/실패/모델 미로드 시 시스템 TTS 즉시 폴백 (무음 금지)
+UI 노출:
+  -> ONNX 설정 섹션에 "베타(폴백 포함)" 안내 텍스트를 고정 노출
+  -> 사용자는 모델 관리 UI가 "실험적 ONNX + 안정 폴백" 정책임을 즉시 인지할 수 있어야 함
 ```
 
 ### 메뉴바 퀵 액세스 (H-1 추가)

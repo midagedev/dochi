@@ -13,9 +13,11 @@ final class SupertonicService: TTSServiceProtocol {
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
     private let modelManager = ONNXModelManager()
+    private let fallbackTTS = SystemTTSService()
 
     /// The currently loaded model ID (set via loadModel).
     private(set) var loadedModelId: String?
+    private(set) var selectedModelId: String = ""
 
     // TTS settings
     var speed: Float = 1.0
@@ -40,12 +42,21 @@ final class SupertonicService: TTSServiceProtocol {
         return modelManager.areModelsAvailable()
     }
 
+    func setSelectedModelId(_ modelId: String) {
+        let normalized = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        selectedModelId = normalized
+        if normalized.isEmpty {
+            loadedModelId = nil
+        }
+    }
+
     /// Load a specific model by ID from the models directory.
     func loadModel(modelId: String) async throws {
         guard !modelId.isEmpty else {
             Log.tts.warning("Empty model ID provided to loadModel")
             return
         }
+        if loadedModelId == modelId { return }
 
         let modelDir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -74,6 +85,8 @@ final class SupertonicService: TTSServiceProtocol {
             } catch {
                 Log.tts.warning("ONNX session load failed for \(modelId): \(error.localizedDescription) — running in placeholder mode")
             }
+        } else {
+            Log.tts.warning("ONNX session bundle(duration/acoustic/vocoder) not found — system TTS fallback will be used")
         }
     }
 
@@ -99,6 +112,14 @@ final class SupertonicService: TTSServiceProtocol {
             Log.tts.info("ONNX models not found at \(mgr.modelsDirectoryPath.path) — running in placeholder mode")
         }
 
+        if !selectedModelId.isEmpty {
+            do {
+                try await loadModel(modelId: selectedModelId)
+            } catch {
+                Log.tts.warning("Selected ONNX model preload failed(\(self.selectedModelId)): \(error.localizedDescription) — system TTS fallback will be used")
+            }
+        }
+
         setupAudioEngine()
         engineState = .ready
         Log.tts.info("Supertonic TTS engine ready (models loaded: \(mgr.isLoaded))")
@@ -108,7 +129,9 @@ final class SupertonicService: TTSServiceProtocol {
         stopAndClear()
         teardownAudioEngine()
         modelManager.unloadModels()
+        fallbackTTS.unloadEngine()
         loadedModelId = nil
+        selectedModelId = ""
         engineState = .unloaded
         Log.tts.info("Supertonic TTS engine unloaded")
     }
@@ -126,6 +149,7 @@ final class SupertonicService: TTSServiceProtocol {
     func stopAndClear() {
         sentenceQueue.removeAll()
         playerNode?.stop()
+        fallbackTTS.stopAndClear()
         isSpeaking = false
         isProcessing = false
         Log.tts.info("Supertonic TTS stopped and queue cleared")
@@ -152,23 +176,26 @@ final class SupertonicService: TTSServiceProtocol {
     private func synthesizeAndPlay(_ text: String) async {
         Log.tts.debug("Synthesizing: \(text.prefix(30))...")
 
+        await ensureSelectedModelLoadedIfNeeded()
+
         if modelManager.isLoaded {
-            await synthesizeWithONNX(text)
-        } else {
-            // Placeholder: simulate synthesis time
-            Log.tts.debug("ONNX models not loaded — placeholder synthesis for: \(text.prefix(30))")
-            try? await Task.sleep(for: .milliseconds(100))
+            let succeeded = await synthesizeWithONNX(text)
+            if succeeded {
+                return
+            }
         }
+
+        await synthesizeWithSystemFallback(text)
     }
 
     // MARK: - ONNX Inference Pipeline
 
-    private func synthesizeWithONNX(_ text: String) async {
+    private func synthesizeWithONNX(_ text: String) async -> Bool {
         // Step 1: Grapheme-to-Phoneme conversion
         let phonemes = KoreanG2P.convert(text)
         guard !phonemes.isEmpty else {
             Log.tts.warning("G2P produced empty phonemes for: \(text.prefix(30))")
-            return
+            return false
         }
 
         Log.tts.debug("G2P: \(phonemes.count) phonemes")
@@ -185,11 +212,12 @@ final class SupertonicService: TTSServiceProtocol {
 
         guard let waveform, !waveform.isEmpty else {
             Log.tts.warning("ONNX inference produced no waveform")
-            return
+            return false
         }
 
         // Step 6: Play audio
         playWaveform(waveform)
+        return true
     }
 
     /// Run the full ONNX inference pipeline (duration -> acoustic -> vocoder).
@@ -201,9 +229,9 @@ final class SupertonicService: TTSServiceProtocol {
         diffusionSteps: Int
     ) -> [Float]? {
         #if canImport(OnnxRuntimeBindings)
-        guard let durationSession = modelManager.durationSession,
-              let acousticSession = modelManager.acousticSession,
-              let vocoderSession = modelManager.vocoderSession else {
+        guard modelManager.durationSession != nil,
+              modelManager.acousticSession != nil,
+              modelManager.vocoderSession != nil else {
             return nil
         }
 
@@ -222,10 +250,35 @@ final class SupertonicService: TTSServiceProtocol {
         #endif
     }
 
+    private func ensureSelectedModelLoadedIfNeeded() async {
+        guard !selectedModelId.isEmpty else { return }
+        guard loadedModelId != selectedModelId else { return }
+
+        do {
+            try await loadModel(modelId: selectedModelId)
+        } catch {
+            Log.tts.warning("Failed to load selected ONNX model \(self.selectedModelId): \(error.localizedDescription)")
+        }
+    }
+
+    private func synthesizeWithSystemFallback(_ text: String) async {
+        fallbackTTS.speed = speed
+
+        if case .unloaded = fallbackTTS.engineState {
+            try? await fallbackTTS.loadEngine()
+        }
+
+        Log.tts.info("Using system TTS fallback for ONNX sentence synthesis")
+        fallbackTTS.enqueueSentence(text)
+        while fallbackTTS.isSpeaking {
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+    }
+
     // MARK: - Audio Playback
 
     private func playWaveform(_ waveform: [Float]) {
-        guard let engine = audioEngine, let player = playerNode else {
+        guard audioEngine != nil, let player = playerNode else {
             Log.tts.error("Audio engine not available for playback")
             return
         }

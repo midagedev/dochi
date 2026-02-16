@@ -317,8 +317,28 @@ final class ONNXTTSTests: XCTestCase {
         let service = SupertonicService()
         XCTAssertFalse(service.isSpeaking)
         XCTAssertNil(service.loadedModelId)
+        XCTAssertEqual(service.selectedModelId, "")
         if case .unloaded = service.engineState {} else {
             XCTFail("Expected unloaded state")
+        }
+    }
+
+    @MainActor
+    func testSupertonicServiceSetSelectedModelId() {
+        let service = SupertonicService()
+        service.setSelectedModelId("  ko_KR-kss-medium  ")
+        XCTAssertEqual(service.selectedModelId, "ko_KR-kss-medium")
+    }
+
+    @MainActor
+    func testSupertonicServiceLoadEngineWithMissingSelectedModelDoesNotThrow() async throws {
+        let service = SupertonicService()
+        service.setSelectedModelId("nonexistent-model-xyz")
+
+        try await service.loadEngine()
+
+        if case .ready = service.engineState {} else {
+            XCTFail("Expected ready state even when selected ONNX model cannot be loaded")
         }
     }
 
