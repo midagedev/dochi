@@ -67,6 +67,11 @@ struct TerminalPanelView: View {
         } message: {
             Text("설정에서 '닫기 전 확인'이 활성화되어 있어 확인이 필요합니다.")
         }
+        .onChange(of: showCloseConfirmation) { _, isPresented in
+            if !isPresented {
+                pendingCloseSessionId = nil
+            }
+        }
     }
 
     // MARK: - Tab Bar
