@@ -89,6 +89,7 @@ final class HeartbeatServiceTests: XCTestCase {
     func testTickDoesNotTriggerExternalToolHealthCheck() async throws {
         let settings = AppSettings()
         settings.heartbeatEnabled = true
+        settings.externalToolEnabled = true
         settings.heartbeatIntervalMinutes = 0
         settings.heartbeatCheckCalendar = false
         settings.heartbeatCheckKanban = false
