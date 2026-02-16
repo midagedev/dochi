@@ -4,6 +4,19 @@ import SwiftUI
 @MainActor
 @Observable
 final class AppSettings {
+    private static let deprecatedKeys = [
+        "uiDensity",
+        "hasSeenPermissionInfo",
+        "ragEmbeddingProvider",
+    ]
+
+    init() {
+        // Remove stale keys for settings that are no longer exposed or used.
+        for key in Self.deprecatedKeys {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
     // MARK: - P1 Settings
 
     var llmProvider: String = UserDefaults.standard.string(forKey: "llmProvider") ?? LLMProvider.openai.rawValue {
@@ -32,10 +45,6 @@ final class AppSettings {
 
     var activeAgentName: String = UserDefaults.standard.string(forKey: "activeAgentName") ?? "도치" {
         didSet { UserDefaults.standard.set(activeAgentName, forKey: "activeAgentName") }
-    }
-
-    var uiDensity: String = UserDefaults.standard.string(forKey: "uiDensity") ?? "normal" {
-        didSet { UserDefaults.standard.set(uiDensity, forKey: "uiDensity") }
     }
 
     // MARK: - P2 Settings
@@ -118,10 +127,6 @@ final class AppSettings {
     /// Whether this device acts as the Telegram host for its workspace.
     var isTelegramHost: Bool = UserDefaults.standard.object(forKey: "isTelegramHost") as? Bool ?? true {
         didSet { UserDefaults.standard.set(isTelegramHost, forKey: "isTelegramHost") }
-    }
-
-    var hasSeenPermissionInfo: Bool = UserDefaults.standard.object(forKey: "hasSeenPermissionInfo") as? Bool ?? false {
-        didSet { UserDefaults.standard.set(hasSeenPermissionInfo, forKey: "hasSeenPermissionInfo") }
     }
 
     var supabaseURL: String = UserDefaults.standard.string(forKey: "supabaseURL") ?? "" {
@@ -452,10 +457,6 @@ final class AppSettings {
 
     var ragEnabled: Bool = UserDefaults.standard.object(forKey: "ragEnabled") as? Bool ?? false {
         didSet { UserDefaults.standard.set(ragEnabled, forKey: "ragEnabled") }
-    }
-
-    var ragEmbeddingProvider: String = UserDefaults.standard.string(forKey: "ragEmbeddingProvider") ?? "openai" {
-        didSet { UserDefaults.standard.set(ragEmbeddingProvider, forKey: "ragEmbeddingProvider") }
     }
 
     var ragEmbeddingModel: String = UserDefaults.standard.string(forKey: "ragEmbeddingModel") ?? "text-embedding-3-small" {

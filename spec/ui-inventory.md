@@ -205,7 +205,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택 (클라우드/로컬 그룹), Ollama 설정, LM Studio 설정, 오프라인 폴백, 태스크 라우팅. **기본 모델 정책은 `LLMProvider` 모델 레지스트리와 일치해야 함** |
 | AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
 | AI | 사용량 (`usage`) | chart.bar.xaxis | `Views/Settings/UsageDashboardView.swift` | 기간별 사용량 (오늘/주/월/전체), 요약 카드 (교환수/토큰/비용), Swift Charts 일별 차트 (비용/토큰 모드), 모델별/에이전트별 분류 테이블, 예산 설정 (월 한도/알림/차단), 구독 플랜 사용률 카드 (위험도 게이지), 자동 작업 설정, 구독 관리 CRUD (G-4, J-5) |
-| AI | 문서 검색 (`rag`) | doc.text.magnifyingglass | `Views/Settings/RAGSettingsView.swift` | RAG 활성화, 임베딩 설정 (프로바이더/모델), 검색 설정 (자동/topK/최소유사도), 청킹 설정 (크기/오버랩), 문서 통계, 유지보수 (재인덱싱/초기화) (I-1) |
+| AI | 문서 검색 (`rag`) | doc.text.magnifyingglass | `Views/Settings/RAGSettingsView.swift` | RAG 활성화, 임베딩 설정 (모델), 검색 설정 (자동/topK/최소유사도), 청킹 설정 (크기/오버랩), 문서 통계, 유지보수 (재인덱싱/초기화) (I-1) |
 | AI | 메모리 정리 (`memory`) | brain.head.profile | `Views/Settings/MemorySettingsView.swift` | 자동 정리 활성화, 최소 메시지 수, 정리 모델 (경량/기본), 배너 표시, 크기 한도 (개인/워크스페이스/에이전트), 자동 아카이브, 변경 이력 (I-2) |
 | 음성 | 음성 합성 (`voice`) | speaker.wave.2 | `Views/Settings/VoiceSettingsView.swift` | TTS 프로바이더 (시스템/Google Cloud/ONNX), 음성, 속도/피치, ONNX 모델 관리 (ONNXModelManagerView), 디퓨전 스텝, TTS 오프라인 폴백 |
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타, Spotlight 검색 (H-4) |
@@ -433,7 +433,7 @@ RAGReference 필드:
 | 동기화 (G-3) | `autoSyncEnabled`, `realtimeSyncEnabled`, `syncConversations`, `syncMemory`, `syncKanban`, `syncProfiles`, `conflictResolutionStrategy` |
 | 메뉴바 (H-1) | `menuBarEnabled`, `menuBarGlobalShortcutEnabled` |
 | Spotlight (H-4) | `spotlightIndexingEnabled`, `spotlightIndexConversations`, `spotlightIndexPersonalMemory`, `spotlightIndexAgentMemory`, `spotlightIndexWorkspaceMemory` |
-| RAG (I-1) | `ragEnabled`, `ragEmbeddingProvider`, `ragEmbeddingModel`, `ragTopK`, `ragMinSimilarity`, `ragAutoSearch`, `ragChunkSize`, `ragChunkOverlap` |
+| RAG (I-1) | `ragEnabled`, `ragEmbeddingModel`, `ragTopK`, `ragMinSimilarity`, `ragAutoSearch`, `ragChunkSize`, `ragChunkOverlap` |
 | 리소스 최적화 (J-5) | `resourceAutoTaskEnabled`, `resourceAutoTaskOnlyWasteRisk`, `resourceAutoTaskTypes` |
 | 터미널 (K-1) | `terminalShellPath`, `terminalFontSize`, `terminalMaxBufferLines`, `terminalCommandTimeout`, `terminalMaxSessions`, `terminalConfirmOnClose`, `terminalLLMEnabled`, `terminalLLMConfirmAlways`, `terminalAutoShowPanel`, `terminalPanelHeight` |
 | 기타 | `chatFontSize`, `currentWorkspaceId`, `defaultUserId`, `activeAgentName` |
@@ -441,6 +441,10 @@ RAGReference 필드:
 ---
 
 ## 데이터 흐름
+
+UX 정책 메모 (2026-02-16):
+- UI에 노출되지 않고 실행 경로에서도 사용되지 않는 설정 키는 유지하지 않는다.
+- RAG 임베딩 프로바이더는 현재 OpenAI 고정 정책이며, 사용자 설정값으로 저장하지 않는다.
 
 ### 텍스트 메시지
 ```
