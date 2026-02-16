@@ -547,36 +547,39 @@ final class SyncEngine {
         guard !remoteBoards.isEmpty else { return }
 
         for remoteBoard in remoteBoards {
+            let timestampKey = "kanban:\(remoteBoard.id.uuidString)"
             if let localBoard = KanbanManager.shared.board(id: remoteBoard.id) {
-                guard localBoard.updatedAt != remoteBoard.updatedAt else { continue }
-
-                if settings.conflictResolutionStrategy == "lastWriteWins" {
-                    if remoteBoard.updatedAt > localBoard.updatedAt {
-                        KanbanManager.shared.upsertBoardFromSync(remoteBoard)
-                        addToast(direction: .incoming, entityType: .kanban, entityTitle: remoteBoard.name)
-                        syncMetadata.entityTimestamps["kanban:\(remoteBoard.id.uuidString)"] = remoteBoard.updatedAt
+                if localBoard.updatedAt != remoteBoard.updatedAt &&
+                    localBoard.updatedAt > (syncMetadata.entityTimestamps[timestampKey] ?? .distantPast)
+                {
+                    if settings.conflictResolutionStrategy == "lastWriteWins" {
+                        if remoteBoard.updatedAt > localBoard.updatedAt {
+                            KanbanManager.shared.upsertBoardFromSync(remoteBoard)
+                            addToast(direction: .incoming, entityType: .kanban, entityTitle: remoteBoard.name)
+                        }
+                        // 로컬이 최신이면 유지 (다음 push에서 재전파)
+                    } else {
+                        let conflict = SyncConflict(
+                            entityType: .kanban,
+                            entityId: remoteBoard.id.uuidString,
+                            entityTitle: remoteBoard.name,
+                            localUpdatedAt: localBoard.updatedAt,
+                            remoteUpdatedAt: remoteBoard.updatedAt,
+                            localPreview: kanbanPreview(localBoard),
+                            remotePreview: kanbanPreview(remoteBoard)
+                        )
+                        syncConflicts.append(conflict)
                     }
-                } else if localBoard.updatedAt > (syncMetadata.entityTimestamps["kanban:\(remoteBoard.id.uuidString)"] ?? .distantPast) {
-                    let conflict = SyncConflict(
-                        entityType: .kanban,
-                        entityId: remoteBoard.id.uuidString,
-                        entityTitle: remoteBoard.name,
-                        localUpdatedAt: localBoard.updatedAt,
-                        remoteUpdatedAt: remoteBoard.updatedAt,
-                        localPreview: kanbanPreview(localBoard),
-                        remotePreview: kanbanPreview(remoteBoard)
-                    )
-                    syncConflicts.append(conflict)
-                } else {
+                } else if remoteBoard.updatedAt > localBoard.updatedAt {
                     KanbanManager.shared.upsertBoardFromSync(remoteBoard)
                     addToast(direction: .incoming, entityType: .kanban, entityTitle: remoteBoard.name)
-                    syncMetadata.entityTimestamps["kanban:\(remoteBoard.id.uuidString)"] = remoteBoard.updatedAt
                 }
             } else {
                 KanbanManager.shared.upsertBoardFromSync(remoteBoard)
                 addToast(direction: .incoming, entityType: .kanban, entityTitle: remoteBoard.name)
-                syncMetadata.entityTimestamps["kanban:\(remoteBoard.id.uuidString)"] = remoteBoard.updatedAt
             }
+
+            syncMetadata.entityTimestamps[timestampKey] = remoteBoard.updatedAt
         }
 
         saveMetadata()

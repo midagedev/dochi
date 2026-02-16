@@ -232,6 +232,42 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(syncedBoard?.cards.count, 1)
     }
 
+    func testManualKanbanSyncDoesNotOverwriteNewerLocalBoardWithOlderRemote() async throws {
+        settings.syncConversations = false
+        settings.syncMemory = false
+        settings.syncProfiles = false
+        settings.syncKanban = true
+        settings.conflictResolutionStrategy = "manual"
+
+        let board = KanbanManager.shared.createBoard(name: "manual-guard-\(UUID().uuidString)")
+        _ = KanbanManager.shared.addCard(boardId: board.id, title: "로컬 카드", column: "백로그")
+        guard let localBoard = KanbanManager.shared.board(id: board.id) else {
+            XCTFail("Expected local board to exist")
+            return
+        }
+        defer { KanbanManager.shared.deleteBoard(id: board.id) }
+
+        let remoteBoard = KanbanBoard(
+            id: localBoard.id,
+            name: localBoard.name,
+            columns: localBoard.columns,
+            cards: [KanbanCard(title: "원격 카드", column: "백로그")],
+            createdAt: localBoard.createdAt,
+            updatedAt: localBoard.updatedAt.addingTimeInterval(-60)
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        mockSupabase.pullResult = try encoder.encode([remoteBoard])
+
+        engine.restoreSyncState()
+        await engine.sync()
+
+        let syncedBoard = KanbanManager.shared.board(id: board.id)
+        XCTAssertTrue(syncedBoard?.cards.contains(where: { $0.title == "로컬 카드" }) == true)
+        XCTAssertFalse(syncedBoard?.cards.contains(where: { $0.title == "원격 카드" }) == true)
+    }
+
     // MARK: - Conflict Tests
 
     func testResolveConflictKeepLocal() {
