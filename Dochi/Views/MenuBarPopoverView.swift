@@ -104,45 +104,93 @@ struct MenuBarPopoverView: View {
 
     @ViewBuilder
     private var conversationArea: some View {
-        if recentMessages.isEmpty && !isProcessing {
-            emptyStateView
-        } else {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(recentMessages) { message in
-                            compactBubble(message: message)
-                                .id(message.id)
-                        }
+        VStack(spacing: 0) {
+            if let suggestion = viewModel.menuBarSuggestion {
+                menuBarSuggestionCard(suggestion)
+                Divider()
+            }
 
-                        // Streaming text
-                        if isProcessing && !viewModel.streamingText.isEmpty {
-                            streamingBubble
-                                .id("streaming")
-                        } else if isProcessing {
-                            processingIndicator
-                                .id("processing")
+            if recentMessages.isEmpty && !isProcessing {
+                emptyStateView
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(recentMessages) { message in
+                                compactBubble(message: message)
+                                    .id(message.id)
+                            }
+
+                            // Streaming text
+                            if isProcessing && !viewModel.streamingText.isEmpty {
+                                streamingBubble
+                                    .id("streaming")
+                            } else if isProcessing {
+                                processingIndicator
+                                    .id("processing")
+                            }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                }
-                .onChange(of: viewModel.streamingText) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        if isProcessing {
-                            proxy.scrollTo("streaming", anchor: .bottom)
-                        }
-                    }
-                }
-                .onChange(of: recentMessages.count) { _, _ in
-                    if let lastId = recentMessages.last?.id {
+                    .onChange(of: viewModel.streamingText) { _, _ in
                         withAnimation(.easeOut(duration: 0.1)) {
-                            proxy.scrollTo(lastId, anchor: .bottom)
+                            if isProcessing {
+                                proxy.scrollTo("streaming", anchor: .bottom)
+                            }
+                        }
+                    }
+                    .onChange(of: recentMessages.count) { _, _ in
+                        if let lastId = recentMessages.last?.id {
+                            withAnimation(.easeOut(duration: 0.1)) {
+                                proxy.scrollTo(lastId, anchor: .bottom)
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    private func menuBarSuggestionCard(_ suggestion: ProactiveSuggestion) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: suggestion.type.icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.yellow)
+                Text("프로액티브 제안")
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer()
+            }
+
+            Text(suggestion.title)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(2)
+
+            Text(suggestion.body)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            HStack(spacing: 8) {
+                Button("앱에서 확인") {
+                    onOpenMainApp()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                Button("나중에") {
+                    viewModel.deferSuggestion(suggestion)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.yellow.opacity(0.08))
     }
 
     // MARK: - Empty State

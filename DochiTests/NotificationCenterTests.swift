@@ -64,15 +64,17 @@ final class NotificationCenterTests: XCTestCase {
         XCTAssertEqual(NotificationManager.Category.kanban.rawValue, "dochi-kanban")
         XCTAssertEqual(NotificationManager.Category.reminder.rawValue, "dochi-reminder")
         XCTAssertEqual(NotificationManager.Category.memory.rawValue, "dochi-memory")
+        XCTAssertEqual(NotificationManager.Category.proactive.rawValue, "dochi-proactive")
     }
 
     func testNotificationCategoryAllCases() {
         let allCases = NotificationManager.Category.allCases
-        XCTAssertEqual(allCases.count, 4)
+        XCTAssertEqual(allCases.count, 5)
         XCTAssertTrue(allCases.contains(.calendar))
         XCTAssertTrue(allCases.contains(.kanban))
         XCTAssertTrue(allCases.contains(.reminder))
         XCTAssertTrue(allCases.contains(.memory))
+        XCTAssertTrue(allCases.contains(.proactive))
     }
 
     // MARK: - NotificationManager Action Constants
@@ -131,6 +133,28 @@ final class NotificationCenterTests: XCTestCase {
 
         // Restore
         settings.notificationMemoryEnabled = true
+    }
+
+    func testSendProactiveSuggestionNotificationRespectsSettings() {
+        let settings = AppSettings()
+        settings.notificationProactiveSuggestionEnabled = false
+        let manager = NotificationManager(settings: settings)
+        let suggestion = ProactiveSuggestion(
+            type: .newsTrend,
+            title: "테스트 제안",
+            body: "본문",
+            suggestedPrompt: "프롬프트"
+        )
+
+        // Should not crash when disabled
+        manager.sendProactiveSuggestionNotification(suggestion: suggestion)
+
+        settings.notificationProactiveSuggestionEnabled = true
+        // Should not crash when enabled
+        manager.sendProactiveSuggestionNotification(suggestion: suggestion)
+
+        // Restore
+        settings.notificationProactiveSuggestionEnabled = false
     }
 
     // MARK: - Register Categories
@@ -258,6 +282,7 @@ final class NotificationCenterTests: XCTestCase {
         viewModel.handleNotificationOpenApp(category: NotificationManager.Category.kanban.rawValue)
         viewModel.handleNotificationOpenApp(category: NotificationManager.Category.reminder.rawValue)
         viewModel.handleNotificationOpenApp(category: NotificationManager.Category.memory.rawValue)
+        viewModel.handleNotificationOpenApp(category: NotificationManager.Category.proactive.rawValue)
         viewModel.handleNotificationOpenApp(category: "unknown-category")
     }
 
@@ -410,6 +435,29 @@ final class NotificationCenterTests: XCTestCase {
         viewModel.handleNotificationOpenApp(category: NotificationManager.Category.memory.rawValue)
         XCTAssertEqual(viewModel.notificationRequestedSection, "chat")
         XCTAssertTrue(viewModel.notificationShowMemoryPanel)
+    }
+
+    func testHandleNotificationOpenAppNavigatesToChatForProactiveSuggestion() {
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        viewModel.handleNotificationOpenApp(category: NotificationManager.Category.proactive.rawValue)
+        XCTAssertEqual(viewModel.notificationRequestedSection, "chat")
+        XCTAssertFalse(viewModel.notificationShowMemoryPanel)
     }
 
     func testHandleNotificationOpenAppUnknownCategoryNoNavigation() {

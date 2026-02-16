@@ -254,6 +254,73 @@ final class MenuBarPopoverDataTests: XCTestCase {
         XCTAssertEqual(viewModel.inputText, "테스트 입력")
         XCTAssertEqual(viewModel.settings.activeAgentName, "테스트 에이전트")
     }
+
+    @MainActor
+    func testMenuBarSuggestionExposedWhenToggleEnabled() {
+        let settings = AppSettings()
+        settings.proactiveSuggestionMenuBarEnabled = true
+        let sessionContext = SessionContext(
+            workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
+            currentUserId: nil
+        )
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: MockKeychainService(),
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: sessionContext
+        )
+
+        let mockSuggestionService = MockProactiveSuggestionService()
+        let suggestion = ProactiveSuggestion(
+            type: .newsTrend,
+            title: "메뉴바 제안",
+            body: "제안 본문",
+            suggestedPrompt: "프롬프트"
+        )
+        mockSuggestionService.currentSuggestion = suggestion
+        viewModel.configureProactiveSuggestionService(mockSuggestionService)
+
+        XCTAssertEqual(viewModel.menuBarSuggestion?.id, suggestion.id)
+    }
+
+    @MainActor
+    func testMenuBarSuggestionHiddenWhenToggleDisabled() {
+        let settings = AppSettings()
+        settings.proactiveSuggestionMenuBarEnabled = false
+        let sessionContext = SessionContext(
+            workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
+            currentUserId: nil
+        )
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: MockKeychainService(),
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: sessionContext
+        )
+
+        let mockSuggestionService = MockProactiveSuggestionService()
+        mockSuggestionService.currentSuggestion = ProactiveSuggestion(
+            type: .newsTrend,
+            title: "메뉴바 제안",
+            body: "제안 본문",
+            suggestedPrompt: "프롬프트"
+        )
+        viewModel.configureProactiveSuggestionService(mockSuggestionService)
+
+        XCTAssertNil(viewModel.menuBarSuggestion)
+    }
 }
 
 // MARK: - StatusIconState Equatable
