@@ -130,18 +130,24 @@ final class InterestDiscoveryServiceTests: XCTestCase {
     }
 
     func testAggressivenessEagerMode() {
-        service.profile.discoveryMode = .eager
+        settings.interestDiscoveryMode = DiscoveryMode.eager.rawValue
         XCTAssertEqual(service.currentAggressiveness, .eager)
     }
 
     func testAggressivenessPassiveMode() {
-        service.profile.discoveryMode = .passive
+        settings.interestDiscoveryMode = DiscoveryMode.passive.rawValue
         XCTAssertEqual(service.currentAggressiveness, .passive)
     }
 
     func testAggressivenessManualMode() {
-        service.profile.discoveryMode = .manual
+        settings.interestDiscoveryMode = DiscoveryMode.manual.rawValue
         XCTAssertEqual(service.currentAggressiveness, .passive)
+    }
+
+    func testAggressivenessPrefersSettingsModeOverProfileMode() {
+        settings.interestDiscoveryMode = DiscoveryMode.eager.rawValue
+        service.profile.discoveryMode = .manual
+        XCTAssertEqual(service.currentAggressiveness, .eager)
     }
 
     // MARK: - CRUD
@@ -262,7 +268,7 @@ final class InterestDiscoveryServiceTests: XCTestCase {
 
     func testBuildSystemPromptAddition_Empty_PassiveMode() {
         // With passive mode and no interests, nothing to add
-        service.profile.discoveryMode = .passive
+        settings.interestDiscoveryMode = DiscoveryMode.passive.rawValue
 
         let addition = service.buildDiscoverySystemPromptAddition()
         XCTAssertNil(addition, "Empty interests in passive mode should return nil")
@@ -313,7 +319,6 @@ final class InterestDiscoveryServiceTests: XCTestCase {
 
     func testAnalyzeMessage_ManualModeSkips() {
         settings.interestDiscoveryMode = DiscoveryMode.manual.rawValue
-        service.profile.discoveryMode = .manual
         let convId = UUID()
         for _ in 0..<5 {
             service.analyzeMessage("관심있는 Python 배워볼까", conversationId: convId)

@@ -455,6 +455,7 @@ UX 정책 메모 (2026-02-16):
 - 프로액티브 제안 채널 토글은 저장값으로만 남기지 않고 실제 노출 경로(알림 센터 배너, 메뉴바 팝오버 카드)에 직접 연결한다.
 - `realtimeSyncEnabled`는 자동 동기화 주기를 직접 제어한다. ON일 때 30초, OFF일 때 5분 주기로 스케줄되며 토글 변경 즉시 재적용한다.
 - 스케줄 `agentName`은 편집 UI(Picker)와 실행 경로 모두에서 동일하게 사용하며, 미존재 에이전트를 가리키면 실행 실패로 기록한다.
+- 관심사 발굴 모드의 단일 소스는 `settings.interestDiscoveryMode`이며, 서비스는 profile 값이 아니라 설정값을 기준으로 적극성과 분석 여부를 결정한다.
 
 ### 텍스트 메시지
 ```
@@ -599,6 +600,21 @@ UI 노출:
   -> 배너/실행 이력에 실패 사유(에이전트 미존재) 노출
 UI 노출:
   -> 자동화 스케줄 목록 각 행에 "에이전트: {name}" 표시
+```
+
+### 관심사 발굴 모드 동기화 (K-3 보강, #182)
+```
+설정: 설정 > 사람 > 관심사 > "발굴 모드"
+  -> settings.interestDiscoveryMode 변경
+  -> InterestDiscoveryService가 동일 값을 즉시 참조
+실행 동작:
+  -> currentAggressiveness 계산은 settings.interestDiscoveryMode 기준
+  -> analyzeMessage 자동 감지는 settings.interestDiscoveryMode == manual 일 때 즉시 비활성
+병합/영속 정책:
+  -> profile.discoveryMode는 저장 호환성을 위한 보조 필드
+  -> profile 로드/저장 시 settings 값으로 동기화하여 불일치 제거
+UI 노출:
+  -> "현재 적극성" 배지는 설정 변경 직후 서비스 계산값으로 즉시 갱신
 ```
 
 ### 모델 빠른 변경 (UX-10 추가)
