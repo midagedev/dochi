@@ -78,6 +78,18 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
         allCases.filter { $0.isLocal }
     }
 
+    /// Default model used by onboarding when this provider is selected.
+    var onboardingDefaultModel: String {
+        switch self {
+        case .openai, .anthropic, .zai:
+            return models.first ?? ""
+        case .ollama:
+            return "llama3"
+        case .lmStudio:
+            return ""
+        }
+    }
+
     /// Whether a given model supports Vision (image) input.
     func supportsVision(model: String) -> Bool {
         switch self {

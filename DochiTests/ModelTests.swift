@@ -374,6 +374,19 @@ final class ModelTests: XCTestCase {
     func testProviderForModelUnknown() {
         XCTAssertNil(LLMProvider.provider(forModel: "unknown-model"))
     }
+
+    // MARK: - LLMProvider.onboardingDefaultModel
+
+    func testOnboardingDefaultModelCloudProvidersUseModelListFirstEntry() {
+        XCTAssertEqual(LLMProvider.openai.onboardingDefaultModel, "gpt-4o")
+        XCTAssertEqual(LLMProvider.anthropic.onboardingDefaultModel, "claude-sonnet-4-5-20250514")
+        XCTAssertEqual(LLMProvider.zai.onboardingDefaultModel, "glm-5")
+    }
+
+    func testOnboardingDefaultModelLocalProviders() {
+        XCTAssertEqual(LLMProvider.ollama.onboardingDefaultModel, "llama3")
+        XCTAssertEqual(LLMProvider.lmStudio.onboardingDefaultModel, "")
+    }
 }
 
 // MARK: - TaskComplexityClassifier Tests

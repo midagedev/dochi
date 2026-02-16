@@ -181,7 +181,7 @@ DochiApp (entry point)
 | ScheduleEditSheet | `Views/Settings/ScheduleEditSheet.swift` | AutomationSettingsView에서 시트 | 스케줄 생성/편집 (이름/반복유형/크론식/프롬프트/에이전트/활성화) (J-3) |
 | ScheduleTemplateSheet | `Views/Settings/ScheduleTemplateSheet.swift` | AutomationSettingsView에서 시트 | 기본 제공 3개 템플릿 선택 (아침 브리핑/주간 리포트/메모리 정리) (J-3) |
 | ScheduleExecutionBannerView | `Views/ScheduleExecutionBannerView.swift` | 대화 화면 상단 자동 표시 | 스케줄 실행 상태 배너 (실행 중/완료/실패) (J-3) |
-| OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 + 기능 투어 연결 |
+| OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 + 기능 투어 연결. **온보딩 기본 모델은 `LLMProvider.onboardingDefaultModel` 단일 소스를 사용** |
 | FeatureTourView | `Views/Guide/FeatureTourViews.swift` | 온보딩 완료 후 / 설정 > 일반 > 가이드 / 커맨드 팔레트 | 4단계 기능 투어 (개요/대화/에이전트·워크스페이스/단축키) |
 | WorkspaceManagementView | `Views/Sidebar/WorkspaceManagementView.swift` | SidebarHeader 메뉴 | 워크스페이스 생성/삭제 |
 | AgentCreationView | `Views/Sidebar/AgentCreationView.swift` | (레거시 — AgentWizardView로 대체) | 에이전트 생성 폼 |
@@ -202,7 +202,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 
 | 그룹 | 섹션 (rawValue) | 아이콘 | 파일 | 내용 |
 |------|----------------|--------|------|------|
-| AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택 (클라우드/로컬 그룹), Ollama 설정, LM Studio 설정, 오프라인 폴백, 태스크 라우팅 |
+| AI | AI 모델 (`ai-model`) | brain | `Views/SettingsView.swift` 내 ModelSettingsView | 프로바이더/모델 선택 (클라우드/로컬 그룹), Ollama 설정, LM Studio 설정, 오프라인 폴백, 태스크 라우팅. **기본 모델 정책은 `LLMProvider` 모델 레지스트리와 일치해야 함** |
 | AI | API 키 (`api-key`) | key | `Views/SettingsView.swift` 내 APIKeySettingsView | OpenAI/Anthropic/Z.AI/Tavily/Fal.ai 키 관리 |
 | AI | 사용량 (`usage`) | chart.bar.xaxis | `Views/Settings/UsageDashboardView.swift` | 기간별 사용량 (오늘/주/월/전체), 요약 카드 (교환수/토큰/비용), Swift Charts 일별 차트 (비용/토큰 모드), 모델별/에이전트별 분류 테이블, 예산 설정 (월 한도/알림/차단), 구독 플랜 사용률 카드 (위험도 게이지), 자동 작업 설정, 구독 관리 CRUD (G-4, J-5) |
 | AI | 문서 검색 (`rag`) | doc.text.magnifyingglass | `Views/Settings/RAGSettingsView.swift` | RAG 활성화, 임베딩 설정 (프로바이더/모델), 검색 설정 (자동/topK/최소유사도), 청킹 설정 (크기/오버랩), 문서 통계, 유지보수 (재인덱싱/초기화) (I-1) |
