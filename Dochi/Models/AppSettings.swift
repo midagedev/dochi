@@ -646,6 +646,26 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(interestIncludeInPrompt, forKey: "interestIncludeInPrompt") }
     }
 
+    // MARK: - Telegram Proactive Notifications (K-6)
+
+    /// Heartbeat alert notification channel: appOnly / telegramOnly / both / off
+    var heartbeatNotificationChannel: String =
+        UserDefaults.standard.string(forKey: "heartbeatNotificationChannel") ?? "appOnly" {
+        didSet { UserDefaults.standard.set(heartbeatNotificationChannel, forKey: "heartbeatNotificationChannel") }
+    }
+
+    /// Proactive suggestion notification channel: appOnly / telegramOnly / both / off
+    var suggestionNotificationChannel: String =
+        UserDefaults.standard.string(forKey: "suggestionNotificationChannel") ?? "appOnly" {
+        didSet { UserDefaults.standard.set(suggestionNotificationChannel, forKey: "suggestionNotificationChannel") }
+    }
+
+    /// Skip Telegram delivery when app is active/foreground
+    var telegramSkipWhenAppActive: Bool =
+        UserDefaults.standard.object(forKey: "telegramSkipWhenAppActive") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(telegramSkipWhenAppActive, forKey: "telegramSkipWhenAppActive") }
+    }
+
     // MARK: - Guide (UX-9) / App Guide (K-5)
 
     /// AI 앱 가이드 도구 활성화 여부

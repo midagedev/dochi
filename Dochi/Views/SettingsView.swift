@@ -96,7 +96,7 @@ struct SettingsView: View {
 
         case .heartbeat:
             Form {
-                HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService, notificationManager: notificationManager)
+                HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService, notificationManager: notificationManager, keychainService: keychainService)
             }
             .formStyle(.grouped)
             .padding()
@@ -456,6 +456,7 @@ struct HeartbeatSettingsContent: View {
     var settings: AppSettings
     var heartbeatService: HeartbeatService?
     var notificationManager: NotificationManager?
+    var keychainService: KeychainServiceProtocol?
 
     var body: some View {
         Section {
@@ -584,6 +585,63 @@ struct HeartbeatSettingsContent: View {
             SettingsSectionHeader(
                 title: "알림 센터",
                 helpContent: "하트비트 알림을 macOS 알림 센터로 전달합니다. 카테고리별로 알림을 켜거나 끌 수 있으며, 알림에서 바로 답장할 수 있습니다."
+            )
+        }
+        .disabled(!settings.heartbeatEnabled)
+
+        // MARK: - Telegram Proactive Notifications (K-6)
+        Section {
+            if let keychainService,
+               let token = keychainService.load(account: "telegram_bot_token"), !token.isEmpty {
+
+                Picker("하트비트 알림 채널", selection: Binding(
+                    get: { NotificationChannel(rawValue: settings.heartbeatNotificationChannel) ?? .appOnly },
+                    set: { settings.heartbeatNotificationChannel = $0.rawValue }
+                )) {
+                    ForEach(NotificationChannel.allCases, id: \.self) { channel in
+                        Text(channel.displayName).tag(channel)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("캘린더/칸반/미리알림/메모리 알림의 전달 채널")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("프로액티브 제안 채널", selection: Binding(
+                    get: { NotificationChannel(rawValue: settings.suggestionNotificationChannel) ?? .appOnly },
+                    set: { settings.suggestionNotificationChannel = $0.rawValue }
+                )) {
+                    ForEach(NotificationChannel.allCases, id: \.self) { channel in
+                        Text(channel.displayName).tag(channel)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("유휴 감지 기반 제안의 전달 채널")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("앱 활성 시 텔레그램 전송 생략", isOn: Binding(
+                    get: { settings.telegramSkipWhenAppActive },
+                    set: { settings.telegramSkipWhenAppActive = $0 }
+                ))
+
+                Text("앱이 포그라운드에 있으면 텔레그램으로 보내지 않습니다")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("텔레그램 봇이 설정되지 않았습니다")
+                        .font(.caption)
+                }
+            }
+        } header: {
+            SettingsSectionHeader(
+                title: "텔레그램 알림",
+                helpContent: "하트비트 알림과 프로액티브 제안을 텔레그램 DM으로도 전달할 수 있습니다. 텔레그램 봇 설정이 필요합니다."
             )
         }
         .disabled(!settings.heartbeatEnabled)
@@ -869,12 +927,13 @@ struct GeneralSettingsView: View {
     var settings: AppSettings
     var heartbeatService: HeartbeatService?
     var notificationManager: NotificationManager?
+    var keychainService: KeychainServiceProtocol?
 
     var body: some View {
         Form {
             InterfaceSettingsContent(settings: settings)
             WakeWordSettingsContent(settings: settings)
-            HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService, notificationManager: notificationManager)
+            HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService, notificationManager: notificationManager, keychainService: keychainService)
             GuideSettingsContent(settings: settings)
         }
         .formStyle(.grouped)

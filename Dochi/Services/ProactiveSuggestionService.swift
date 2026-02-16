@@ -20,6 +20,15 @@ final class ProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
     private let conversationService: ConversationServiceProtocol
     private let sessionContext: SessionContext
 
+    // MARK: - Telegram Relay (K-6)
+
+    private var telegramRelay: TelegramProactiveRelayProtocol?
+
+    /// Inject TelegramProactiveRelay for Telegram notification delivery (K-6).
+    func setTelegramRelay(_ relay: TelegramProactiveRelayProtocol) {
+        self.telegramRelay = relay
+    }
+
     // MARK: - Idle Detection
 
     private var lastActivityDate: Date = Date()
@@ -202,6 +211,11 @@ final class ProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
 
         // Add toast event
         toastEvents.append(SuggestionToastEvent(suggestion: selected))
+
+        // Telegram relay (K-6)
+        if let telegramRelay {
+            await telegramRelay.sendSuggestion(selected)
+        }
 
         Log.app.info("Suggestion generated: \(selected.type.rawValue) — \(selected.title)")
     }
