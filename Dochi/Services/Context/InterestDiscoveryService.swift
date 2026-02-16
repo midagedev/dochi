@@ -52,7 +52,7 @@ final class InterestDiscoveryService: InterestDiscoveryServiceProtocol {
     // MARK: - Aggressiveness
 
     var currentAggressiveness: DiscoveryAggressiveness {
-        switch profile.discoveryMode {
+        switch effectiveDiscoveryMode {
         case .eager: return .eager
         case .passive: return .passive
         case .manual: return .passive
@@ -64,12 +64,17 @@ final class InterestDiscoveryService: InterestDiscoveryServiceProtocol {
         }
     }
 
+    private var effectiveDiscoveryMode: DiscoveryMode {
+        DiscoveryMode(rawValue: settings.interestDiscoveryMode) ?? profile.discoveryMode
+    }
+
     // MARK: - Persistence
 
     func loadProfile(userId: String) {
         let fileURL = baseURL.appendingPathComponent("\(userId).json")
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             profile = InterestProfile()
+            profile.discoveryMode = effectiveDiscoveryMode
             Log.storage.debug("No interest profile found for \(userId), using empty")
             return
         }
@@ -78,16 +83,19 @@ final class InterestDiscoveryService: InterestDiscoveryServiceProtocol {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             profile = try decoder.decode(InterestProfile.self, from: data)
+            profile.discoveryMode = effectiveDiscoveryMode
             Log.storage.info("Loaded interest profile for \(userId): \(self.profile.interests.count) interests")
         } catch {
             Log.storage.error("Failed to load interest profile: \(error.localizedDescription)")
             profile = InterestProfile()
+            profile.discoveryMode = effectiveDiscoveryMode
         }
     }
 
     func saveProfile(userId: String) {
         let fileURL = baseURL.appendingPathComponent("\(userId).json")
         do {
+            profile.discoveryMode = effectiveDiscoveryMode
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -146,7 +154,7 @@ final class InterestDiscoveryService: InterestDiscoveryServiceProtocol {
 
     func analyzeMessage(_ content: String, conversationId: UUID) {
         guard settings.interestDiscoveryEnabled else { return }
-        guard profile.discoveryMode != .manual else { return }
+        guard effectiveDiscoveryMode != .manual else { return }
 
         let lowered = content.lowercased()
 

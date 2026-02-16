@@ -130,18 +130,24 @@ final class InterestDiscoveryServiceTests: XCTestCase {
     }
 
     func testAggressivenessEagerMode() {
-        service.profile.discoveryMode = .eager
+        settings.interestDiscoveryMode = DiscoveryMode.eager.rawValue
         XCTAssertEqual(service.currentAggressiveness, .eager)
     }
 
     func testAggressivenessPassiveMode() {
-        service.profile.discoveryMode = .passive
+        settings.interestDiscoveryMode = DiscoveryMode.passive.rawValue
         XCTAssertEqual(service.currentAggressiveness, .passive)
     }
 
     func testAggressivenessManualMode() {
-        service.profile.discoveryMode = .manual
+        settings.interestDiscoveryMode = DiscoveryMode.manual.rawValue
         XCTAssertEqual(service.currentAggressiveness, .passive)
+    }
+
+    func testAggressivenessPrefersSettingsModeOverProfileMode() {
+        settings.interestDiscoveryMode = DiscoveryMode.eager.rawValue
+        service.profile.discoveryMode = .manual
+        XCTAssertEqual(service.currentAggressiveness, .eager)
     }
 
     // MARK: - CRUD
@@ -208,6 +214,7 @@ final class InterestDiscoveryServiceTests: XCTestCase {
 
     func testSaveAndLoadProfile() {
         let userId = "test-user-\(UUID().uuidString)"
+        settings.interestDiscoveryMode = DiscoveryMode.passive.rawValue
         let entry = InterestEntry(topic: "테스트 관심사", status: .confirmed, confidence: 1.0, tags: ["테스트"])
         service.addInterest(entry)
 
@@ -221,11 +228,48 @@ final class InterestDiscoveryServiceTests: XCTestCase {
         XCTAssertEqual(service2.profile.interests.first?.topic, "테스트 관심사")
         XCTAssertEqual(service2.profile.interests.first?.status, .confirmed)
         XCTAssertEqual(service2.profile.interests.first?.tags, ["테스트"])
+        XCTAssertEqual(service2.profile.discoveryMode, .passive)
 
-        // Cleanup
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let fileURL = appSupport.appendingPathComponent("Dochi").appendingPathComponent("interests").appendingPathComponent("\(userId).json")
-        try? FileManager.default.removeItem(at: fileURL)
+        cleanupProfileFile(userId: userId)
+    }
+
+    func testSaveProfilePersistsSettingsDiscoveryMode() throws {
+        let userId = "test-user-\(UUID().uuidString)"
+        settings.interestDiscoveryMode = DiscoveryMode.eager.rawValue
+        service.profile.discoveryMode = .manual
+
+        service.saveProfile(userId: userId)
+
+        let data = try Data(contentsOf: profileFileURL(userId: userId))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(InterestProfile.self, from: data)
+
+        XCTAssertEqual(decoded.discoveryMode, .eager)
+
+        cleanupProfileFile(userId: userId)
+    }
+
+    func testLoadProfileOverridesPersistedDiscoveryModeWithSettings() throws {
+        let userId = "test-user-\(UUID().uuidString)"
+        var profile = InterestProfile()
+        profile.discoveryMode = .manual
+        profile.interests = [InterestEntry(topic: "테스트", status: .confirmed)]
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(profile)
+        try FileManager.default.createDirectory(at: profileFileURL(userId: userId).deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try data.write(to: profileFileURL(userId: userId))
+
+        settings.interestDiscoveryMode = DiscoveryMode.eager.rawValue
+        service.loadProfile(userId: userId)
+
+        XCTAssertEqual(service.profile.discoveryMode, .eager)
+        XCTAssertEqual(service.profile.interests.first?.topic, "테스트")
+
+        cleanupProfileFile(userId: userId)
     }
 
     func testLoadNonexistentProfile() {
@@ -262,7 +306,7 @@ final class InterestDiscoveryServiceTests: XCTestCase {
 
     func testBuildSystemPromptAddition_Empty_PassiveMode() {
         // With passive mode and no interests, nothing to add
-        service.profile.discoveryMode = .passive
+        settings.interestDiscoveryMode = DiscoveryMode.passive.rawValue
 
         let addition = service.buildDiscoverySystemPromptAddition()
         XCTAssertNil(addition, "Empty interests in passive mode should return nil")
@@ -313,7 +357,6 @@ final class InterestDiscoveryServiceTests: XCTestCase {
 
     func testAnalyzeMessage_ManualModeSkips() {
         settings.interestDiscoveryMode = DiscoveryMode.manual.rawValue
-        service.profile.discoveryMode = .manual
         let convId = UUID()
         for _ in 0..<5 {
             service.analyzeMessage("관심있는 Python 배워볼까", conversationId: convId)
@@ -343,6 +386,18 @@ final class InterestDiscoveryServiceTests: XCTestCase {
 
         XCTAssertNil(mockContext.userMemory["test-user"],
                      "Should not sync empty profile")
+    }
+
+    private func profileFileURL(userId: String) -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport
+            .appendingPathComponent("Dochi")
+            .appendingPathComponent("interests")
+            .appendingPathComponent("\(userId).json")
+    }
+
+    private func cleanupProfileFile(userId: String) {
+        try? FileManager.default.removeItem(at: profileFileURL(userId: userId))
     }
 }
 
