@@ -125,6 +125,7 @@ final class DeviceRegistrationTests: XCTestCase {
     func testHeartbeatStartRegistersDevice() async {
         let mock = MockSupabaseService()
         let settings = AppSettings()
+        settings.deviceCloudSyncEnabled = true
         let service = DeviceHeartbeatService(supabaseService: mock, settings: settings)
 
         let wsId = UUID()
@@ -143,6 +144,7 @@ final class DeviceRegistrationTests: XCTestCase {
         let mock = MockSupabaseService()
         mock.isConfigured = false
         let settings = AppSettings()
+        settings.deviceCloudSyncEnabled = true
         let service = DeviceHeartbeatService(supabaseService: mock, settings: settings)
 
         await service.startHeartbeat(workspaceIds: [])
@@ -154,6 +156,7 @@ final class DeviceRegistrationTests: XCTestCase {
         let mock = MockSupabaseService()
         mock.authState = .signedOut
         let settings = AppSettings()
+        settings.deviceCloudSyncEnabled = true
         let service = DeviceHeartbeatService(supabaseService: mock, settings: settings)
 
         await service.startHeartbeat(workspaceIds: [])
@@ -164,6 +167,7 @@ final class DeviceRegistrationTests: XCTestCase {
     func testHeartbeatUpdateWorkspaces() async {
         let mock = MockSupabaseService()
         let settings = AppSettings()
+        settings.deviceCloudSyncEnabled = true
         let service = DeviceHeartbeatService(supabaseService: mock, settings: settings)
 
         await service.startHeartbeat(workspaceIds: [])
@@ -178,6 +182,58 @@ final class DeviceRegistrationTests: XCTestCase {
 
     func testHeartbeatIntervalIs30Seconds() {
         XCTAssertEqual(DeviceHeartbeatService.heartbeatIntervalSeconds, 30)
+    }
+
+    func testHeartbeatSkipsWhenCloudSyncDisabled() async {
+        let mock = MockSupabaseService()
+        let settings = AppSettings()
+        settings.deviceCloudSyncEnabled = false
+        let service = DeviceHeartbeatService(supabaseService: mock, settings: settings)
+
+        await service.startHeartbeat(workspaceIds: [])
+        XCTAssertNil(service.currentDeviceId)
+        XCTAssertFalse(service.isRunning)
+        XCTAssertTrue(mock.registeredDevices.isEmpty)
+    }
+
+    func testHeartbeatStartWhileRunningUpdatesWorkspacesWithoutReRegistration() async {
+        let mock = MockSupabaseService()
+        let settings = AppSettings()
+        settings.deviceCloudSyncEnabled = true
+        let service = DeviceHeartbeatService(supabaseService: mock, settings: settings)
+
+        let ws1 = UUID()
+        let ws2 = UUID()
+
+        await service.startHeartbeat(workspaceIds: [ws1])
+        await service.startHeartbeat(workspaceIds: [ws2])
+
+        XCTAssertEqual(mock.registeredDevices.count, 1)
+        XCTAssertEqual(mock.registeredDevices.first?.workspaceIds, [ws2])
+        XCTAssertTrue(service.isRunning)
+
+        service.stopHeartbeat()
+    }
+
+    func testHeartbeatWorkspaceDeduplicationPreservesOrder() async {
+        let mock = MockSupabaseService()
+        let settings = AppSettings()
+        settings.deviceCloudSyncEnabled = true
+        let service = DeviceHeartbeatService(supabaseService: mock, settings: settings)
+
+        let ws1 = UUID()
+        let ws2 = UUID()
+        let ws3 = UUID()
+
+        await service.startHeartbeat(workspaceIds: [ws1, ws2, ws1, ws3, ws2])
+        XCTAssertEqual(mock.registeredDevices.count, 1)
+        XCTAssertEqual(mock.registeredDevices.first?.workspaceIds, [ws1, ws2, ws3])
+
+        await service.startHeartbeat(workspaceIds: [ws3, ws3, ws2, ws1, ws2])
+        XCTAssertEqual(mock.registeredDevices.count, 1)
+        XCTAssertEqual(mock.registeredDevices.first?.workspaceIds, [ws3, ws2, ws1])
+
+        service.stopHeartbeat()
     }
 
     // MARK: - AppSettings deviceId

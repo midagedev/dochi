@@ -21,17 +21,32 @@ final class DeviceHeartbeatService {
 
     /// Register this device and start sending heartbeats.
     func startHeartbeat(workspaceIds: [UUID]) async {
+        guard settings.deviceCloudSyncEnabled else {
+            stopHeartbeat()
+            Log.cloud.debug("DeviceHeartbeat: skipping — device cloud sync disabled")
+            return
+        }
+
         guard supabaseService.isConfigured, supabaseService.authState.userId != nil else {
             Log.cloud.debug("DeviceHeartbeat: skipping — not configured or not signed in")
             return
         }
+
+        let normalizedWorkspaceIds = deduplicateWorkspaceIdsPreservingOrder(workspaceIds)
+
+        if isRunning {
+            await updateWorkspaces(normalizedWorkspaceIds)
+            return
+        }
+
+        heartbeatTask?.cancel()
 
         // Register the device
         let deviceName = Host.current().localizedName ?? "Mac"
         do {
             let device = try await supabaseService.registerDevice(
                 name: deviceName,
-                workspaceIds: workspaceIds
+                workspaceIds: normalizedWorkspaceIds
             )
             currentDeviceId = device.id
             settings.deviceId = device.id.uuidString
@@ -62,10 +77,11 @@ final class DeviceHeartbeatService {
     /// Update this device's workspace list.
     func updateWorkspaces(_ workspaceIds: [UUID]) async {
         guard let deviceId = currentDeviceId else { return }
+        let normalizedWorkspaceIds = deduplicateWorkspaceIdsPreservingOrder(workspaceIds)
         do {
             try await supabaseService.updateDeviceWorkspaces(
                 deviceId: deviceId,
-                workspaceIds: workspaceIds
+                workspaceIds: normalizedWorkspaceIds
             )
         } catch {
             Log.cloud.error("Failed to update device workspaces: \(error.localizedDescription)")
@@ -79,5 +95,16 @@ final class DeviceHeartbeatService {
         } catch {
             Log.cloud.warning("Device heartbeat failed: \(error.localizedDescription)")
         }
+    }
+
+    private func deduplicateWorkspaceIdsPreservingOrder(_ workspaceIds: [UUID]) -> [UUID] {
+        var seen: Set<UUID> = []
+        var result: [UUID] = []
+        result.reserveCapacity(workspaceIds.count)
+
+        for workspaceId in workspaceIds where seen.insert(workspaceId).inserted {
+            result.append(workspaceId)
+        }
+        return result
     }
 }

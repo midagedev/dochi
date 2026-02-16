@@ -65,6 +65,7 @@ struct DochiApp: App {
     private let interestDiscoveryService: InterestDiscoveryService
     private let externalToolManager: ExternalToolSessionManager
     private let telegramProactiveRelay: TelegramProactiveRelay
+    private let deviceHeartbeatService: DeviceHeartbeatService
 
     init() {
         let settings = AppSettings()
@@ -109,6 +110,8 @@ struct DochiApp: App {
 
         let sessionContext = SessionContext(workspaceId: workspaceId, currentUserId: restoredUserId)
         self.sessionContext = sessionContext
+        let deviceHeartbeatService = DeviceHeartbeatService(supabaseService: supabaseService, settings: settings)
+        self.deviceHeartbeatService = deviceHeartbeatService
 
         let delegationManager = DelegationManager()
         self.delegationManager = delegationManager
@@ -355,7 +358,9 @@ struct DochiApp: App {
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)
                     viewModel.configureDevicePolicyService(devicePolicyService)
-                    Task { await devicePolicyService.registerCurrentDevice() }
+                    Task {
+                        await devicePolicyService.registerCurrentDevice()
+                    }
 
                     // Wire notification callbacks (H-3)
                     notificationManager.onReply = { [weak viewModel] text, category, originalBody in
@@ -401,6 +406,7 @@ struct DochiApp: App {
                     heartbeatService.stop()
                     schedulerService.stop()
                     proactiveSuggestionService.stop()
+                    deviceHeartbeatService.stopHeartbeat()
                 }
                 .onChange(of: settings.heartbeatEnabled) { _, _ in
                     heartbeatService.restart()
@@ -438,6 +444,9 @@ struct DochiApp: App {
                 }
                 .onChange(of: settings.menuBarGlobalShortcutEnabled) { _, _ in
                     appDelegate.menuBarManager?.handleSettingsChange()
+                }
+                .task(id: deviceHeartbeatLifecycleTrigger) {
+                    await syncDeviceHeartbeatLifecycle()
                 }
                 .onOpenURL { url in
                     viewModel.handleDeepLink(url: url)
@@ -540,6 +549,29 @@ struct DochiApp: App {
         Task {
             try? await telegramService.stopWebhook()
         }
+    }
+
+    private func deviceHeartbeatWorkspaceIds() -> [UUID] {
+        if let workspaceId = UUID(uuidString: settings.currentWorkspaceId) {
+            return [workspaceId]
+        }
+        return [sessionContext.workspaceId]
+    }
+
+    private var deviceHeartbeatLifecycleTrigger: String {
+        let userId = supabaseService.authState.userId?.uuidString ?? "signed-out"
+        return "\(settings.deviceCloudSyncEnabled)-\(settings.currentWorkspaceId)-\(userId)"
+    }
+
+    private func syncDeviceHeartbeatLifecycle() async {
+        guard settings.deviceCloudSyncEnabled,
+              supabaseService.isConfigured,
+              supabaseService.authState.userId != nil else {
+            deviceHeartbeatService.stopHeartbeat()
+            return
+        }
+
+        await deviceHeartbeatService.startHeartbeat(workspaceIds: deviceHeartbeatWorkspaceIds())
     }
 
     private func restoreMCPServers(mcpService: MCPService, json: String) {
