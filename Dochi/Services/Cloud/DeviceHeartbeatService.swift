@@ -32,7 +32,7 @@ final class DeviceHeartbeatService {
             return
         }
 
-        let normalizedWorkspaceIds = Array(Set(workspaceIds))
+        let normalizedWorkspaceIds = deduplicateWorkspaceIdsPreservingOrder(workspaceIds)
 
         if isRunning {
             await updateWorkspaces(normalizedWorkspaceIds)
@@ -77,10 +77,11 @@ final class DeviceHeartbeatService {
     /// Update this device's workspace list.
     func updateWorkspaces(_ workspaceIds: [UUID]) async {
         guard let deviceId = currentDeviceId else { return }
+        let normalizedWorkspaceIds = deduplicateWorkspaceIdsPreservingOrder(workspaceIds)
         do {
             try await supabaseService.updateDeviceWorkspaces(
                 deviceId: deviceId,
-                workspaceIds: workspaceIds
+                workspaceIds: normalizedWorkspaceIds
             )
         } catch {
             Log.cloud.error("Failed to update device workspaces: \(error.localizedDescription)")
@@ -94,5 +95,16 @@ final class DeviceHeartbeatService {
         } catch {
             Log.cloud.warning("Device heartbeat failed: \(error.localizedDescription)")
         }
+    }
+
+    private func deduplicateWorkspaceIdsPreservingOrder(_ workspaceIds: [UUID]) -> [UUID] {
+        var seen: Set<UUID> = []
+        var result: [UUID] = []
+        result.reserveCapacity(workspaceIds.count)
+
+        for workspaceId in workspaceIds where seen.insert(workspaceId).inserted {
+            result.append(workspaceId)
+        }
+        return result
     }
 }
