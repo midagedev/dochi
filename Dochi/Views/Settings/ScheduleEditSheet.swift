@@ -5,6 +5,8 @@ import SwiftUI
 struct ScheduleEditSheet: View {
     var schedulerService: SchedulerServiceProtocol
     var editingSchedule: ScheduleEntry?
+    var availableAgents: [String]
+    var defaultAgentName: String
 
     @Environment(\.dismiss) private var dismiss
 
@@ -17,7 +19,7 @@ struct ScheduleEditSheet: View {
     @State private var selectedDay: Int = 1
     @State private var customCron: String = ""
     @State private var prompt: String = ""
-    @State private var agentName: String = "도치"
+    @State private var agentName: String = ""
     @State private var isEnabled: Bool = true
 
     private var isEditing: Bool { editingSchedule != nil }
@@ -48,6 +50,7 @@ struct ScheduleEditSheet: View {
     private var isValid: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty &&
         !prompt.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !agentName.trimmingCharacters(in: .whitespaces).isEmpty &&
         CronExpression.parse(cronExpression) != nil
     }
 
@@ -157,12 +160,24 @@ struct ScheduleEditSheet: View {
                         Text("에이전트")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TextField("에이전트 이름", text: $agentName)
-                            .textFieldStyle(.roundedBorder)
-                            .disabled(true)
-                        Text("향후 지원 예정")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+
+                        Picker("에이전트", selection: $agentName) {
+                            ForEach(normalizedAvailableAgents, id: \.self) { name in
+                                Text(agentPickerLabel(name)).tag(name)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+
+                        if selectedAgentExistsInWorkspace {
+                            Text("현재 워크스페이스 에이전트로 자동 실행됩니다")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            Text("현재 워크스페이스에 없는 에이전트입니다. 저장 전에 대상 에이전트를 확인하세요.")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
                     }
 
                     // Enable toggle
@@ -210,7 +225,10 @@ struct ScheduleEditSheet: View {
                 agentName = schedule.agentName
                 isEnabled = schedule.isEnabled
                 loadCronFields(from: schedule.cronExpression)
+            } else {
+                agentName = defaultAgentName
             }
+            syncSelectedAgentWithAvailableList()
         }
     }
 
@@ -325,16 +343,65 @@ struct ScheduleEditSheet: View {
         if case .value(let m) = parsed.minute { selectedMinute = m }
     }
 
+    private var normalizedAvailableAgents: [String] {
+        var names = availableAgents.map { $0.trimmingCharacters(in: .whitespaces) }
+        names = names.filter { !$0.isEmpty }
+
+        // Keep legacy value visible when editing an old schedule that references a removed agent.
+        let editingAgent = editingSchedule?.agentName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !editingAgent.isEmpty && !names.contains(where: { $0.localizedCaseInsensitiveCompare(editingAgent) == .orderedSame }) {
+            names.append(editingAgent)
+        }
+
+        if !names.contains(defaultAgentName) {
+            names.append(defaultAgentName)
+        }
+        if names.isEmpty {
+            names = [defaultAgentName]
+        }
+        return Array(Set(names)).sorted()
+    }
+
+    private var selectedAgentExistsInWorkspace: Bool {
+        if agentName.localizedCaseInsensitiveCompare("도치") == .orderedSame {
+            return true
+        }
+        return availableAgents.contains {
+            $0.localizedCaseInsensitiveCompare(agentName) == .orderedSame
+        }
+    }
+
+    private func agentPickerLabel(_ agent: String) -> String {
+        if agent.localizedCaseInsensitiveCompare("도치") == .orderedSame {
+            return agent
+        }
+        let exists = availableAgents.contains {
+            $0.localizedCaseInsensitiveCompare(agent) == .orderedSame
+        }
+        return exists ? agent : "\(agent) (삭제됨)"
+    }
+
+    private func syncSelectedAgentWithAvailableList() {
+        guard !normalizedAvailableAgents.isEmpty else { return }
+        if normalizedAvailableAgents.contains(agentName) { return }
+        if normalizedAvailableAgents.contains(defaultAgentName) {
+            agentName = defaultAgentName
+        } else {
+            agentName = normalizedAvailableAgents[0]
+        }
+    }
+
     private func save() {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespaces)
+        let trimmedAgentName = agentName.trimmingCharacters(in: .whitespaces)
 
         if var existing = editingSchedule {
             existing.name = trimmedName
             existing.icon = icon
             existing.cronExpression = cronExpression
             existing.prompt = trimmedPrompt
-            existing.agentName = agentName
+            existing.agentName = trimmedAgentName
             existing.isEnabled = isEnabled
             schedulerService.updateSchedule(existing)
         } else {
@@ -343,7 +410,7 @@ struct ScheduleEditSheet: View {
                 icon: icon,
                 cronExpression: cronExpression,
                 prompt: trimmedPrompt,
-                agentName: agentName,
+                agentName: trimmedAgentName,
                 isEnabled: isEnabled
             )
             schedulerService.addSchedule(entry)

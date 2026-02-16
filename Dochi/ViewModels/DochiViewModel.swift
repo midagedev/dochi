@@ -5,6 +5,26 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class DochiViewModel {
+    enum ScheduledAutomationExecutionError: LocalizedError {
+        case interactionBusy
+        case emptyPrompt
+        case agentNotFound(String)
+        case dispatchRejected(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .interactionBusy:
+                return "앱이 다른 작업을 처리 중이라 자동화를 실행할 수 없습니다."
+            case .emptyPrompt:
+                return "자동화 프롬프트가 비어 있습니다."
+            case .agentNotFound(let name):
+                return "자동화 대상 에이전트를 찾을 수 없습니다: \(name)"
+            case .dispatchRejected(let reason):
+                return reason
+            }
+        }
+    }
+
     // MARK: - State
 
     private(set) var interactionState: InteractionState = .idle
@@ -431,6 +451,40 @@ final class DochiViewModel {
         schedulerService?.clearCurrentExecution()
     }
 
+    /// Execute a scheduler entry by routing to the selected agent context and dispatching the prompt.
+    func executeScheduledAutomation(_ schedule: ScheduleEntry) async throws {
+        guard interactionState == .idle else {
+            throw ScheduledAutomationExecutionError.interactionBusy
+        }
+
+        let prompt = schedule.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else {
+            throw ScheduledAutomationExecutionError.emptyPrompt
+        }
+
+        let requestedAgent = schedule.agentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let availableAgents = contextService.listAgents(workspaceId: sessionContext.workspaceId)
+        guard let targetAgent = resolveScheduledAgentName(requestedAgent, available: availableAgents) else {
+            throw ScheduledAutomationExecutionError.agentNotFound(schedule.agentName)
+        }
+
+        if settings.activeAgentName.localizedCaseInsensitiveCompare(targetAgent) != .orderedSame {
+            switchAgent(name: targetAgent)
+        } else {
+            ensureConversation()
+        }
+
+        let beforeMessageCount = currentConversation?.messages.count ?? 0
+        inputText = prompt
+        sendMessage()
+
+        let afterMessageCount = currentConversation?.messages.count ?? 0
+        if afterMessageCount == beforeMessageCount {
+            let reason = errorMessage ?? "자동화 프롬프트를 전송하지 못했습니다."
+            throw ScheduledAutomationExecutionError.dispatchRejected(reason)
+        }
+    }
+
     /// 피드백 제출 (I-4)
     func submitFeedback(messageId: UUID, conversationId: UUID, rating: FeedbackRating, category: FeedbackCategory? = nil, comment: String? = nil) {
         // Look up the message's actual provider/model from metadata (C-1 fix)
@@ -467,6 +521,23 @@ final class DochiViewModel {
         if let conv = conversations.first(where: { $0.id == conversationId }),
            let msg = conv.messages.first(where: { $0.id == messageId }) {
             return msg
+        }
+        return nil
+    }
+
+    private func resolveScheduledAgentName(_ requestedAgentName: String, available: [String]) -> String? {
+        let trimmed = requestedAgentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let preferred = trimmed.isEmpty ? settings.activeAgentName : trimmed
+
+        if let matched = available.first(where: {
+            $0.localizedCaseInsensitiveCompare(preferred) == .orderedSame
+        }) {
+            return matched
+        }
+
+        // "도치"는 기본 에이전트로 UI/설정에서 사용할 수 있으므로 목록에 없어도 허용한다.
+        if preferred.localizedCaseInsensitiveCompare("도치") == .orderedSame {
+            return "도치"
         }
         return nil
     }

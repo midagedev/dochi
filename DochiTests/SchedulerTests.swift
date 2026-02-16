@@ -489,4 +489,78 @@ final class SchedulerTests: XCTestCase {
         XCTAssertTrue(SettingsSection.automation.matches(query: "자동화"))
         XCTAssertFalse(SettingsSection.automation.matches(query: "음성"))
     }
+
+    // MARK: - Scheduled Automation Agent Routing (#183)
+
+    func testExecuteScheduledAutomationSwitchesAgentAndDispatchesPrompt() async throws {
+        let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let (viewModel, settings, contextService) = makeScheduleExecutionViewModel(workspaceId: wsId)
+        contextService.agents[wsId] = ["도치", "연구원"]
+        settings.activeAgentName = "도치"
+
+        let schedule = ScheduleEntry(
+            name: "주간 요약",
+            cronExpression: "0 9 * * 1",
+            prompt: "이번 주 진행 상황을 요약해줘",
+            agentName: "연구원"
+        )
+
+        try await viewModel.executeScheduledAutomation(schedule)
+
+        XCTAssertEqual(settings.activeAgentName, "연구원")
+        XCTAssertNotNil(viewModel.currentConversation)
+        XCTAssertEqual(viewModel.currentConversation?.messages.first?.role, .user)
+        XCTAssertEqual(viewModel.currentConversation?.messages.first?.content, "이번 주 진행 상황을 요약해줘")
+    }
+
+    func testExecuteScheduledAutomationFailsWhenTargetAgentMissing() async {
+        let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let (viewModel, _, contextService) = makeScheduleExecutionViewModel(workspaceId: wsId)
+        contextService.agents[wsId] = ["도치"]
+
+        let schedule = ScheduleEntry(
+            name: "오류 테스트",
+            cronExpression: "0 9 * * *",
+            prompt: "테스트",
+            agentName: "없는에이전트"
+        )
+
+        do {
+            try await viewModel.executeScheduledAutomation(schedule)
+            XCTFail("Expected agentNotFound error")
+        } catch let error as DochiViewModel.ScheduledAutomationExecutionError {
+            switch error {
+            case .agentNotFound(let name):
+                XCTAssertEqual(name, "없는에이전트")
+            default:
+                XCTFail("Unexpected error: \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    private func makeScheduleExecutionViewModel(workspaceId: UUID) -> (DochiViewModel, AppSettings, MockContextService) {
+        let settings = AppSettings()
+        settings.taskRoutingEnabled = false
+        settings.activeAgentName = "도치"
+
+        let keychainService = MockKeychainService()
+        try? keychainService.save(account: LLMProvider.openai.keychainAccount, value: "test-key")
+
+        let contextService = MockContextService()
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: contextService,
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: workspaceId, currentUserId: nil)
+        )
+        return (viewModel, settings, contextService)
+    }
 }
