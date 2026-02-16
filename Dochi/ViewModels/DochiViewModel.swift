@@ -1681,7 +1681,6 @@ final class DochiViewModel {
         conversation.updatedAt = Date()
 
         let systemPrompt = composeSystemPrompt()
-        let messages = prepareMessages(from: conversation)
 
         // Resolve model (agent config applies to Telegram too)
         let router = ModelRouter(settings: settings, keychainService: keychainService)
@@ -1695,69 +1694,136 @@ final class DochiViewModel {
         }
 
         let useStreaming = settings.telegramStreamReplies
+        let telegramTools = telegramSafeToolSchemas()
 
         do {
-            var accumulatedText = ""
+            var finalText: String?
             var streamMessageId: Int64?
             var lastEditLength = 0
+            var loopConversation = conversation
+            var toolLoopCount = 0
 
-            // For non-streaming mode, send typing indicator
-            if !useStreaming, let tg = getTelegramService() {
-                try? await tg.sendChatAction(chatId: update.chatId, action: "typing")
-            }
+            telegramLoop: while toolLoopCount <= Self.maxToolLoopIterations + 1 {
+                // For non-streaming mode, send typing indicator before each model request
+                if !useStreaming, let tg = getTelegramService() {
+                    try? await tg.sendChatAction(chatId: update.chatId, action: "typing")
+                }
 
-            let onPartial: @MainActor @Sendable (String) -> Void = { [weak self] partial in
-                accumulatedText += partial
+                var loopText = ""
+                let onPartial: @MainActor @Sendable (String) -> Void = { [weak self] partial in
+                    loopText += partial
 
-                guard useStreaming, let self, let tg = self.getTelegramService() else { return }
+                    guard useStreaming, let self, let tg = self.getTelegramService() else { return }
 
-                // Throttle edits: only update every 50+ chars or first chunk
-                let currentLength = accumulatedText.count
-                guard currentLength - lastEditLength >= 50 || streamMessageId == nil else { return }
+                    // Throttle edits: only update every 50+ chars or first chunk
+                    let currentLength = loopText.count
+                    guard currentLength - lastEditLength >= 50 || streamMessageId == nil else { return }
 
-                let textSnapshot = accumulatedText + " ▍"
-                lastEditLength = currentLength
+                    let textSnapshot = loopText + " ▍"
+                    lastEditLength = currentLength
 
-                Task { @MainActor in
-                    do {
-                        if let msgId = streamMessageId {
-                            try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: textSnapshot)
-                        } else {
-                            streamMessageId = try await tg.sendMessage(chatId: update.chatId, text: textSnapshot)
+                    Task { @MainActor in
+                        do {
+                            if let msgId = streamMessageId {
+                                try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: textSnapshot)
+                            } else {
+                                streamMessageId = try await tg.sendMessage(chatId: update.chatId, text: textSnapshot)
+                            }
+                        } catch {
+                            Log.telegram.debug("Streaming edit skipped: \(error.localizedDescription)")
                         }
-                    } catch {
-                        Log.telegram.debug("Streaming edit skipped: \(error.localizedDescription)")
+                    }
+                }
+
+                let response = try await llmService.send(
+                    messages: prepareMessages(from: loopConversation),
+                    systemPrompt: systemPrompt,
+                    model: model.model,
+                    provider: model.provider,
+                    apiKey: model.apiKey,
+                    tools: telegramTools.isEmpty ? nil : telegramTools,
+                    onPartial: onPartial
+                )
+
+                switch response {
+                case .text(let text):
+                    let resolved = text.isEmpty ? loopText : text
+                    guard !resolved.isEmpty else {
+                        Log.telegram.warning("Empty response for Telegram message")
+                        return
+                    }
+                    finalText = resolved
+                    break telegramLoop
+
+                case .partial(let partial):
+                    let resolved = partial.isEmpty ? loopText : partial
+                    guard !resolved.isEmpty else {
+                        Log.telegram.warning("Empty partial response for Telegram message")
+                        return
+                    }
+                    finalText = resolved
+                    break telegramLoop
+
+                case .toolCalls(let toolCalls):
+                    toolLoopCount += 1
+
+                    // Save assistant tool-call message for the next loop context
+                    loopConversation.messages.append(
+                        Message(role: .assistant, content: loopText, toolCalls: toolCalls)
+                    )
+
+                    if toolLoopCount > Self.maxToolLoopIterations {
+                        loopConversation.messages.append(
+                            Message(
+                                role: .tool,
+                                content: "도구 호출이 너무 많습니다 (최대 \(Self.maxToolLoopIterations)회). 최종 응답을 생성해주세요.",
+                                toolCallId: toolCalls.first?.id
+                            )
+                        )
+                        continue telegramLoop
+                    }
+
+                    for codableCall in toolCalls {
+                        let call = ToolCall(
+                            id: codableCall.id,
+                            name: codableCall.name,
+                            arguments: codableCall.arguments
+                        )
+
+                        let normalizedName = Self.desanitizeToolNameForLLM(call.name)
+                        let blockedForTelegram =
+                            normalizedName.hasPrefix("mcp_")
+                            || Self.remoteToolControlNames.contains(normalizedName)
+                            || (toolInfoForLLMName(call.name)?.category != .safe)
+
+                        let result: ToolResult
+                        if blockedForTelegram {
+                            result = ToolResult(
+                                toolCallId: call.id,
+                                content: "원격(텔레그램)에서는 safe 도구만 사용할 수 있습니다. 이 작업은 앱에서 직접 실행해주세요.",
+                                isError: true
+                            )
+                            Log.telegram.info("Blocked remote tool call: \(call.name)")
+                        } else {
+                            result = await toolService.execute(name: call.name, arguments: call.arguments)
+                        }
+
+                        loopConversation.messages.append(
+                            Message(role: .tool, content: result.content, toolCallId: call.id)
+                        )
                     }
                 }
             }
 
-            let response = try await llmService.send(
-                messages: messages,
-                systemPrompt: systemPrompt,
-                model: model.model,
-                provider: model.provider,
-                apiKey: model.apiKey,
-                tools: nil,
-                onPartial: onPartial
-            )
-
-            let finalText: String
-            switch response {
-            case .text(let text):
-                finalText = text.isEmpty ? accumulatedText : text
-            default:
-                finalText = accumulatedText
-            }
-
-            guard !finalText.isEmpty else {
-                Log.telegram.warning("Empty response for Telegram message")
+            guard let finalText, !finalText.isEmpty else {
+                Log.telegram.warning("Failed to produce final Telegram response")
                 return
             }
 
             // Append assistant response to conversation
-            let assistantMessage = Message(role: .assistant, content: finalText)
-            conversation.messages.append(assistantMessage)
-            conversation.updatedAt = Date()
+            loopConversation.messages.append(Message(role: .assistant, content: finalText))
+            loopConversation.updatedAt = Date()
+            conversation = loopConversation
 
             // Auto-title from first user message
             if conversation.title == "새 대화",
@@ -1784,6 +1850,35 @@ final class DochiViewModel {
             }
         } catch {
             Log.telegram.error("Telegram response failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static let remoteToolControlNames: Set<String> = [
+        "tools.enable",
+        "tools.enable_ttl",
+        "tools.reset"
+    ]
+
+    private static func desanitizeToolNameForLLM(_ name: String) -> String {
+        name.replacingOccurrences(of: "-_-", with: ".")
+    }
+
+    private func toolInfoForLLMName(_ llmName: String) -> ToolInfo? {
+        if let info = toolService.toolInfo(named: llmName) { return info }
+        return toolService.toolInfo(named: Self.desanitizeToolNameForLLM(llmName))
+    }
+
+    private func telegramSafeToolSchemas() -> [[String: Any]] {
+        let safeSchemas = toolService.availableToolSchemas(for: ["safe"])
+        return safeSchemas.filter { schema in
+            guard let function = schema["function"] as? [String: Any],
+                  let name = function["name"] as? String else {
+                return false
+            }
+
+            if name.hasPrefix("mcp_") { return false }
+            if Self.remoteToolControlNames.contains(Self.desanitizeToolNameForLLM(name)) { return false }
+            return true
         }
     }
 

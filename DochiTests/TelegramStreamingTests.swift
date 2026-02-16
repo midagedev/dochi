@@ -18,6 +18,7 @@ final class TelegramStreamingTests: XCTestCase {
     // MARK: - ShellPermissionConfig (reuse for quick smoke)
 
     func testTelegramStreamRepliesDefaultTrue() {
+        UserDefaults.standard.removeObject(forKey: "telegramStreamReplies")
         let settings = AppSettings()
         XCTAssertTrue(settings.telegramStreamReplies)
     }
@@ -51,6 +52,144 @@ final class TelegramStreamingTests: XCTestCase {
     func testMockConformsToProtocol() {
         let tg: TelegramServiceProtocol = MockTelegramService()
         XCTAssertFalse(tg.isPolling)
+    }
+
+    // MARK: - DochiViewModel Telegram tool flow
+
+    func testHandleTelegramMessageFiltersUnsafeSchemas() async {
+        let llmService = MockLLMService()
+        llmService.stubbedResponse = .text("검색 완료")
+
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedSchemas = [
+            makeFunctionSchema(name: "web_search"),
+            makeFunctionSchema(name: "mcp_db_query"),
+            makeFunctionSchema(name: "tools-_-enable"),
+            makeFunctionSchema(name: "tools-_-enable_ttl"),
+            makeFunctionSchema(name: "tools-_-reset"),
+        ]
+
+        let (viewModel, telegramService, _, _) = makeTelegramTestContext(
+            llmService: llmService,
+            toolService: toolService
+        )
+
+        let update = TelegramUpdate(
+            updateId: 1,
+            chatId: 12345,
+            senderId: 99,
+            senderUsername: "tester",
+            text: "최신 뉴스 찾아줘"
+        )
+
+        await viewModel.handleTelegramMessage(update)
+
+        let toolNames = extractToolNames(from: llmService.lastTools)
+        XCTAssertEqual(Set(toolNames), Set(["web_search"]))
+        XCTAssertEqual(telegramService.sentMessages.last?.text, "검색 완료")
+    }
+
+    func testHandleTelegramMessageExecutesSafeToolCall() async {
+        let llmService = MockLLMService()
+        llmService.stubbedResponses = [
+            .toolCalls([
+                CodableToolCall(
+                    id: "tc1",
+                    name: "web_search",
+                    argumentsJSON: #"{"query":"Swift 6 변경점"}"#
+                )
+            ]),
+            .text("요약 결과")
+        ]
+
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedSchemas = [makeFunctionSchema(name: "web_search")]
+        toolService.stubbedResult = ToolResult(toolCallId: "tc1", content: "검색 결과 본문")
+        toolService.allToolInfos = [
+            ToolInfo(
+                name: "web_search",
+                description: "웹 검색",
+                category: .safe,
+                isBaseline: true,
+                isEnabled: true,
+                parameters: []
+            )
+        ]
+
+        let (viewModel, telegramService, conversationService, _) = makeTelegramTestContext(
+            llmService: llmService,
+            toolService: toolService
+        )
+
+        let update = TelegramUpdate(
+            updateId: 2,
+            chatId: 56789,
+            senderId: 100,
+            senderUsername: "tester2",
+            text: "Swift 6 검색해줘"
+        )
+
+        await viewModel.handleTelegramMessage(update)
+
+        XCTAssertEqual(toolService.executeCallCount, 1)
+        XCTAssertEqual(toolService.lastExecutedName, "web_search")
+        XCTAssertEqual(telegramService.sentMessages.last?.text, "요약 결과")
+
+        let saved = conversationService.list().first
+        XCTAssertNotNil(saved)
+        XCTAssertTrue(saved?.messages.contains(where: {
+            $0.role == .tool && $0.content == "검색 결과 본문"
+        }) ?? false)
+    }
+
+    func testHandleTelegramMessageBlocksSensitiveToolCall() async {
+        let llmService = MockLLMService()
+        llmService.stubbedResponses = [
+            .toolCalls([
+                CodableToolCall(
+                    id: "tc1",
+                    name: "settings-_-set",
+                    argumentsJSON: #"{"key":"chatFontSize","value":"18"}"#
+                )
+            ]),
+            .text("완료")
+        ]
+
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedSchemas = [makeFunctionSchema(name: "web_search")]
+        toolService.allToolInfos = [
+            ToolInfo(
+                name: "settings.set",
+                description: "설정 변경",
+                category: .sensitive,
+                isBaseline: false,
+                isEnabled: false,
+                parameters: []
+            )
+        ]
+
+        let (viewModel, _, conversationService, _) = makeTelegramTestContext(
+            llmService: llmService,
+            toolService: toolService
+        )
+
+        let update = TelegramUpdate(
+            updateId: 3,
+            chatId: 99999,
+            senderId: 101,
+            senderUsername: "tester3",
+            text: "글자 크기 바꿔줘"
+        )
+
+        await viewModel.handleTelegramMessage(update)
+
+        XCTAssertEqual(toolService.executeCallCount, 0)
+
+        let saved = conversationService.list().first
+        XCTAssertNotNil(saved)
+        XCTAssertTrue(saved?.messages.contains(where: {
+            $0.role == .tool && $0.content.contains("원격(텔레그램)에서는 safe 도구만")
+        }) ?? false)
     }
 
     // MARK: - Offset persistence
@@ -333,5 +472,63 @@ final class TelegramStreamingTests: XCTestCase {
         let hash = SHA256.hash(data: Data(token.utf8))
         let prefix = hash.prefix(8).map { String(format: "%02x", $0) }.joined()
         return "telegram_offset_\(prefix)"
+    }
+
+    private func makeTelegramTestContext(
+        llmService: MockLLMService,
+        toolService: MockBuiltInToolService
+    ) -> (DochiViewModel, MockTelegramService, MockConversationService, MockContextService) {
+        let settings = AppSettings()
+        settings.llmProvider = LLMProvider.openai.rawValue
+        settings.llmModel = "gpt-4o"
+        settings.taskRoutingEnabled = false
+
+        let contextService = MockContextService()
+        let conversationService = MockConversationService()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai"] = "sk-test"
+        let sessionContext = SessionContext(
+            workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        )
+
+        let viewModel = DochiViewModel(
+            llmService: llmService,
+            toolService: toolService,
+            contextService: contextService,
+            conversationService: conversationService,
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: sessionContext
+        )
+
+        let telegramService = MockTelegramService()
+        viewModel.setTelegramService(telegramService)
+
+        return (viewModel, telegramService, conversationService, contextService)
+    }
+
+    private func makeFunctionSchema(name: String) -> [String: Any] {
+        [
+            "type": "function",
+            "function": [
+                "name": name,
+                "description": "test",
+                "parameters": ["type": "object"]
+            ]
+        ]
+    }
+
+    private func extractToolNames(from schemas: [[String: Any]]?) -> [String] {
+        guard let schemas else { return [] }
+        return schemas.compactMap { schema in
+            guard let function = schema["function"] as? [String: Any],
+                  let name = function["name"] as? String else {
+                return nil
+            }
+            return name
+        }
     }
 }

@@ -12,7 +12,9 @@ final class MockLLMService: LLMServiceProtocol {
     var lastModel: String?
     var lastProvider: LLMProvider?
     var lastAPIKey: String?
+    var lastTools: [[String: Any]]?
     var stubbedResponse: LLMResponse = .text("Mock response")
+    var stubbedResponses: [LLMResponse] = []
     var stubbedError: Error?
     var cancelCallCount = 0
 
@@ -31,6 +33,7 @@ final class MockLLMService: LLMServiceProtocol {
         lastModel = model
         lastProvider = provider
         lastAPIKey = apiKey
+        lastTools = tools
         if let error = stubbedError { throw error }
 
         lastMetrics = ExchangeMetrics(
@@ -45,6 +48,9 @@ final class MockLLMService: LLMServiceProtocol {
             wasFallback: false
         )
 
+        if !stubbedResponses.isEmpty {
+            return stubbedResponses.removeFirst()
+        }
         return stubbedResponse
     }
 
