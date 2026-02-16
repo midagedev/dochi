@@ -400,6 +400,19 @@ final class ModelTests: XCTestCase {
         XCTAssertNil(UserDefaults.standard.object(forKey: "hasSeenPermissionInfo"))
         XCTAssertNil(UserDefaults.standard.object(forKey: "ragEmbeddingProvider"))
     }
+
+    @MainActor
+    func testAppSettingsKeepsActiveKeysWhenRemovingDeprecatedKeys() {
+        UserDefaults.standard.set("text-embedding-3-large", forKey: "ragEmbeddingModel")
+
+        let settings = AppSettings()
+
+        XCTAssertEqual(settings.ragEmbeddingModel, "text-embedding-3-large")
+        XCTAssertEqual(
+            UserDefaults.standard.string(forKey: "ragEmbeddingModel"),
+            "text-embedding-3-large"
+        )
+    }
 }
 
 // MARK: - TaskComplexityClassifier Tests
