@@ -569,6 +569,7 @@ struct DochiApp: App {
     private func syncProactiveSuggestionNotification() async {
         guard settings.notificationProactiveSuggestionEnabled,
               let suggestion = viewModel.currentSuggestion else { return }
+        guard !NSApp.isActive else { return }
 
         await notificationManager.requestAuthorizationIfNeeded()
         notificationManager.sendProactiveSuggestionNotification(suggestion: suggestion)

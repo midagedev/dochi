@@ -661,7 +661,7 @@ HeartbeatService tick -> 카테고리별 컨텍스트 수집
 제안 생성:
   ProactiveSuggestionService가 currentSuggestion 생성
   -> DochiApp.syncProactiveSuggestionNotification()
-  -> ON일 때 NotificationManager.sendProactiveSuggestionNotification()
+  -> ON + 앱 비활성 상태일 때 NotificationManager.sendProactiveSuggestionNotification()
   -> 카테고리: dochi-proactive, "앱 열기" 액션으로 chat 섹션 진입
 메뉴바 노출:
   MenuBarPopoverView 상단 카드
