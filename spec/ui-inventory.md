@@ -457,6 +457,7 @@ UX 정책 메모 (2026-02-16):
 - 스케줄 `agentName`은 편집 UI(Picker)와 실행 경로 모두에서 동일하게 사용하며, 미존재 에이전트를 가리키면 실행 실패로 기록한다.
 - 관심사 발굴 모드의 단일 소스는 `settings.interestDiscoveryMode`이며, 서비스는 profile 값이 아니라 설정값을 기준으로 적극성과 분석 여부를 결정한다.
 - ONNX 로컬 TTS는 `settings.onnxModelId`를 런타임 로드 타깃으로 즉시 반영하고, 추론 실패/미구현 시 시스템 TTS 폴백을 사용자에게 명시한다.
+- `syncKanban` 토글이 켜진 경우 SyncEngine은 칸반 보드 데이터를 실제 push/pull 하며, 상태 요약의 "칸반 n건"은 실데이터 기준으로 계산한다.
 
 ### 텍스트 메시지
 ```
@@ -673,6 +674,20 @@ ONNX 모델 관리:
 UI 노출:
   -> ONNX 설정 섹션에 "베타(폴백 포함)" 안내 텍스트를 고정 노출
   -> 사용자는 모델 관리 UI가 "실험적 ONNX + 안정 폴백" 정책임을 즉시 인지할 수 있어야 함
+```
+
+### 칸반 동기화 반영 (K-3 보강, #180)
+```
+설정: 설정 > 계정 > 동기화 대상 > "칸반" 토글
+  -> settings.syncKanban 변경
+  -> SyncEngine.sync()/initialUpload()에서 pushKanban/pullKanban 단계 활성화
+실행 동작:
+  -> pushKanban: 로컬 KanbanManager 보드 배열을 JSON으로 업로드
+  -> pullKanban: 원격 보드를 updatedAt 기준(lastWriteWins)으로 병합/업서트
+  -> 수동 충돌 전략일 때는 칸반 충돌 항목을 syncConflicts에 추가
+UI 노출:
+  -> SystemStatusSheetView 동기화 대상 요약의 "칸반 n건"은 KanbanManager 실보드 수를 표시
+  -> 토글 ON 상태에서 칸반 변경은 동기화 토스트/히스토리에 실제 엔티티로 기록
 ```
 
 ### 메뉴바 퀵 액세스 (H-1 추가)

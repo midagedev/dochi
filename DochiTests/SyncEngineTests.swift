@@ -23,6 +23,7 @@ final class SyncEngineTests: XCTestCase {
         settings.realtimeSyncEnabled = true
         settings.syncConversations = true
         settings.syncMemory = true
+        settings.syncKanban = true
         settings.syncProfiles = true
         settings.conflictResolutionStrategy = "lastWriteWins"
 
@@ -187,6 +188,86 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertTrue(mockSupabase.pushedEntities.contains(where: { $0.type == .profile }))
     }
 
+    func testSyncPushesKanbanBoards() async throws {
+        let board = KanbanManager.shared.createBoard(name: "sync-kanban-push-\(UUID().uuidString)")
+        defer { KanbanManager.shared.deleteBoard(id: board.id) }
+
+        engine.restoreSyncState()
+        await engine.sync()
+
+        guard let payload = mockSupabase.pushedEntities.first(where: { $0.type == .kanban })?.payload else {
+            XCTFail("Expected kanban payload to be pushed")
+            return
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let pushedBoards = try decoder.decode([KanbanBoard].self, from: payload)
+        XCTAssertTrue(pushedBoards.contains(where: { $0.id == board.id }))
+    }
+
+    func testSyncPullsKanbanBoards() async {
+        settings.syncConversations = false
+        settings.syncMemory = false
+        settings.syncProfiles = false
+        settings.syncKanban = true
+
+        let remoteBoard = KanbanBoard(
+            id: UUID(),
+            name: "remote-sync-\(UUID().uuidString)",
+            columns: ["백로그", "진행 중", "완료"],
+            cards: [KanbanCard(title: "원격 카드", column: "백로그")]
+        )
+        defer { KanbanManager.shared.deleteBoard(id: remoteBoard.id) }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        mockSupabase.pullResult = try? encoder.encode([remoteBoard])
+
+        engine.restoreSyncState()
+        await engine.sync()
+
+        let syncedBoard = KanbanManager.shared.board(id: remoteBoard.id)
+        XCTAssertEqual(syncedBoard?.name, remoteBoard.name)
+        XCTAssertEqual(syncedBoard?.cards.count, 1)
+    }
+
+    func testManualKanbanSyncDoesNotOverwriteNewerLocalBoardWithOlderRemote() async throws {
+        settings.syncConversations = false
+        settings.syncMemory = false
+        settings.syncProfiles = false
+        settings.syncKanban = true
+        settings.conflictResolutionStrategy = "manual"
+
+        let board = KanbanManager.shared.createBoard(name: "manual-guard-\(UUID().uuidString)")
+        _ = KanbanManager.shared.addCard(boardId: board.id, title: "로컬 카드", column: "백로그")
+        guard let localBoard = KanbanManager.shared.board(id: board.id) else {
+            XCTFail("Expected local board to exist")
+            return
+        }
+        defer { KanbanManager.shared.deleteBoard(id: board.id) }
+
+        let remoteBoard = KanbanBoard(
+            id: localBoard.id,
+            name: localBoard.name,
+            columns: localBoard.columns,
+            cards: [KanbanCard(title: "원격 카드", column: "백로그")],
+            createdAt: localBoard.createdAt,
+            updatedAt: localBoard.updatedAt.addingTimeInterval(-60)
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        mockSupabase.pullResult = try encoder.encode([remoteBoard])
+
+        engine.restoreSyncState()
+        await engine.sync()
+
+        let syncedBoard = KanbanManager.shared.board(id: board.id)
+        XCTAssertTrue(syncedBoard?.cards.contains(where: { $0.title == "로컬 카드" }) == true)
+        XCTAssertFalse(syncedBoard?.cards.contains(where: { $0.title == "원격 카드" }) == true)
+    }
+
     // MARK: - Conflict Tests
 
     func testResolveConflictKeepLocal() {
@@ -304,6 +385,15 @@ final class SyncEngineTests: XCTestCase {
         let counts = engine.entityCounts()
         XCTAssertNil(counts[.conversation])
         XCTAssertNil(counts[.profile])
+    }
+
+    func testEntityCountsIncludesKanbanBoardCount() {
+        let initialCount = KanbanManager.shared.listBoards().count
+        let board = KanbanManager.shared.createBoard(name: "count-kanban-\(UUID().uuidString)")
+        defer { KanbanManager.shared.deleteBoard(id: board.id) }
+
+        let counts = engine.entityCounts()
+        XCTAssertEqual(counts[.kanban], initialCount + 1)
     }
 
     // MARK: - Toast Tests

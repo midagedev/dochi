@@ -148,6 +148,13 @@ final class KanbanManager {
         boards.values.first { $0.name.localizedCaseInsensitiveContains(name) }
     }
 
+    /// Upsert board from cloud sync payload while preserving the incoming ID/timestamps.
+    func upsertBoardFromSync(_ board: KanbanBoard) {
+        boards[board.id] = board
+        save(board)
+        Log.storage.info("Upserted kanban board from sync: \(board.name)")
+    }
+
     func deleteBoard(id: UUID) {
         let name = boards[id]?.name ?? "unknown"
         boards.removeValue(forKey: id)
