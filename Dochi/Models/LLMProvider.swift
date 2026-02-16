@@ -81,8 +81,12 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
     /// Default model used by onboarding when this provider is selected.
     var onboardingDefaultModel: String {
         switch self {
-        case .openai, .anthropic, .zai:
-            return models.first ?? ""
+        case .openai:
+            return models.first ?? "gpt-4o"
+        case .anthropic:
+            return models.first ?? "claude-sonnet-4-5-20250514"
+        case .zai:
+            return models.first ?? "glm-5"
         case .ollama:
             return "llama3"
         case .lmStudio:
