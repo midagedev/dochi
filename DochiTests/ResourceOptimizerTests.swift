@@ -172,10 +172,7 @@ final class ResourceOptimizerTests: XCTestCase {
 
         XCTAssertEqual(queued, 2)
         XCTAssertEqual(service.autoTaskRecords.count, 2)
-        XCTAssertEqual(
-            Set(service.autoTaskRecords.map(\.taskType)),
-            Set([.research, .kanbanCleanup])
-        )
+        XCTAssertEqual(service.autoTaskRecords.map(\.taskType), [.research, .kanbanCleanup])
     }
 
     func testEvaluateAndQueueAutoTasksRespectsOnlyWasteRisk() async {

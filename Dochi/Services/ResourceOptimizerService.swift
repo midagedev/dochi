@@ -169,7 +169,10 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
     }
 
     func evaluateAndQueueAutoTasks(enabledTypes: [AutoTaskType], onlyWasteRisk: Bool) async -> Int {
-        let taskTypes = Array(Set(enabledTypes))
+        var taskTypes: [AutoTaskType] = []
+        for type in enabledTypes where !taskTypes.contains(type) {
+            taskTypes.append(type)
+        }
         guard !taskTypes.isEmpty else { return 0 }
 
         let utilizations = await allUtilizations()
