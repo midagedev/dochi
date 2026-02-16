@@ -163,15 +163,21 @@ struct ScheduleEditSheet: View {
 
                         Picker("에이전트", selection: $agentName) {
                             ForEach(normalizedAvailableAgents, id: \.self) { name in
-                                Text(name).tag(name)
+                                Text(agentPickerLabel(name)).tag(name)
                             }
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
 
-                        Text("현재 워크스페이스 에이전트로 자동 실행됩니다")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                        if selectedAgentExistsInWorkspace {
+                            Text("현재 워크스페이스 에이전트로 자동 실행됩니다")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            Text("현재 워크스페이스에 없는 에이전트입니다. 저장 전에 대상 에이전트를 확인하세요.")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
                     }
 
                     // Enable toggle
@@ -340,6 +346,13 @@ struct ScheduleEditSheet: View {
     private var normalizedAvailableAgents: [String] {
         var names = availableAgents.map { $0.trimmingCharacters(in: .whitespaces) }
         names = names.filter { !$0.isEmpty }
+
+        // Keep legacy value visible when editing an old schedule that references a removed agent.
+        let editingAgent = editingSchedule?.agentName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !editingAgent.isEmpty && !names.contains(where: { $0.localizedCaseInsensitiveCompare(editingAgent) == .orderedSame }) {
+            names.append(editingAgent)
+        }
+
         if !names.contains(defaultAgentName) {
             names.append(defaultAgentName)
         }
@@ -347,6 +360,25 @@ struct ScheduleEditSheet: View {
             names = [defaultAgentName]
         }
         return Array(Set(names)).sorted()
+    }
+
+    private var selectedAgentExistsInWorkspace: Bool {
+        if agentName.localizedCaseInsensitiveCompare("도치") == .orderedSame {
+            return true
+        }
+        return availableAgents.contains {
+            $0.localizedCaseInsensitiveCompare(agentName) == .orderedSame
+        }
+    }
+
+    private func agentPickerLabel(_ agent: String) -> String {
+        if agent.localizedCaseInsensitiveCompare("도치") == .orderedSame {
+            return agent
+        }
+        let exists = availableAgents.contains {
+            $0.localizedCaseInsensitiveCompare(agent) == .orderedSame
+        }
+        return exists ? agent : "\(agent) (삭제됨)"
     }
 
     private func syncSelectedAgentWithAvailableList() {

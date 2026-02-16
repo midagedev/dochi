@@ -585,6 +585,7 @@ UI 노출:
 설정: 설정 > 일반 > 자동화 > 스케줄 편집
   -> "에이전트"는 현재 워크스페이스 에이전트 목록 Picker로 선택
   -> 기본값은 현재 활성 에이전트(settings.activeAgentName)
+  -> 기존 스케줄이 삭제된 에이전트를 가리키면 Picker에 "(삭제됨)"으로 표시해 값 보존
   -> 저장 시 ScheduleEntry.agentName에 선택값 저장
 실행 트리거: SchedulerService tick에서 스케줄 발화
   -> DochiApp scheduler execution handler
