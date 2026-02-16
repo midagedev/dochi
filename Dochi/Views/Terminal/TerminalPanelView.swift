@@ -6,6 +6,8 @@ struct TerminalPanelView: View {
     var settings: AppSettings
 
     @State private var inputText: String = ""
+    @State private var pendingCloseSessionId: UUID?
+    @State private var showCloseConfirmation = false
 
     private var activeSession: TerminalSession? {
         guard let activeId = terminalService.activeSessionId else { return nil }
@@ -48,6 +50,28 @@ struct TerminalPanelView: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
+        .confirmationDialog(
+            "세션을 닫을까요?",
+            isPresented: $showCloseConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("닫기", role: .destructive) {
+                if let id = pendingCloseSessionId {
+                    terminalService.closeSession(id: id)
+                }
+                pendingCloseSessionId = nil
+            }
+            Button("취소", role: .cancel) {
+                pendingCloseSessionId = nil
+            }
+        } message: {
+            Text("설정에서 '닫기 전 확인'이 활성화되어 있어 확인이 필요합니다.")
+        }
+        .onChange(of: showCloseConfirmation) { _, isPresented in
+            if !isPresented {
+                pendingCloseSessionId = nil
+            }
+        }
     }
 
     // MARK: - Tab Bar
@@ -113,7 +137,12 @@ struct TerminalPanelView: View {
                 .lineLimit(1)
 
             Button {
-                terminalService.closeSession(id: session.id)
+                if settings.terminalConfirmOnClose {
+                    pendingCloseSessionId = session.id
+                    showCloseConfirmation = true
+                } else {
+                    terminalService.closeSession(id: session.id)
+                }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 8))
