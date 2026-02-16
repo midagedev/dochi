@@ -178,7 +178,7 @@ DochiApp (entry point)
 | TTSFallbackBannerView | `Views/ContentView.swift` 내 | TTS 오프라인 폴백 발동 시 자동 표시 | TTS 전환 안내 + 프로바이더명 + "원래 TTS로 복구" 버튼 (G-2) |
 | ONNXModelManagerView | `Views/Settings/ONNXModelManagerView.swift` | VoiceSettingsView 내 ONNX 선택 시 인라인 | ONNX 모델 카탈로그, 다운로드/삭제, 설치된 모델 Picker (G-2) |
 | AutomationSettingsView | `Views/Settings/AutomationSettingsView.swift` | 설정 > 일반 > 자동화 | 마스터 토글, 스케줄 리스트 CRUD, 템플릿 추가, 실행 이력 (J-3) |
-| ScheduleEditSheet | `Views/Settings/ScheduleEditSheet.swift` | AutomationSettingsView에서 시트 | 스케줄 생성/편집 (이름/반복유형/크론식/프롬프트/에이전트/활성화) (J-3) |
+| ScheduleEditSheet | `Views/Settings/ScheduleEditSheet.swift` | AutomationSettingsView에서 시트 | 스케줄 생성/편집 (이름/반복유형/크론식/프롬프트/에이전트 Picker/활성화) (J-3) |
 | ScheduleTemplateSheet | `Views/Settings/ScheduleTemplateSheet.swift` | AutomationSettingsView에서 시트 | 기본 제공 3개 템플릿 선택 (아침 브리핑/주간 리포트/메모리 정리) (J-3) |
 | ScheduleExecutionBannerView | `Views/ScheduleExecutionBannerView.swift` | 대화 화면 상단 자동 표시 | 스케줄 실행 상태 배너 (실행 중/완료/실패) (J-3) |
 | OnboardingView | `Views/OnboardingView.swift` | 최초 실행 시 자동 | 6단계 초기 설정 위저드 + 기능 투어 연결. **온보딩 기본 모델은 `LLMProvider.onboardingDefaultModel` 단일 소스를 사용** |
@@ -211,7 +211,7 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 | 일반 | 인터페이스 (`interface`) | paintbrush | `Views/SettingsView.swift` 내 InterfaceSettingsContent | 폰트, 인터랙션 모드, 아바타, Spotlight 검색 (H-4) |
 | 일반 | 웨이크워드 (`wake-word`) | waveform | `Views/SettingsView.swift` 내 WakeWordSettingsContent | 웨이크워드 설정 |
 | 일반 | 하트비트 (`heartbeat`) | heart.circle | `Views/SettingsView.swift` 내 HeartbeatSettingsContent | Heartbeat 간격, 캘린더/칸반/미리알림 체크, 알림 센터 설정 (권한 상태, 소리/답장 토글, 카테고리별 알림 토글) (H-3), 텔레그램 알림 채널 설정 (K-6) |
-| 일반 | 자동화 (`automation`) | clock.badge.checkmark | `Views/Settings/AutomationSettingsView.swift` | 마스터 토글, 스케줄 CRUD (크론식), 템플릿 추가, 실행 이력 (J-3) |
+| 일반 | 자동화 (`automation`) | clock.badge.checkmark | `Views/Settings/AutomationSettingsView.swift` | 마스터 토글, 스케줄 CRUD (크론식+에이전트 선택), 템플릿 추가, 실행 이력 (J-3) |
 | 사람 | 가족 (`family`) | person.2 | `Views/Settings/FamilySettingsView.swift` | 사용자 프로필 CRUD |
 | 사람 | 에이전트 (`agent`) | person.crop.rectangle | `Views/Settings/AgentSettingsView.swift` → `Views/Agent/AgentCardGridView.swift` | 에이전트 카드 그리드 |
 | 연결 | 도구 (`tools`) | wrench.and.screwdriver | `Views/Settings/ToolsSettingsView.swift` | 도구 브라우저 (검색/필터/상세) |
@@ -454,6 +454,7 @@ UX 정책 메모 (2026-02-16):
 - `deviceCloudSyncEnabled`는 로그인/설정 상태와 함께 DeviceHeartbeatService 시작/정지를 직접 제어한다.
 - 프로액티브 제안 채널 토글은 저장값으로만 남기지 않고 실제 노출 경로(알림 센터 배너, 메뉴바 팝오버 카드)에 직접 연결한다.
 - `realtimeSyncEnabled`는 자동 동기화 주기를 직접 제어한다. ON일 때 30초, OFF일 때 5분 주기로 스케줄되며 토글 변경 즉시 재적용한다.
+- 스케줄 `agentName`은 편집 UI(Picker)와 실행 경로 모두에서 동일하게 사용하며, 미존재 에이전트를 가리키면 실행 실패로 기록한다.
 
 ### 텍스트 메시지
 ```
@@ -577,6 +578,26 @@ UI 노출:
      autoSyncEnabled OFF: "자동 동기화 OFF: 동기화 타이머가 중지됩니다."
      ON: "실시간 동기화가 활성화되어 30초마다 동기화합니다."
      OFF: "실시간 동기화가 비활성화되어 5분마다 동기화합니다."
+```
+
+### 자동화 에이전트 라우팅 (J-3 보강, #183)
+```
+설정: 설정 > 일반 > 자동화 > 스케줄 편집
+  -> "에이전트"는 현재 워크스페이스 에이전트 목록 Picker로 선택
+  -> 기본값은 현재 활성 에이전트(settings.activeAgentName)
+  -> 저장 시 ScheduleEntry.agentName에 선택값 저장
+실행 트리거: SchedulerService tick에서 스케줄 발화
+  -> DochiApp scheduler execution handler
+  -> DochiViewModel.executeScheduledAutomation(schedule)
+실행 동작:
+  -> ScheduleEntry.agentName 존재 여부 검증 (contextService.listAgents)
+  -> 대상 에이전트로 전환(switchAgent) 후 새 대화 컨텍스트 확보
+  -> schedule.prompt를 사용자 메시지로 전송(sendMessage)
+실패 정책:
+  -> 대상 에이전트가 없으면 throw -> ScheduleExecutionRecord.status=failure
+  -> 배너/실행 이력에 실패 사유(에이전트 미존재) 노출
+UI 노출:
+  -> 자동화 스케줄 목록 각 행에 "에이전트: {name}" 표시
 ```
 
 ### 모델 빠른 변경 (UX-10 추가)

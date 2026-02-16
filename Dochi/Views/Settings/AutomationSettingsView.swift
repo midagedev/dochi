@@ -5,6 +5,8 @@ import SwiftUI
 struct AutomationSettingsView: View {
     var settings: AppSettings
     var schedulerService: SchedulerServiceProtocol?
+    var contextService: ContextServiceProtocol?
+    var workspaceId: UUID?
 
     @State private var showEditSheet = false
     @State private var showTemplateSheet = false
@@ -128,7 +130,9 @@ struct AutomationSettingsView: View {
             if let schedulerService {
                 ScheduleEditSheet(
                     schedulerService: schedulerService,
-                    editingSchedule: editingSchedule
+                    editingSchedule: editingSchedule,
+                    availableAgents: availableAgentNames,
+                    defaultAgentName: settings.activeAgentName
                 )
             }
         }
@@ -146,6 +150,20 @@ struct AutomationSettingsView: View {
                 }
             }
         }
+    }
+
+    private var availableAgentNames: [String] {
+        guard let contextService, let workspaceId else {
+            return [settings.activeAgentName]
+        }
+        let agents = contextService.listAgents(workspaceId: workspaceId)
+        if agents.isEmpty {
+            return [settings.activeAgentName]
+        }
+        if agents.contains(settings.activeAgentName) {
+            return agents
+        }
+        return (agents + [settings.activeAgentName]).sorted()
     }
 }
 
@@ -168,6 +186,10 @@ struct ScheduleRowView: View {
                 Text(schedule.repeatSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Text("에이전트: \(schedule.agentName)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
             Spacer()

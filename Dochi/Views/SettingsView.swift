@@ -108,7 +108,12 @@ struct SettingsView: View {
             )
 
         case .automation:
-            AutomationSettingsView(settings: settings, schedulerService: schedulerService)
+            AutomationSettingsView(
+                settings: settings,
+                schedulerService: schedulerService,
+                contextService: contextService,
+                workspaceId: sessionContext?.workspaceId
+            )
 
         case .family:
             if let contextService, let sessionContext {
