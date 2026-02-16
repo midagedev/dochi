@@ -66,6 +66,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     private let settings: AppSettings
     private let profilesDir: URL
+    private var healthMonitorTask: Task<Void, Never>?
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -77,6 +78,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         try? FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true)
         checkTmuxAvailability()
         loadProfiles()
+        startHealthMonitor()
     }
 
     // MARK: - tmux Check
@@ -84,6 +86,20 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private func checkTmuxAvailability() {
         let tmuxPath = settings.externalToolTmuxPath
         isTmuxAvailable = FileManager.default.isExecutableFile(atPath: tmuxPath)
+    }
+
+    private func startHealthMonitor() {
+        healthMonitorTask?.cancel()
+        healthMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { break }
+                let interval = max(5, self.settings.externalToolHealthCheckIntervalSeconds)
+                try? await Task.sleep(for: .seconds(interval))
+                guard !Task.isCancelled else { break }
+                guard self.settings.externalToolEnabled else { continue }
+                await self.checkAllHealth()
+            }
+        }
     }
 
     // MARK: - Profile CRUD

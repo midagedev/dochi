@@ -165,11 +165,6 @@ final class HeartbeatService: Observable {
             // 5. Interest expiration check (K-3)
             interestDiscoveryService?.checkExpirations()
 
-            // 6. External tool health check (K-4)
-            if settings.externalToolEnabled {
-                await externalToolManager?.checkAllHealth()
-            }
-
             consecutiveErrors = 0
         } catch {
             consecutiveErrors += 1
