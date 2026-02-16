@@ -144,6 +144,11 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         // DateTime (baseline, safe)
         registry.register(DateTimeTool())
 
+        // App guide (baseline, safe) (K-5)
+        if settings.appGuideEnabled {
+            registry.register(AppGuideTool(toolRegistry: registry))
+        }
+
         // Open URL (conditional, sensitive)
         registry.register(OpenURLTool())
 
