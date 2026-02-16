@@ -65,6 +65,7 @@ final class TTSRouter: TTSServiceProtocol {
 
         supertonicTTS.speed = speed
         supertonicTTS.diffusionSteps = settings.ttsDiffusionSteps
+        supertonicTTS.setSelectedModelId(settings.onnxModelId)
     }
 
     // MARK: - TTSServiceProtocol

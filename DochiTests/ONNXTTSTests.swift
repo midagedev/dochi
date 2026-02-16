@@ -317,8 +317,50 @@ final class ONNXTTSTests: XCTestCase {
         let service = SupertonicService()
         XCTAssertFalse(service.isSpeaking)
         XCTAssertNil(service.loadedModelId)
+        XCTAssertEqual(service.selectedModelId, "")
         if case .unloaded = service.engineState {} else {
             XCTFail("Expected unloaded state")
+        }
+    }
+
+    @MainActor
+    func testSupertonicServiceSetSelectedModelId() {
+        let service = SupertonicService()
+        service.setSelectedModelId("  ko_KR-kss-medium  ")
+        XCTAssertEqual(service.selectedModelId, "ko_KR-kss-medium")
+    }
+
+    @MainActor
+    func testSupertonicServiceClearingSelectedModelResetsLoadedModel() async throws {
+        let modelId = "onnx-test-\(UUID().uuidString)"
+        let modelDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Dochi/models/\(modelId)")
+        try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: modelDir) }
+
+        let onnxFile = modelDir.appendingPathComponent("\(modelId).onnx")
+        FileManager.default.createFile(atPath: onnxFile.path, contents: Data([0x00]))
+
+        let service = SupertonicService()
+        service.setSelectedModelId(modelId)
+        try await service.loadModel(modelId: modelId)
+        XCTAssertEqual(service.loadedModelId, modelId)
+
+        service.setSelectedModelId("")
+        XCTAssertEqual(service.selectedModelId, "")
+        XCTAssertNil(service.loadedModelId)
+    }
+
+    @MainActor
+    func testSupertonicServiceLoadEngineWithMissingSelectedModelDoesNotThrow() async throws {
+        let service = SupertonicService()
+        service.setSelectedModelId("nonexistent-model-xyz")
+
+        try await service.loadEngine()
+
+        if case .ready = service.engineState {} else {
+            XCTFail("Expected ready state even when selected ONNX model cannot be loaded")
         }
     }
 

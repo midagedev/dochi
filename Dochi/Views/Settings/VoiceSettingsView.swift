@@ -82,6 +82,10 @@ struct VoiceSettingsView: View {
 
             if settings.currentTTSProvider == .onnxLocal {
                 Section("ONNX 모델") {
+                    Label("베타 기능: ONNX 추론이 실패하거나 준비되지 않으면 시스템 TTS로 자동 폴백됩니다.", systemImage: "flask.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+
                     if let manager = downloadManager {
                         ONNXModelManagerView(
                             settings: settings,
@@ -89,6 +93,12 @@ struct VoiceSettingsView: View {
                         )
                     } else {
                         Text("모델 매니저를 사용할 수 없습니다")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if settings.onnxModelId.isEmpty {
+                        Text("원활한 테스트를 위해 설치된 모델을 하나 선택하세요.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
