@@ -331,6 +331,28 @@ final class ONNXTTSTests: XCTestCase {
     }
 
     @MainActor
+    func testSupertonicServiceClearingSelectedModelResetsLoadedModel() async throws {
+        let modelId = "onnx-test-\(UUID().uuidString)"
+        let modelDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Dochi/models/\(modelId)")
+        try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: modelDir) }
+
+        let onnxFile = modelDir.appendingPathComponent("\(modelId).onnx")
+        FileManager.default.createFile(atPath: onnxFile.path, contents: Data([0x00]))
+
+        let service = SupertonicService()
+        service.setSelectedModelId(modelId)
+        try await service.loadModel(modelId: modelId)
+        XCTAssertEqual(service.loadedModelId, modelId)
+
+        service.setSelectedModelId("")
+        XCTAssertEqual(service.selectedModelId, "")
+        XCTAssertNil(service.loadedModelId)
+    }
+
+    @MainActor
     func testSupertonicServiceLoadEngineWithMissingSelectedModelDoesNotThrow() async throws {
         let service = SupertonicService()
         service.setSelectedModelId("nonexistent-model-xyz")
