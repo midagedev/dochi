@@ -10,6 +10,11 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
     var updateSubscriptionCallCount = 0
     var deleteSubscriptionCallCount = 0
     var queueAutoTaskCallCount = 0
+    var evaluateAndQueueAutoTasksCallCount = 0
+
+    var lastEvaluatedTypes: [AutoTaskType] = []
+    var lastOnlyWasteRisk: Bool?
+    var evaluateAndQueueAutoTasksResult = 0
 
     func addSubscription(_ plan: SubscriptionPlan) async {
         addSubscriptionCallCount += 1
@@ -65,5 +70,12 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
             taskType: type,
             subscriptionId: subscriptionId
         ))
+    }
+
+    func evaluateAndQueueAutoTasks(enabledTypes: [AutoTaskType], onlyWasteRisk: Bool) async -> Int {
+        evaluateAndQueueAutoTasksCallCount += 1
+        lastEvaluatedTypes = enabledTypes
+        lastOnlyWasteRisk = onlyWasteRisk
+        return evaluateAndQueueAutoTasksResult
     }
 }

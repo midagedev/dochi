@@ -117,6 +117,37 @@ final class HeartbeatServiceTests: XCTestCase {
         )
     }
 
+    func testTickTriggersResourceAutoTaskPipelineWhenEnabled() async throws {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatIntervalMinutes = 0
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+        settings.resourceAutoTaskEnabled = true
+        settings.resourceAutoTaskOnlyWasteRisk = true
+        settings.resourceAutoTaskTypes = [AutoTaskType.research.rawValue]
+
+        let service = HeartbeatService(settings: settings)
+        let optimizer = MockResourceOptimizer()
+        service.setResourceOptimizer(optimizer)
+
+        service.start()
+        defer { service.stop() }
+
+        let timeout = Date().addingTimeInterval(0.5)
+        while service.lastTickDate == nil && Date() < timeout {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertNotNil(service.lastTickDate)
+        XCTAssertGreaterThanOrEqual(optimizer.evaluateAndQueueAutoTasksCallCount, 1)
+        XCTAssertEqual(optimizer.lastOnlyWasteRisk, true)
+        XCTAssertEqual(Set(optimizer.lastEvaluatedTypes), Set([.research]))
+    }
+
     // MARK: - Proactive Handler
 
     func testProactiveHandlerIsCalled() {

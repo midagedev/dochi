@@ -18,4 +18,5 @@ protocol ResourceOptimizerProtocol: Sendable {
     // MARK: - Auto Tasks
     var autoTaskRecords: [AutoTaskRecord] { get }
     func queueAutoTask(type: AutoTaskType, subscriptionId: UUID) async
+    func evaluateAndQueueAutoTasks(enabledTypes: [AutoTaskType], onlyWasteRisk: Bool) async -> Int
 }

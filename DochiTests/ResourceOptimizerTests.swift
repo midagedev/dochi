@@ -156,6 +156,80 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(service.autoTaskRecords.count, 100)
     }
 
+    func testEvaluateAndQueueAutoTasksQueuesEnabledTypes() async {
+        let plan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Pro",
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        await service.addSubscription(plan)
+
+        let queued = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.research, .kanbanCleanup],
+            onlyWasteRisk: false
+        )
+
+        XCTAssertEqual(queued, 2)
+        XCTAssertEqual(service.autoTaskRecords.count, 2)
+        XCTAssertEqual(service.autoTaskRecords.map(\.taskType), [.research, .kanbanCleanup])
+    }
+
+    func testEvaluateAndQueueAutoTasksRespectsOnlyWasteRisk() async {
+        let calendar = Calendar.current
+        let todayDay = calendar.component(.day, from: Date())
+        let normalResetDay = min(max(todayDay, 1), 28)
+        let wasteRiskResetDay = todayDay < 28 ? todayDay + 1 : 1
+
+        let normalPlan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Normal",
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: normalResetDay
+        )
+        let wasteRiskPlan = SubscriptionPlan(
+            providerName: "Anthropic",
+            planName: "Near reset",
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: wasteRiskResetDay
+        )
+
+        await service.addSubscription(normalPlan)
+        await service.addSubscription(wasteRiskPlan)
+
+        let queued = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.research],
+            onlyWasteRisk: true
+        )
+
+        XCTAssertEqual(queued, 1)
+        XCTAssertEqual(service.autoTaskRecords.count, 1)
+        XCTAssertEqual(service.autoTaskRecords.first?.subscriptionId, wasteRiskPlan.id)
+    }
+
+    func testEvaluateAndQueueAutoTasksAvoidsSameDayDuplicates() async {
+        let plan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Pro",
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        await service.addSubscription(plan)
+
+        let firstRun = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.research],
+            onlyWasteRisk: false
+        )
+        let secondRun = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.research],
+            onlyWasteRisk: false
+        )
+
+        XCTAssertEqual(firstRun, 1)
+        XCTAssertEqual(secondRun, 0)
+        XCTAssertEqual(service.autoTaskRecords.count, 1)
+    }
+
     // MARK: - Utilization
 
     func testUtilizationWithNoUsageStore() async {
@@ -323,6 +397,15 @@ final class ResourceOptimizerTests: XCTestCase {
         await mock.queueAutoTask(type: .kanbanCleanup, subscriptionId: plan.id)
         XCTAssertEqual(mock.queueAutoTaskCallCount, 1)
         XCTAssertEqual(mock.autoTaskRecords.count, 1)
+
+        let queued = await mock.evaluateAndQueueAutoTasks(
+            enabledTypes: [.research],
+            onlyWasteRisk: true
+        )
+        XCTAssertEqual(mock.evaluateAndQueueAutoTasksCallCount, 1)
+        XCTAssertEqual(mock.lastEvaluatedTypes, [.research])
+        XCTAssertEqual(mock.lastOnlyWasteRisk, true)
+        XCTAssertEqual(queued, 0)
 
         await mock.deleteSubscription(id: plan.id)
         XCTAssertEqual(mock.deleteSubscriptionCallCount, 1)

@@ -168,6 +168,54 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         Log.app.info("Queued auto task: \(type.displayName) for subscription \(subscriptionId)")
     }
 
+    func evaluateAndQueueAutoTasks(enabledTypes: [AutoTaskType], onlyWasteRisk: Bool) async -> Int {
+        var taskTypes: [AutoTaskType] = []
+        for type in enabledTypes where !taskTypes.contains(type) {
+            taskTypes.append(type)
+        }
+        guard !taskTypes.isEmpty else { return 0 }
+
+        let utilizations = await allUtilizations()
+        let now = Date()
+        var queuedCount = 0
+
+        for util in utilizations {
+            guard shouldQueueTasks(for: util, onlyWasteRisk: onlyWasteRisk) else { continue }
+            for taskType in taskTypes {
+                guard shouldQueueAutoTask(
+                    type: taskType,
+                    subscriptionId: util.subscription.id,
+                    now: now
+                ) else { continue }
+                await queueAutoTask(type: taskType, subscriptionId: util.subscription.id)
+                queuedCount += 1
+            }
+        }
+
+        if queuedCount > 0 {
+            Log.app.info("Resource auto-task pipeline queued \(queuedCount) task(s)")
+        }
+        return queuedCount
+    }
+
+    private func shouldQueueTasks(for util: ResourceUtilization, onlyWasteRisk: Bool) -> Bool {
+        guard let limit = util.subscription.monthlyTokenLimit, limit > 0 else { return false }
+        guard util.usedTokens < limit else { return false }
+        if onlyWasteRisk && util.riskLevel != .wasteRisk {
+            return false
+        }
+        return true
+    }
+
+    private func shouldQueueAutoTask(type: AutoTaskType, subscriptionId: UUID, now: Date) -> Bool {
+        guard let lastRecord = autoTaskRecords.last(where: {
+            $0.subscriptionId == subscriptionId && $0.taskType == type
+        }) else {
+            return true
+        }
+        return !Calendar.current.isDate(lastRecord.executedAt, inSameDayAs: now)
+    }
+
     // MARK: - Token Usage Query
 
     private func tokensUsedByProvider(_ providerName: String, since startDate: Date) async -> Int {
