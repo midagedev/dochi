@@ -235,6 +235,8 @@ SettingsView는 좌측 사이드바(SettingsSidebarView) + 우측 콘텐츠의 N
 - `Services/Protocols/TerminalServiceProtocol.swift` — TerminalServiceProtocol (K-1)
 - `Services/Terminal/TerminalService.swift` — TerminalService (@Observable, Process/Pipe 기반 쉘 세션 관리, 비동기 출력, 히스토리) (K-1)
 - `Services/Tools/TerminalRunTool.swift` — terminal.run 도구 (restricted, LLM 터미널 명령 실행) (K-1)
+- `Services/Tools/AppGuideTool.swift` — app.guide 도구 (baseline, safe, 앱 사용 가이드 조회) (K-5)
+- `Models/AppGuideContent.swift` — GuideItem, GuideResponse, AppGuideContentBuilder (K-5)
 - `Views/Settings/SubscriptionEditSheet.swift` — 구독 등록/편집 시트 (J-5)
 - `Services/UsageStore.swift` — UsageStore (파일 기반 영구 저장, 5초 디바운스) (G-4)
 - `Services/Protocols/UsageStoreProtocol.swift` — UsageStoreProtocol (G-4)

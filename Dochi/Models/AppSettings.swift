@@ -666,7 +666,12 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(telegramSkipWhenAppActive, forKey: "telegramSkipWhenAppActive") }
     }
 
-    // MARK: - Guide (UX-9)
+    // MARK: - Guide (UX-9) / App Guide (K-5)
+
+    /// AI 앱 가이드 도구 활성화 여부
+    var appGuideEnabled: Bool = UserDefaults.standard.object(forKey: "appGuideEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(appGuideEnabled, forKey: "appGuideEnabled") }
+    }
 
     /// 인앱 힌트 표시 여부 (hintsGloballyDisabled의 반전)
     var hintsEnabled: Bool {

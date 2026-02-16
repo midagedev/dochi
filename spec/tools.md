@@ -45,6 +45,7 @@
 | `print_image` | safe | { image_path } | - |
 | `calculate` | safe | { expression } | - |
 | `datetime` | safe | {} | 현재 날짜/시간 반환 |
+| `app.guide` | safe | { topic?, query? } | appGuideEnabled=true (기본) |
 | `clipboard.read` | safe | {} | - |
 | `clipboard.write` | safe | { text } | - |
 | `set_timer` | safe | { label, seconds } | - |
