@@ -432,6 +432,12 @@ struct DochiApp: App {
                 .onChange(of: settings.automationEnabled) { _, _ in
                     schedulerService.restart()
                 }
+                .onChange(of: settings.autoSyncEnabled) { _, _ in
+                    viewModel.syncEngine?.refreshAutoSyncSchedule()
+                }
+                .onChange(of: settings.realtimeSyncEnabled) { _, _ in
+                    viewModel.syncEngine?.refreshAutoSyncSchedule()
+                }
                 .onChange(of: settings.proactiveSuggestionEnabled) { _, newValue in
                     if newValue {
                         proactiveSuggestionService.start()
