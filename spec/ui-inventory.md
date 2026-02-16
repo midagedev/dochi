@@ -574,6 +574,7 @@ UI 노출:
   -> realtimeSyncEnabled 변경 시 refreshAutoSyncSchedule()
 UI 노출:
   -> AccountSettingsView 실시간 동기화 토글 아래 주기 안내 문구
+     autoSyncEnabled OFF: "자동 동기화 OFF: 동기화 타이머가 중지됩니다."
      ON: "실시간 동기화가 활성화되어 30초마다 동기화합니다."
      OFF: "실시간 동기화가 비활성화되어 5분마다 동기화합니다."
 ```
