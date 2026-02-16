@@ -137,7 +137,7 @@ DochiApp (entry point)
 | SuggestionToastView | `Views/SuggestionToastView.swift` | 제안 발생 시 좌측 하단 토스트 (6초 auto fade) | 라이트벌브 아이콘 + 제안 제목 + 유형 배지 |
 | SuggestionToastContainerView | `Views/SuggestionToastView.swift` | 제안 발생 시 자동 | 토스트 스택 컨테이너, 좌측 하단 고정 |
 | SuggestionHistoryView | `Views/SuggestionHistoryView.swift` | 커맨드 팔레트 "제안 기록" | 제안 기록 시트 (400x480pt): 오늘 요약 + 최근 20건 리스트 + 상태 배지 |
-| ProactiveSuggestionSettingsView | `Views/Settings/ProactiveSuggestionSettingsView.swift` | 설정 > 프로액티브 제안 | 활성화, 유휴 감지 시간, 쿨다운, 조용한 시간, 유형별 토글 |
+| ProactiveSuggestionSettingsView | `Views/Settings/ProactiveSuggestionSettingsView.swift` | 설정 > 프로액티브 제안 | 활성화, 유휴 감지 시간, 쿨다운, 조용한 시간, 유형별 토글, 제안 채널 토글(알림 센터/메뉴바) |
 
 ### 관심사 발굴 (K-3)
 
@@ -426,6 +426,7 @@ RAGReference 필드:
 | 음성 | `ttsProvider`, `wakeWordEnabled`, `wakeWord`, `sttSilenceTimeout`, `onnxModelId`, `ttsOfflineFallbackEnabled`, `ttsDiffusionSteps` |
 | 통합 | `telegramEnabled`, `telegramStreamReplies`, `ollamaBaseURL` |
 | Heartbeat | `heartbeatEnabled`, `heartbeatIntervalMinutes`, `heartbeatCheckCalendar/Kanban/Reminders` |
+| 프로액티브 제안 (K-2) | `proactiveSuggestionEnabled`, `proactiveSuggestionIdleMinutes`, `proactiveSuggestionCooldownMinutes`, `proactiveSuggestionQuietHoursEnabled`, `suggestionType*Enabled`, `notificationProactiveSuggestionEnabled`, `proactiveSuggestionMenuBarEnabled`, `suggestionNotificationChannel` |
 | 알림 센터 (H-3) | `notificationCalendarEnabled`, `notificationKanbanEnabled`, `notificationReminderEnabled`, `notificationMemoryEnabled`, `notificationSoundEnabled`, `notificationReplyEnabled` |
 | 아바타 | `avatarEnabled` |
 | 가이드 | `hintsEnabled`, `featureTourCompleted`, `featureTourSkipped`, `featureTourBannerDismissed` |
@@ -451,6 +452,7 @@ UX 정책 메모 (2026-02-16):
 - 외부도구 상태 확인은 Heartbeat 주기와 분리하고 `externalToolHealthCheckIntervalSeconds`(초) 전용 주기를 따른다.
 - 리소스 자동 작업은 Heartbeat tick에서 조건을 평가해 큐에 등록하며, 동일 구독/동일 작업은 하루 1회까지만 큐잉한다.
 - `deviceCloudSyncEnabled`는 로그인/설정 상태와 함께 DeviceHeartbeatService 시작/정지를 직접 제어한다.
+- 프로액티브 제안 채널 토글은 저장값으로만 남기지 않고 실제 노출 경로(알림 센터 배너, 메뉴바 팝오버 카드)에 직접 연결한다.
 
 ### 텍스트 메시지
 ```
@@ -649,6 +651,22 @@ HeartbeatService tick -> 카테고리별 컨텍스트 수집
   -> 권한 상태 표시 (초록/빨강/노랑 원)
   -> 소리/답장 토글, 캘린더/칸반/미리알림/메모리 카테고리별 토글
   -> 하트비트 비활성 시 전체 disabled
+```
+
+### 프로액티브 제안 노출 채널 (K-2 보강)
+```
+설정: 설정 > 프로액티브 제안 > 알림
+  -> "알림 센터에 제안 표시(notificationProactiveSuggestionEnabled)"
+  -> "메뉴바에 제안 표시(proactiveSuggestionMenuBarEnabled)"
+제안 생성:
+  ProactiveSuggestionService가 currentSuggestion 생성
+  -> DochiApp.syncProactiveSuggestionNotification()
+  -> ON + 앱 비활성 상태일 때 NotificationManager.sendProactiveSuggestionNotification()
+  -> 카테고리: dochi-proactive, "앱 열기" 액션으로 chat 섹션 진입
+메뉴바 노출:
+  MenuBarPopoverView 상단 카드
+  -> settings.proactiveSuggestionMenuBarEnabled == true 일 때만 표시
+  -> "앱에서 확인" (메인 앱 포커스), "나중에" (deferSuggestion)
 ```
 
 ### 가이드/온보딩 (UX-9 추가)

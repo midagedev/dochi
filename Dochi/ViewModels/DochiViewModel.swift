@@ -377,6 +377,11 @@ final class DochiViewModel {
         proactiveSuggestionService?.currentSuggestion
     }
 
+    var menuBarSuggestion: ProactiveSuggestion? {
+        guard settings.proactiveSuggestionMenuBarEnabled else { return nil }
+        return currentSuggestion
+    }
+
     var suggestionHistory: [ProactiveSuggestion] {
         proactiveSuggestionService?.suggestionHistory ?? []
     }
@@ -1659,6 +1664,9 @@ final class DochiViewModel {
             notificationRequestedSection = "chat"
             notificationShowMemoryPanel = true
             Log.app.info("Notification: navigating to memory panel")
+        case NotificationManager.Category.proactive.rawValue:
+            notificationRequestedSection = "chat"
+            Log.app.info("Notification: navigating to conversation for proactive suggestion")
         default:
             break
         }

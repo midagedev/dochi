@@ -13,6 +13,7 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
         case kanban = "dochi-kanban"
         case reminder = "dochi-reminder"
         case memory = "dochi-memory"
+        case proactive = "dochi-proactive"
     }
 
     enum ActionIdentifier: String {
@@ -106,10 +107,17 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
             options: []
         )
 
+        let proactiveCategory = UNNotificationCategory(
+            identifier: Category.proactive.rawValue,
+            actions: [openAppAction, dismissAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
         UNUserNotificationCenter.current().setNotificationCategories([
-            calendarCategory, kanbanCategory, reminderCategory, memoryCategory
+            calendarCategory, kanbanCategory, reminderCategory, memoryCategory, proactiveCategory
         ])
-        Log.app.info("NotificationManager: registered 4 notification categories (replyEnabled: \(replyEnabled))")
+        Log.app.info("NotificationManager: registered \(Category.allCases.count) notification categories (replyEnabled: \(replyEnabled))")
     }
 
     /// Request notification permission if not already granted.
@@ -171,6 +179,15 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
             title: "도치 - 메모리 알림",
             body: warning,
             category: .memory
+        )
+    }
+
+    func sendProactiveSuggestionNotification(suggestion: ProactiveSuggestion) {
+        guard settings.notificationProactiveSuggestionEnabled else { return }
+        sendNotification(
+            title: "도치 - 프로액티브 제안",
+            body: "\(suggestion.title)\n\(suggestion.body)",
+            category: .proactive
         )
     }
 

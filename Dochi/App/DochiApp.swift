@@ -445,6 +445,9 @@ struct DochiApp: App {
                 .onChange(of: settings.menuBarGlobalShortcutEnabled) { _, _ in
                     appDelegate.menuBarManager?.handleSettingsChange()
                 }
+                .task(id: proactiveSuggestionNotificationTrigger) {
+                    await syncProactiveSuggestionNotification()
+                }
                 .task(id: deviceHeartbeatLifecycleTrigger) {
                     await syncDeviceHeartbeatLifecycle()
                 }
@@ -556,6 +559,20 @@ struct DochiApp: App {
             return [workspaceId]
         }
         return [sessionContext.workspaceId]
+    }
+
+    private var proactiveSuggestionNotificationTrigger: String {
+        let suggestionId = viewModel.currentSuggestion?.id.uuidString ?? "none"
+        return "\(settings.notificationProactiveSuggestionEnabled)-\(suggestionId)"
+    }
+
+    private func syncProactiveSuggestionNotification() async {
+        guard settings.notificationProactiveSuggestionEnabled,
+              let suggestion = viewModel.currentSuggestion else { return }
+        guard !NSApp.isActive else { return }
+
+        await notificationManager.requestAuthorizationIfNeeded()
+        notificationManager.sendProactiveSuggestionNotification(suggestion: suggestion)
     }
 
     private var deviceHeartbeatLifecycleTrigger: String {

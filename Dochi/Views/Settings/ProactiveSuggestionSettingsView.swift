@@ -154,6 +154,12 @@ struct ProactiveSuggestionSettingsView: View {
                     get: { settings.proactiveSuggestionMenuBarEnabled },
                     set: { settings.proactiveSuggestionMenuBarEnabled = $0 }
                 ))
+
+                if settings.notificationProactiveSuggestionEnabled || settings.proactiveSuggestionMenuBarEnabled {
+                    Text("새 제안이 생성되면 알림 센터 배너와 메뉴바 팝오버 상단 카드 노출을 각각 토글로 제어합니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .disabled(!settings.proactiveSuggestionEnabled)
 
