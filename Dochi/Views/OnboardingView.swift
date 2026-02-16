@@ -315,8 +315,7 @@ struct OnboardingView: View {
         errorMessage = nil
 
         // Save key immediately
-        let account = "\(selectedProvider.rawValue)_api_key"
-        try? keychainService.save(account: account, value: apiKey)
+        try? keychainService.save(account: selectedProvider.keychainAccount, value: apiKey)
 
         withAnimation {
             step = .profile

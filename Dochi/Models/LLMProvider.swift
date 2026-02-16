@@ -41,6 +41,12 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
         rawValue
     }
 
+    /// Legacy keychain account used in older onboarding builds.
+    var legacyAPIKeyAccount: String? {
+        guard requiresAPIKey else { return nil }
+        return "\(rawValue)_api_key"
+    }
+
     /// Whether this provider requires an API key.
     var requiresAPIKey: Bool {
         switch self {

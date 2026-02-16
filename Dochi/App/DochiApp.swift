@@ -70,6 +70,7 @@ struct DochiApp: App {
         let settings = AppSettings()
         let contextService = ContextService()
         let keychainService = KeychainService()
+        Self.migrateLegacyAPIKeysIfNeeded(keychainService: keychainService)
         let conversationService = ConversationService()
         let llmService = LLMService(settings: settings)
         let speechService = SpeechService()
@@ -504,6 +505,29 @@ struct DochiApp: App {
             }
         }
         Log.app.info("Restored \(servers.count) MCP server(s) from settings")
+    }
+
+    private static func migrateLegacyAPIKeysIfNeeded(keychainService: KeychainServiceProtocol) {
+        for provider in LLMProvider.allCases where provider.requiresAPIKey {
+            guard let legacyAccount = provider.legacyAPIKeyAccount else { continue }
+
+            let currentValue = keychainService.load(account: provider.keychainAccount)
+            if let currentValue, !currentValue.isEmpty {
+                continue
+            }
+
+            guard let legacyValue = keychainService.load(account: legacyAccount), !legacyValue.isEmpty else {
+                continue
+            }
+
+            do {
+                try keychainService.save(account: provider.keychainAccount, value: legacyValue)
+                try? keychainService.delete(account: legacyAccount)
+                Log.app.info("Migrated legacy API key account for \(provider.displayName)")
+            } catch {
+                Log.app.error("Failed to migrate API key for \(provider.displayName): \(error.localizedDescription)")
+            }
+        }
     }
 }
 

@@ -31,7 +31,12 @@ final class EmbeddingService {
     func embedBatch(_ texts: [String]) async throws -> [[Float]] {
         guard !texts.isEmpty else { return [] }
 
-        guard let apiKey = keychainService.load(account: "openai_api_key"), !apiKey.isEmpty else {
+        let primaryAccount = LLMProvider.openai.keychainAccount
+        let legacyAccount = LLMProvider.openai.legacyAPIKeyAccount
+        let apiKey = keychainService.load(account: primaryAccount)
+            ?? legacyAccount.flatMap { keychainService.load(account: $0) }
+
+        guard let apiKey, !apiKey.isEmpty else {
             throw EmbeddingError.noAPIKey
         }
 
