@@ -449,6 +449,7 @@ UX 정책 메모 (2026-02-16):
 - 터미널 탭 닫기는 `terminalConfirmOnClose`가 켜진 경우 확인 다이얼로그를 필수로 거친다.
 - 텔레그램 수신/라우팅 책임은 `isTelegramHost`가 켜진 디바이스에서만 활성화한다.
 - 외부도구 상태 확인은 Heartbeat 주기와 분리하고 `externalToolHealthCheckIntervalSeconds`(초) 전용 주기를 따른다.
+- 리소스 자동 작업은 Heartbeat tick에서 조건을 평가해 큐에 등록하며, 동일 구독/동일 작업은 하루 1회까지만 큐잉한다.
 
 ### 텍스트 메시지
 ```
@@ -526,6 +527,18 @@ SidebarHeaderView [+] / 커맨드 팔레트 "새 에이전트 생성" / EmptyCon
   -> MessageBubbleView -> MemoryReferenceBadgeView: "메모리 N계층" 배지
   -> 호버 팝오버: 계층별 사용 여부 + 글자수
 기존 컨텍스트 인스펙터: ⌘⌥I -> showContextInspector -> ContextInspectorView (시트)
+```
+
+### 리소스 자동 작업 (J-5 보강)
+```
+설정: 설정 > AI > 사용량 > 자동 작업 설정
+  -> settings.resourceAutoTaskEnabled / resourceAutoTaskTypes / resourceAutoTaskOnlyWasteRisk 저장
+실행 트리거: HeartbeatService tick
+  -> ResourceOptimizerService.evaluateAndQueueAutoTasks(enabledTypes, onlyWasteRisk) 호출
+  -> 구독 사용률 계산 후 조건 충족 시 queueAutoTask() 기록 생성
+  -> 동일 subscription + taskType은 같은 날짜에 중복 큐잉하지 않음
+UI 노출:
+  -> 자동 작업 설정 카드에 "Heartbeat 주기 평가 + 하루 1회 큐잉" 정책 문구 명시
 ```
 
 ### 모델 빠른 변경 (UX-10 추가)
@@ -914,4 +927,4 @@ AppSettings: terminalShellPath, terminalFontSize, terminalMaxBufferLines, termin
 
 ---
 
-*최종 업데이트: 2026-02-15 (K-1 통합 터미널 추가)*
+*최종 업데이트: 2026-02-16 (J-5 자동 작업 실행 파이프라인 연결)*

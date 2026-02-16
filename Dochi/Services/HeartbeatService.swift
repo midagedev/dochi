@@ -24,6 +24,7 @@ final class HeartbeatService: Observable {
     private var notificationManager: NotificationManager?
     private var interestDiscoveryService: InterestDiscoveryServiceProtocol?
     private var externalToolManager: ExternalToolSessionManagerProtocol?
+    private var resourceOptimizer: ResourceOptimizerProtocol?
     private var telegramRelay: TelegramProactiveRelayProtocol?
 
     // Observable state
@@ -57,6 +58,11 @@ final class HeartbeatService: Observable {
     /// Inject ExternalToolSessionManager for periodic health checks (K-4).
     func setExternalToolManager(_ manager: ExternalToolSessionManagerProtocol) {
         self.externalToolManager = manager
+    }
+
+    /// Inject ResourceOptimizerService for automatic resource task pipeline (J-5).
+    func setResourceOptimizer(_ optimizer: ResourceOptimizerProtocol) {
+        self.resourceOptimizer = optimizer
     }
 
     /// Inject TelegramProactiveRelay for Telegram notification delivery (K-6).
@@ -164,6 +170,21 @@ final class HeartbeatService: Observable {
 
             // 5. Interest expiration check (K-3)
             interestDiscoveryService?.checkExpirations()
+
+            // 6. Resource auto-task pipeline (J-5)
+            if settings.resourceAutoTaskEnabled, let resourceOptimizer {
+                let enabledTypes = Array(Set(settings.resourceAutoTaskTypes.compactMap(AutoTaskType.init(rawValue:))))
+                if !enabledTypes.isEmpty {
+                    checksPerformed.append("resourceAutoTask")
+                    let queuedCount = await resourceOptimizer.evaluateAndQueueAutoTasks(
+                        enabledTypes: enabledTypes,
+                        onlyWasteRisk: settings.resourceAutoTaskOnlyWasteRisk
+                    )
+                    if queuedCount > 0 {
+                        Log.app.info("Heartbeat queued \(queuedCount) resource auto task(s)")
+                    }
+                }
+            }
 
             consecutiveErrors = 0
         } catch {

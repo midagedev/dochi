@@ -320,6 +320,7 @@ struct DochiApp: App {
 
                     // Configure ResourceOptimizer (J-5)
                     viewModel.configureResourceOptimizer(resourceOptimizer)
+                    heartbeatService.setResourceOptimizer(resourceOptimizer)
 
                     // Configure SchedulerService (J-3)
                     viewModel.configureSchedulerService(schedulerService)

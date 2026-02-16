@@ -630,6 +630,10 @@ struct UsageDashboardView: View {
                     }
                 }
 
+                Text("Heartbeat 설정 주기마다 조건을 평가하며, 같은 자동 작업은 구독별로 하루 1회만 큐잉됩니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Toggle("\"낭비 위험\" 시에만 실행", isOn: Binding(
                     get: { settings.resourceAutoTaskOnlyWasteRisk },
                     set: { settings.resourceAutoTaskOnlyWasteRisk = $0 }
