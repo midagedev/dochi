@@ -387,6 +387,32 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(LLMProvider.ollama.onboardingDefaultModel, "llama3")
         XCTAssertEqual(LLMProvider.lmStudio.onboardingDefaultModel, "")
     }
+
+    @MainActor
+    func testAppSettingsRemovesDeprecatedKeysOnInit() {
+        UserDefaults.standard.set("compact", forKey: "uiDensity")
+        UserDefaults.standard.set(true, forKey: "hasSeenPermissionInfo")
+        UserDefaults.standard.set("openai", forKey: "ragEmbeddingProvider")
+
+        _ = AppSettings()
+
+        XCTAssertNil(UserDefaults.standard.object(forKey: "uiDensity"))
+        XCTAssertNil(UserDefaults.standard.object(forKey: "hasSeenPermissionInfo"))
+        XCTAssertNil(UserDefaults.standard.object(forKey: "ragEmbeddingProvider"))
+    }
+
+    @MainActor
+    func testAppSettingsKeepsActiveKeysWhenRemovingDeprecatedKeys() {
+        UserDefaults.standard.set("text-embedding-3-large", forKey: "ragEmbeddingModel")
+
+        let settings = AppSettings()
+
+        XCTAssertEqual(settings.ragEmbeddingModel, "text-embedding-3-large")
+        XCTAssertEqual(
+            UserDefaults.standard.string(forKey: "ragEmbeddingModel"),
+            "text-embedding-3-large"
+        )
+    }
 }
 
 // MARK: - TaskComplexityClassifier Tests
