@@ -86,6 +86,37 @@ final class HeartbeatServiceTests: XCTestCase {
         // Should not crash
     }
 
+    func testTickDoesNotTriggerExternalToolHealthCheck() async throws {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.externalToolEnabled = true
+        settings.heartbeatIntervalMinutes = 0
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+
+        let service = HeartbeatService(settings: settings)
+        let externalToolManager = MockExternalToolSessionManager()
+        service.setExternalToolManager(externalToolManager)
+
+        service.start()
+        defer { service.stop() }
+
+        let timeout = Date().addingTimeInterval(0.5)
+        while service.lastTickDate == nil && Date() < timeout {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertNotNil(service.lastTickDate)
+        XCTAssertEqual(
+            externalToolManager.checkAllHealthCallCount,
+            0,
+            "External tool health checks should be driven by ExternalToolSessionManager monitor, not HeartbeatService tick."
+        )
+    }
+
     // MARK: - Proactive Handler
 
     func testProactiveHandlerIsCalled() {

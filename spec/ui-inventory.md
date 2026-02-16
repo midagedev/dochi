@@ -448,6 +448,7 @@ UX 정책 메모 (2026-02-16):
 - Slack 통합은 인증/라우팅/설정 플로우가 완성될 때까지 제품 UI에 노출하지 않고, 미연결 프로토타입 코드는 제거한다.
 - 터미널 탭 닫기는 `terminalConfirmOnClose`가 켜진 경우 확인 다이얼로그를 필수로 거친다.
 - 텔레그램 수신/라우팅 책임은 `isTelegramHost`가 켜진 디바이스에서만 활성화한다.
+- 외부도구 상태 확인은 Heartbeat 주기와 분리하고 `externalToolHealthCheckIntervalSeconds`(초) 전용 주기를 따른다.
 
 ### 텍스트 메시지
 ```
