@@ -741,41 +741,43 @@ struct HeartbeatSettingsContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            HStack {
-                Text("유휴 감지: \(settings.proactiveSuggestionIdleMinutes)분")
-                Slider(
-                    value: Binding(
-                        get: { Double(settings.proactiveSuggestionIdleMinutes) },
-                        set: { settings.proactiveSuggestionIdleMinutes = Int($0.rounded()) }
-                    ),
-                    in: 5...120,
-                    step: 5
-                )
-            }
+            Group {
+                HStack {
+                    Text("유휴 감지: \(settings.proactiveSuggestionIdleMinutes)분")
+                    Slider(
+                        value: Binding(
+                            get: { Double(settings.proactiveSuggestionIdleMinutes) },
+                            set: { settings.proactiveSuggestionIdleMinutes = Int($0.rounded()) }
+                        ),
+                        in: 5...120,
+                        step: 5
+                    )
+                }
 
-            HStack {
-                Text("쿨다운: \(settings.proactiveSuggestionCooldownMinutes)분")
-                Slider(
-                    value: Binding(
-                        get: { Double(settings.proactiveSuggestionCooldownMinutes) },
-                        set: { settings.proactiveSuggestionCooldownMinutes = Int($0.rounded()) }
-                    ),
-                    in: 10...240,
-                    step: 10
-                )
-            }
+                HStack {
+                    Text("쿨다운: \(settings.proactiveSuggestionCooldownMinutes)분")
+                    Slider(
+                        value: Binding(
+                            get: { Double(settings.proactiveSuggestionCooldownMinutes) },
+                            set: { settings.proactiveSuggestionCooldownMinutes = Int($0.rounded()) }
+                        ),
+                        in: 10...240,
+                        step: 10
+                    )
+                }
 
-            Toggle("조용한 시간에 제안 중지", isOn: Binding(
-                get: { settings.proactiveSuggestionQuietHoursEnabled },
-                set: { settings.proactiveSuggestionQuietHoursEnabled = $0 }
-            ))
+                Toggle("조용한 시간에 제안 중지", isOn: Binding(
+                    get: { settings.proactiveSuggestionQuietHoursEnabled },
+                    set: { settings.proactiveSuggestionQuietHoursEnabled = $0 }
+                ))
+            }
+            .disabled(!settings.proactiveSuggestionEnabled)
         } header: {
             SettingsSectionHeader(
                 title: "프로액티브 제안",
                 helpContent: "사용자가 일정 시간 유휴 상태일 때, 칸반 진행 상황/메모리 기한/대화 주제 등을 기반으로 자동 제안합니다. 조용한 시간 설정은 하트비트와 공유합니다."
             )
         }
-        .disabled(!settings.proactiveSuggestionEnabled)
 
         Section("제안 유형") {
             ForEach(SuggestionType.allCases, id: \.rawValue) { type in
