@@ -690,6 +690,13 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(terminalPanelHeight, forKey: "terminalPanelHeight") }
     }
 
+    // MARK: - Local Control Plane (F-2)
+
+    /// 로컬 CLI/디버그 인터페이스용 Control Plane 활성화 플래그
+    var localControlPlaneEnabled: Bool = UserDefaults.standard.object(forKey: "localControlPlaneEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(localControlPlaneEnabled, forKey: "localControlPlaneEnabled") }
+    }
+
     // MARK: - Proactive Suggestions (K-2)
 
     var proactiveSuggestionEnabled: Bool = UserDefaults.standard.object(forKey: "proactiveSuggestionEnabled") as? Bool ?? false {

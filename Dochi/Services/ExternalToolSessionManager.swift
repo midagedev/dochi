@@ -4,7 +4,7 @@ import os
 // MARK: - Protocol
 
 @MainActor
-protocol ExternalToolSessionManagerProtocol: AnyObject {
+protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
     var profiles: [ExternalToolProfile] { get }
     var sessions: [ExternalToolSession] { get }
     var isTmuxAvailable: Bool { get }
