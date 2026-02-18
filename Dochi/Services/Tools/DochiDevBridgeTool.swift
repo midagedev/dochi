@@ -82,6 +82,10 @@ final class DochiBridgeOpenTool: BuiltInToolProtocol {
                     "description": "브리지에 연결할 에이전트 종류 (기본: codex)",
                 ],
                 "working_directory": ["type": "string", "description": "작업 디렉토리 (기본: ~)"],
+                "force_working_directory": [
+                    "type": "boolean",
+                    "description": "기존 프로파일의 working_directory를 강제로 덮어씁니다.",
+                ],
                 "profile_name": ["type": "string", "description": "브리지 프로파일 이름 (기본: 에이전트별 기본값)"],
                 "arguments": [
                     "type": "array",
@@ -104,32 +108,63 @@ final class DochiBridgeOpenTool: BuiltInToolProtocol {
 
         let customName = (arguments["profile_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let profileName = (customName?.isEmpty == false) ? customName! : preset.defaultProfileName
-        let workingDirectory = (arguments["working_directory"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedWorkingDirectory = (workingDirectory?.isEmpty == false) ? workingDirectory! : "~"
+        let requestedWorkingDirectoryRaw = (arguments["working_directory"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestedWorkingDirectory = (requestedWorkingDirectoryRaw?.isEmpty == false)
+            ? requestedWorkingDirectoryRaw
+            : nil
+        let forceWorkingDirectory = arguments["force_working_directory"] as? Bool ?? false
         let extraArgs = arguments["arguments"] as? [String] ?? []
 
+        let existingProfile = manager.profiles.first(where: { $0.name == profileName })
+        if let existingProfile,
+           let active = manager.sessions.first(where: { $0.profileId == existingProfile.id && $0.status != .dead }) {
+            let decision = BridgeWorkingDirectorySelector.decideForActiveSession(
+                profileWorkingDirectory: existingProfile.workingDirectory,
+                requestedWorkingDirectory: requestedWorkingDirectory,
+                forceWorkingDirectory: forceWorkingDirectory
+            )
+            return ToolResult(toolCallId: "", content: """
+                브리지 채널이 이미 열려 있습니다.
+                - profile: \(existingProfile.name) (\(existingProfile.id.uuidString))
+                - session_id: \(active.id.uuidString)
+                - status: \(active.status.rawValue)
+                - working_directory: \(decision.workingDirectory)
+                - selection_reason: \(decision.selectionReason.rawValue)
+                - selection_detail: \(decision.selectionDetail)
+                """)
+        }
+
+        let recommendedRoots: [GitRepositoryInsight]
+        if existingProfile == nil, requestedWorkingDirectory == nil {
+            recommendedRoots = await manager.discoverGitRepositoryInsights(searchPaths: nil, limit: 10)
+        } else {
+            recommendedRoots = []
+        }
+        let decision = BridgeWorkingDirectorySelector.decide(
+            existingProfile: existingProfile,
+            requestedWorkingDirectory: requestedWorkingDirectory,
+            forceWorkingDirectory: forceWorkingDirectory,
+            recommendedRoots: recommendedRoots
+        )
+
         let profile: ExternalToolProfile
-        if let existing = manager.profiles.first(where: { $0.name == profileName }) {
+        if var existing = existingProfile {
+            if decision.selectionReason == .existingProfileOverridden {
+                existing.workingDirectory = decision.workingDirectory
+                manager.saveProfile(existing)
+            }
             profile = existing
         } else {
             let created = ExternalToolProfile(
                 name: profileName,
                 command: preset.command,
                 arguments: extraArgs,
-                workingDirectory: resolvedWorkingDirectory,
+                workingDirectory: decision.workingDirectory,
                 healthCheckPatterns: preset.healthPatterns
             )
             manager.saveProfile(created)
             profile = created
-        }
-
-        if let active = manager.sessions.first(where: { $0.profileId == profile.id && $0.status != .dead }) {
-            return ToolResult(toolCallId: "", content: """
-                브리지 채널이 이미 열려 있습니다.
-                - profile: \(profile.name) (\(profile.id.uuidString))
-                - session_id: \(active.id.uuidString)
-                - status: \(active.status.rawValue)
-                """)
         }
 
         do {
@@ -143,6 +178,9 @@ final class DochiBridgeOpenTool: BuiltInToolProtocol {
                 - profile: \(profile.name) (\(profile.id.uuidString))
                 - session_id: \(session.id.uuidString)
                 - status: \(session.status.rawValue)
+                - working_directory: \(decision.workingDirectory)
+                - selection_reason: \(decision.selectionReason.rawValue)
+                - selection_detail: \(decision.selectionDetail)
                 다음 단계:
                 1) dochi.bridge_send로 명령 전달
                 2) dochi.bridge_read로 출력 확인

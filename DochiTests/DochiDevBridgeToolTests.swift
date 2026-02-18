@@ -18,6 +18,7 @@ final class DochiDevBridgeToolTests: XCTestCase {
         XCTAssertEqual(manager.startSessionCallCount, 1)
         XCTAssertEqual(manager.sessions.count, 1)
         XCTAssertTrue(result.content.contains("session_id"))
+        XCTAssertTrue(result.content.contains("selection_reason: requested_working_directory"))
     }
 
     func testBridgeOpenReusesExistingSession() async throws {
@@ -36,6 +37,118 @@ final class DochiDevBridgeToolTests: XCTestCase {
         XCTAssertFalse(result.isError)
         XCTAssertEqual(manager.startSessionCallCount, 1)
         XCTAssertTrue(result.content.contains("이미 열려 있습니다"))
+        XCTAssertTrue(result.content.contains("selection_reason: existing_session_reused"))
+    }
+
+    func testBridgeOpenPreservesExistingProfileWorkingDirectoryWithoutForce() async {
+        let manager = MockExternalToolSessionManager()
+        let existingProfile = ExternalToolProfile(
+            name: "Dochi Bridge Codex",
+            command: "codex",
+            workingDirectory: "~/repo/existing"
+        )
+        manager.saveProfile(existingProfile)
+        let tool = DochiBridgeOpenTool(manager: manager)
+
+        let result = await tool.execute(arguments: [
+            "agent": "codex",
+            "working_directory": "/tmp/new"
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(manager.startSessionCallCount, 1)
+        let saved = manager.profiles.first(where: { $0.id == existingProfile.id })
+        XCTAssertEqual(saved?.workingDirectory, "~/repo/existing")
+        XCTAssertTrue(result.content.contains("working_directory: ~/repo/existing"))
+        XCTAssertTrue(result.content.contains("selection_reason: existing_profile_preserved"))
+    }
+
+    func testBridgeOpenForceWorkingDirectoryOverridesExistingProfile() async {
+        let manager = MockExternalToolSessionManager()
+        let existingProfile = ExternalToolProfile(
+            name: "Dochi Bridge Codex",
+            command: "codex",
+            workingDirectory: "~/repo/existing"
+        )
+        manager.saveProfile(existingProfile)
+        let tool = DochiBridgeOpenTool(manager: manager)
+
+        let result = await tool.execute(arguments: [
+            "agent": "codex",
+            "working_directory": "/tmp/new",
+            "force_working_directory": true,
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(manager.startSessionCallCount, 1)
+        let saved = manager.profiles.first(where: { $0.id == existingProfile.id })
+        XCTAssertEqual(saved?.workingDirectory, "/tmp/new")
+        XCTAssertTrue(result.content.contains("working_directory: /tmp/new"))
+        XCTAssertTrue(result.content.contains("selection_reason: existing_profile_overridden"))
+    }
+
+    func testBridgeOpenFallsBackToRecommendedRootForNewProfile() async {
+        let manager = MockExternalToolSessionManager()
+        manager.mockGitRepositoryInsights = [
+            GitRepositoryInsight(
+                workDomain: "company",
+                workDomainConfidence: 0.9,
+                workDomainReason: "test",
+                path: "/Users/me/repo/top",
+                name: "top",
+                branch: "main",
+                originURL: "git@github.com:acme/top.git",
+                remoteHost: "github.com",
+                remoteOwner: "acme",
+                remoteRepository: "top",
+                lastCommitEpoch: 1_700_000_000,
+                lastCommitISO8601: "2023-11-14T22:13:20.000Z",
+                lastCommitRelative: "1d ago",
+                upstreamLastCommitEpoch: 1_700_000_000,
+                upstreamLastCommitISO8601: "2023-11-14T22:13:20.000Z",
+                upstreamLastCommitRelative: "1d ago",
+                daysSinceLastCommit: 1,
+                recentCommitCount30d: 12,
+                changedFileCount: 3,
+                untrackedFileCount: 1,
+                aheadCount: 0,
+                behindCount: 0,
+                score: 67
+            )
+        ]
+        let tool = DochiBridgeOpenTool(manager: manager)
+
+        let result = await tool.execute(arguments: ["agent": "codex"])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(manager.startSessionCallCount, 1)
+        let saved = manager.profiles.first(where: { $0.name == "Dochi Bridge Codex" })
+        XCTAssertEqual(saved?.workingDirectory, "/Users/me/repo/top")
+        XCTAssertTrue(result.content.contains("working_directory: /Users/me/repo/top"))
+        XCTAssertTrue(result.content.contains("selection_reason: recommended_git_root"))
+    }
+
+    func testBridgeOpenIgnoresForceWhenSessionAlreadyRunning() async throws {
+        let manager = MockExternalToolSessionManager()
+        let existingProfile = ExternalToolProfile(
+            name: "Dochi Bridge Codex",
+            command: "codex",
+            workingDirectory: "~/repo/existing"
+        )
+        manager.saveProfile(existingProfile)
+        try await manager.startSession(profileId: existingProfile.id)
+        let tool = DochiBridgeOpenTool(manager: manager)
+
+        let result = await tool.execute(arguments: [
+            "agent": "codex",
+            "working_directory": "/tmp/new",
+            "force_working_directory": true,
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(manager.startSessionCallCount, 1)
+        XCTAssertTrue(result.content.contains("working_directory: ~/repo/existing"))
+        XCTAssertTrue(result.content.contains("selection_reason: existing_session_reused_force_ignored"))
     }
 
     func testBridgeSendDispatchesCommand() async throws {

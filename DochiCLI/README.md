@@ -63,7 +63,8 @@ dochi dev tool conversation.search '{"query":"회의","limit":5}'
 dochi dev log recent --minutes 15
 dochi dev log tail --seconds 30 --category App --level info
 dochi dev chat stream "최근 대화 3개를 요약해줘"
-dochi dev bridge open codex
+dochi dev bridge open codex --cwd ~/repo/dochi
+dochi dev bridge open codex --profile "Dochi Bridge Codex" --cwd ~/work/app --force-working-directory
 dochi dev bridge roots --limit 10
 dochi dev bridge roots --path ~/repo --path ~/work --limit 20
 dochi dev bridge status

@@ -462,14 +462,31 @@ enum DochiCLI {
                 return CLIResult(exitCode: .runtimeError, command: "dev.tool", message: "요청 실패: \(error.localizedDescription)")
             }
 
-        case .bridgeOpen(let agent):
+        case .bridgeOpen(let agent, let profileName, let workingDirectory, let forceWorkingDirectory):
             do {
-                let result = try client.call(method: "bridge.open", params: ["agent": agent])
+                var params: [String: Any] = ["agent": agent]
+                if let profileName, !profileName.isEmpty {
+                    params["profile_name"] = profileName
+                }
+                if let workingDirectory, !workingDirectory.isEmpty {
+                    params["working_directory"] = workingDirectory
+                }
+                if forceWorkingDirectory {
+                    params["force_working_directory"] = true
+                }
+
+                let result = try client.call(method: "bridge.open", params: params)
                 let sessionId = result["session_id"] as? String ?? "-"
                 let profile = result["profile_name"] as? String ?? "-"
+                let cwd = result["working_directory"] as? String ?? "-"
+                let selectionReason = result["selection_reason"] as? String ?? "-"
+                let selectionDetail = result["selection_detail"] as? String ?? "-"
                 let status = result["status"] as? String ?? "-"
                 let reused = (result["reused"] as? Bool == true) ? "재사용" : "새로 생성"
-                let message = "bridge.open \(reused): profile=\(profile), session_id=\(sessionId), status=\(status)"
+                let message = """
+                bridge.open \(reused): profile=\(profile), session_id=\(sessionId), status=\(status), cwd=\(cwd), reason=\(selectionReason)
+                detail: \(selectionDetail)
+                """
                 return CLIResult(exitCode: .success, command: "dev.bridge.open", message: message, data: result)
             } catch let error as CLIControlPlaneError {
                 return mapControlPlaneError(error, command: "dev.bridge.open")
@@ -950,7 +967,7 @@ enum DochiCLI {
           dochi dev log recent [--minutes N]
           dochi dev log tail [--seconds N] [--category C] [--level L] [--contains K]
           dochi dev chat stream <prompt>
-          dochi dev bridge open [agent]
+          dochi dev bridge open [agent] [--profile NAME] [--cwd DIR] [--force-working-directory]
           dochi dev bridge roots [--limit N] [--path DIR]...
           dochi dev bridge status [session_id]
           dochi dev bridge send <session_id> <command>
