@@ -168,7 +168,15 @@ final class ContextService: ContextServiceProtocol {
 
     func registerProject(workspaceId: UUID, repoRootPath: String, defaultBranch: String?) -> ProjectContext {
         let projectId = ProjectContext.makeID(repoRootPath: ProjectContext.normalizePath(repoRootPath))
-        if let existing = loadProject(workspaceId: workspaceId, projectId: projectId) {
+        if var existing = loadProject(workspaceId: workspaceId, projectId: projectId) {
+            if let defaultBranch,
+               !defaultBranch.isEmpty,
+               existing.defaultBranch != defaultBranch
+            {
+                existing.defaultBranch = defaultBranch
+                existing.updatedAt = Date()
+                saveProject(workspaceId: workspaceId, project: existing)
+            }
             return existing
         }
 

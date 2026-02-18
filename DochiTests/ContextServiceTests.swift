@@ -183,6 +183,27 @@ final class ContextServiceTests: XCTestCase {
         XCTAssertTrue(loaded?.repoRootPath.hasSuffix("/repo/dochi") == true)
     }
 
+    func testRegisterProjectUpdatesDefaultBranchWhenExisting() {
+        let wsId = UUID()
+        let project = service.registerProject(
+            workspaceId: wsId,
+            repoRootPath: "/tmp/dochi",
+            defaultBranch: "main"
+        )
+
+        let updated = service.registerProject(
+            workspaceId: wsId,
+            repoRootPath: "/tmp/dochi",
+            defaultBranch: "develop"
+        )
+
+        XCTAssertEqual(updated.id, project.id)
+        XCTAssertEqual(updated.defaultBranch, "develop")
+
+        let loaded = service.loadProject(workspaceId: wsId, projectId: project.id)
+        XCTAssertEqual(loaded?.defaultBranch, "develop")
+    }
+
     func testListProjectsSortedByName() {
         let wsId = UUID()
         let p1 = ProjectContext(repoRootPath: "/tmp/zeta-repo", displayName: "Zeta")
