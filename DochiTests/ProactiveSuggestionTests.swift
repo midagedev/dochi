@@ -556,3 +556,59 @@ final class ProactiveSuggestionServiceTests: XCTestCase {
         XCTAssertEqual(service.suggestionHistory[2].status, .accepted)
     }
 }
+
+// MARK: - Activity Signal Expansion (B2)
+
+@MainActor
+final class ProactiveActivitySignalTests: XCTestCase {
+
+    private func makeViewModel(
+        conversationService: MockConversationService = MockConversationService()
+    ) -> (DochiViewModel, MockProactiveSuggestionService, MockConversationService) {
+        let settings = AppSettings()
+        let proactive = MockProactiveSuggestionService()
+
+        let viewModel = DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: conversationService,
+            keychainService: MockKeychainService(),
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+        viewModel.configureProactiveSuggestionService(proactive)
+        return (viewModel, proactive, conversationService)
+    }
+
+    func testSelectConversationRecordsActivity() {
+        let conversationService = MockConversationService()
+        let (viewModel, proactive, _) = makeViewModel(conversationService: conversationService)
+
+        let conversation = Conversation(title: "활동 테스트")
+        conversationService.save(conversation: conversation)
+
+        viewModel.selectConversation(id: conversation.id)
+
+        XCTAssertEqual(proactive.recordActivityCallCount, 1)
+    }
+
+    func testSwitchAgentRecordsActivity() {
+        let (viewModel, proactive, _) = makeViewModel()
+
+        viewModel.switchAgent(name: "도치")
+
+        XCTAssertGreaterThanOrEqual(proactive.recordActivityCallCount, 1)
+    }
+
+    func testStartListeningRecordsActivity() {
+        let (viewModel, proactive, _) = makeViewModel()
+
+        viewModel.startListening()
+
+        XCTAssertEqual(proactive.recordActivityCallCount, 1)
+    }
+}

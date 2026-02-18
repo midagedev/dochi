@@ -733,6 +733,8 @@ struct ContentView: View {
     // MARK: - Palette Action Execution
 
     private func executePaletteAction(_ action: CommandPaletteItem.PaletteAction) {
+        viewModel.recordUserActivity()
+
         switch action {
         case .newConversation:
             viewModel.newConversation()
@@ -1425,6 +1427,7 @@ struct InputBarView: View {
     @Bindable var viewModel: DochiViewModel
     @State private var showSlashCommands = false
     @State private var isDraggingOver = false
+    @State private var hasRecordedTypingActivity = false
 
     private var matchingCommands: [SlashCommand] {
         FeatureCatalog.matchingCommands(for: viewModel.inputText)
@@ -1484,6 +1487,9 @@ struct InputBarView: View {
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
                     .padding(8)
+                    .onTapGesture {
+                        viewModel.recordUserActivity()
+                    }
                     .onSubmit {
                         if !NSEvent.modifierFlags.contains(.shift) {
                             if showSlashCommands && !matchingCommands.isEmpty {
@@ -1494,6 +1500,12 @@ struct InputBarView: View {
                         }
                     }
                     .onChange(of: viewModel.inputText) { _, newValue in
+                        if newValue.isEmpty {
+                            hasRecordedTypingActivity = false
+                        } else if !hasRecordedTypingActivity {
+                            viewModel.recordUserActivity()
+                            hasRecordedTypingActivity = true
+                        }
                         withAnimation(.easeOut(duration: 0.15)) {
                             showSlashCommands = newValue.hasPrefix("/") && viewModel.interactionState == .idle
                         }
