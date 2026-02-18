@@ -268,6 +268,14 @@ struct OnboardingView: View {
                 operatingProfileOption(.familyHomeAssistant)
                 operatingProfileOption(.personalProductivityAssistant)
             }
+
+            Button("기본값으로 계속 (가족형)") {
+                selectedOperatingProfile = .familyHomeAssistant
+                advanceStep()
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .font(.caption)
         }
     }
 
