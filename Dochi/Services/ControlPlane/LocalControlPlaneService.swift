@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-struct LocalControlPlaneMethodResult {
+struct LocalControlPlaneMethodResult: @unchecked Sendable {
     let success: Bool
     let result: [String: Any]
     let errorCode: String?
@@ -23,7 +23,7 @@ final class LocalControlPlaneService {
     private let methodHandler: LocalControlPlaneMethodHandler
 
     private var listenFD: Int32 = -1
-    private var acceptTask: Task<Void, Never>?
+    private var acceptWorkItem: DispatchWorkItem?
 
     init(
         socketURL: URL = LocalControlPlaneService.defaultSocketURL,
@@ -92,21 +92,30 @@ final class LocalControlPlaneService {
             return
         }
 
-        _ = chmod(socketURL.path, mode_t(0o600))
+        _ = chmod(self.socketURL.path, mode_t(0o600))
         listenFD = fd
 
         let serverFD = fd
         let handler = methodHandler
-        acceptTask = Task.detached {
-            Self.acceptLoop(serverFD: serverFD, handler: handler)
+        var workItem: DispatchWorkItem?
+        workItem = DispatchWorkItem {
+            Self.acceptLoop(
+                serverFD: serverFD,
+                handler: handler,
+                shouldStop: { workItem?.isCancelled ?? true }
+            )
+        }
+        acceptWorkItem = workItem
+        if let workItem {
+            DispatchQueue.global(qos: .utility).async(execute: workItem)
         }
 
-        Log.app.info("ControlPlane started at \(socketURL.path)")
+        Log.app.info("ControlPlane started at \(self.socketURL.path)")
     }
 
     func stop() {
-        acceptTask?.cancel()
-        acceptTask = nil
+        acceptWorkItem?.cancel()
+        acceptWorkItem = nil
 
         if listenFD >= 0 {
             shutdown(listenFD, SHUT_RDWR)
@@ -114,20 +123,24 @@ final class LocalControlPlaneService {
             listenFD = -1
         }
 
-        unlink(socketURL.path)
+        unlink(self.socketURL.path)
         Log.app.info("ControlPlane stopped")
     }
 
-    private static func acceptLoop(serverFD: Int32, handler: @escaping LocalControlPlaneMethodHandler) {
-        while !Task.isCancelled {
+    private static func acceptLoop(
+        serverFD: Int32,
+        handler: @escaping LocalControlPlaneMethodHandler,
+        shouldStop: @escaping () -> Bool
+    ) {
+        while !shouldStop() {
             let clientFD = accept(serverFD, nil, nil)
             if clientFD < 0 {
                 if errno == EINTR { continue }
-                if Task.isCancelled { break }
+                if shouldStop() { break }
                 continue
             }
 
-            Task.detached {
+            Task {
                 await Self.handleClient(fd: clientFD, handler: handler)
             }
         }

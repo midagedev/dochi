@@ -25,6 +25,56 @@ final class DochiViewModel {
         }
     }
 
+    enum ControlPlaneChatSendError: LocalizedError {
+        case interactionBusy
+        case emptyPrompt
+        case timeout
+        case requestFailed(String)
+        case noConversation
+        case noAssistantResponse
+
+        var errorCode: String {
+            switch self {
+            case .interactionBusy:
+                return "interaction_busy"
+            case .emptyPrompt:
+                return "empty_prompt"
+            case .timeout:
+                return "chat_timeout"
+            case .requestFailed:
+                return "chat_failed"
+            case .noConversation:
+                return "no_conversation"
+            case .noAssistantResponse:
+                return "no_assistant_response"
+            }
+        }
+
+        var errorDescription: String? {
+            switch self {
+            case .interactionBusy:
+                return "앱이 다른 작업을 처리 중입니다."
+            case .emptyPrompt:
+                return "prompt가 비어 있습니다."
+            case .timeout:
+                return "응답 대기 시간이 초과되었습니다."
+            case .requestFailed(let reason):
+                return reason
+            case .noConversation:
+                return "대화를 생성하지 못했습니다."
+            case .noAssistantResponse:
+                return "어시스턴트 응답을 찾을 수 없습니다."
+            }
+        }
+    }
+
+    struct ControlPlaneChatSendResponse: Sendable {
+        let conversationId: String
+        let assistantMessageId: String
+        let assistantMessage: String
+        let messageCount: Int
+    }
+
     // MARK: - State
 
     private(set) var interactionState: InteractionState = .idle
@@ -944,6 +994,54 @@ final class DochiViewModel {
                 await processLLMLoop()
             }
         }
+    }
+
+    /// Control Plane `chat.send`용 단발 요청.
+    /// 기존 `sendMessage()` 플로우를 재사용하고, 완료까지 대기한 뒤 최신 assistant 응답을 반환한다.
+    func sendMessageFromControlPlane(prompt: String, timeoutSeconds: Int = 120) async throws -> ControlPlaneChatSendResponse {
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else {
+            throw ControlPlaneChatSendError.emptyPrompt
+        }
+        guard interactionState == .idle else {
+            throw ControlPlaneChatSendError.interactionBusy
+        }
+
+        let timeout = max(5, min(300, timeoutSeconds))
+        let beforeMessageCount = currentConversation?.messages.count ?? 0
+
+        inputText = trimmedPrompt
+        sendMessage()
+
+        let deadline = Date().addingTimeInterval(TimeInterval(timeout))
+        while interactionState != .idle {
+            if Date() >= deadline {
+                cancelRequest()
+                throw ControlPlaneChatSendError.timeout
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+
+        if let errorMessage, !errorMessage.isEmpty {
+            throw ControlPlaneChatSendError.requestFailed(errorMessage)
+        }
+
+        guard let conversation = currentConversation else {
+            throw ControlPlaneChatSendError.noConversation
+        }
+
+        let candidateMessages = Array(conversation.messages.dropFirst(beforeMessageCount))
+        guard let assistantMessage = candidateMessages.last(where: { $0.role == .assistant })
+            ?? conversation.messages.last(where: { $0.role == .assistant }) else {
+            throw ControlPlaneChatSendError.noAssistantResponse
+        }
+
+        return ControlPlaneChatSendResponse(
+            conversationId: conversation.id.uuidString,
+            assistantMessageId: assistantMessage.id.uuidString,
+            assistantMessage: assistantMessage.content,
+            messageCount: conversation.messages.count
+        )
     }
 
     // MARK: - Image Attachment Actions (I-3)

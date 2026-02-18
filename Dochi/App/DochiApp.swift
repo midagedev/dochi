@@ -66,6 +66,7 @@ struct DochiApp: App {
     private let externalToolManager: ExternalToolSessionManager
     private let telegramProactiveRelay: TelegramProactiveRelay
     private let deviceHeartbeatService: DeviceHeartbeatService
+    private let controlPlaneService: LocalControlPlaneService
 
     init() {
         let settings = AppSettings()
@@ -203,7 +204,7 @@ struct DochiApp: App {
         )
         self.memoryConsolidator = memoryConsolidator
 
-        _viewModel = State(initialValue: DochiViewModel(
+        let viewModel = DochiViewModel(
             llmService: llmService,
             toolService: toolService,
             contextService: contextService,
@@ -215,7 +216,18 @@ struct DochiApp: App {
             settings: settings,
             sessionContext: sessionContext,
             metricsCollector: metricsCollector
-        ))
+        )
+        _viewModel = State(initialValue: viewModel)
+
+        self.controlPlaneService = LocalControlPlaneService { method, params in
+            await Self.handleControlPlaneMethod(
+                method: method,
+                params: params,
+                viewModel: viewModel,
+                toolService: toolService,
+                externalToolManager: externalToolManager
+            )
+        }
 
         contextService.migrateIfNeeded()
 
@@ -282,200 +294,7 @@ struct DochiApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(viewModel: viewModel, supabaseService: supabaseService, heartbeatService: heartbeatService)
-                .onAppear {
-                    if viewModel.isVoiceMode {
-                        viewModel.prepareTTSEngine()
-                    }
-                    // Wire Telegram message handler
-                    viewModel.setTelegramService(telegramService)
-                    telegramService.onMessage = { [weak viewModel] update in
-                        guard settings.isTelegramHost else {
-                            Log.telegram.debug("isTelegramHost=false 이므로 텔레그램 메시지 처리를 건너뜀")
-                            return
-                        }
-                        guard let viewModel else { return }
-                        Task {
-                            await viewModel.handleTelegramMessage(update)
-                        }
-                    }
-
-                    heartbeatService.restart()
-
-                    // Configure Spotlight indexer (H-4)
-                    viewModel.configureSpotlightIndexer(spotlightIndexer)
-
-                    // Configure RAG DocumentIndexer (I-1)
-                    viewModel.configureDocumentIndexer(documentIndexer)
-
-                    // Configure Memory Consolidator (I-2)
-                    viewModel.configureMemoryConsolidator(memoryConsolidator)
-
-                    // Configure FeedbackStore (I-4)
-                    let feedbackStore = FeedbackStore()
-                    viewModel.configureFeedbackStore(feedbackStore)
-
-                    // Configure DelegationManager (J-2)
-                    viewModel.configureDelegationManager(delegationManager)
-
-                    // Configure PluginManager (J-4)
-                    viewModel.configurePluginManager(pluginManager)
-
-                    // Configure ResourceOptimizer (J-5)
-                    viewModel.configureResourceOptimizer(resourceOptimizer)
-                    heartbeatService.setResourceOptimizer(resourceOptimizer)
-
-                    // Configure SchedulerService (J-3)
-                    viewModel.configureSchedulerService(schedulerService)
-                    schedulerService.setExecutionHandler { [weak viewModel] schedule in
-                        guard let viewModel else { return }
-                        Log.app.info("Scheduler executing: \(schedule.name) [agent=\(schedule.agentName)] — \(schedule.prompt)")
-                        try await viewModel.executeScheduledAutomation(schedule)
-                    }
-                    schedulerService.start()
-
-                    // Configure TerminalService (K-1)
-                    viewModel.configureTerminalService(terminalService)
-                    toolService.configureTerminalService(terminalService)
-
-                    // Configure ProactiveSuggestionService (K-2)
-                    viewModel.configureProactiveSuggestionService(proactiveSuggestionService)
-                    proactiveSuggestionService.start()
-
-                    // Configure TelegramProactiveRelay (K-6)
-                    viewModel.configureTelegramProactiveRelay(telegramProactiveRelay)
-                    applyTelegramHostRole()
-
-                    // Configure InterestDiscoveryService (K-3)
-                    viewModel.configureInterestDiscoveryService(interestDiscoveryService)
-                    heartbeatService.setInterestDiscoveryService(interestDiscoveryService)
-
-                    // Configure ExternalToolSessionManager (K-4)
-                    viewModel.configureExternalToolManager(externalToolManager)
-                    heartbeatService.setExternalToolManager(externalToolManager)
-                    ExternalToolTools.register(toolService: toolService, manager: externalToolManager)
-                    DochiDevBridgeTools.register(toolService: toolService, manager: externalToolManager)
-
-                    // Configure DevicePolicyService (J-1)
-                    let devicePolicyService = DevicePolicyService(settings: settings)
-                    viewModel.configureDevicePolicyService(devicePolicyService)
-                    Task {
-                        await devicePolicyService.registerCurrentDevice()
-                    }
-
-                    // Wire notification callbacks (H-3)
-                    notificationManager.onReply = { [weak viewModel] text, category, originalBody in
-                        guard let viewModel else { return }
-                        viewModel.handleNotificationReply(text: text, category: category, originalBody: originalBody)
-                    }
-                    notificationManager.onOpenApp = { [weak viewModel] category in
-                        guard let viewModel else { return }
-                        viewModel.handleNotificationOpenApp(category: category)
-                    }
-                    if settings.heartbeatEnabled {
-                        Task {
-                            await notificationManager.requestAuthorizationIfNeeded()
-                        }
-                    }
-
-                    // Refresh cached monthly cost for budget checking (C-2)
-                    Task {
-                        await viewModel.metricsCollector.refreshMonthCost()
-                    }
-
-                    // Wire UsageStore to AppDelegate for flush on termination (C-3)
-                    appDelegate.usageStore = usageStore
-
-                    // Setup menu bar manager (H-1)
-                    if appDelegate.menuBarManager == nil {
-                        let manager = MenuBarManager(settings: settings, viewModel: viewModel)
-                        appDelegate.menuBarManager = manager
-                        manager.setup()
-                    }
-
-                    // Smoke test: write app state for automated verification
-                    SmokeTestReporter.report(
-                        profileCount: viewModel.userProfiles.count,
-                        currentUserId: sessionContext.currentUserId,
-                        currentUserName: viewModel.currentUserName == "(사용자 없음)" ? nil : viewModel.currentUserName,
-                        conversationCount: viewModel.conversations.count,
-                        workspaceId: sessionContext.workspaceId.uuidString,
-                        agentName: settings.activeAgentName
-                    )
-                }
-                .onDisappear {
-                    heartbeatService.stop()
-                    schedulerService.stop()
-                    proactiveSuggestionService.stop()
-                    deviceHeartbeatService.stopHeartbeat()
-                }
-                .onChange(of: settings.heartbeatEnabled) { _, _ in
-                    heartbeatService.restart()
-                }
-                .onChange(of: settings.heartbeatIntervalMinutes) { _, _ in
-                    heartbeatService.restart()
-                }
-                .onChange(of: settings.heartbeatCheckCalendar) { _, _ in
-                    heartbeatService.restart()
-                }
-                .onChange(of: settings.heartbeatCheckKanban) { _, _ in
-                    heartbeatService.restart()
-                }
-                .onChange(of: settings.heartbeatCheckReminders) { _, _ in
-                    heartbeatService.restart()
-                }
-                .onChange(of: settings.heartbeatQuietHoursStart) { _, _ in
-                    heartbeatService.restart()
-                }
-                .onChange(of: settings.heartbeatQuietHoursEnd) { _, _ in
-                    heartbeatService.restart()
-                }
-                .onChange(of: settings.automationEnabled) { _, _ in
-                    schedulerService.restart()
-                }
-                .onChange(of: settings.autoSyncEnabled) { _, _ in
-                    viewModel.syncEngine?.refreshAutoSyncSchedule()
-                }
-                .onChange(of: settings.realtimeSyncEnabled) { _, _ in
-                    viewModel.syncEngine?.refreshAutoSyncSchedule()
-                }
-                .onChange(of: settings.proactiveSuggestionEnabled) { _, newValue in
-                    if newValue {
-                        proactiveSuggestionService.start()
-                    } else {
-                        proactiveSuggestionService.stop()
-                    }
-                }
-                .onChange(of: settings.menuBarEnabled) { _, _ in
-                    appDelegate.menuBarManager?.handleSettingsChange()
-                }
-                .onChange(of: settings.menuBarGlobalShortcutEnabled) { _, _ in
-                    appDelegate.menuBarManager?.handleSettingsChange()
-                }
-                .task(id: proactiveSuggestionNotificationTrigger) {
-                    await syncProactiveSuggestionNotification()
-                }
-                .task(id: deviceHeartbeatLifecycleTrigger) {
-                    await syncDeviceHeartbeatLifecycle()
-                }
-                .onOpenURL { url in
-                    viewModel.handleDeepLink(url: url)
-                }
-                .sheet(isPresented: $showOnboarding) {
-                    OnboardingView(
-                        settings: settings,
-                        keychainService: keychainService,
-                        contextService: contextService,
-                        onComplete: {
-                            // Sync newly created user to sessionContext
-                            if !settings.defaultUserId.isEmpty {
-                                sessionContext.currentUserId = settings.defaultUserId
-                            }
-                            showOnboarding = false
-                        }
-                    )
-                    .interactiveDismissDisabled()
-                }
+            mainWindowContent
         }
 
         Window("로그 뷰어", id: "log-viewer") {
@@ -489,6 +308,214 @@ struct DochiApp: App {
         .commands {
             DebugCommands()
         }
+    }
+
+    private var mainWindowContent: some View {
+        ContentView(viewModel: viewModel, supabaseService: supabaseService, heartbeatService: heartbeatService)
+            .onAppear {
+                if viewModel.isVoiceMode {
+                    viewModel.prepareTTSEngine()
+                }
+                // Wire Telegram message handler
+                viewModel.setTelegramService(telegramService)
+                telegramService.onMessage = { [weak viewModel] update in
+                    guard settings.isTelegramHost else {
+                        Log.telegram.debug("isTelegramHost=false 이므로 텔레그램 메시지 처리를 건너뜀")
+                        return
+                    }
+                    guard let viewModel else { return }
+                    Task {
+                        await viewModel.handleTelegramMessage(update)
+                    }
+                }
+
+                heartbeatService.restart()
+
+                // Configure Spotlight indexer (H-4)
+                viewModel.configureSpotlightIndexer(spotlightIndexer)
+
+                // Configure RAG DocumentIndexer (I-1)
+                viewModel.configureDocumentIndexer(documentIndexer)
+
+                // Configure Memory Consolidator (I-2)
+                viewModel.configureMemoryConsolidator(memoryConsolidator)
+
+                // Configure FeedbackStore (I-4)
+                let feedbackStore = FeedbackStore()
+                viewModel.configureFeedbackStore(feedbackStore)
+
+                // Configure DelegationManager (J-2)
+                viewModel.configureDelegationManager(delegationManager)
+
+                // Configure PluginManager (J-4)
+                viewModel.configurePluginManager(pluginManager)
+
+                // Configure ResourceOptimizer (J-5)
+                viewModel.configureResourceOptimizer(resourceOptimizer)
+                heartbeatService.setResourceOptimizer(resourceOptimizer)
+
+                // Configure SchedulerService (J-3)
+                viewModel.configureSchedulerService(schedulerService)
+                schedulerService.setExecutionHandler { [weak viewModel] schedule in
+                    guard let viewModel else { return }
+                    Log.app.info("Scheduler executing: \(schedule.name) [agent=\(schedule.agentName)] — \(schedule.prompt)")
+                    try await viewModel.executeScheduledAutomation(schedule)
+                }
+                schedulerService.start()
+
+                // Configure TerminalService (K-1)
+                viewModel.configureTerminalService(terminalService)
+                toolService.configureTerminalService(terminalService)
+
+                // Configure ProactiveSuggestionService (K-2)
+                viewModel.configureProactiveSuggestionService(proactiveSuggestionService)
+                proactiveSuggestionService.start()
+
+                // Configure TelegramProactiveRelay (K-6)
+                viewModel.configureTelegramProactiveRelay(telegramProactiveRelay)
+                applyTelegramHostRole()
+
+                // Configure InterestDiscoveryService (K-3)
+                viewModel.configureInterestDiscoveryService(interestDiscoveryService)
+                heartbeatService.setInterestDiscoveryService(interestDiscoveryService)
+
+                // Configure ExternalToolSessionManager (K-4)
+                viewModel.configureExternalToolManager(externalToolManager)
+                heartbeatService.setExternalToolManager(externalToolManager)
+                ExternalToolTools.register(toolService: toolService, manager: externalToolManager)
+                DochiDevBridgeTools.register(toolService: toolService, manager: externalToolManager)
+                if settings.localControlPlaneEnabled {
+                    controlPlaneService.start()
+                }
+
+                // Configure DevicePolicyService (J-1)
+                let devicePolicyService = DevicePolicyService(settings: settings)
+                viewModel.configureDevicePolicyService(devicePolicyService)
+                Task {
+                    await devicePolicyService.registerCurrentDevice()
+                }
+
+                // Wire notification callbacks (H-3)
+                notificationManager.onReply = { [weak viewModel] text, category, originalBody in
+                    guard let viewModel else { return }
+                    viewModel.handleNotificationReply(text: text, category: category, originalBody: originalBody)
+                }
+                notificationManager.onOpenApp = { [weak viewModel] category in
+                    guard let viewModel else { return }
+                    viewModel.handleNotificationOpenApp(category: category)
+                }
+                if settings.heartbeatEnabled {
+                    Task {
+                        await notificationManager.requestAuthorizationIfNeeded()
+                    }
+                }
+
+                // Refresh cached monthly cost for budget checking (C-2)
+                Task {
+                    await viewModel.metricsCollector.refreshMonthCost()
+                }
+
+                // Wire UsageStore to AppDelegate for flush on termination (C-3)
+                appDelegate.usageStore = usageStore
+
+                // Setup menu bar manager (H-1)
+                if appDelegate.menuBarManager == nil {
+                    let manager = MenuBarManager(settings: settings, viewModel: viewModel)
+                    appDelegate.menuBarManager = manager
+                    manager.setup()
+                }
+
+                // Smoke test: write app state for automated verification
+                SmokeTestReporter.report(
+                    profileCount: viewModel.userProfiles.count,
+                    currentUserId: sessionContext.currentUserId,
+                    currentUserName: viewModel.currentUserName == "(사용자 없음)" ? nil : viewModel.currentUserName,
+                    conversationCount: viewModel.conversations.count,
+                    workspaceId: sessionContext.workspaceId.uuidString,
+                    agentName: settings.activeAgentName
+                )
+            }
+            .onDisappear {
+                heartbeatService.stop()
+                schedulerService.stop()
+                proactiveSuggestionService.stop()
+                deviceHeartbeatService.stopHeartbeat()
+                controlPlaneService.stop()
+            }
+            .onChange(of: settings.heartbeatEnabled) { _, _ in
+                heartbeatService.restart()
+            }
+            .onChange(of: settings.heartbeatIntervalMinutes) { _, _ in
+                heartbeatService.restart()
+            }
+            .onChange(of: settings.heartbeatCheckCalendar) { _, _ in
+                heartbeatService.restart()
+            }
+            .onChange(of: settings.heartbeatCheckKanban) { _, _ in
+                heartbeatService.restart()
+            }
+            .onChange(of: settings.heartbeatCheckReminders) { _, _ in
+                heartbeatService.restart()
+            }
+            .onChange(of: settings.heartbeatQuietHoursStart) { _, _ in
+                heartbeatService.restart()
+            }
+            .onChange(of: settings.heartbeatQuietHoursEnd) { _, _ in
+                heartbeatService.restart()
+            }
+            .onChange(of: settings.automationEnabled) { _, _ in
+                schedulerService.restart()
+            }
+            .onChange(of: settings.autoSyncEnabled) { _, _ in
+                viewModel.syncEngine?.refreshAutoSyncSchedule()
+            }
+            .onChange(of: settings.realtimeSyncEnabled) { _, _ in
+                viewModel.syncEngine?.refreshAutoSyncSchedule()
+            }
+            .onChange(of: settings.proactiveSuggestionEnabled) { _, newValue in
+                if newValue {
+                    proactiveSuggestionService.start()
+                } else {
+                    proactiveSuggestionService.stop()
+                }
+            }
+            .onChange(of: settings.menuBarEnabled) { _, _ in
+                appDelegate.menuBarManager?.handleSettingsChange()
+            }
+            .onChange(of: settings.menuBarGlobalShortcutEnabled) { _, _ in
+                appDelegate.menuBarManager?.handleSettingsChange()
+            }
+            .onChange(of: settings.localControlPlaneEnabled) { _, enabled in
+                if enabled {
+                    controlPlaneService.start()
+                } else {
+                    controlPlaneService.stop()
+                }
+            }
+            .task(id: proactiveSuggestionNotificationTrigger) {
+                await syncProactiveSuggestionNotification()
+            }
+            .task(id: deviceHeartbeatLifecycleTrigger) {
+                await syncDeviceHeartbeatLifecycle()
+            }
+            .onOpenURL { url in
+                viewModel.handleDeepLink(url: url)
+            }
+            .sheet(isPresented: $showOnboarding) {
+                OnboardingView(
+                    settings: settings,
+                    keychainService: keychainService,
+                    contextService: contextService,
+                    onComplete: {
+                        // Sync newly created user to sessionContext
+                        if !settings.defaultUserId.isEmpty {
+                            sessionContext.currentUserId = settings.defaultUserId
+                        }
+                        showOnboarding = false
+                    }
+                )
+                .interactiveDismissDisabled()
+            }
     }
 
     private var settingsView: some View {
@@ -597,6 +624,405 @@ struct DochiApp: App {
         }
 
         await deviceHeartbeatService.startHeartbeat(workspaceIds: deviceHeartbeatWorkspaceIds())
+    }
+
+    private enum ControlPlaneBridgePreset: String {
+        case codex
+        case claude
+        case aider
+
+        var command: String {
+            switch self {
+            case .codex:
+                return "codex"
+            case .claude:
+                return "claude"
+            case .aider:
+                return "aider"
+            }
+        }
+
+        var healthPatterns: HealthCheckPatterns {
+            switch self {
+            case .codex:
+                return .codexCLI
+            case .claude:
+                return .claudeCode
+            case .aider:
+                return .aider
+            }
+        }
+
+        var defaultProfileName: String {
+            switch self {
+            case .codex:
+                return "Dochi Bridge Codex"
+            case .claude:
+                return "Dochi Bridge Claude"
+            case .aider:
+                return "Dochi Bridge Aider"
+            }
+        }
+    }
+
+    private struct UncheckedJSONObject: @unchecked Sendable {
+        let value: [String: Any]
+    }
+
+    private struct UncheckedJSONArray: @unchecked Sendable {
+        let value: [[String: Any]]
+    }
+
+    nonisolated private static func handleControlPlaneMethod(
+        method: String,
+        params: [String: Any],
+        viewModel: DochiViewModel,
+        toolService: BuiltInToolService,
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        switch method {
+        case "app.ping":
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+            let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+            return .ok([
+                "status": "ok",
+                "app": "Dochi",
+                "version": version,
+                "build": build,
+                "socket_path": LocalControlPlaneService.defaultSocketURL.path,
+                "timestamp": isoTimestamp(),
+            ])
+
+        case "session.list":
+            let sessionsPayload = await MainActor.run { () -> UncheckedJSONArray in
+                viewModel.loadConversations()
+                let currentConversationId = viewModel.currentConversation?.id
+                let sessions = viewModel.conversations.map { conversation in
+                    let preview = (conversation.messages.last?.content ?? "")
+                        .replacingOccurrences(of: "\n", with: " ")
+                    return [
+                        "id": conversation.id.uuidString,
+                        "title": conversation.title,
+                        "source": conversation.source.rawValue,
+                        "message_count": conversation.messages.count,
+                        "updated_at": isoTimestamp(conversation.updatedAt),
+                        "is_active": currentConversationId == conversation.id,
+                        "last_message_preview": String(preview.prefix(120)),
+                    ]
+                }
+                return UncheckedJSONArray(value: sessions)
+            }
+            let sessions = sessionsPayload.value
+            return .ok([
+                "count": sessions.count,
+                "sessions": sessions,
+            ])
+
+        case "chat.send":
+            guard let prompt = (params["prompt"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !prompt.isEmpty else {
+                return .failure(code: "empty_prompt", message: "prompt가 필요합니다.")
+            }
+
+            let timeoutSeconds = params["timeout_seconds"] as? Int ?? 120
+            do {
+                let response = try await viewModel.sendMessageFromControlPlane(
+                    prompt: prompt,
+                    timeoutSeconds: timeoutSeconds
+                )
+                var result: [String: Any] = [
+                    "conversation_id": response.conversationId,
+                    "assistant_message_id": response.assistantMessageId,
+                    "assistant_message": response.assistantMessage,
+                    "message_count": response.messageCount,
+                ]
+                result["status"] = "completed"
+                return .ok(result)
+            } catch let error as DochiViewModel.ControlPlaneChatSendError {
+                return .failure(
+                    code: error.errorCode,
+                    message: error.errorDescription ?? "chat.send 실패"
+                )
+            } catch {
+                return .failure(code: "internal_error", message: error.localizedDescription)
+            }
+
+        case "tool.execute":
+            guard let name = (params["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !name.isEmpty else {
+                return .failure(code: "missing_tool_name", message: "name이 필요합니다.")
+            }
+
+            let argumentsPayload = UncheckedJSONObject(value: params["arguments"] as? [String: Any] ?? [:])
+            let toolResult = await executeTool(
+                toolService: toolService,
+                name: name,
+                arguments: argumentsPayload
+            )
+            if toolResult.isError {
+                return .failure(code: "tool_error", message: toolResult.content)
+            }
+            return .ok([
+                "tool_name": name,
+                "content": toolResult.content,
+            ])
+
+        case "log.recent":
+            let minutes = max(1, min(1_440, params["minutes"] as? Int ?? 10))
+            let limit = max(1, min(500, params["limit"] as? Int ?? 120))
+            let category = nonEmptyString(params["category"])
+            let level = nonEmptyString(params["level"])?.lowercased()
+            let contains = nonEmptyString(params["contains"])
+
+            do {
+                let entries = try await fetchDochiLogs(
+                    minutes: minutes,
+                    category: category,
+                    level: level,
+                    contains: contains,
+                    limit: limit
+                )
+                let serialized = entries.map { entry in
+                    [
+                        "timestamp": isoTimestamp(entry.date),
+                        "category": entry.category,
+                        "level": entry.level,
+                        "message": entry.message,
+                    ]
+                }
+                return .ok([
+                    "count": serialized.count,
+                    "entries": serialized,
+                ])
+            } catch {
+                return .failure(code: "log_fetch_failed", message: error.localizedDescription)
+            }
+
+        case "bridge.open":
+            return await handleBridgeOpen(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.status":
+            return await handleBridgeStatus(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.send":
+            return await handleBridgeSend(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.read":
+            return await handleBridgeRead(params: params, externalToolManager: externalToolManager)
+
+        default:
+            return .failure(code: "method_not_found", message: "지원하지 않는 메서드입니다: \(method)")
+        }
+    }
+
+    nonisolated private static func handleBridgeOpen(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard await externalToolManager.isTmuxAvailable else {
+            return .failure(code: "tmux_unavailable", message: "tmux를 찾을 수 없습니다.")
+        }
+
+        let agentRaw = nonEmptyString(params["agent"])?.lowercased() ?? "codex"
+        guard let preset = ControlPlaneBridgePreset(rawValue: agentRaw) else {
+            return .failure(code: "invalid_agent", message: "agent는 codex, claude, aider 중 하나여야 합니다.")
+        }
+
+        let profileName = nonEmptyString(params["profile_name"]) ?? preset.defaultProfileName
+        let workingDirectory = nonEmptyString(params["working_directory"]) ?? "~"
+        let arguments = params["arguments"] as? [String] ?? []
+
+        let profile = await MainActor.run { () -> ExternalToolProfile in
+            if let existing = externalToolManager.profiles.first(where: { $0.name == profileName }) {
+                return existing
+            }
+
+            let created = ExternalToolProfile(
+                name: profileName,
+                command: preset.command,
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                healthCheckPatterns: preset.healthPatterns
+            )
+            externalToolManager.saveProfile(created)
+            return created
+        }
+
+        let existingSessionPayload = await MainActor.run { () -> UncheckedJSONObject? in
+            guard let payload = existingBridgeSessionPayload(for: profile.id, manager: externalToolManager) else {
+                return nil
+            }
+            return UncheckedJSONObject(value: payload)
+        }
+        if let existingSessionPayload {
+            var payload = existingSessionPayload.value
+            payload["reused"] = true
+            return .ok(payload)
+        }
+
+        do {
+            try await externalToolManager.startSession(profileId: profile.id)
+        } catch {
+            return .failure(code: "bridge_open_failed", message: error.localizedDescription)
+        }
+
+        let createdSessionPayload = await MainActor.run { () -> UncheckedJSONObject? in
+            guard let payload = existingBridgeSessionPayload(for: profile.id, manager: externalToolManager) else {
+                return nil
+            }
+            return UncheckedJSONObject(value: payload)
+        }
+        guard let createdSessionPayload else {
+            return .failure(code: "bridge_open_failed", message: "브리지 세션 생성 후 조회에 실패했습니다.")
+        }
+
+        var payload = createdSessionPayload.value
+        payload["reused"] = false
+        return .ok(payload)
+    }
+
+    nonisolated private static func handleBridgeStatus(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        if let sessionIdRaw = nonEmptyString(params["session_id"]) {
+            guard let sessionId = UUID(uuidString: sessionIdRaw) else {
+                return .failure(code: "invalid_session_id", message: "session_id 형식이 올바르지 않습니다.")
+            }
+
+            let payload = await MainActor.run { () -> UncheckedJSONObject? in
+                guard let payload = bridgeSessionPayload(sessionId: sessionId, manager: externalToolManager) else {
+                    return nil
+                }
+                return UncheckedJSONObject(value: payload)
+            }
+            guard let payload else {
+                return .failure(code: "session_not_found", message: "세션을 찾을 수 없습니다: \(sessionIdRaw)")
+            }
+            return .ok(payload.value)
+        }
+
+        let sessionsPayload = await MainActor.run { () -> UncheckedJSONArray in
+            let sessions: [[String: Any]] = externalToolManager.sessions.map { session in
+                let profileName = externalToolManager.profiles.first(where: { $0.id == session.profileId })?.name ?? "unknown"
+                return [
+                    "session_id": session.id.uuidString,
+                    "profile_id": session.profileId.uuidString,
+                    "profile_name": profileName,
+                    "status": session.status.rawValue,
+                    "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
+                    "last_activity": session.lastActivityText ?? NSNull(),
+                ]
+            }
+            return UncheckedJSONArray(value: sessions)
+        }
+        let sessions = sessionsPayload.value
+
+        return .ok([
+            "count": sessions.count,
+            "sessions": sessions,
+        ])
+    }
+
+    nonisolated private static func handleBridgeSend(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let sessionIdRaw = nonEmptyString(params["session_id"]),
+              let sessionId = UUID(uuidString: sessionIdRaw) else {
+            return .failure(code: "invalid_session_id", message: "유효한 session_id가 필요합니다.")
+        }
+        guard let command = nonEmptyString(params["command"]) else {
+            return .failure(code: "missing_command", message: "command가 필요합니다.")
+        }
+
+        do {
+            try await externalToolManager.sendCommand(sessionId: sessionId, command: command)
+            return .ok([
+                "session_id": sessionId.uuidString,
+                "status": "sent",
+                "command": command,
+            ])
+        } catch {
+            return .failure(code: "bridge_send_failed", message: error.localizedDescription)
+        }
+    }
+
+    nonisolated private static func handleBridgeRead(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let sessionIdRaw = nonEmptyString(params["session_id"]),
+              let sessionId = UUID(uuidString: sessionIdRaw) else {
+            return .failure(code: "invalid_session_id", message: "유효한 session_id가 필요합니다.")
+        }
+
+        let lines = max(1, min(500, params["lines"] as? Int ?? 80))
+        let output = await externalToolManager.captureOutput(sessionId: sessionId, lines: lines)
+        return .ok([
+            "session_id": sessionId.uuidString,
+            "count": output.count,
+            "lines": output,
+        ])
+    }
+
+    @MainActor
+    private static func existingBridgeSessionPayload(
+        for profileId: UUID,
+        manager: ExternalToolSessionManagerProtocol
+    ) -> [String: Any]? {
+        guard let session = manager.sessions.first(where: { $0.profileId == profileId && $0.status != .dead }) else {
+            return nil
+        }
+        let profileName = manager.profiles.first(where: { $0.id == session.profileId })?.name ?? "unknown"
+        return [
+            "session_id": session.id.uuidString,
+            "profile_id": session.profileId.uuidString,
+            "profile_name": profileName,
+            "status": session.status.rawValue,
+            "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
+            "last_activity": session.lastActivityText ?? NSNull(),
+        ]
+    }
+
+    @MainActor
+    private static func bridgeSessionPayload(
+        sessionId: UUID,
+        manager: ExternalToolSessionManagerProtocol
+    ) -> [String: Any]? {
+        guard let session = manager.sessions.first(where: { $0.id == sessionId }) else {
+            return nil
+        }
+        let profileName = manager.profiles.first(where: { $0.id == session.profileId })?.name ?? "unknown"
+        return [
+            "session_id": session.id.uuidString,
+            "profile_id": session.profileId.uuidString,
+            "profile_name": profileName,
+            "status": session.status.rawValue,
+            "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
+            "last_activity": session.lastActivityText ?? NSNull(),
+        ]
+    }
+
+    nonisolated private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let raw = value as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    nonisolated private static func isoTimestamp(_ date: Date = Date()) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    @MainActor
+    private static func executeTool(
+        toolService: BuiltInToolService,
+        name: String,
+        arguments: UncheckedJSONObject
+    ) async -> ToolResult {
+        await toolService.execute(name: name, arguments: arguments.value)
     }
 
     private func restoreMCPServers(mcpService: MCPService, json: String) {

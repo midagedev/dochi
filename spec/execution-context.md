@@ -333,6 +333,13 @@
   1. 앱 실행 중 CLI에서 `app.ping` 성공
   2. `tool.execute`로 기존 도구 1개 이상 호출 가능
   3. 실패 시 구조화된 에러 코드/메시지 반환
+- 상태: done (2026-02-18)
+- 구현 파일:
+  - `Dochi/App/DochiApp.swift`
+  - `Dochi/ViewModels/DochiViewModel.swift`
+  - `Dochi/Services/ControlPlane/LocalControlPlaneService.swift`
+- 테스트:
+  - `DochiTests/LocalControlPlaneServiceTests.swift`
 
 ### F3. [P0][CLI] 앱 연결 모드 + graceful fallback
 - Problem: 앱 미실행/권한 미설정 상태에서 실패 원인 파악이 어렵다.
