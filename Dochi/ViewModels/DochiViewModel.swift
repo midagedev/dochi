@@ -1689,7 +1689,7 @@ final class DochiViewModel {
                 if granted {
                     startListening()
                 } else {
-                    errorMessage = "마이크 권한이 필요합니다. 시스템 설정에서 허용해주세요."
+                    errorMessage = "마이크 및 음성 인식 권한이 필요합니다. 시스템 설정에서 허용해주세요."
                 }
             }
             return
@@ -1873,12 +1873,25 @@ final class DochiViewModel {
     private func handleSpeechError(_ error: Error) {
         partialTranscript = ""
         Log.stt.error("Speech error: \(error.localizedDescription)")
+        errorMessage = "음성 입력 실패: \(error.localizedDescription)"
 
         if interactionState == .listening {
             transition(to: .idle)
         }
 
-        if sessionState == .active {
+        let shouldRetry: Bool
+        if let speechError = error as? SpeechServiceError {
+            switch speechError {
+            case .audioEngineFailure, .recognizerUnavailable, .noInputDevice, .noSpeechDetected:
+                shouldRetry = false
+            case .recognitionFailed:
+                shouldRetry = true
+            }
+        } else {
+            shouldRetry = true
+        }
+
+        if sessionState == .active && shouldRetry {
             // Stay in session, try again
             startListening()
         }
@@ -2336,6 +2349,18 @@ final class DochiViewModel {
         guard settings.wakeWordEnabled, settings.wakeWordAlwaysOn else { return }
         guard !isBackgroundListening else { return }
         guard interactionState == .idle else { return }
+        guard speechService.isAuthorized else {
+            Task { [weak self] in
+                guard let self else { return }
+                let granted = await self.speechService.requestAuthorization()
+                if granted {
+                    self.startBackgroundWakeWordListener()
+                } else {
+                    self.errorMessage = "웨이크워드를 사용하려면 마이크 및 음성 인식 권한이 필요합니다."
+                }
+            }
+            return
+        }
 
         isBackgroundListening = true
         Log.app.info("Starting background wake word listener")

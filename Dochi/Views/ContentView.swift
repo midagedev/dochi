@@ -513,8 +513,10 @@ struct ContentView: View {
             if viewModel.settings.avatarEnabled {
                 if #available(macOS 15.0, *) {
                     AvatarView(
-                        interactionState: viewModel.interactionState
+                        interactionState: viewModel.interactionState,
+                        modelName: viewModel.settings.avatarModelName
                     )
+                    .id(viewModel.settings.avatarModelName)
                     .frame(height: 250)
                 }
             }

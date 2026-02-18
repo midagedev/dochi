@@ -247,6 +247,12 @@ struct InterfaceSettingsContent: View {
     var viewModel: DochiViewModel?
     var spotlightIndexer: SpotlightIndexer?
 
+    private var selectedAvatarModel: AvatarModelOption {
+        AvatarModelCatalog.model(for: settings.avatarModelName)
+            ?? AvatarModelCatalog.model(for: AvatarModelCatalog.defaultModelID)
+            ?? AvatarModelCatalog.models[0]
+    }
+
     var body: some View {
         Section {
             HStack {
@@ -314,14 +320,48 @@ struct InterfaceSettingsContent: View {
                 .foregroundStyle(.secondary)
 
             if settings.avatarEnabled {
-                Text("Dochi/Resources/Models/ 디렉토리에 default_avatar.vrm 파일을 배치해주세요")
+                Picker("아바타 모델", selection: Binding(
+                    get: { settings.avatarModelName },
+                    set: { settings.avatarModelName = AvatarModelCatalog.normalizedModelID($0) }
+                )) {
+                    ForEach(AvatarModelCatalog.models) { option in
+                        Text(option.displayName).tag(option.id)
+                    }
+                }
+
+                HStack {
+                    Text("프레이밍 줌: \(Int((settings.avatarCameraZoom * 100).rounded()))%")
+                    Slider(value: Binding(
+                        get: { settings.avatarCameraZoom },
+                        set: { settings.avatarCameraZoom = $0 }
+                    ), in: AppSettings.avatarCameraZoomRange, step: 0.01)
+                }
+
+                Text("값이 작을수록 줌아웃, 클수록 줌인됩니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("메인 화면 아바타에 마우스를 올리고 휠 또는 트랙패드 핀치로도 실시간 조절할 수 있습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button("기본 줌으로 복원") {
+                    settings.avatarCameraZoom = AppSettings.avatarCameraZoomDefault
+                }
+                .buttonStyle(.borderless)
+
+                Text("선택됨: \(selectedAvatarModel.id).vrm · 라이선스 \(selectedAvatarModel.license)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("모델 경로: Dochi/Resources/Models/")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         } header: {
             SettingsSectionHeader(
                 title: "아바타",
-                helpContent: "VRM 형식의 3D 아바타를 대화 영역 위에 표시합니다. macOS 15 이상에서 사용 가능합니다. Resources/Models/에 VRM 파일이 필요합니다."
+                helpContent: "VRM 형식의 3D 아바타를 대화 영역 위에 표시합니다. macOS 15 이상에서 사용 가능합니다. 내장 모델 중 하나를 선택해 사용할 수 있습니다."
             )
         }
 

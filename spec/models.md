@@ -40,6 +40,7 @@
 | `uiDensity` | String | P1 | |
 | `wakeWordAlwaysOn` | Bool | P2 | 앱 활성 중 항상 감지 |
 | `avatarEnabled` | Bool | UI | 3D 아바타 표시 |
+| `avatarModelName` | String | UI | 선택한 VRM 아바타 모델 ID |
 | `heartbeatEnabled` | Bool | UI | 프로액티브 에이전트 |
 | `heartbeatIntervalMinutes` | Int | UI | 기본 30분 |
 | `heartbeatCheckCalendar` | Bool | UI | |
