@@ -377,7 +377,7 @@ enum GitRepositoryInsightScanner {
             return WorkDomainClassification(domain: "personal", confidence: 0.65, reason: "origin owner naming pattern")
         }
 
-        return WorkDomainClassification(domain: "company", confidence: 0.55, reason: "origin owner differs from local identity")
+        return WorkDomainClassification(domain: "unknown", confidence: 0.45, reason: "public host but owner not matched to local identity")
     }
 
     private static func detectPersonalIdentity() -> Set<String> {
