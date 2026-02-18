@@ -766,6 +766,16 @@ struct HeartbeatSettingsContent: View {
                     )
                 }
 
+                Stepper(
+                    value: Binding(
+                        get: { settings.proactiveDailyCap },
+                        set: { settings.proactiveDailyCap = min(max($0, 0), 20) }
+                    ),
+                    in: 0...20
+                ) {
+                    Text("일일 제안 한도: \(settings.proactiveDailyCap)개")
+                }
+
                 Toggle("조용한 시간에 제안 중지", isOn: Binding(
                     get: { settings.proactiveSuggestionQuietHoursEnabled },
                     set: { settings.proactiveSuggestionQuietHoursEnabled = $0 }

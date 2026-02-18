@@ -258,6 +258,7 @@ final class ProactiveSuggestionTests: XCTestCase {
         _ = settings.proactiveSuggestionEnabled
         _ = settings.proactiveSuggestionIdleMinutes
         _ = settings.proactiveSuggestionCooldownMinutes
+        _ = settings.proactiveDailyCap
         _ = settings.proactiveSuggestionQuietHoursEnabled
         _ = settings.suggestionTypeNewsEnabled
         _ = settings.suggestionTypeDeepDiveEnabled
@@ -267,6 +268,15 @@ final class ProactiveSuggestionTests: XCTestCase {
         _ = settings.suggestionTypeCostEnabled
         _ = settings.notificationProactiveSuggestionEnabled
         _ = settings.proactiveSuggestionMenuBarEnabled
+    }
+
+    func testAppSettingsProactiveDailyCapPersistence() {
+        let settings = AppSettings()
+
+        settings.proactiveDailyCap = 7
+
+        XCTAssertEqual(settings.proactiveDailyCap, 7)
+        XCTAssertEqual(UserDefaults.standard.object(forKey: "proactiveDailyCap") as? Int, 7)
     }
 
     // MARK: - SuggestionType Priority Tests

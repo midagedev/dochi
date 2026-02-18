@@ -573,6 +573,10 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(proactiveSuggestionCooldownMinutes, forKey: "proactiveSuggestionCooldownMinutes") }
     }
 
+    var proactiveDailyCap: Int = UserDefaults.standard.object(forKey: "proactiveDailyCap") as? Int ?? 5 {
+        didSet { UserDefaults.standard.set(proactiveDailyCap, forKey: "proactiveDailyCap") }
+    }
+
     var proactiveSuggestionQuietHoursEnabled: Bool = UserDefaults.standard.object(forKey: "proactiveSuggestionQuietHoursEnabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(proactiveSuggestionQuietHoursEnabled, forKey: "proactiveSuggestionQuietHoursEnabled") }
     }
