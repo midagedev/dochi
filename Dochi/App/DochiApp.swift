@@ -67,6 +67,7 @@ struct DochiApp: App {
     private let telegramProactiveRelay: TelegramProactiveRelay
     private let deviceHeartbeatService: DeviceHeartbeatService
     private let controlPlaneService: LocalControlPlaneService
+    private let controlPlaneTokenManager: ControlPlaneTokenManager
 
     init() {
         let settings = AppSettings()
@@ -219,15 +220,21 @@ struct DochiApp: App {
         )
         _viewModel = State(initialValue: viewModel)
 
-        self.controlPlaneService = LocalControlPlaneService { method, params in
-            await Self.handleControlPlaneMethod(
-                method: method,
-                params: params,
-                viewModel: viewModel,
-                toolService: toolService,
-                externalToolManager: externalToolManager
-            )
-        }
+        let controlPlaneTokenManager = ControlPlaneTokenManager()
+        self.controlPlaneTokenManager = controlPlaneTokenManager
+        self.controlPlaneService = LocalControlPlaneService(
+            methodHandler: { method, params in
+                await Self.handleControlPlaneMethod(
+                    method: method,
+                    params: params,
+                    viewModel: viewModel,
+                    toolService: toolService,
+                    externalToolManager: externalToolManager,
+                    tokenManager: controlPlaneTokenManager
+                )
+            },
+            authTokenProvider: { controlPlaneTokenManager.currentToken() }
+        )
 
         contextService.migrateIfNeeded()
 
@@ -385,6 +392,7 @@ struct DochiApp: App {
                 ExternalToolTools.register(toolService: toolService, manager: externalToolManager)
                 DochiDevBridgeTools.register(toolService: toolService, manager: externalToolManager)
                 if settings.localControlPlaneEnabled {
+                    controlPlaneTokenManager.rotate()
                     controlPlaneService.start()
                 }
 
@@ -487,6 +495,7 @@ struct DochiApp: App {
             }
             .onChange(of: settings.localControlPlaneEnabled) { _, enabled in
                 if enabled {
+                    controlPlaneTokenManager.rotate()
                     controlPlaneService.start()
                 } else {
                     controlPlaneService.stop()
@@ -684,7 +693,8 @@ struct DochiApp: App {
         params: [String: Any],
         viewModel: DochiViewModel,
         toolService: BuiltInToolService,
-        externalToolManager: ExternalToolSessionManagerProtocol
+        externalToolManager: ExternalToolSessionManagerProtocol,
+        tokenManager: ControlPlaneTokenManager
     ) async -> LocalControlPlaneMethodResult {
         switch method {
         case "app.ping":
@@ -696,7 +706,18 @@ struct DochiApp: App {
                 "version": version,
                 "build": build,
                 "socket_path": LocalControlPlaneService.defaultSocketURL.path,
+                "token_path": tokenManager.tokenFilePath,
+                "auth_required": true,
                 "timestamp": isoTimestamp(),
+            ])
+
+        case "auth.rotate":
+            let rotatedToken = tokenManager.rotate()
+            return .ok([
+                "status": "rotated",
+                "token_path": tokenManager.tokenFilePath,
+                "token_length": rotatedToken.count,
+                "rotated_at": isoTimestamp(),
             ])
 
         case "session.list":

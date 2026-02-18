@@ -21,16 +21,22 @@ typealias LocalControlPlaneMethodHandler = @Sendable (_ method: String, _ params
 final class LocalControlPlaneService {
     private let socketURL: URL
     private let methodHandler: LocalControlPlaneMethodHandler
+    private let authTokenProvider: @Sendable () -> String?
+    private let unauthenticatedMethods: Set<String>
 
     private var listenFD: Int32 = -1
     private var acceptWorkItem: DispatchWorkItem?
 
     init(
         socketURL: URL = LocalControlPlaneService.defaultSocketURL,
-        methodHandler: @escaping LocalControlPlaneMethodHandler
+        methodHandler: @escaping LocalControlPlaneMethodHandler,
+        authTokenProvider: @escaping @Sendable () -> String? = { nil },
+        unauthenticatedMethods: Set<String> = []
     ) {
         self.socketURL = socketURL
         self.methodHandler = methodHandler
+        self.authTokenProvider = authTokenProvider
+        self.unauthenticatedMethods = unauthenticatedMethods
     }
 
     deinit {
@@ -97,11 +103,15 @@ final class LocalControlPlaneService {
 
         let serverFD = fd
         let handler = methodHandler
+        let authProvider = authTokenProvider
+        let bypassMethods = unauthenticatedMethods
         var workItem: DispatchWorkItem?
         workItem = DispatchWorkItem {
             Self.acceptLoop(
                 serverFD: serverFD,
                 handler: handler,
+                authTokenProvider: authProvider,
+                unauthenticatedMethods: bypassMethods,
                 shouldStop: { workItem?.isCancelled ?? true }
             )
         }
@@ -130,6 +140,8 @@ final class LocalControlPlaneService {
     private static func acceptLoop(
         serverFD: Int32,
         handler: @escaping LocalControlPlaneMethodHandler,
+        authTokenProvider: @escaping @Sendable () -> String?,
+        unauthenticatedMethods: Set<String>,
         shouldStop: @escaping () -> Bool
     ) {
         while !shouldStop() {
@@ -141,12 +153,22 @@ final class LocalControlPlaneService {
             }
 
             Task {
-                await Self.handleClient(fd: clientFD, handler: handler)
+                await Self.handleClient(
+                    fd: clientFD,
+                    handler: handler,
+                    authTokenProvider: authTokenProvider,
+                    unauthenticatedMethods: unauthenticatedMethods
+                )
             }
         }
     }
 
-    private static func handleClient(fd: Int32, handler: @escaping LocalControlPlaneMethodHandler) async {
+    private static func handleClient(
+        fd: Int32,
+        handler: @escaping LocalControlPlaneMethodHandler,
+        authTokenProvider: @escaping @Sendable () -> String?,
+        unauthenticatedMethods: Set<String>
+    ) async {
         defer {
             shutdown(fd, SHUT_RDWR)
             close(fd)
@@ -172,6 +194,23 @@ final class LocalControlPlaneService {
             let response = makeErrorResponse(requestId: requestId, code: "missing_method", message: "method가 필요합니다.")
             writeResponse(fd: fd, payload: response)
             return
+        }
+
+        if !unauthenticatedMethods.contains(method),
+           let requiredToken = authTokenProvider(),
+           !requiredToken.isEmpty {
+            let providedToken = (requestJSON["auth_token"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let isValidToken = providedToken == requiredToken
+            if !isValidToken {
+                let response = makeErrorResponse(
+                    requestId: requestId,
+                    code: "unauthorized",
+                    message: "로컬 API 인증에 실패했습니다. Dochi 앱 상태를 확인한 뒤 다시 시도하세요."
+                )
+                writeResponse(fd: fd, payload: response)
+                return
+            }
         }
 
         let params = requestJSON["params"] as? [String: Any] ?? [:]

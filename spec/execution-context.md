@@ -398,6 +398,18 @@
 - Acceptance Criteria:
   1. 권한 없는 요청 거부
   2. 민감 도구 호출 시 앱 정책과 동일한 확인 흐름 보장
+- 상태: done (2026-02-18)
+- 구현 파일:
+  - `Dochi/App/DochiApp.swift`
+  - `Dochi/Services/ControlPlane/ControlPlaneTokenManager.swift`
+  - `Dochi/Services/ControlPlane/LocalControlPlaneService.swift`
+  - `Dochi/Services/Tools/BuiltInToolService.swift`
+  - `Dochi/CLIShared/CLIControlPlaneClient.swift`
+  - `DochiCLI/main.swift`
+- 테스트:
+  - `DochiTests/LocalControlPlaneServiceTests.swift`
+  - `DochiTests/CLIControlPlaneClientTests.swift`
+  - `DochiTests/ControlPlaneTokenManagerTests.swift`
 
 ---
 
