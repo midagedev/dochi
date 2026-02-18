@@ -2675,6 +2675,13 @@ final class DochiViewModel {
 
     // MARK: - API Key Management
 
+    var setupHealthReport: SetupHealthReport {
+        let provider = settings.currentProvider
+        let hasKey = !loadAPIKey(for: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasProviderAPIKey = !provider.requiresAPIKey || hasKey
+        return settings.setupHealthReport(hasProviderAPIKey: hasProviderAPIKey)
+    }
+
     func loadAPIKey(for provider: LLMProvider) -> String {
         keychainService.load(account: provider.keychainAccount) ?? ""
     }

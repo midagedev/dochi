@@ -24,6 +24,23 @@ enum OperatingProfile: String, CaseIterable, Codable, Sendable {
     }
 }
 
+struct SetupHealthIssue: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let detail: String
+    let sectionRawValue: String
+    let weight: Int
+}
+
+struct SetupHealthReport: Equatable, Sendable {
+    let score: Int
+    let issues: [SetupHealthIssue]
+
+    var primaryIssue: SetupHealthIssue? {
+        issues.max { lhs, rhs in lhs.weight < rhs.weight }
+    }
+}
+
 @MainActor
 @Observable
 final class AppSettings {
@@ -468,6 +485,79 @@ final class AppSettings {
 
     var currentTTSProvider: TTSProvider {
         TTSProvider(rawValue: ttsProvider) ?? .system
+    }
+
+    /// Ephemeral settings deep-link target; not persisted.
+    var pendingSettingsDeepLinkSection: String?
+
+    /// Setup completeness score for activation UX.
+    func setupHealthReport(hasProviderAPIKey: Bool) -> SetupHealthReport {
+        var issues: [SetupHealthIssue] = []
+
+        if currentProvider.requiresAPIKey && !hasProviderAPIKey {
+            issues.append(
+                SetupHealthIssue(
+                    id: "api_key_missing",
+                    title: "API 키 설정 필요",
+                    detail: "\(currentProvider.rawValue.uppercased()) API 키가 없어 응답 생성이 제한됩니다.",
+                    sectionRawValue: "api-key",
+                    weight: 40
+                )
+            )
+        }
+
+        let supabaseURLMissing = supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let supabaseKeyMissing = supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if autoSyncEnabled && (supabaseURLMissing || supabaseKeyMissing) {
+            issues.append(
+                SetupHealthIssue(
+                    id: "sync_config_missing",
+                    title: "동기화 연동 설정 필요",
+                    detail: "자동 동기화가 켜져 있지만 Supabase 설정이 비어 있습니다.",
+                    sectionRawValue: "account",
+                    weight: 20
+                )
+            )
+        }
+
+        if proactiveSuggestionEnabled && suggestionNotificationChannel == NotificationChannel.off.rawValue {
+            issues.append(
+                SetupHealthIssue(
+                    id: "proactive_channel_off",
+                    title: "프로액티브 알림 채널 비활성",
+                    detail: "프로액티브 제안은 켜져 있으나 전달 채널이 꺼져 있습니다.",
+                    sectionRawValue: "proactive-suggestion",
+                    weight: 15
+                )
+            )
+        }
+
+        if heartbeatEnabled && heartbeatNotificationChannel == NotificationChannel.off.rawValue {
+            issues.append(
+                SetupHealthIssue(
+                    id: "heartbeat_channel_off",
+                    title: "하트비트 알림 채널 비활성",
+                    detail: "하트비트는 켜져 있으나 알림 채널이 꺼져 있습니다.",
+                    sectionRawValue: "heartbeat",
+                    weight: 15
+                )
+            )
+        }
+
+        if defaultUserId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(
+                SetupHealthIssue(
+                    id: "default_user_missing",
+                    title: "기본 사용자 프로필 필요",
+                    detail: "가족/사용자 컨텍스트가 없어 개인화 품질이 낮아질 수 있습니다.",
+                    sectionRawValue: "family",
+                    weight: 10
+                )
+            )
+        }
+
+        let penalty = min(100, issues.reduce(0) { $0 + $1.weight })
+        return SetupHealthReport(score: max(0, 100 - penalty), issues: issues)
     }
 
     // MARK: - Memory Consolidation (I-2)

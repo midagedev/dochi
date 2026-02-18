@@ -440,6 +440,17 @@ struct ContentView: View {
                 )
             }
 
+            let setupHealth = viewModel.setupHealthReport
+            if let primaryIssue = setupHealth.primaryIssue {
+                SetupRecoveryBannerView(
+                    score: setupHealth.score,
+                    issue: primaryIssue,
+                    onOpenSettings: {
+                        openSettings(sectionRawValue: primaryIssue.sectionRawValue)
+                    }
+                )
+            }
+
             // Tool confirmation banner
             if let confirmation = viewModel.pendingToolConfirmation {
                 ToolConfirmationBannerView(
@@ -732,6 +743,13 @@ struct ContentView: View {
 
     // MARK: - Palette Action Execution
 
+    private func openSettings(sectionRawValue: String? = nil) {
+        if let sectionRawValue {
+            viewModel.settings.pendingSettingsDeepLinkSection = sectionRawValue
+        }
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+
     private func executePaletteAction(_ action: CommandPaletteItem.PaletteAction) {
         viewModel.recordUserActivity()
 
@@ -745,7 +763,7 @@ struct ContentView: View {
             viewModel.switchAgent(name: name)
         case .openSettings:
             // macOS handles ⌘, natively via Settings scene
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            openSettings()
         case .openContextInspector:
             showContextInspector = true
         case .openMemoryPanel:
@@ -780,15 +798,15 @@ struct ContentView: View {
             HintManager.shared.resetAllHints()
         case .openQuickModelPopover:
             showQuickModelPopover = true
-        case .openSettingsSection:
+        case .openSettingsSection(let section):
             // Open settings window (the section deep-link is handled by Settings scene)
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            openSettings(sectionRawValue: section)
         case .syncNow:
             Task { await viewModel.syncEngine?.sync() }
         case .syncConflicts:
             showSyncConflictSheet = true
         case .cloudAccountSettings:
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            openSettings(sectionRawValue: SettingsSection.account.rawValue)
         case .rebuildSpotlightIndex:
             if let indexer = viewModel.spotlightIndexer {
                 Task {
@@ -806,7 +824,7 @@ struct ContentView: View {
         case .memoryChangeHistory:
             showMemoryDiffSheet = true
         case .memorySettings:
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            openSettings(sectionRawValue: SettingsSection.memory.rawValue)
         case .reindexDocuments:
             if let indexer = viewModel.documentIndexer {
                 Task { await indexer.reindexAll() }
@@ -1252,6 +1270,41 @@ struct StatusBarView: View {
         case .idle:
             return ""
         }
+    }
+}
+
+// MARK: - Setup Recovery Banner
+
+struct SetupRecoveryBannerView: View {
+    let score: Int
+    let issue: SetupHealthIssue
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wrench.and.screwdriver.fill")
+                .foregroundStyle(.orange)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Setup Health \(score)/100 · \(issue.title)")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(issue.detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+
+            Button("지금 복구") {
+                onOpenSettings()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.08))
     }
 }
 
