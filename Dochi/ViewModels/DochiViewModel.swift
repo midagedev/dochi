@@ -75,6 +75,21 @@ final class DochiViewModel {
         let messageCount: Int
     }
 
+    struct ControlPlaneStreamEvent: Sendable {
+        enum Kind: String, Sendable {
+            case partial
+            case toolCall = "tool_call"
+            case toolResult = "tool_result"
+            case done
+            case error
+        }
+
+        let kind: Kind
+        let text: String?
+        let toolName: String?
+        let timestamp: String
+    }
+
     // MARK: - State
 
     private(set) var interactionState: InteractionState = .idle
@@ -999,6 +1014,21 @@ final class DochiViewModel {
     /// Control Plane `chat.send`용 단발 요청.
     /// 기존 `sendMessage()` 플로우를 재사용하고, 완료까지 대기한 뒤 최신 assistant 응답을 반환한다.
     func sendMessageFromControlPlane(prompt: String, timeoutSeconds: Int = 120) async throws -> ControlPlaneChatSendResponse {
+        try await runControlPlaneChatStream(
+            prompt: prompt,
+            correlationId: UUID().uuidString,
+            timeoutSeconds: timeoutSeconds
+        ) { _ in }
+    }
+
+    /// Control Plane `chat.stream`용 이벤트 스트림 실행.
+    /// partial/tool_call/tool_result/done 이벤트를 순서대로 전달한다.
+    func runControlPlaneChatStream(
+        prompt: String,
+        correlationId: String,
+        timeoutSeconds: Int = 120,
+        onEvent: @Sendable @escaping (ControlPlaneStreamEvent) async -> Void
+    ) async throws -> ControlPlaneChatSendResponse {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else {
             throw ControlPlaneChatSendError.emptyPrompt
@@ -1009,6 +1039,9 @@ final class DochiViewModel {
 
         let timeout = max(5, min(300, timeoutSeconds))
         let beforeMessageCount = currentConversation?.messages.count ?? 0
+        var observedMessageCount = beforeMessageCount
+        var lastStreamingLength = 0
+        var lastToolName: String?
 
         inputText = trimmedPrompt
         sendMessage()
@@ -1017,24 +1050,97 @@ final class DochiViewModel {
         while interactionState != .idle {
             if Date() >= deadline {
                 cancelRequest()
+                await onEvent(ControlPlaneStreamEvent(
+                    kind: .error,
+                    text: "[cid:\(correlationId)] timeout",
+                    toolName: nil,
+                    timestamp: Self.controlPlaneTimestamp()
+                ))
                 throw ControlPlaneChatSendError.timeout
             }
+
+            if streamingText.count < lastStreamingLength {
+                lastStreamingLength = streamingText.count
+            } else if streamingText.count > lastStreamingLength {
+                let delta = String(streamingText.dropFirst(lastStreamingLength))
+                if !delta.isEmpty {
+                    await onEvent(ControlPlaneStreamEvent(
+                        kind: .partial,
+                        text: delta,
+                        toolName: nil,
+                        timestamp: Self.controlPlaneTimestamp()
+                    ))
+                }
+                lastStreamingLength = streamingText.count
+            }
+
+            if currentToolName != lastToolName {
+                lastToolName = currentToolName
+                if let lastToolName, !lastToolName.isEmpty {
+                    await onEvent(ControlPlaneStreamEvent(
+                        kind: .toolCall,
+                        text: nil,
+                        toolName: lastToolName,
+                        timestamp: Self.controlPlaneTimestamp()
+                    ))
+                }
+            }
+
+            if let conversation = currentConversation,
+               conversation.messages.count > observedMessageCount {
+                let newMessages = conversation.messages.dropFirst(observedMessageCount)
+                for message in newMessages where message.role == .tool {
+                    await onEvent(ControlPlaneStreamEvent(
+                        kind: .toolResult,
+                        text: message.content,
+                        toolName: lastToolName,
+                        timestamp: Self.controlPlaneTimestamp()
+                    ))
+                }
+                observedMessageCount = conversation.messages.count
+            }
+
             try? await Task.sleep(for: .milliseconds(150))
         }
 
         if let errorMessage, !errorMessage.isEmpty {
+            await onEvent(ControlPlaneStreamEvent(
+                kind: .error,
+                text: "[cid:\(correlationId)] \(errorMessage)",
+                toolName: nil,
+                timestamp: Self.controlPlaneTimestamp()
+            ))
             throw ControlPlaneChatSendError.requestFailed(errorMessage)
         }
 
         guard let conversation = currentConversation else {
+            await onEvent(ControlPlaneStreamEvent(
+                kind: .error,
+                text: "[cid:\(correlationId)] no conversation",
+                toolName: nil,
+                timestamp: Self.controlPlaneTimestamp()
+            ))
             throw ControlPlaneChatSendError.noConversation
         }
 
         let candidateMessages = Array(conversation.messages.dropFirst(beforeMessageCount))
         guard let assistantMessage = candidateMessages.last(where: { $0.role == .assistant })
             ?? conversation.messages.last(where: { $0.role == .assistant }) else {
+            await onEvent(ControlPlaneStreamEvent(
+                kind: .error,
+                text: "[cid:\(correlationId)] no assistant response",
+                toolName: nil,
+                timestamp: Self.controlPlaneTimestamp()
+            ))
             throw ControlPlaneChatSendError.noAssistantResponse
         }
+
+        await onEvent(ControlPlaneStreamEvent(
+            kind: .done,
+            text: assistantMessage.content,
+            toolName: nil,
+            timestamp: Self.controlPlaneTimestamp()
+        ))
 
         return ControlPlaneChatSendResponse(
             conversationId: conversation.id.uuidString,
@@ -1042,6 +1148,12 @@ final class DochiViewModel {
             assistantMessage: assistantMessage.content,
             messageCount: conversation.messages.count
         )
+    }
+
+    nonisolated private static func controlPlaneTimestamp(_ date: Date = Date()) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     // MARK: - Image Attachment Actions (I-3)

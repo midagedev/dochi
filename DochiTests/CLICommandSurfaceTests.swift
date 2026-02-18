@@ -37,6 +37,25 @@ final class CLICommandSurfaceTests: XCTestCase {
         XCTAssertEqual(invocation.command, .dev(.bridgeSend(sessionId: "abc-123", command: "run tests")))
     }
 
+    func testParseDevChatStream() throws {
+        let invocation = try CLICommandParser.parse(["dev", "chat", "stream", "실시간", "테스트"])
+        XCTAssertEqual(invocation.command, .dev(.chatStream(prompt: "실시간 테스트")))
+    }
+
+    func testParseDevLogTailWithOptions() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "log", "tail",
+            "--seconds", "20",
+            "--category", "Tool",
+            "--level", "info",
+            "--contains", "cid:abc",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.logTail(seconds: 20, category: "Tool", level: "info", contains: "cid:abc"))
+        )
+    }
+
     func testParseInvalidModeThrows() {
         XCTAssertThrowsError(try CLICommandParser.parse(["--mode", "invalid", "ask", "hi"])) { error in
             let description = error.localizedDescription

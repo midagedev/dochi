@@ -125,7 +125,7 @@ enum DochiCLI {
             return handleSession(action, runtimeMode: invocation.runtimeMode)
 
         case .dev(let action):
-            return handleDev(action, runtimeMode: invocation.runtimeMode)
+            return handleDev(action, runtimeMode: invocation.runtimeMode, outputMode: invocation.outputMode)
 
         case .doctor:
             return handleDoctor(runtimeMode: invocation.runtimeMode)
@@ -405,7 +405,7 @@ enum DochiCLI {
         }
     }
 
-    private static func handleDev(_ action: CLIDevAction, runtimeMode: CLIRuntimeMode) -> CLIResult {
+    private static func handleDev(_ action: CLIDevAction, runtimeMode: CLIRuntimeMode, outputMode: CLIOutputMode) -> CLIResult {
         guard let client = appConnectedClient(runtimeMode: runtimeMode) else {
             return appConnectionFailure(command: "dev", reason: "Dochi 앱이 실행 중이 아니거나 연결할 수 없습니다.")
         }
@@ -431,6 +431,19 @@ enum DochiCLI {
             } catch {
                 return CLIResult(exitCode: .runtimeError, command: "dev.log.recent", message: "요청 실패: \(error.localizedDescription)")
             }
+
+        case .logTail(let seconds, let category, let level, let contains):
+            return handleDevLogTail(
+                client: client,
+                outputMode: outputMode,
+                seconds: seconds,
+                category: category,
+                level: level,
+                contains: contains
+            )
+
+        case .chatStream(let prompt):
+            return handleDevChatStream(client: client, outputMode: outputMode, prompt: prompt)
 
         case .tool(let name, let argumentsJSON):
             do {
@@ -526,6 +539,186 @@ enum DochiCLI {
             } catch {
                 return CLIResult(exitCode: .runtimeError, command: "dev.bridge.read", message: "요청 실패: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private static func handleDevChatStream(
+        client: CLIControlPlaneClient,
+        outputMode: CLIOutputMode,
+        prompt: String
+    ) -> CLIResult {
+        do {
+            let openResult = try client.call(method: "chat.stream.open", params: ["prompt": prompt])
+            guard let streamId = openResult["stream_id"] as? String, !streamId.isEmpty else {
+                return CLIResult(exitCode: .runtimeError, command: "dev.chat.stream", message: "chat.stream.open 응답에 stream_id가 없습니다.")
+            }
+            let correlationId = openResult["correlation_id"] as? String ?? "-"
+
+            var collected: [[String: Any]] = []
+            defer {
+                _ = try? client.call(method: "chat.stream.close", params: ["stream_id": streamId])
+            }
+
+            if outputMode == .text {
+                print("chat.stream 시작: stream_id=\(streamId), correlation_id=\(correlationId)")
+            }
+
+            while true {
+                let readResult = try client.call(method: "chat.stream.read", params: [
+                    "stream_id": streamId,
+                    "limit": 80,
+                ])
+                let events = readResult["events"] as? [[String: Any]] ?? []
+                collected.append(contentsOf: events)
+
+                if outputMode == .text {
+                    renderChatStreamEvents(events)
+                }
+
+                let done = readResult["done"] as? Bool ?? false
+                if done {
+                    let errorMessage = readResult["error_message"] as? String
+                    if let errorMessage, !errorMessage.isEmpty {
+                        return CLIResult(
+                            exitCode: .runtimeError,
+                            command: "dev.chat.stream",
+                            message: "스트림 실패: \(errorMessage)",
+                            data: [
+                                "stream_id": streamId,
+                                "correlation_id": correlationId,
+                                "events": collected,
+                            ]
+                        )
+                    }
+
+                    return CLIResult(
+                        exitCode: .success,
+                        command: "dev.chat.stream",
+                        message: "chat.stream 완료 (events: \(collected.count), correlation_id: \(correlationId))",
+                        data: [
+                            "stream_id": streamId,
+                            "correlation_id": correlationId,
+                            "events": collected,
+                        ]
+                    )
+                }
+
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+        } catch let error as CLIControlPlaneError {
+            return mapControlPlaneError(error, command: "dev.chat.stream")
+        } catch {
+            return CLIResult(exitCode: .runtimeError, command: "dev.chat.stream", message: "요청 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private static func handleDevLogTail(
+        client: CLIControlPlaneClient,
+        outputMode: CLIOutputMode,
+        seconds: Int,
+        category: String?,
+        level: String?,
+        contains: String?
+    ) -> CLIResult {
+        do {
+            var openParams: [String: Any] = [
+                "lookback_seconds": 30,
+            ]
+            if let category, !category.isEmpty {
+                openParams["category"] = category
+            }
+            if let level, !level.isEmpty {
+                openParams["level"] = level
+            }
+            if let contains, !contains.isEmpty {
+                openParams["contains"] = contains
+            }
+
+            let openResult = try client.call(method: "log.tail.open", params: openParams)
+            guard let tailId = openResult["tail_id"] as? String, !tailId.isEmpty else {
+                return CLIResult(exitCode: .runtimeError, command: "dev.log.tail", message: "log.tail.open 응답에 tail_id가 없습니다.")
+            }
+            let correlationId = openResult["correlation_id"] as? String ?? "-"
+
+            var collected: [[String: Any]] = []
+            defer {
+                _ = try? client.call(method: "log.tail.close", params: ["tail_id": tailId])
+            }
+
+            if outputMode == .text {
+                print("log.tail 시작: tail_id=\(tailId), correlation_id=\(correlationId), duration=\(seconds)s")
+            }
+
+            let deadline = Date().addingTimeInterval(TimeInterval(max(1, seconds)))
+            while Date() < deadline {
+                let readResult = try client.call(method: "log.tail.read", params: [
+                    "tail_id": tailId,
+                    "limit": 200,
+                ])
+                let events = readResult["events"] as? [[String: Any]] ?? []
+                collected.append(contentsOf: events)
+
+                if outputMode == .text {
+                    renderLogTailEvents(events)
+                }
+
+                Thread.sleep(forTimeInterval: 1.0)
+            }
+
+            return CLIResult(
+                exitCode: .success,
+                command: "dev.log.tail",
+                message: "log.tail 종료 (events: \(collected.count), correlation_id: \(correlationId))",
+                data: [
+                    "tail_id": tailId,
+                    "correlation_id": correlationId,
+                    "events": collected,
+                ]
+            )
+        } catch let error as CLIControlPlaneError {
+            return mapControlPlaneError(error, command: "dev.log.tail")
+        } catch {
+            return CLIResult(exitCode: .runtimeError, command: "dev.log.tail", message: "요청 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private static func renderChatStreamEvents(_ events: [[String: Any]]) {
+        for event in events {
+            let type = event["type"] as? String ?? "unknown"
+            switch type {
+            case "partial":
+                let text = event["text"] as? String ?? ""
+                if !text.isEmpty {
+                    print(text, terminator: "")
+                    fflush(stdout)
+                }
+            case "tool_call":
+                let toolName = event["tool_name"] as? String ?? "unknown"
+                print("\n[tool_call] \(toolName)")
+            case "tool_result":
+                let text = event["text"] as? String ?? ""
+                let preview = text.isEmpty ? "(empty)" : text
+                print("\n[tool_result] \(preview)")
+            case "done":
+                print("\n[done]")
+            case "error":
+                let text = event["text"] as? String ?? "(error)"
+                print("\n[error] \(text)")
+            default:
+                let text = event["text"] as? String ?? ""
+                print("\n[\(type)] \(text)")
+            }
+        }
+    }
+
+    private static func renderLogTailEvents(_ events: [[String: Any]]) {
+        guard !events.isEmpty else { return }
+        for event in events {
+            let ts = event["timestamp"] as? String ?? "-"
+            let category = event["category"] as? String ?? "-"
+            let level = event["level"] as? String ?? "-"
+            let message = event["message"] as? String ?? ""
+            print("[\(ts)] [\(category)] [\(level)] \(message)")
         }
     }
 
@@ -704,6 +897,8 @@ enum DochiCLI {
           dochi session list
           dochi dev tool <name> [arguments_json]
           dochi dev log recent [--minutes N]
+          dochi dev log tail [--seconds N] [--category C] [--level L] [--contains K]
+          dochi dev chat stream <prompt>
           dochi dev bridge open [agent]
           dochi dev bridge status [session_id]
           dochi dev bridge send <session_id> <command>
