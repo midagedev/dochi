@@ -160,7 +160,7 @@ enum DochiCLI {
             return CLIResult(
                 exitCode: .authError,
                 command: "ask",
-                message: "API 키가 설정되지 않았습니다. dochi config set api_key <KEY>를 실행하세요."
+                message: "standalone API 키가 없습니다. dochi config set api_key <KEY>를 실행하세요."
             )
         }
 
@@ -169,7 +169,7 @@ enum DochiCLI {
             let response = try await client.query(query)
             return CLIResult(exitCode: .success, command: "ask", message: response)
         } catch {
-            return CLIResult(exitCode: .runtimeError, command: "ask", message: "질의 실패: \(error.localizedDescription)")
+            return CLIResult(exitCode: .runtimeError, command: "ask", message: "standalone 질의 실패: \(error.localizedDescription)")
         }
     }
 
@@ -224,11 +224,11 @@ enum DochiCLI {
             return CLIResult(
                 exitCode: .authError,
                 command: "chat",
-                message: "API 키가 설정되지 않았습니다. dochi config set api_key <KEY>를 실행하세요."
+                message: "standalone API 키가 없습니다. dochi config set api_key <KEY>를 실행하세요."
             )
         }
 
-        print("도치 대화 모드 시작 (/quit 종료, /clear 기록 초기화)")
+        print("도치 standalone 대화 모드 시작 (/quit 종료, /clear 기록 초기화)")
         let client = DochiCLIClient(config: config)
 
         while true {
@@ -730,7 +730,6 @@ enum DochiCLI {
         let configFile = CLIConfig.configFile
         let config = CLIConfig.load()
         let appRunning = AppConnectionProbe.isDochiAppRunning()
-        let appRequired = runtimeMode != .standalone
         let socketPath = CLIControlPlaneClient.defaultSocketURL.path
         let socketExists = FileManager.default.fileExists(atPath: socketPath)
         let tokenPath = CLIControlPlaneClient.defaultTokenURL.path
@@ -741,7 +740,7 @@ enum DochiCLI {
 
         let pingOK: Bool
         let pingDetail: String
-        if appRequired && appRunning && socketExists {
+        if appRunning && socketExists {
             do {
                 let pingResult = try CLIControlPlaneClient().call(method: "app.ping")
                 let version = pingResult["version"] as? String ?? "unknown"
@@ -751,34 +750,35 @@ enum DochiCLI {
                 pingOK = false
                 pingDetail = "connection failed: \(error.localizedDescription)"
             }
-        } else if appRequired {
+        } else {
             pingOK = false
             pingDetail = "skipped (app/socket unavailable)"
-        } else {
-            pingOK = true
-            pingDetail = "skipped in standalone mode"
         }
 
         let checks: [(name: String, ok: Bool, detail: String)] = [
             ("context_dir", FileManager.default.fileExists(atPath: contextDir.path), contextDir.path),
             ("config_file", FileManager.default.fileExists(atPath: configFile.path), configFile.path),
-            ("api_key", (config.apiKey?.isEmpty == false), "api_key configured"),
-            ("app_running", !appRequired || appRunning, appRequired ? "bundle: com.hckim.dochi" : "standalone mode"),
-            ("control_plane_socket", !appRequired || socketExists, socketPath),
-            ("control_plane_token_file", !appRequired || (tokenExists && tokenReadable), tokenPath),
+            ("app_running", appRunning, "bundle: com.hckim.dochi"),
+            ("control_plane_socket", socketExists, socketPath),
+            ("control_plane_token_file", (tokenExists && tokenReadable), tokenPath),
             ("control_plane_ping", pingOK, pingDetail),
             ("mode", true, runtimeMode.rawValue),
         ]
 
-        let okCount = checks.filter { $0.ok }.count
-        let status = okCount == checks.count ? "정상" : "확인 필요"
+        var mutableChecks = checks
+        if runtimeMode == .standalone {
+            mutableChecks.append(("standalone_api_key", (config.apiKey?.isEmpty == false), "cli_config api_key"))
+        }
 
-        var lines = ["doctor 결과: \(status) (\(okCount)/\(checks.count))"]
-        for check in checks {
+        let okCount = mutableChecks.filter { $0.ok }.count
+        let status = okCount == mutableChecks.count ? "정상" : "확인 필요"
+
+        var lines = ["doctor 결과: \(status) (\(okCount)/\(mutableChecks.count))"]
+        for check in mutableChecks {
             lines.append("- \(check.ok ? "OK" : "FAIL") \(check.name): \(check.detail)")
         }
 
-        let structuredChecks = checks.map { check -> [String: Any] in
+        let structuredChecks = mutableChecks.map { check -> [String: Any] in
             [
                 "name": check.name,
                 "ok": check.ok,
@@ -787,13 +787,13 @@ enum DochiCLI {
         }
 
         return CLIResult(
-            exitCode: okCount == checks.count ? .success : .connectionError,
+            exitCode: okCount == mutableChecks.count ? .success : .connectionError,
             command: "doctor",
             message: lines.joined(separator: "\n"),
             data: [
                 "status": status,
                 "ok_count": okCount,
-                "total_count": checks.count,
+                "total_count": mutableChecks.count,
                 "checks": structuredChecks,
             ]
         )
@@ -805,7 +805,6 @@ enum DochiCLI {
         if runtimeMode == .standalone {
             return nil
         }
-
         guard AppConnectionProbe.isDochiAppRunning() else {
             return nil
         }
@@ -818,7 +817,7 @@ enum DochiCLI {
             확인할 항목:
             1) Dochi 앱이 실행 중인지 확인하세요.
             2) `dochi doctor`로 연결 상태를 점검하세요.
-            3) 앱 없이 실행하려면 `--mode standalone`을 사용하세요.
+            3) 디버그용 standalone은 `--mode standalone --allow-standalone`으로만 사용하세요.
             """
         return CLIResult(exitCode: .connectionError, command: command, message: message)
     }
@@ -927,6 +926,7 @@ enum DochiCLI {
 
         전역 옵션:
           --mode <auto|app|standalone>
+          --allow-standalone (디버그 전용)
           --json
           --help
           --version
@@ -974,7 +974,7 @@ struct CLIConfig: Codable {
     }
 }
 
-// MARK: - CLI Client
+// MARK: - Standalone Client (Debug Only)
 
 final class DochiCLIClient {
     private let config: CLIConfig
@@ -1017,7 +1017,6 @@ final class DochiCLIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let systemPrompt = loadSystemPrompt()
-
         let body: [String: Any] = [
             "model": config.model,
             "max_tokens": 4096,
@@ -1046,8 +1045,6 @@ final class DochiCLIClient {
         return (try? String(contentsOf: file, encoding: .utf8)) ?? "당신은 도치라는 이름의 AI 어시스턴트입니다."
     }
 }
-
-// MARK: - CLI Errors
 
 enum CLIError: LocalizedError {
     case noAPIKey

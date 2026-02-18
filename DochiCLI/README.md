@@ -25,9 +25,12 @@ dochi doctor
 |------|------|--------------|----------------|------------|
 | `auto` (기본값) | 앱 연결 모드로 실행 | 예 | 예 | 아니오 |
 | `app` | 앱 연결 모드 강제 | 예 | 예 | 아니오 |
-| `standalone` | 앱 없이 직접 LLM API 호출 | 아니오 | 아니오 | 예 (`dochi config set api_key ...`) |
+| `standalone` | 디버그 전용 직접 LLM 호출 | 아니오 | 아니오 | 예 (`dochi config set api_key ...`) |
 
-참고: 현재 구현에서 `auto`와 `app`은 동일하게 앱 연결을 요구합니다.
+정책:
+- 제품 기본 경로는 `auto`/`app` (Host 연결) 입니다.
+- `standalone`은 자동 fallback되지 않습니다.
+- `standalone`은 `--allow-standalone`(또는 `DOCHI_CLI_ALLOW_STANDALONE=1`)이 있어야만 실행됩니다.
 
 ## 3) 주요 명령
 
@@ -43,7 +46,13 @@ dochi config show
 dochi config get provider
 dochi config set provider anthropic
 dochi config set model claude-sonnet-4-5-20250929
+```
+
+디버그용 standalone 설정:
+
+```bash
 dochi config set api_key <YOUR_KEY>
+dochi --mode standalone --allow-standalone ask "연결 테스트"
 ```
 
 ### 운영/개발 명령
@@ -84,12 +93,12 @@ dochi ask "회의록 요약해줘" --json
 
 - `context_dir`
 - `config_file`
-- `api_key`
 - `app_running`
 - `control_plane_socket`
 - `control_plane_token_file`
 - `control_plane_ping`
 - `mode`
+- `standalone_api_key` (`--mode standalone`일 때만)
 
 앱 연결 모드에서 문제를 만났다면 `dochi doctor` 출력부터 확인하세요.
 
@@ -99,7 +108,7 @@ dochi ask "회의록 요약해줘" --json
 
 1. Dochi 데스크톱 앱이 실행 중인지 확인
 2. `dochi doctor`에서 `app_running`, `control_plane_socket`, `control_plane_ping` 확인
-3. 앱 없이 쓰려면 `--mode standalone` 사용
+3. 디버깅으로 우회하려면 `--mode standalone --allow-standalone` 사용
 
 ### "로컬 API 인증에 실패했습니다"
 
@@ -113,6 +122,7 @@ dochi ask "회의록 요약해줘" --json
 dochi config set api_key <YOUR_KEY>
 dochi config set provider anthropic
 dochi config set model claude-sonnet-4-5-20250929
+dochi --mode standalone --allow-standalone ask "테스트"
 ```
 
 ## 8) 종료 코드

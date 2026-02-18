@@ -48,7 +48,8 @@ CLI_BIN="$(find ~/Library/Developer/Xcode/DerivedData -path '*Build/Products/Deb
 ```
 
 - 기본 모드(`--mode auto`)는 실행 중인 Dochi 앱의 로컬 API(Control Plane)에 연결합니다.
-- 앱 없이 직접 LLM API를 호출하려면 `--mode standalone`을 사용합니다.
+- 기본 사용은 Host 연결 모드(`auto`/`app`)를 권장합니다.
+- standalone은 디버그 전용이며 `--mode standalone --allow-standalone`으로만 활성화됩니다.
 - 상세 명령/운영 가이드: [`DochiCLI/README.md`](./DochiCLI/README.md)
 
 ## 컨텍스트 구조

@@ -77,9 +77,16 @@ enum CLIParseError: LocalizedError {
 }
 
 enum CLICommandParser {
-    static func parse(_ args: [String]) throws -> CLIInvocation {
+    static func parse(
+        _ args: [String],
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> CLIInvocation {
         var outputMode: CLIOutputMode = .text
         var runtimeMode: CLIRuntimeMode = .auto
+        var allowStandalone = false
+        if let flag = environment["DOCHI_CLI_ALLOW_STANDALONE"]?.lowercased() {
+            allowStandalone = flag == "1" || flag == "true" || flag == "yes"
+        }
 
         var filtered: [String] = []
         var i = 0
@@ -92,6 +99,8 @@ enum CLICommandParser {
                 outputMode = .json
             case "--help", "-h":
                 helpRequested = true
+            case "--allow-standalone":
+                allowStandalone = true
             case "--mode":
                 let next = i + 1
                 guard next < args.count else {
@@ -114,6 +123,10 @@ enum CLICommandParser {
                 }
             }
             i += 1
+        }
+
+        if runtimeMode == .standalone && !allowStandalone {
+            throw CLIParseError.invalidUsage("standalone 모드는 디버그 전용입니다. `--allow-standalone`을 함께 지정하세요.")
         }
 
         if helpRequested {

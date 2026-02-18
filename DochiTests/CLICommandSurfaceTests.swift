@@ -63,6 +63,28 @@ final class CLICommandSurfaceTests: XCTestCase {
         }
     }
 
+    func testParseStandaloneWithoutAllowFlagThrows() {
+        XCTAssertThrowsError(try CLICommandParser.parse(["--mode", "standalone", "ask", "hi"], environment: [:])) { error in
+            let description = error.localizedDescription
+            XCTAssertTrue(description.contains("--allow-standalone"))
+        }
+    }
+
+    func testParseStandaloneWithAllowFlagPasses() throws {
+        let invocation = try CLICommandParser.parse(["--mode", "standalone", "--allow-standalone", "ask", "hi"], environment: [:])
+        XCTAssertEqual(invocation.runtimeMode, .standalone)
+        XCTAssertEqual(invocation.command, .ask(query: "hi"))
+    }
+
+    func testParseStandaloneWithEnvironmentFlagPasses() throws {
+        let invocation = try CLICommandParser.parse(
+            ["--mode", "standalone", "ask", "hi"],
+            environment: ["DOCHI_CLI_ALLOW_STANDALONE": "1"]
+        )
+        XCTAssertEqual(invocation.runtimeMode, .standalone)
+        XCTAssertEqual(invocation.command, .ask(query: "hi"))
+    }
+
     func testParseInvalidConfigUsageThrows() {
         XCTAssertThrowsError(try CLICommandParser.parse(["config", "set", "model"])) { error in
             let description = error.localizedDescription
