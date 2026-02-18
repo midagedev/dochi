@@ -9,7 +9,11 @@ final class ControlPlaneTokenManager: @unchecked Sendable {
     init(tokenFileURL: URL = ControlPlaneTokenManager.defaultTokenURL) {
         self.tokenFileURL = tokenFileURL
         self.token = Self.generateToken()
-        _ = rotate()
+        do {
+            try persist(token: token)
+        } catch {
+            Log.app.error("ControlPlane: 초기 토큰 저장 실패: \(error.localizedDescription)")
+        }
     }
 
     var tokenFilePath: String {
@@ -25,16 +29,17 @@ final class ControlPlaneTokenManager: @unchecked Sendable {
     @discardableResult
     func rotate() -> String {
         let newToken = Self.generateToken()
-        lock.lock()
-        token = newToken
-        lock.unlock()
 
         do {
             try persist(token: newToken)
+            lock.lock()
+            token = newToken
+            lock.unlock()
+            return newToken
         } catch {
             Log.app.error("ControlPlane: 토큰 저장 실패: \(error.localizedDescription)")
+            return currentToken()
         }
-        return newToken
     }
 
     func validate(_ candidate: String?) -> Bool {

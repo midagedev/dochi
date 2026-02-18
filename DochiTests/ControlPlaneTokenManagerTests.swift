@@ -52,4 +52,15 @@ final class ControlPlaneTokenManagerTests: XCTestCase {
         XCTAssertEqual(result, 0)
         XCTAssertEqual(fileStat.st_mode & 0o777, 0o600)
     }
+
+    func testRotateKeepsCurrentTokenWhenPersistFails() {
+        let invalidTokenURL = URL(fileURLWithPath: "/dev/null/control-plane.token")
+        let manager = ControlPlaneTokenManager(tokenFileURL: invalidTokenURL)
+        let beforeRotate = manager.currentToken()
+
+        let rotated = manager.rotate()
+
+        XCTAssertEqual(rotated, beforeRotate)
+        XCTAssertEqual(manager.currentToken(), beforeRotate)
+    }
 }
