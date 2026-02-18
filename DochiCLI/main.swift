@@ -80,12 +80,13 @@ enum AppConnectionProbe {
 
 enum DochiCLI {
     static func run(arguments: [String] = Array(CommandLine.arguments.dropFirst())) async -> CLIExitCode {
+        let parseOutputMode: CLIOutputMode = arguments.contains("--json") ? .json : .text
         let invocation: CLIInvocation
 
         do {
             invocation = try CLICommandParser.parse(arguments)
         } catch {
-            let printer = CLIPrinter(outputMode: .text)
+            let printer = CLIPrinter(outputMode: parseOutputMode)
             let message = "명령 파싱 오류: \(error.localizedDescription)\n\n\(usageText())"
             printer.emit(CLIResult(exitCode: .invalidUsage, command: "help", message: message))
             return .invalidUsage
