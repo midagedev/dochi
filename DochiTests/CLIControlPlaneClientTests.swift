@@ -4,6 +4,7 @@ import XCTest
 final class CLIControlPlaneClientTests: XCTestCase {
     private var tempDirectoryURL: URL!
     private var socketURL: URL!
+    private var tokenURL: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -12,6 +13,7 @@ final class CLIControlPlaneClientTests: XCTestCase {
             .appendingPathComponent("dc-cli-\(suffix)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectoryURL, withIntermediateDirectories: true)
         socketURL = tempDirectoryURL.appendingPathComponent("dochi.sock")
+        tokenURL = tempDirectoryURL.appendingPathComponent("control-plane.token")
     }
 
     override func tearDownWithError() throws {
@@ -68,6 +70,51 @@ final class CLIControlPlaneClientTests: XCTestCase {
             guard case CLIControlPlaneError.connectFailed = error else {
                 return XCTFail("unexpected error: \(error)")
             }
+        }
+    }
+
+    func testCallIncludesAuthTokenFromTokenFile() throws {
+        try Data("secret-token".utf8).write(to: tokenURL, options: .atomic)
+
+        let service = LocalControlPlaneService(
+            socketURL: socketURL,
+            methodHandler: { method, _ in
+                guard method == "app.ping" else {
+                    return .failure(code: "method_not_found", message: method)
+                }
+                return .ok(["status": "ok"])
+            },
+            authTokenProvider: { "secret-token" }
+        )
+        defer { service.stop() }
+
+        service.start()
+        try waitForSocket()
+
+        let client = CLIControlPlaneClient(socketURL: socketURL, tokenURL: tokenURL)
+        let result = try client.call(method: "app.ping")
+        XCTAssertEqual(result["status"] as? String, "ok")
+    }
+
+    func testCallThrowsUnauthorizedWhenTokenDoesNotMatch() throws {
+        try Data("wrong-token".utf8).write(to: tokenURL, options: .atomic)
+
+        let service = LocalControlPlaneService(
+            socketURL: socketURL,
+            methodHandler: { _, _ in .ok(["status": "ok"]) },
+            authTokenProvider: { "secret-token" }
+        )
+        defer { service.stop() }
+
+        service.start()
+        try waitForSocket()
+
+        let client = CLIControlPlaneClient(socketURL: socketURL, tokenURL: tokenURL)
+        XCTAssertThrowsError(try client.call(method: "app.ping")) { error in
+            guard case CLIControlPlaneError.remoteError(let code, _) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(code, "unauthorized")
         }
     }
 

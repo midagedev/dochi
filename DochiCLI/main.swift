@@ -733,6 +733,11 @@ enum DochiCLI {
         let appRequired = runtimeMode != .standalone
         let socketPath = CLIControlPlaneClient.defaultSocketURL.path
         let socketExists = FileManager.default.fileExists(atPath: socketPath)
+        let tokenPath = CLIControlPlaneClient.defaultTokenURL.path
+        let tokenExists = FileManager.default.fileExists(atPath: tokenPath)
+        let tokenReadable = (try? String(contentsOfFile: tokenPath, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
 
         let pingOK: Bool
         let pingDetail: String
@@ -760,6 +765,7 @@ enum DochiCLI {
             ("api_key", (config.apiKey?.isEmpty == false), "api_key configured"),
             ("app_running", !appRequired || appRunning, appRequired ? "bundle: com.hckim.dochi" : "standalone mode"),
             ("control_plane_socket", !appRequired || socketExists, socketPath),
+            ("control_plane_token_file", !appRequired || (tokenExists && tokenReadable), tokenPath),
             ("control_plane_ping", pingOK, pingDetail),
             ("mode", true, runtimeMode.rawValue),
         ]
@@ -824,6 +830,19 @@ enum DochiCLI {
         case .socketPathTooLong, .requestEncodeFailed, .responseDecodeFailed:
             return CLIResult(exitCode: .runtimeError, command: command, message: "Control Plane 처리 오류: \(error.localizedDescription)")
         case .remoteError(let code, let message):
+            if code == "unauthorized" {
+                return CLIResult(
+                    exitCode: .authError,
+                    command: command,
+                    message: """
+                        로컬 API 인증에 실패했습니다.
+                        확인할 항목:
+                        1) Dochi 앱이 실행 중인지 확인하세요.
+                        2) `dochi doctor`로 토큰/소켓 상태를 점검하세요.
+                        상세: \(message)
+                        """
+                )
+            }
             return CLIResult(exitCode: .runtimeError, command: command, message: "앱 요청 실패 (\(code)): \(message)")
         }
     }

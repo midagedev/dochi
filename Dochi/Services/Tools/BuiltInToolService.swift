@@ -338,16 +338,23 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         // TerminalRunTool handles its own confirm flow via terminalLLMConfirmAlways (C-4)
         let skipConfirmation = resolvedName == "shell.execute" || resolvedName == "terminal.run"
         if !skipConfirmation && (tool.category == .sensitive || tool.category == .restricted) {
-            if let handler = confirmationHandler {
-                let approved = await handler(tool.name, tool.description)
-                if !approved {
-                    Log.tool.info("Tool \(name) denied by user")
-                    return ToolResult(
-                        toolCallId: "",
-                        content: "도구 '\(name)' 실행이 사용자에 의해 거부되었습니다.",
-                        isError: true
-                    )
-                }
+            guard let handler = confirmationHandler else {
+                Log.tool.warning("Tool \(name) blocked: confirmation handler unavailable")
+                return ToolResult(
+                    toolCallId: "",
+                    content: "도구 '\(name)' 실행을 위한 사용자 확인 채널을 사용할 수 없습니다.",
+                    isError: true
+                )
+            }
+
+            let approved = await handler(tool.name, tool.description)
+            if !approved {
+                Log.tool.info("Tool \(name) denied by user")
+                return ToolResult(
+                    toolCallId: "",
+                    content: "도구 '\(name)' 실행이 사용자에 의해 거부되었습니다.",
+                    isError: true
+                )
             }
         }
 

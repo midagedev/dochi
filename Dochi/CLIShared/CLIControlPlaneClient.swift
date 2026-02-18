@@ -29,13 +29,16 @@ enum CLIControlPlaneError: LocalizedError {
 
 struct CLIControlPlaneClient {
     let socketURL: URL
+    let tokenURL: URL
     let timeoutSeconds: Int
 
     init(
         socketURL: URL = CLIControlPlaneClient.defaultSocketURL,
+        tokenURL: URL = CLIControlPlaneClient.defaultTokenURL,
         timeoutSeconds: Int = 3
     ) {
         self.socketURL = socketURL
+        self.tokenURL = tokenURL
         self.timeoutSeconds = max(1, timeoutSeconds)
     }
 
@@ -80,11 +83,14 @@ struct CLIControlPlaneClient {
             throw CLIControlPlaneError.connectFailed(String(cString: strerror(errno)))
         }
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "request_id": UUID().uuidString,
             "method": method,
             "params": params,
         ]
+        if let authToken = loadAuthToken() {
+            payload["auth_token"] = authToken
+        }
 
         guard let requestData = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
             throw CLIControlPlaneError.requestEncodeFailed
@@ -151,5 +157,21 @@ struct CLIControlPlaneClient {
     static var defaultSocketURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Dochi/run/dochi.sock")
+    }
+
+    static var defaultTokenURL: URL {
+        defaultSocketURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("control-plane.token")
+    }
+
+    private func loadAuthToken() -> String? {
+        guard let data = try? Data(contentsOf: tokenURL),
+              let token = String(data: data, encoding: .utf8)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            return nil
+        }
+        return token
     }
 }

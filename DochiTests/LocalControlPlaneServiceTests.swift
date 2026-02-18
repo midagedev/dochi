@@ -87,6 +87,69 @@ final class LocalControlPlaneServiceTests: XCTestCase {
         XCTAssertEqual(error?["code"] as? String, "invalid_json")
     }
 
+    func testSocketFilePermissionIs0600() throws {
+        let service = LocalControlPlaneService(socketURL: socketURL) { _, _ in
+            .ok(["status": "ok"])
+        }
+        defer { service.stop() }
+
+        service.start()
+        try waitForSocket()
+
+        var fileStat = stat()
+        let result = socketURL.path.withCString { cString in
+            stat(cString, &fileStat)
+        }
+        XCTAssertEqual(result, 0)
+        let permissionBits = fileStat.st_mode & 0o777
+        XCTAssertEqual(permissionBits, 0o600)
+    }
+
+    func testRejectsRequestWithoutAuthTokenWhenProviderConfigured() throws {
+        let service = LocalControlPlaneService(
+            socketURL: socketURL,
+            methodHandler: { _, _ in .ok(["status": "ok"]) },
+            authTokenProvider: { "secret-token" }
+        )
+        defer { service.stop() }
+
+        service.start()
+        try waitForSocket()
+
+        let response = try sendJSONRequest([
+            "request_id": "auth-missing",
+            "method": "app.ping",
+            "params": [:],
+        ])
+
+        XCTAssertEqual(response["ok"] as? Bool, false)
+        let error = response["error"] as? [String: Any]
+        XCTAssertEqual(error?["code"] as? String, "unauthorized")
+    }
+
+    func testAcceptsRequestWithValidAuthToken() throws {
+        let service = LocalControlPlaneService(
+            socketURL: socketURL,
+            methodHandler: { method, _ in .ok(["echo_method": method]) },
+            authTokenProvider: { "secret-token" }
+        )
+        defer { service.stop() }
+
+        service.start()
+        try waitForSocket()
+
+        let response = try sendJSONRequest([
+            "request_id": "auth-ok",
+            "method": "app.ping",
+            "auth_token": "secret-token",
+            "params": [:],
+        ])
+
+        XCTAssertEqual(response["ok"] as? Bool, true)
+        let result = response["result"] as? [String: Any]
+        XCTAssertEqual(result?["echo_method"] as? String, "app.ping")
+    }
+
     private func waitForSocket(timeout: TimeInterval = 2.0) throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
