@@ -148,6 +148,11 @@ final class ProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
             todaySuggestionCount = 0
         }
 
+        if hasReachedDailyCap() {
+            state = .cooldown
+            return
+        }
+
         let elapsed = Date().timeIntervalSince(lastActivityDate)
         let idleThreshold = TimeInterval(settings.proactiveSuggestionIdleMinutes * 60)
         guard elapsed >= idleThreshold else { return }
@@ -173,6 +178,11 @@ final class ProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
     // MARK: - Suggestion Generation
 
     private func generateSuggestion() async {
+        guard !hasReachedDailyCap() else {
+            state = .cooldown
+            return
+        }
+
         let enabledTypes = activeTypes()
         guard !enabledTypes.isEmpty else {
             state = .idle
@@ -377,6 +387,11 @@ final class ProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
         if suggestionHistory.count > Self.maxHistoryCount {
             suggestionHistory = Array(suggestionHistory.prefix(Self.maxHistoryCount))
         }
+    }
+
+    private func hasReachedDailyCap() -> Bool {
+        let cap = max(settings.proactiveDailyCap, 0)
+        return todaySuggestionCount >= cap
     }
 
     private static let dayFormatter: DateFormatter = {

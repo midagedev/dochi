@@ -130,6 +130,20 @@ struct ProactiveSuggestionSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Stepper(
+                    value: Binding(
+                        get: { settings.proactiveDailyCap },
+                        set: { settings.proactiveDailyCap = min(max($0, 0), 20) }
+                    ),
+                    in: 0...20
+                ) {
+                    Text("일일 제안 한도: \(settings.proactiveDailyCap)개")
+                }
+
+                Text("하루 생성 가능한 제안 수를 제한합니다. 0이면 제안을 생성하지 않습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Toggle("조용한 시간 적용", isOn: Binding(
                     get: { settings.proactiveSuggestionQuietHoursEnabled },
                     set: { settings.proactiveSuggestionQuietHoursEnabled = $0 }
