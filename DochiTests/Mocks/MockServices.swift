@@ -1050,6 +1050,10 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         try await startSession(profileId: profileId)
     }
 
+    func activeSession(for profileId: UUID) -> ExternalToolSession? {
+        sessions.first { $0.profileId == profileId && $0.status != .dead }
+    }
+
     func sendCommand(sessionId: UUID, command: String) async throws {
         sendCommandCallCount += 1
         lastSentCommand = command

@@ -159,6 +159,36 @@ final class ExternalToolManagerTests: XCTestCase {
     }
 
     @MainActor
+    func testActiveSessionReturnsRunningSessionForProfile() async throws {
+        let manager = MockExternalToolSessionManager()
+        let profile = ExternalToolProfile(name: "Codex", command: "codex")
+        manager.saveProfile(profile)
+
+        try await manager.startSession(profileId: profile.id)
+
+        let active = manager.activeSession(for: profile.id)
+        XCTAssertNotNil(active)
+        XCTAssertEqual(active?.profileId, profile.id)
+        XCTAssertEqual(active?.status, .idle)
+    }
+
+    @MainActor
+    func testActiveSessionIgnoresDeadSession() async throws {
+        let manager = MockExternalToolSessionManager()
+        let profile = ExternalToolProfile(name: "Codex", command: "codex")
+        manager.saveProfile(profile)
+
+        try await manager.startSession(profileId: profile.id)
+        guard let sessionId = manager.sessions.first?.id else {
+            XCTFail("Expected created session")
+            return
+        }
+        await manager.stopSession(id: sessionId)
+
+        XCTAssertNil(manager.activeSession(for: profile.id))
+    }
+
+    @MainActor
     func testSessionStartFailsWithUnknownProfile() async {
         let manager = MockExternalToolSessionManager()
 
