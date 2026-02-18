@@ -276,11 +276,114 @@
 
 ---
 
+## EPIC F — CLI & Debugging Control Plane
+
+목적: Dochi를 GUI와 동등한 **정식 CLI 인터페이스**로 제공하고, 개발 디버깅 생산성도 함께 개선한다.
+
+### F0. 아키텍처 결정 (ADR)
+- 결론:
+  1. CLI는 디버깅 부가 기능이 아니라 Phase 6의 정식 인터페이스로 취급한다.
+  2. 단순 파일 조회/설정 편집은 API 없이 가능하지만, `세션 관리/채팅/도구 실행/실시간 로그`는 앱 프로세스 상태 접근이 필요하다.
+  3. 따라서 앱 로컬 API(Control Plane)는 디버깅뿐 아니라 정식 CLI UX를 위해 필요하다.
+  4. 원격 서버형 API는 범위 밖. macOS 로컬 전용으로 시작한다.
+- 전송 방식:
+  1. 1차는 Unix Domain Socket (`~/Library/Application Support/Dochi/run/dochi.sock`) + JSON-RPC 스타일
+  2. TCP/HTTP 공개 포트는 초기 범위에서 제외
+- 운영 모드:
+  1. App-Connected 모드(기본): 실행 중인 Dochi 앱과 연결, 로컬 컨텍스트/도구/세션 활용
+  2. Standalone 모드(제한): 앱 미실행 시 직접 LLM 질의 등 제한 기능만 허용
+- 언어 결정:
+  1. 1차 구현은 기존 `DochiCLI`(Swift) 확장으로 간다.
+  2. Go 재작성은 CLI 요구가 안정화된 뒤(명령/프로토콜 고정 이후) 재평가한다.
+
+### F1. [P0][CLI] 명령 표면 재정의 (사용자/개발 공용)
+- Problem: 현재 `DochiCLI/main.swift`는 단발 질의 중심이며 설정 명령 일부가 실제 구현과 불일치.
+- Scope:
+  1. 사용자 명령 체계 고정: `chat`, `ask`, `session`, `conversation`, `context`, `config`
+  2. 개발/운영 명령은 별도 네임스페이스: `dev tool`, `dev log`, `dev bridge`, `doctor`
+  3. App-Connected 모드/Standalone 모드에서 각 명령의 지원 범위를 명확히 정의
+  4. 모든 명령에 `--json` 출력 옵션 추가
+  5. 에러 코드 정책 표준화 (사용자 입력 오류/연결 오류/권한 오류)
+- Files:
+  - `DochiCLI/main.swift`
+  - `DochiCLI/*` (파서 분리 시)
+- Acceptance Criteria:
+  1. `dochi --help`가 실제 구현된 명령만 노출
+  2. 설정 명령(`config set/show`)이 정상 동작
+  3. 사용자 명령과 개발 명령이 도움말에서 명확히 분리 표시
+  4. CI에서 기본 명령 스모크 테스트 통과
+
+### F2. [P0][App] 로컬 Control Plane v0
+- Problem: CLI가 앱 내부 상태(세션/도구/로그)에 접근할 경로가 없음.
+- Scope:
+  1. 앱 부팅 시 로컬 소켓 서버 시작/종료
+  2. v0 메서드 제공:
+     - `app.ping`
+     - `session.list`
+     - `chat.send` (single-shot)
+     - `tool.execute`
+     - `log.recent`
+     - `bridge.open`, `bridge.status`, `bridge.send`, `bridge.read`
+  3. 요청/응답에 `request_id` 포함
+- Files:
+  - `Dochi/App/DochiApp.swift`
+  - `Dochi/ViewModels/DochiViewModel.swift`
+  - `Dochi/Services/*` (Control Plane 신규)
+- Acceptance Criteria:
+  1. 앱 실행 중 CLI에서 `app.ping` 성공
+  2. `tool.execute`로 기존 도구 1개 이상 호출 가능
+  3. 실패 시 구조화된 에러 코드/메시지 반환
+
+### F3. [P0][CLI] 앱 연결 모드 + graceful fallback
+- Problem: 앱 미실행/권한 미설정 상태에서 실패 원인 파악이 어렵다.
+- Scope:
+  1. 기본 모드: 앱 연결 시 Control Plane 사용
+  2. 앱 미실행 시: 명확한 오류 + 실행 가이드
+  3. `doctor` 명령에서 연결 상태 및 권한 점검
+- Files:
+  - `DochiCLI/main.swift`
+  - `DochiCLI/*`
+- Acceptance Criteria:
+  1. 앱 미실행 시 3초 내 실패 + 안내 출력
+  2. `dochi doctor`로 최소 점검 항목 5개 출력
+  3. 재현 가능한 종료 코드 체계 유지
+
+### F4. [P1][Debug] 실시간 이벤트/로그 스트림
+- Problem: 현재는 단발 로그 조회 중심이라 디버깅 루프가 느림.
+- Scope:
+  1. `chat.stream` 이벤트 스트림(부분 응답/도구 호출/완료)
+  2. `log.tail` (category/level/filter)
+  3. 이벤트 correlation id 부여
+- Files:
+  - `Dochi/ViewModels/DochiViewModel.swift`
+  - `Dochi/Utilities/Log.swift`
+  - `DochiCLI/*`
+- Acceptance Criteria:
+  1. CLI에서 스트림 모드로 응답 진행률 확인 가능
+  2. 도구 실행 이벤트와 로그를 동일 ID로 추적 가능
+
+### F5. [P1][Security] 로컬 API 접근 제어
+- Problem: 로컬 소켓이라도 동일 사용자 세션 내 오용 가능성 존재.
+- Scope:
+  1. 소켓 파일 권한 엄격화 (`0600`)
+  2. 로컬 세션 토큰(회전 가능) 검증
+  3. 민감/제한 도구에 기존 사용자 확인 정책 재사용
+- Files:
+  - `Dochi/Services/*` (Control Plane)
+  - `Dochi/Services/Tools/BuiltInToolService.swift`
+- Acceptance Criteria:
+  1. 권한 없는 요청 거부
+  2. 민감 도구 호출 시 앱 정책과 동일한 확인 흐름 보장
+
+---
+
 ## 6. 스프린트 제안 (작업 순서)
 
-1. Sprint 1: A1, B1, C1, B3
-2. Sprint 2: A2, A3, B2, C2
-3. Sprint 3: D1 + E1 착수
+1. Sprint 0 (CLI Debug Track): F1, F2, F3
+2. Sprint 1: A1, B1, C1, B3
+3. Sprint 2: A2, A3, B2, C2
+4. Sprint 3: D1 + E1 착수
+5. Sprint 4 (CLI 확장): F4, F5
 
 이 순서를 유지하면 UX 일관성과 활성화 지표를 빠르게 개선할 수 있다.
 

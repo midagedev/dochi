@@ -101,6 +101,7 @@ targets:
     platform: macOS
     sources:
       - path: DochiCLI
+      - path: Dochi/CLIShared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi.cli

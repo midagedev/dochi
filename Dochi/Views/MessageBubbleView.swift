@@ -63,7 +63,7 @@ struct MessageBubbleView: View {
 
                 // UX-7: Archived tool execution records (preferred over raw tool calls)
                 if let records = message.toolExecutionRecords, !records.isEmpty {
-                    ForEach(records) { record in
+                    ForEach(Array(records.enumerated()), id: \.offset) { _, record in
                         ToolExecutionRecordCardView(record: record)
                     }
                 }
