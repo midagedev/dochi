@@ -130,6 +130,21 @@ Error state:
 - Git 스캔 상태 (신규 제안)
   - `notEligible` / `candidate` / `queued` / `running` / `done` / `failed`
 
+### AppSettings 키 매핑 (구현 기준)
+
+| UI 항목 | 설정 키 | 비고 |
+|---|---|---|
+| 프로액티브 활성화 | `proactiveSuggestionEnabled` | 마스터 토글 |
+| 유휴 감지 분 | `proactiveSuggestionIdleMinutes` | `idle` 진입 임계값 |
+| 쿨다운 분 | `proactiveSuggestionCooldownMinutes` | 제안 후 재생성 제한 |
+| 일일 한도 | `proactiveDailyCap` | 0이면 생성 안 함 |
+| 조용한 시간 적용 | `proactiveSuggestionQuietHoursEnabled` | 하트비트 조용한 시간 공유 |
+| 제안 채널 | `suggestionNotificationChannel` | off/app/telegram/both |
+| 메뉴바 노출 | `proactiveSuggestionMenuBarEnabled` | 메뉴바 카드 표시 |
+| 자동작업 활성 | `resourceAutoTaskEnabled` | 자원 자동작업 마스터 토글 |
+| 낭비위험만 실행 | `resourceAutoTaskOnlyWasteRisk` | 필터 토글 |
+| 자동작업 타입 | `resourceAutoTaskTypes` | 선택된 작업 집합 |
+
 ## 5) UX 규칙
 
 ### 노출 최소 원칙
@@ -143,6 +158,13 @@ Error state:
 - `wasteRisk`가 아닌 경우 강한 경고색 최소화
 - 쿨다운 중에는 CTA를 억제하고 상태만 표시
 - dismiss/제외 선택은 프로젝트 단위로 기억
+
+### Git 스캔 노출 억제 규칙 (우선순위)
+
+1. 프로젝트 제외 정책이 있으면 항상 미노출
+2. 동일 `repo+branch+headSHA+diffHash`가 최근 실행 이력에 있으면 미노출
+3. 쿨다운 기간 내 동일 프로젝트 반복 노출 금지
+4. 대규모 diff/바이너리 비중 초과 시 자동 후보 미노출 (수동 실행만 허용)
 
 ## 6) 이벤트/계측 (MVP)
 
