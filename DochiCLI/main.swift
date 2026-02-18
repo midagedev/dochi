@@ -621,8 +621,9 @@ enum DochiCLI {
         contains: String?
     ) -> CLIResult {
         do {
+            let lookbackSeconds = max(1, min(3_600, seconds))
             var openParams: [String: Any] = [
-                "lookback_seconds": 30,
+                "lookback_seconds": lookbackSeconds,
             ]
             if let category, !category.isEmpty {
                 openParams["category"] = category
