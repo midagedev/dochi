@@ -461,7 +461,7 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
 
         let paths = output
             .split(whereSeparator: \.isNewline)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map(String.init)
             .filter { !$0.isEmpty }
         guard !paths.isEmpty else { return [] }
 
