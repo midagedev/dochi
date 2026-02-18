@@ -957,6 +957,13 @@ struct DochiApp: App {
             return .failure(code: "invalid_session_id", message: "유효한 session_id가 필요합니다.")
         }
 
+        let sessionExists = await MainActor.run {
+            externalToolManager.sessions.contains { $0.id == sessionId }
+        }
+        guard sessionExists else {
+            return .failure(code: "session_not_found", message: "세션을 찾을 수 없습니다: \(sessionIdRaw)")
+        }
+
         let lines = max(1, min(500, params["lines"] as? Int ?? 80))
         let output = await externalToolManager.captureOutput(sessionId: sessionId, lines: lines)
         return .ok([
