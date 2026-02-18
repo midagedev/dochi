@@ -96,6 +96,13 @@ final class DochiViewModel {
     private(set) var proactiveSuggestionService: ProactiveSuggestionServiceProtocol?
     var showSuggestionHistory: Bool = false
 
+    // MARK: - Task Opportunity (D1)
+    private(set) var completedTaskOpportunityIDs: Set<UUID> = []
+    var taskOpportunityActionInFlightID: UUID?
+    var taskOpportunityActionFeedback: TaskOpportunityActionFeedback?
+    var reminderOpportunityExecutor: ((TaskOpportunity) async -> ToolResult)?
+    var kanbanOpportunityExecutor: ((TaskOpportunity) -> Bool)?
+
     // MARK: - Interest Discovery (K-3)
     private(set) var interestDiscoveryService: InterestDiscoveryServiceProtocol?
 
@@ -445,6 +452,101 @@ final class DochiViewModel {
         guard let service = proactiveSuggestionService else { return }
         service.isPaused.toggle()
         Log.app.info("Proactive suggestion \(service.isPaused ? "paused" : "resumed")")
+    }
+
+    func executeTaskOpportunity(_ opportunity: TaskOpportunity) {
+        taskOpportunityActionInFlightID = opportunity.id
+
+        Task { @MainActor in
+            let feedback = await performTaskOpportunity(opportunity)
+            taskOpportunityActionInFlightID = nil
+            taskOpportunityActionFeedback = feedback
+
+            if feedback.isSuccess {
+                completedTaskOpportunityIDs.insert(opportunity.id)
+            } else {
+                errorMessage = feedback.message
+            }
+
+            let opportunityId = opportunity.id
+            try? await Task.sleep(for: .seconds(3))
+            if taskOpportunityActionFeedback?.opportunityId == opportunityId {
+                taskOpportunityActionFeedback = nil
+            }
+        }
+    }
+
+    private func performTaskOpportunity(_ opportunity: TaskOpportunity) async -> TaskOpportunityActionFeedback {
+        switch opportunity.actionKind {
+        case .createReminder:
+            let result: ToolResult
+            if let reminderOpportunityExecutor {
+                result = await reminderOpportunityExecutor(opportunity)
+            } else {
+                result = await registerReminderFromOpportunity(opportunity)
+            }
+
+            return TaskOpportunityActionFeedback(
+                opportunityId: opportunity.id,
+                isSuccess: !result.isError,
+                message: result.content
+            )
+
+        case .createKanbanCard:
+            let isSuccess: Bool
+            if let kanbanOpportunityExecutor {
+                isSuccess = kanbanOpportunityExecutor(opportunity)
+            } else {
+                isSuccess = registerKanbanFromOpportunity(opportunity)
+            }
+
+            let message: String
+            if isSuccess {
+                message = "칸반에 '\(opportunity.suggestedTitle)' 항목을 등록했습니다."
+            } else {
+                message = "칸반 등록에 실패했습니다. 보드/컬럼 설정을 확인해주세요."
+            }
+
+            return TaskOpportunityActionFeedback(
+                opportunityId: opportunity.id,
+                isSuccess: isSuccess,
+                message: message
+            )
+        }
+    }
+
+    private func registerReminderFromOpportunity(_ opportunity: TaskOpportunity) async -> ToolResult {
+        var arguments: [String: Any] = [
+            "title": opportunity.suggestedTitle
+        ]
+        if let notes = opportunity.suggestedNotes, !notes.isEmpty {
+            arguments["notes"] = notes
+        }
+        if let dueDate = opportunity.dueDateISO8601, !dueDate.isEmpty {
+            arguments["due_date"] = dueDate
+        }
+
+        let tool = CreateReminderTool()
+        return await tool.execute(arguments: arguments)
+    }
+
+    private func registerKanbanFromOpportunity(_ opportunity: TaskOpportunity) -> Bool {
+        let targetBoardName: String
+        if let boardName = opportunity.boardName?.trimmingCharacters(in: .whitespacesAndNewlines), !boardName.isEmpty {
+            targetBoardName = boardName
+        } else {
+            targetBoardName = "기본 보드"
+        }
+
+        let board = KanbanManager.shared.board(name: targetBoardName) ?? KanbanManager.shared.createBoard(name: targetBoardName)
+        let description = opportunity.suggestedNotes ?? "Heartbeat opportunity"
+
+        return KanbanManager.shared.addCard(
+            boardId: board.id,
+            title: opportunity.suggestedTitle,
+            priority: .medium,
+            description: description
+        ) != nil
     }
 
     func dismissScheduleExecutionBanner() {

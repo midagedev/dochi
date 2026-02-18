@@ -9,6 +9,23 @@ struct HeartbeatTickResult: Sendable {
     let itemsFound: Int
     let notificationSent: Bool
     let error: String?
+    let opportunities: [TaskOpportunity]
+
+    init(
+        timestamp: Date,
+        checksPerformed: [String],
+        itemsFound: Int,
+        notificationSent: Bool,
+        error: String?,
+        opportunities: [TaskOpportunity] = []
+    ) {
+        self.timestamp = timestamp
+        self.checksPerformed = checksPerformed
+        self.itemsFound = itemsFound
+        self.notificationSent = notificationSent
+        self.error = error
+        self.opportunities = opportunities
+    }
 }
 
 /// Heartbeat-based proactive agent service.
@@ -193,6 +210,13 @@ final class HeartbeatService: Observable {
             Log.app.error("HeartbeatService tick error: \(error.localizedDescription)")
         }
 
+        let opportunities = mapTaskOpportunities(
+            calendarContext: calendarContext,
+            kanbanContext: kanbanContext,
+            reminderContext: reminderContext,
+            memoryWarning: memoryWarning
+        )
+
         let notificationSent: Bool
         let itemsFound = contextParts.count
 
@@ -246,7 +270,8 @@ final class HeartbeatService: Observable {
             checksPerformed: checksPerformed,
             itemsFound: itemsFound,
             notificationSent: notificationSent,
-            error: errorMessage
+            error: errorMessage,
+            opportunities: opportunities
         )
         lastTickDate = result.timestamp
         lastTickResult = result
@@ -341,6 +366,117 @@ final class HeartbeatService: Observable {
         }
 
         return warnings.isEmpty ? nil : warnings.joined(separator: "\n")
+    }
+
+    // MARK: - Task Opportunity Mapping (D1)
+
+    func mapTaskOpportunities(
+        calendarContext: String,
+        kanbanContext: String,
+        reminderContext: String,
+        memoryWarning: String?
+    ) -> [TaskOpportunity] {
+        var opportunities: [TaskOpportunity] = []
+
+        let calendarLines = normalizedLines(from: calendarContext)
+        for line in calendarLines.prefix(2) {
+            opportunities.append(
+                TaskOpportunity(
+                    source: .calendar,
+                    title: "다가오는 일정 준비",
+                    detail: line,
+                    actionKind: .createReminder,
+                    suggestedTitle: "일정 준비: \(line)",
+                    suggestedNotes: "Heartbeat 일정 점검에서 제안된 작업입니다."
+                )
+            )
+        }
+
+        let kanbanLines = normalizedLines(from: kanbanContext)
+        for line in kanbanLines.prefix(2) {
+            let parsed = parseKanbanContextLine(line)
+            opportunities.append(
+                TaskOpportunity(
+                    source: .kanban,
+                    title: "칸반 후속 리마인더",
+                    detail: line,
+                    actionKind: .createReminder,
+                    suggestedTitle: "\(parsed.cardTitle) 확인",
+                    suggestedNotes: parsed.boardName.map { "보드: \($0)" }
+                )
+            )
+        }
+
+        let reminderLines = normalizedLines(from: reminderContext)
+        for line in reminderLines.prefix(2) {
+            let reminderTitle = parseReminderTitle(line)
+            opportunities.append(
+                TaskOpportunity(
+                    source: .reminder,
+                    title: "미리알림을 칸반으로 등록",
+                    detail: line,
+                    actionKind: .createKanbanCard,
+                    suggestedTitle: reminderTitle,
+                    suggestedNotes: "원본 미리알림: \(line)",
+                    boardName: defaultBoardName()
+                )
+            )
+        }
+
+        if let memoryWarning, !memoryWarning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            opportunities.append(
+                TaskOpportunity(
+                    source: .memory,
+                    title: "메모리 정리 작업 등록",
+                    detail: memoryWarning,
+                    actionKind: .createKanbanCard,
+                    suggestedTitle: "메모리 정리 점검",
+                    suggestedNotes: memoryWarning,
+                    boardName: defaultBoardName()
+                )
+            )
+        }
+
+        return Array(opportunities.prefix(4))
+    }
+
+    private func normalizedLines(from context: String) -> [String] {
+        context
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func parseReminderTitle(_ line: String) -> String {
+        if let range = line.range(of: " (마감:") {
+            return String(line[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return line
+    }
+
+    private func parseKanbanContextLine(_ line: String) -> (cardTitle: String, boardName: String?) {
+        var working = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if working.hasPrefix("- ") {
+            working.removeFirst(2)
+        }
+
+        var boardName: String?
+        if let open = working.lastIndex(of: "["), let close = working.lastIndex(of: "]"), open < close {
+            boardName = String(working[working.index(after: open)..<close]).trimmingCharacters(in: .whitespacesAndNewlines)
+            working = String(working[..<open]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let tokens = working.split(separator: " ").map(String.init)
+        if let first = tokens.first, first.rangeOfCharacter(from: .alphanumerics) == nil {
+            working = tokens.dropFirst().joined(separator: " ")
+        }
+
+        let cardTitle = working.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (cardTitle.isEmpty ? line : cardTitle, boardName)
+    }
+
+    private func defaultBoardName() -> String? {
+        KanbanManager.shared.listBoards().first?.name
     }
 
     // MARK: - Message Composition

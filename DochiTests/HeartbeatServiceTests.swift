@@ -4,6 +4,26 @@ import XCTest
 @MainActor
 final class HeartbeatServiceTests: XCTestCase {
 
+    private func makeViewModelForOpportunityTests() -> DochiViewModel {
+        let contextService = MockContextService()
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+
+        return DochiViewModel(
+            llmService: MockLLMService(),
+            toolService: MockBuiltInToolService(),
+            contextService: contextService,
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+    }
+
     // MARK: - HeartbeatTickResult
 
     func testTickResultStoresAllFields() {
@@ -45,6 +65,37 @@ final class HeartbeatServiceTests: XCTestCase {
 
     func testMaxHistoryCount() {
         XCTAssertEqual(HeartbeatService.maxHistoryCount, 20)
+    }
+
+    func testMapTaskOpportunitiesBuildsStructuredActions() {
+        let settings = AppSettings()
+        let service = HeartbeatService(settings: settings)
+
+        let opportunities = service.mapTaskOpportunities(
+            calendarContext: "오전 9:00 팀 스탠드업",
+            kanbanContext: "- 🔥 배포 체크 [제품 운영]",
+            reminderContext: "계약서 확인 (마감: 오후 3:00)",
+            memoryWarning: nil
+        )
+
+        XCTAssertGreaterThanOrEqual(opportunities.count, 3)
+        XCTAssertTrue(opportunities.contains { $0.actionKind == .createReminder })
+        XCTAssertTrue(opportunities.contains { $0.actionKind == .createKanbanCard })
+        XCTAssertTrue(opportunities.allSatisfy { !$0.suggestedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+    }
+
+    func testMapTaskOpportunitiesCapsResultSize() {
+        let settings = AppSettings()
+        let service = HeartbeatService(settings: settings)
+
+        let opportunities = service.mapTaskOpportunities(
+            calendarContext: "a\nb\nc",
+            kanbanContext: "- x [A]\n- y [B]\n- z [C]",
+            reminderContext: "r1 (마감: 10:00)\nr2 (마감: 11:00)\nr3 (마감: 12:00)",
+            memoryWarning: "메모리 경고"
+        )
+
+        XCTAssertEqual(opportunities.count, 4)
     }
 
     // MARK: - Start/Stop
@@ -223,5 +274,56 @@ final class HeartbeatServiceTests: XCTestCase {
         viewModel.injectProactiveMessage("no conversation")
         // Should not crash
         XCTAssertNil(viewModel.currentConversation)
+    }
+
+    func testExecuteTaskOpportunityTriggersKanbanActionAndShowsSuccessFeedback() async {
+        let viewModel = makeViewModelForOpportunityTests()
+        let opportunity = TaskOpportunity(
+            source: .reminder,
+            title: "칸반 등록",
+            detail: "테스트",
+            actionKind: .createKanbanCard,
+            suggestedTitle: "테스트 작업"
+        )
+
+        let called = expectation(description: "kanban action called")
+        viewModel.kanbanOpportunityExecutor = { _ in
+            called.fulfill()
+            return true
+        }
+
+        viewModel.executeTaskOpportunity(opportunity)
+        await fulfillment(of: [called], timeout: 1.0)
+        try? await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(viewModel.taskOpportunityActionFeedback?.opportunityId, opportunity.id)
+        XCTAssertEqual(viewModel.taskOpportunityActionFeedback?.isSuccess, true)
+        XCTAssertTrue(viewModel.completedTaskOpportunityIDs.contains(opportunity.id))
+    }
+
+    func testExecuteTaskOpportunityFailureShowsErrorFeedback() async {
+        let viewModel = makeViewModelForOpportunityTests()
+        let opportunity = TaskOpportunity(
+            source: .calendar,
+            title: "미리알림 등록",
+            detail: "테스트",
+            actionKind: .createReminder,
+            suggestedTitle: "테스트 리마인더"
+        )
+
+        let called = expectation(description: "reminder action called")
+        viewModel.reminderOpportunityExecutor = { _ in
+            called.fulfill()
+            return ToolResult(toolCallId: "", content: "미리알림 생성 실패", isError: true)
+        }
+
+        viewModel.executeTaskOpportunity(opportunity)
+        await fulfillment(of: [called], timeout: 1.0)
+        try? await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(viewModel.taskOpportunityActionFeedback?.opportunityId, opportunity.id)
+        XCTAssertEqual(viewModel.taskOpportunityActionFeedback?.isSuccess, false)
+        XCTAssertEqual(viewModel.errorMessage, "미리알림 생성 실패")
+        XCTAssertFalse(viewModel.completedTaskOpportunityIDs.contains(opportunity.id))
     }
 }

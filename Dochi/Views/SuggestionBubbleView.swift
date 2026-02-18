@@ -12,8 +12,35 @@ struct SuggestionBubbleView: View {
     let onAccept: () -> Void
     let onDefer: () -> Void
     let onDismissType: () -> Void
+    let opportunities: [TaskOpportunity]
+    let opportunityActionInFlightID: UUID?
+    let opportunityActionFeedback: TaskOpportunityActionFeedback?
+    let onOpportunityAction: (TaskOpportunity) -> Void
+    let showsSuggestionActions: Bool
 
     @State private var showDismissConfirmation = false
+
+    init(
+        suggestion: ProactiveSuggestion,
+        onAccept: @escaping () -> Void,
+        onDefer: @escaping () -> Void,
+        onDismissType: @escaping () -> Void,
+        opportunities: [TaskOpportunity] = [],
+        opportunityActionInFlightID: UUID? = nil,
+        opportunityActionFeedback: TaskOpportunityActionFeedback? = nil,
+        onOpportunityAction: @escaping (TaskOpportunity) -> Void = { _ in },
+        showsSuggestionActions: Bool = true
+    ) {
+        self.suggestion = suggestion
+        self.onAccept = onAccept
+        self.onDefer = onDefer
+        self.onDismissType = onDismissType
+        self.opportunities = opportunities
+        self.opportunityActionInFlightID = opportunityActionInFlightID
+        self.opportunityActionFeedback = opportunityActionFeedback
+        self.onOpportunityAction = onOpportunityAction
+        self.showsSuggestionActions = showsSuggestionActions
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -49,32 +76,38 @@ struct SuggestionBubbleView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
 
+                if !opportunities.isEmpty {
+                    opportunityList
+                }
+
                 // Action buttons
-                HStack(spacing: 8) {
-                    Button {
-                        onAccept()
-                    } label: {
-                        Label("수락", systemImage: "checkmark")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                if showsSuggestionActions {
+                    HStack(spacing: 8) {
+                        Button {
+                            onAccept()
+                        } label: {
+                            Label("수락", systemImage: "checkmark")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
 
-                    Button("나중에") {
-                        onDefer()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                        Button("나중에") {
+                            onDefer()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
 
-                    Spacer()
+                        Spacer()
 
-                    Button("이런 제안 그만") {
-                        showDismissConfirmation = true
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .popover(isPresented: $showDismissConfirmation) {
-                        dismissConfirmationPopover
+                        Button("이런 제안 그만") {
+                            showDismissConfirmation = true
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .popover(isPresented: $showDismissConfirmation) {
+                            dismissConfirmationPopover
+                        }
                     }
                 }
             }
@@ -116,6 +149,58 @@ struct SuggestionBubbleView: View {
         case "green": return .green
         case "red": return .red
         default: return .gray
+        }
+    }
+
+    // MARK: - Opportunity Actions
+
+    private var opportunityList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("지금 바로 등록")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(opportunities.prefix(3)) { opportunity in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(opportunity.title)
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(opportunity.detail)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+
+                        Spacer()
+
+                        if opportunityActionInFlightID == opportunity.id {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Button(opportunity.actionKind.buttonTitle) {
+                                onOpportunityAction(opportunity)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+
+                    if let feedback = opportunityActionFeedback, feedback.opportunityId == opportunity.id {
+                        HStack(spacing: 4) {
+                            Image(systemName: feedback.isSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(feedback.isSuccess ? .green : .orange)
+                            Text(feedback.message)
+                                .font(.system(size: 10))
+                                .foregroundStyle(feedback.isSuccess ? .green : .orange)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
         }
     }
 

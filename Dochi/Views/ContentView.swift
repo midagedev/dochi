@@ -554,12 +554,45 @@ struct ContentView: View {
             }
 
             // K-2: Proactive suggestion bubble
+            let heartbeatOpportunities = recentHeartbeatOpportunities
             if let suggestion = viewModel.currentSuggestion {
                 SuggestionBubbleView(
                     suggestion: suggestion,
                     onAccept: { withAnimation(.easeOut(duration: 0.25)) { viewModel.acceptSuggestion(suggestion) } },
                     onDefer: { withAnimation(.easeOut(duration: 0.25)) { viewModel.deferSuggestion(suggestion) } },
-                    onDismissType: { withAnimation(.easeOut(duration: 0.25)) { viewModel.dismissSuggestionType(suggestion) } }
+                    onDismissType: { withAnimation(.easeOut(duration: 0.25)) { viewModel.dismissSuggestionType(suggestion) } },
+                    opportunities: heartbeatOpportunities,
+                    opportunityActionInFlightID: viewModel.taskOpportunityActionInFlightID,
+                    opportunityActionFeedback: viewModel.taskOpportunityActionFeedback,
+                    onOpportunityAction: { opportunity in
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            viewModel.executeTaskOpportunity(opportunity)
+                        }
+                    }
+                )
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if !heartbeatOpportunities.isEmpty {
+                SuggestionBubbleView(
+                    suggestion: ProactiveSuggestion(
+                        type: .kanbanCheck,
+                        title: "하트비트 할거리 제안",
+                        body: "점검 결과를 바로 미리알림/칸반에 등록할 수 있습니다.",
+                        suggestedPrompt: ""
+                    ),
+                    onAccept: {},
+                    onDefer: {},
+                    onDismissType: {},
+                    opportunities: heartbeatOpportunities,
+                    opportunityActionInFlightID: viewModel.taskOpportunityActionInFlightID,
+                    opportunityActionFeedback: viewModel.taskOpportunityActionFeedback,
+                    onOpportunityAction: { opportunity in
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            viewModel.executeTaskOpportunity(opportunity)
+                        }
+                    },
+                    showsSuggestionActions: false
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -742,6 +775,12 @@ struct ContentView: View {
     }
 
     // MARK: - Palette Action Execution
+
+    private var recentHeartbeatOpportunities: [TaskOpportunity] {
+        guard let result = heartbeatService?.lastTickResult else { return [] }
+        guard Date().timeIntervalSince(result.timestamp) <= 30 * 60 else { return [] }
+        return result.opportunities.filter { !viewModel.completedTaskOpportunityIDs.contains($0.id) }
+    }
 
     private func openSettings(sectionRawValue: String? = nil) {
         if let sectionRawValue {
