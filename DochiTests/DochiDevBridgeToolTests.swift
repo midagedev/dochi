@@ -95,6 +95,70 @@ final class DochiDevBridgeToolTests: XCTestCase {
         XCTAssertTrue(result.content.contains(sessionId.uuidString))
     }
 
+    func testBridgeRootsReturnsRankedInsights() async {
+        let manager = MockExternalToolSessionManager()
+        manager.mockGitRepositoryInsights = [
+            GitRepositoryInsight(
+                workDomain: "company",
+                workDomainConfidence: 0.8,
+                workDomainReason: "test",
+                path: "/Users/me/repo/a",
+                name: "a",
+                branch: "main",
+                originURL: "git@github.com:acme/a.git",
+                remoteHost: "github.com",
+                remoteOwner: "acme",
+                remoteRepository: "a",
+                lastCommitEpoch: 1_700_000_000,
+                lastCommitISO8601: "2023-11-14T22:13:20.000Z",
+                lastCommitRelative: "1d ago",
+                upstreamLastCommitEpoch: 1_700_000_000,
+                upstreamLastCommitISO8601: "2023-11-14T22:13:20.000Z",
+                upstreamLastCommitRelative: "1d ago",
+                daysSinceLastCommit: 1,
+                recentCommitCount30d: 12,
+                changedFileCount: 3,
+                untrackedFileCount: 1,
+                aheadCount: 0,
+                behindCount: 0,
+                score: 67
+            ),
+            GitRepositoryInsight(
+                workDomain: "personal",
+                workDomainConfidence: 0.6,
+                workDomainReason: "test",
+                path: "/Users/me/repo/b",
+                name: "b",
+                branch: "feature/x",
+                originURL: "git@github.com:me/b.git",
+                remoteHost: "github.com",
+                remoteOwner: "me",
+                remoteRepository: "b",
+                lastCommitEpoch: 1_699_000_000,
+                lastCommitISO8601: "2023-11-03T08:26:40.000Z",
+                lastCommitRelative: "12d ago",
+                upstreamLastCommitEpoch: 1_699_000_000,
+                upstreamLastCommitISO8601: "2023-11-03T08:26:40.000Z",
+                upstreamLastCommitRelative: "12d ago",
+                daysSinceLastCommit: 12,
+                recentCommitCount30d: 3,
+                changedFileCount: 0,
+                untrackedFileCount: 0,
+                aheadCount: nil,
+                behindCount: nil,
+                score: 21
+            ),
+        ]
+        let tool = DochiBridgeRootsTool(manager: manager)
+
+        let result = await tool.execute(arguments: ["limit": 5])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.content.contains("[67] a"))
+        XCTAssertTrue(result.content.contains("/Users/me/repo/a"))
+        XCTAssertTrue(result.content.contains("/Users/me/repo/b"))
+    }
+
     func testLogRecentWithInjectedFetcherFormatsOutput() async {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let tool = DochiLogRecentTool(fetcher: { minutes, category, level, contains, limit in

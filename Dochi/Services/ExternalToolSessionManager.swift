@@ -28,6 +28,9 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
 
     // Output
     func captureOutput(sessionId: UUID, lines: Int) async -> [String]
+
+    // Repository insights
+    func discoverGitRepositoryInsights(searchPaths: [String]?, limit: Int) async -> [GitRepositoryInsight]
 }
 
 // MARK: - Errors
@@ -339,6 +342,18 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             return []
         }
         return output.components(separatedBy: "\n")
+    }
+
+    func discoverGitRepositoryInsights(searchPaths: [String]?, limit: Int) async -> [GitRepositoryInsight] {
+        let profilePaths = profiles.map(\.workingDirectory)
+        let mergedPaths = (searchPaths ?? []) + profilePaths
+        let effectiveLimit = max(1, min(200, limit))
+        return await Task.detached(priority: .utility) {
+            GitRepositoryInsightScanner.discover(
+                searchPaths: mergedPaths.isEmpty ? nil : mergedPaths,
+                limit: effectiveLimit
+            )
+        }.value
     }
 
     // MARK: - Helpers

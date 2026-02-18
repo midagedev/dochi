@@ -41,6 +41,7 @@ enum CLIDevAction: Equatable, Sendable {
     case logTail(seconds: Int, category: String?, level: String?, contains: String?)
     case chatStream(prompt: String)
     case bridgeOpen(agent: String)
+    case bridgeRoots(limit: Int, searchPaths: [String])
     case bridgeStatus(sessionId: String?)
     case bridgeSend(sessionId: String, command: String)
     case bridgeRead(sessionId: String, lines: Int)
@@ -320,6 +321,29 @@ enum CLICommandParser {
             case "open":
                 let agent = rest.first ?? "codex"
                 return .dev(.bridgeOpen(agent: agent))
+            case "roots":
+                var limit = 20
+                var searchPaths: [String] = []
+                var index = 0
+                while index < rest.count {
+                    switch rest[index] {
+                    case "--limit":
+                        guard index + 1 < rest.count, let parsed = Int(rest[index + 1]) else {
+                            throw CLIParseError.invalidUsage("dev bridge roots --limit <N> 형식이 필요합니다.")
+                        }
+                        limit = max(1, parsed)
+                        index += 2
+                    case "--path":
+                        guard index + 1 < rest.count else {
+                            throw CLIParseError.invalidUsage("dev bridge roots --path <DIR> 형식이 필요합니다.")
+                        }
+                        searchPaths.append(rest[index + 1])
+                        index += 2
+                    default:
+                        throw CLIParseError.invalidUsage("dev bridge roots의 알 수 없는 옵션입니다: \(rest[index])")
+                    }
+                }
+                return .dev(.bridgeRoots(limit: limit, searchPaths: searchPaths))
             case "status":
                 let sessionId = rest.first
                 return .dev(.bridgeStatus(sessionId: sessionId))
@@ -335,7 +359,7 @@ enum CLICommandParser {
                 let lines = rest.count >= 2 ? (Int(rest[1]) ?? 80) : 80
                 return .dev(.bridgeRead(sessionId: rest[0], lines: max(1, lines)))
             default:
-                throw CLIParseError.invalidUsage("dev bridge 하위 명령은 open/status/send/read만 지원합니다.")
+                throw CLIParseError.invalidUsage("dev bridge 하위 명령은 open/roots/status/send/read만 지원합니다.")
             }
 
         default:

@@ -897,6 +897,9 @@ struct DochiApp: App {
         case "bridge.read":
             return await handleBridgeRead(params: params, externalToolManager: externalToolManager)
 
+        case "bridge.roots":
+            return await handleBridgeRoots(params: params, externalToolManager: externalToolManager)
+
         default:
             return .failure(code: "method_not_found", message: "지원하지 않는 메서드입니다: \(method)")
         }
@@ -1270,6 +1273,51 @@ struct DochiApp: App {
             "session_id": sessionId.uuidString,
             "count": output.count,
             "lines": output,
+        ])
+    }
+
+    nonisolated private static func handleBridgeRoots(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        let limit = max(1, min(200, params["limit"] as? Int ?? 20))
+        let searchPaths = params["search_paths"] as? [String]
+        let roots = await externalToolManager.discoverGitRepositoryInsights(
+            searchPaths: searchPaths,
+            limit: limit
+        )
+
+        let payload = roots.map { insight in
+            [
+                "work_domain": insight.workDomain,
+                "work_domain_confidence": insight.workDomainConfidence,
+                "work_domain_reason": insight.workDomainReason,
+                "path": insight.path,
+                "name": insight.name,
+                "branch": insight.branch,
+                "origin_url": insight.originURL ?? NSNull(),
+                "remote_host": insight.remoteHost ?? NSNull(),
+                "remote_owner": insight.remoteOwner ?? NSNull(),
+                "remote_repository": insight.remoteRepository ?? NSNull(),
+                "last_commit_epoch": insight.lastCommitEpoch ?? NSNull(),
+                "last_commit_iso8601": insight.lastCommitISO8601 ?? NSNull(),
+                "last_commit_relative": insight.lastCommitRelative,
+                "upstream_last_commit_epoch": insight.upstreamLastCommitEpoch ?? NSNull(),
+                "upstream_last_commit_iso8601": insight.upstreamLastCommitISO8601 ?? NSNull(),
+                "upstream_last_commit_relative": insight.upstreamLastCommitRelative,
+                "days_since_last_commit": insight.daysSinceLastCommit ?? NSNull(),
+                "recent_commit_count_30d": insight.recentCommitCount30d,
+                "changed_file_count": insight.changedFileCount,
+                "untracked_file_count": insight.untrackedFileCount,
+                "ahead_count": insight.aheadCount ?? NSNull(),
+                "behind_count": insight.behindCount ?? NSNull(),
+                "score": insight.score,
+            ] as [String: Any]
+        }
+
+        return .ok([
+            "count": payload.count,
+            "roots": payload,
         ])
     }
 

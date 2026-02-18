@@ -168,6 +168,60 @@ final class HeartbeatServiceTests: XCTestCase {
         )
     }
 
+    func testTickCollectsGitContextWithoutSendingNotificationAlone() async throws {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatIntervalMinutes = 0
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+
+        let service = HeartbeatService(settings: settings)
+        let externalToolManager = MockExternalToolSessionManager()
+        externalToolManager.mockGitRepositoryInsights = [
+            GitRepositoryInsight(
+                workDomain: "company",
+                workDomainConfidence: 0.82,
+                workDomainReason: "self-hosted git remote",
+                path: "/Users/me/repo/work",
+                name: "work",
+                branch: "main",
+                originURL: "ssh://git@git.company.local/team/work.git",
+                remoteHost: "git.company.local",
+                remoteOwner: "team",
+                remoteRepository: "work",
+                lastCommitEpoch: 1_700_000_000,
+                lastCommitISO8601: "2023-11-14T22:13:20.000Z",
+                lastCommitRelative: "1d ago",
+                upstreamLastCommitEpoch: 1_700_000_000,
+                upstreamLastCommitISO8601: "2023-11-14T22:13:20.000Z",
+                upstreamLastCommitRelative: "1d ago",
+                daysSinceLastCommit: 1,
+                recentCommitCount30d: 8,
+                changedFileCount: 2,
+                untrackedFileCount: 1,
+                aheadCount: 0,
+                behindCount: 0,
+                score: 60
+            ),
+        ]
+        service.setExternalToolManager(externalToolManager)
+
+        service.start()
+        defer { service.stop() }
+
+        let timeout = Date().addingTimeInterval(0.5)
+        while service.lastTickDate == nil && Date() < timeout {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertNotNil(service.lastTickDate)
+        XCTAssertEqual(service.lastTickResult?.notificationSent, false)
+        XCTAssertTrue(service.lastTickResult?.gitContextSummary?.contains("[company] work") == true)
+    }
+
     func testTickTriggersResourceAutoTaskPipelineWhenEnabled() async throws {
         let settings = AppSettings()
         settings.heartbeatEnabled = true
