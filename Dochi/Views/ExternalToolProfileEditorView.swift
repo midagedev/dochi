@@ -21,6 +21,7 @@ struct ExternalToolProfileEditorView: View {
     @State private var waitingPattern: String = ""
     @State private var errorPattern: String = ""
     @State private var selectedPreset: ExternalToolPreset? = nil
+    @State private var viewModel: ExternalToolProfileEditorViewModel
 
     private let iconOptions = ["terminal.fill", "hammer", "wrench", "chevron.left.forwardslash.chevron.right", "cpu"]
 
@@ -29,6 +30,7 @@ struct ExternalToolProfileEditorView: View {
         self.existingProfile = existingProfile
         self.onSave = onSave
         self.onCancel = onCancel
+        _viewModel = State(initialValue: ExternalToolProfileEditorViewModel(manager: manager))
     }
 
     var body: some View {
@@ -57,6 +59,63 @@ struct ExternalToolProfileEditorView: View {
                             .font(.system(.body, design: .monospaced))
                         Button("선택") {
                             selectDirectory()
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Button {
+                                Task { await viewModel.refreshRecommendedRoots() }
+                            } label: {
+                                Label("추천 Git 루트 불러오기", systemImage: "sparkles.rectangle.stack")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            if viewModel.isLoadingRecommendations {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else if !viewModel.recommendedRoots.isEmpty {
+                                Text("\(viewModel.recommendedRoots.count)개 추천")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if !viewModel.recommendedRoots.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(viewModel.recommendedRoots, id: \.path) { root in
+                                    Button {
+                                        workingDirectory = viewModel.applyRecommendedRoot(root)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("[\(root.score)] \(root.name) · \(root.branch)")
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundStyle(.primary)
+                                            Text("최근 \(root.lastCommitRelative) · dirty \(root.changedFileCount)+\(root.untrackedFileCount)")
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(.secondary)
+                                            Text(root.path)
+                                                .font(.system(size: 10, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 6)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .fill(workingDirectory == root.path ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08))
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        } else if viewModel.hasLoadedRecommendations, !viewModel.isLoadingRecommendations {
+                            Text("추천 가능한 Git 루트를 찾지 못했습니다.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -157,7 +216,7 @@ struct ExternalToolProfileEditorView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
-        .frame(width: 500, height: 600)
+        .frame(width: 520, height: 680)
         .onAppear {
             loadExistingProfile()
         }

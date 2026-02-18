@@ -37,6 +37,32 @@ final class CLICommandSurfaceTests: XCTestCase {
         XCTAssertEqual(invocation.command, .dev(.bridgeSend(sessionId: "abc-123", command: "run tests")))
     }
 
+    func testParseDevBridgeOpenWithOptions() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "open", "codex",
+            "--profile", "Dochi Bridge Codex",
+            "--cwd", "~/repo/dochi",
+            "--force-working-directory",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeOpen(
+                agent: "codex",
+                profileName: "Dochi Bridge Codex",
+                workingDirectory: "~/repo/dochi",
+                forceWorkingDirectory: true
+            ))
+        )
+    }
+
+    func testParseDevBridgeOpenWithoutOptionsDefaultsToCodex() throws {
+        let invocation = try CLICommandParser.parse(["dev", "bridge", "open"])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeOpen(agent: "codex", profileName: nil, workingDirectory: nil, forceWorkingDirectory: false))
+        )
+    }
+
     func testParseDevBridgeRootsWithOptions() throws {
         let invocation = try CLICommandParser.parse([
             "dev", "bridge", "roots",

@@ -40,7 +40,7 @@ enum CLIDevAction: Equatable, Sendable {
     case logRecent(minutes: Int)
     case logTail(seconds: Int, category: String?, level: String?, contains: String?)
     case chatStream(prompt: String)
-    case bridgeOpen(agent: String)
+    case bridgeOpen(agent: String, profileName: String?, workingDirectory: String?, forceWorkingDirectory: Bool)
     case bridgeRoots(limit: Int, searchPaths: [String])
     case bridgeStatus(sessionId: String?)
     case bridgeSend(sessionId: String, command: String)
@@ -319,8 +319,45 @@ enum CLICommandParser {
             let rest = Array(args.dropFirst(2))
             switch sub {
             case "open":
-                let agent = rest.first ?? "codex"
-                return .dev(.bridgeOpen(agent: agent))
+                var agent = "codex"
+                var profileName: String?
+                var workingDirectory: String?
+                var forceWorkingDirectory = false
+                var index = 0
+
+                if index < rest.count, !rest[index].hasPrefix("--") {
+                    agent = rest[index]
+                    index += 1
+                }
+
+                while index < rest.count {
+                    switch rest[index] {
+                    case "--profile":
+                        guard index + 1 < rest.count else {
+                            throw CLIParseError.invalidUsage("dev bridge open --profile <name> 형식이 필요합니다.")
+                        }
+                        profileName = rest[index + 1]
+                        index += 2
+                    case "--working-directory", "--cwd":
+                        guard index + 1 < rest.count else {
+                            throw CLIParseError.invalidUsage("dev bridge open --working-directory <DIR> 형식이 필요합니다.")
+                        }
+                        workingDirectory = rest[index + 1]
+                        index += 2
+                    case "--force-working-directory":
+                        forceWorkingDirectory = true
+                        index += 1
+                    default:
+                        throw CLIParseError.invalidUsage("dev bridge open의 알 수 없는 옵션입니다: \(rest[index])")
+                    }
+                }
+
+                return .dev(.bridgeOpen(
+                    agent: agent,
+                    profileName: profileName,
+                    workingDirectory: workingDirectory,
+                    forceWorkingDirectory: forceWorkingDirectory
+                ))
             case "roots":
                 var limit = 20
                 var searchPaths: [String] = []

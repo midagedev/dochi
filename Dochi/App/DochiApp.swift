@@ -1132,11 +1132,58 @@ struct DochiApp: App {
         }
 
         let profileName = nonEmptyString(params["profile_name"]) ?? preset.defaultProfileName
-        let workingDirectory = nonEmptyString(params["working_directory"]) ?? "~"
+        let requestedWorkingDirectory = nonEmptyString(params["working_directory"])
+        let forceWorkingDirectory = boolValue(params["force_working_directory"]) ?? false
         let arguments = params["arguments"] as? [String] ?? []
 
+        let existingProfile = await MainActor.run { () -> ExternalToolProfile? in
+            externalToolManager.profiles.first(where: { $0.name == profileName })
+        }
+
+        if let existingProfile {
+            let existingSessionPayload = await MainActor.run { () -> UncheckedJSONObject? in
+                guard let payload = existingBridgeSessionPayload(for: existingProfile.id, manager: externalToolManager) else {
+                    return nil
+                }
+                return UncheckedJSONObject(value: payload)
+            }
+            if let existingSessionPayload {
+                let decision = BridgeWorkingDirectorySelector.decideForActiveSession(
+                    profileWorkingDirectory: existingProfile.workingDirectory,
+                    requestedWorkingDirectory: requestedWorkingDirectory,
+                    forceWorkingDirectory: forceWorkingDirectory
+                )
+                var payload = existingSessionPayload.value
+                payload["reused"] = true
+                payload["working_directory"] = decision.workingDirectory
+                payload["selection_reason"] = decision.selectionReason.rawValue
+                payload["selection_detail"] = decision.selectionDetail
+                return .ok(payload)
+            }
+        }
+
+        let recommendedRoots: [GitRepositoryInsight]
+        if existingProfile == nil, requestedWorkingDirectory == nil {
+            recommendedRoots = await externalToolManager.discoverGitRepositoryInsights(
+                searchPaths: nil,
+                limit: 10
+            )
+        } else {
+            recommendedRoots = []
+        }
+        let decision = BridgeWorkingDirectorySelector.decide(
+            existingProfile: existingProfile,
+            requestedWorkingDirectory: requestedWorkingDirectory,
+            forceWorkingDirectory: forceWorkingDirectory,
+            recommendedRoots: recommendedRoots
+        )
+
         let profile = await MainActor.run { () -> ExternalToolProfile in
-            if let existing = externalToolManager.profiles.first(where: { $0.name == profileName }) {
+            if var existing = existingProfile {
+                if decision.selectionReason == .existingProfileOverridden {
+                    existing.workingDirectory = decision.workingDirectory
+                    externalToolManager.saveProfile(existing)
+                }
                 return existing
             }
 
@@ -1144,23 +1191,11 @@ struct DochiApp: App {
                 name: profileName,
                 command: preset.command,
                 arguments: arguments,
-                workingDirectory: workingDirectory,
+                workingDirectory: decision.workingDirectory,
                 healthCheckPatterns: preset.healthPatterns
             )
             externalToolManager.saveProfile(created)
             return created
-        }
-
-        let existingSessionPayload = await MainActor.run { () -> UncheckedJSONObject? in
-            guard let payload = existingBridgeSessionPayload(for: profile.id, manager: externalToolManager) else {
-                return nil
-            }
-            return UncheckedJSONObject(value: payload)
-        }
-        if let existingSessionPayload {
-            var payload = existingSessionPayload.value
-            payload["reused"] = true
-            return .ok(payload)
         }
 
         do {
@@ -1181,6 +1216,9 @@ struct DochiApp: App {
 
         var payload = createdSessionPayload.value
         payload["reused"] = false
+        payload["working_directory"] = decision.workingDirectory
+        payload["selection_reason"] = decision.selectionReason.rawValue
+        payload["selection_detail"] = decision.selectionDetail
         return .ok(payload)
     }
 
@@ -1207,11 +1245,13 @@ struct DochiApp: App {
 
         let sessionsPayload = await MainActor.run { () -> UncheckedJSONArray in
             let sessions: [[String: Any]] = externalToolManager.sessions.map { session in
-                let profileName = externalToolManager.profiles.first(where: { $0.id == session.profileId })?.name ?? "unknown"
+                let profile = externalToolManager.profiles.first(where: { $0.id == session.profileId })
+                let profileName = profile?.name ?? "unknown"
                 return [
                     "session_id": session.id.uuidString,
                     "profile_id": session.profileId.uuidString,
                     "profile_name": profileName,
+                    "working_directory": profile?.workingDirectory ?? "~",
                     "status": session.status.rawValue,
                     "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
                     "last_activity": session.lastActivityText ?? NSNull(),
@@ -1329,11 +1369,13 @@ struct DochiApp: App {
         guard let session = manager.sessions.first(where: { $0.profileId == profileId && $0.status != .dead }) else {
             return nil
         }
-        let profileName = manager.profiles.first(where: { $0.id == session.profileId })?.name ?? "unknown"
+        let profile = manager.profiles.first(where: { $0.id == session.profileId })
+        let profileName = profile?.name ?? "unknown"
         return [
             "session_id": session.id.uuidString,
             "profile_id": session.profileId.uuidString,
             "profile_name": profileName,
+            "working_directory": profile?.workingDirectory ?? "~",
             "status": session.status.rawValue,
             "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
             "last_activity": session.lastActivityText ?? NSNull(),
@@ -1348,11 +1390,13 @@ struct DochiApp: App {
         guard let session = manager.sessions.first(where: { $0.id == sessionId }) else {
             return nil
         }
-        let profileName = manager.profiles.first(where: { $0.id == session.profileId })?.name ?? "unknown"
+        let profile = manager.profiles.first(where: { $0.id == session.profileId })
+        let profileName = profile?.name ?? "unknown"
         return [
             "session_id": session.id.uuidString,
             "profile_id": session.profileId.uuidString,
             "profile_name": profileName,
+            "working_directory": profile?.workingDirectory ?? "~",
             "status": session.status.rawValue,
             "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
             "last_activity": session.lastActivityText ?? NSNull(),
@@ -1363,6 +1407,27 @@ struct DochiApp: App {
         guard let raw = value as? String else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    nonisolated private static func boolValue(_ value: Any?) -> Bool? {
+        switch value {
+        case let bool as Bool:
+            return bool
+        case let number as NSNumber:
+            return number.boolValue
+        case let string as String:
+            let normalized = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            switch normalized {
+            case "1", "true", "yes", "y":
+                return true
+            case "0", "false", "no", "n":
+                return false
+            default:
+                return nil
+            }
+        default:
+            return nil
+        }
     }
 
     nonisolated private static func isoTimestamp(_ date: Date = Date()) -> String {
