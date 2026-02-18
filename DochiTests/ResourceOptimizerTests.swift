@@ -133,6 +133,26 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(level, .wasteRisk)
     }
 
+    func testRiskLevelUsesProjectedSignal() async {
+        let level = service.calculateRiskLevel(
+            usageRatio: 0.45,
+            remainingRatio: 0.2,
+            projectedUsageRatio: 0.55,
+            reserveBufferRatio: 0.08
+        )
+        XCTAssertEqual(level, .caution)
+    }
+
+    func testRiskLevelProjectedSignalRespectsReserveBuffer() async {
+        let level = service.calculateRiskLevel(
+            usageRatio: 0.45,
+            remainingRatio: 0.2,
+            projectedUsageRatio: 0.55,
+            reserveBufferRatio: 0.5
+        )
+        XCTAssertEqual(level, .normal)
+    }
+
     // MARK: - Auto Task Queue
 
     func testQueueAutoTask() async {
@@ -228,6 +248,85 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(firstRun, 1)
         XCTAssertEqual(secondRun, 0)
         XCTAssertEqual(service.autoTaskRecords.count, 1)
+    }
+
+    func testEvaluateAndQueueAutoTasksQueuesGitScanReviewWhenDiffExists() async throws {
+        let repoURL = try makeGitRepository(name: "git-scan-repo")
+        let changed = repoURL.appendingPathComponent("notes.md")
+        try "hello\nworld\n".write(to: changed, atomically: true, encoding: .utf8)
+
+        let plan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Pro",
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        await service.addSubscription(plan)
+
+        let queued = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.gitScanReview],
+            onlyWasteRisk: false,
+            gitInsights: [sampleInsight(path: repoURL.path)]
+        )
+
+        XCTAssertEqual(queued, 1)
+        XCTAssertEqual(service.autoTaskRecords.count, 1)
+        XCTAssertEqual(service.autoTaskRecords.first?.taskType, .gitScanReview)
+        XCTAssertNotNil(service.autoTaskRecords.first?.dedupeKey)
+        XCTAssertTrue(service.autoTaskRecords.first?.summary.contains("git-scan-repo") == true)
+    }
+
+    func testEvaluateAndQueueAutoTasksDedupesGitScanReviewByChangeSet() async throws {
+        let repoURL = try makeGitRepository(name: "git-scan-dedupe")
+        let changed = repoURL.appendingPathComponent("README.md")
+        try "first change\n".write(to: changed, atomically: true, encoding: .utf8)
+
+        let plan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Pro",
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        await service.addSubscription(plan)
+
+        let first = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.gitScanReview],
+            onlyWasteRisk: false,
+            gitInsights: [sampleInsight(path: repoURL.path)]
+        )
+        let second = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.gitScanReview],
+            onlyWasteRisk: false,
+            gitInsights: [sampleInsight(path: repoURL.path)]
+        )
+
+        XCTAssertEqual(first, 1)
+        XCTAssertEqual(second, 0)
+        XCTAssertEqual(service.autoTaskRecords.count, 1)
+    }
+
+    func testEvaluateAndQueueAutoTasksSkipsGitScanReviewForHugeDiff() async throws {
+        let repoURL = try makeGitRepository(name: "git-scan-large")
+        let changed = repoURL.appendingPathComponent("big.txt")
+        let lines = Array(repeating: "line", count: 5000).joined(separator: "\n")
+        try lines.write(to: changed, atomically: true, encoding: .utf8)
+
+        let plan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Pro",
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        await service.addSubscription(plan)
+
+        let queued = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.gitScanReview],
+            onlyWasteRisk: false,
+            gitInsights: [sampleInsight(path: repoURL.path)]
+        )
+
+        XCTAssertEqual(queued, 0)
+        XCTAssertTrue(service.autoTaskRecords.isEmpty)
     }
 
     // MARK: - Utilization
@@ -460,10 +559,75 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(AutoTaskType.memoryCleanup.displayName, "메모리 정리")
         XCTAssertEqual(AutoTaskType.documentSummary.displayName, "문서 요약")
         XCTAssertEqual(AutoTaskType.kanbanCleanup.displayName, "칸반 정리")
+        XCTAssertEqual(AutoTaskType.gitScanReview.displayName, "Git 스캔 리뷰")
 
         XCTAssertFalse(AutoTaskType.research.icon.isEmpty)
         XCTAssertFalse(AutoTaskType.memoryCleanup.icon.isEmpty)
         XCTAssertFalse(AutoTaskType.documentSummary.icon.isEmpty)
         XCTAssertFalse(AutoTaskType.kanbanCleanup.icon.isEmpty)
+        XCTAssertFalse(AutoTaskType.gitScanReview.icon.isEmpty)
+    }
+
+    // MARK: - Git Helpers
+
+    private func makeGitRepository(name: String) throws -> URL {
+        let repoURL = tempDir.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
+
+        try runGit(["init"], at: repoURL)
+        try runGit(["checkout", "-b", "main"], at: repoURL)
+
+        let readme = repoURL.appendingPathComponent("README.md")
+        try "# \(name)\n".write(to: readme, atomically: true, encoding: .utf8)
+        try runGit(["add", "README.md"], at: repoURL)
+        try runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"], at: repoURL)
+
+        return repoURL
+    }
+
+    private func runGit(_ args: [String], at repoURL: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        process.currentDirectoryURL = repoURL
+        let stderr = Pipe()
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw NSError(domain: "ResourceOptimizerTests", code: Int(process.terminationStatus), userInfo: [
+                NSLocalizedDescriptionKey: "git command failed: \(args.joined(separator: " "))\n\(message)",
+            ])
+        }
+    }
+
+    private func sampleInsight(path: String) -> GitRepositoryInsight {
+        GitRepositoryInsight(
+            workDomain: "personal",
+            workDomainConfidence: 0.5,
+            workDomainReason: "test",
+            path: path,
+            name: URL(fileURLWithPath: path).lastPathComponent,
+            branch: "main",
+            originURL: nil,
+            remoteHost: nil,
+            remoteOwner: nil,
+            remoteRepository: nil,
+            lastCommitEpoch: nil,
+            lastCommitISO8601: nil,
+            lastCommitRelative: "today",
+            upstreamLastCommitEpoch: nil,
+            upstreamLastCommitISO8601: nil,
+            upstreamLastCommitRelative: "unknown",
+            daysSinceLastCommit: nil,
+            recentCommitCount30d: 0,
+            changedFileCount: 1,
+            untrackedFileCount: 0,
+            aheadCount: 0,
+            behindCount: 0,
+            score: 1
+        )
     }
 }

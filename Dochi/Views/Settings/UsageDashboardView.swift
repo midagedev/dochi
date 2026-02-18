@@ -569,6 +569,13 @@ struct UsageDashboardView: View {
                 Text("예상 미사용: \(String(format: "%.0f", util.currentUnusedPercent))%")
                     .font(.system(size: 10))
                     .foregroundStyle(util.riskLevel == .wasteRisk ? .red : .secondary)
+
+                Text(
+                    "기간 종료 예상 사용률: \(String(format: "%.0f", util.projectedUsageRatio * 100))% · "
+                        + "보존 버퍼: \(String(format: "%.0f", util.reserveBufferRatio * 100))%"
+                )
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
             }
         }
         .padding(8)
@@ -644,6 +651,25 @@ struct UsageDashboardView: View {
                     Text("잔여 토큰이 있으면 항상 자동 작업을 실행합니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                if isGitScanAutoTaskEnabled {
+                    Divider()
+                    if let latestGitScanRecord {
+                        Text("Git 스캔 자동작업 상태: 최근 큐잉 \(latestGitScanRecord.executedAt, style: .relative)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if !latestGitScanRecord.summary.isEmpty {
+                            Text(latestGitScanRecord.summary)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    } else {
+                        Text("Git 스캔 자동작업 상태: 아직 큐잉된 작업이 없습니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -753,6 +779,19 @@ struct UsageDashboardView: View {
     private func loadUtilizations() async {
         guard let optimizer = resourceOptimizer else { return }
         utilizations = await optimizer.allUtilizations()
+    }
+
+    private var isGitScanAutoTaskEnabled: Bool {
+        settings.resourceAutoTaskEnabled
+            && settings.resourceAutoTaskTypes.contains(AutoTaskType.gitScanReview.rawValue)
+    }
+
+    private var latestGitScanRecord: AutoTaskRecord? {
+        resourceOptimizer?
+            .autoTaskRecords
+            .filter { $0.taskType == .gitScanReview }
+            .sorted { $0.executedAt > $1.executedAt }
+            .first
     }
 
     // MARK: - Formatting
