@@ -14,6 +14,7 @@ struct OnboardingView: View {
     @State private var userName: String = ""
     @State private var agentName: String = "도치"
     @State private var interactionMode: InteractionMode = .voiceAndText
+    @State private var selectedOperatingProfile: OperatingProfile = .familyHomeAssistant
     @State private var isValidatingKey = false
     @State private var errorMessage: String?
     @State private var showFeatureTour = false
@@ -23,6 +24,7 @@ struct OnboardingView: View {
         case provider
         case apiKey
         case profile
+        case operatingProfile
         case agent
         case complete
     }
@@ -75,6 +77,8 @@ struct OnboardingView: View {
                     apiKeyStep
                 case .profile:
                     profileStep
+                case .operatingProfile:
+                    operatingProfileStep
                 case .agent:
                     agentStep
                 case .complete:
@@ -249,6 +253,49 @@ struct OnboardingView: View {
         }
     }
 
+    private var operatingProfileStep: some View {
+        VStack(spacing: 16) {
+            Text("운영 프로필 선택")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("도치가 어떤 역할을 기본으로 수행할지 선택해주세요.\n선택하지 않으면 가족 홈 어시스턴트로 시작합니다.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            VStack(spacing: 8) {
+                operatingProfileOption(.familyHomeAssistant)
+                operatingProfileOption(.personalProductivityAssistant)
+            }
+        }
+    }
+
+    private func operatingProfileOption(_ profile: OperatingProfile) -> some View {
+        Button {
+            selectedOperatingProfile = profile
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.displayName)
+                        .fontWeight(.medium)
+                    Text(profile.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if selectedOperatingProfile == profile {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(12)
+            .background(selectedOperatingProfile == profile ? Color.blue.opacity(0.1) : Color.secondary.opacity(0.05))
+            .cornerRadius(10)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var completeStep: some View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.circle.fill")
@@ -263,6 +310,7 @@ struct OnboardingView: View {
                 settingRow("프로바이더", value: selectedProvider.rawValue.uppercased())
                 settingRow("모델", value: defaultModel(for: selectedProvider))
                 settingRow("이름", value: userName.isEmpty ? "(미설정)" : userName)
+                settingRow("운영 프로필", value: selectedOperatingProfile.displayName)
                 settingRow("에이전트", value: agentName)
                 settingRow("대화 모드", value: interactionMode == .voiceAndText ? "음성 + 텍스트" : "텍스트만")
             }
@@ -291,7 +339,7 @@ struct OnboardingView: View {
 
     private var canAdvance: Bool {
         switch step {
-        case .welcome, .profile, .agent, .complete:
+        case .welcome, .profile, .operatingProfile, .agent, .complete:
             return true
         case .provider:
             return true
@@ -331,6 +379,7 @@ struct OnboardingView: View {
         settings.llmModel = defaultModel(for: selectedProvider)
         settings.activeAgentName = agentName.isEmpty ? "도치" : agentName
         settings.interactionMode = interactionMode.rawValue
+        settings.operatingProfile = selectedOperatingProfile.rawValue
 
         // Create first user profile if name provided
         let trimmedName = userName.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -117,7 +117,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .voice:
             return ["음성", "TTS", "속도", "피치", "Google Cloud", "프로바이더"]
         case .interface:
-            return ["글꼴", "폰트", "크기", "모드", "아바타", "VRM"]
+            return ["글꼴", "폰트", "크기", "모드", "아바타", "VRM", "운영", "프로필", "가족", "홈", "personal", "family"]
         case .wakeWord:
             return ["웨이크워드", "마이크", "침묵", "음성 입력"]
         case .heartbeat:
