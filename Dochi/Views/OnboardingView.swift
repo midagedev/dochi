@@ -18,6 +18,10 @@ struct OnboardingView: View {
     @State private var isValidatingKey = false
     @State private var errorMessage: String?
     @State private var showFeatureTour = false
+    @State private var quickSeedEnabled = true
+    @State private var quickSeedStatus: QuickSeedStatus = .idle
+    @State private var isCreatingQuickSeed = false
+    @State private var didPersistSettings = false
 
     enum OnboardingStep: Int, CaseIterable {
         case welcome
@@ -27,6 +31,12 @@ struct OnboardingView: View {
         case operatingProfile
         case agent
         case complete
+    }
+
+    enum QuickSeedStatus {
+        case idle
+        case success(String)
+        case failure(String)
     }
 
     var body: some View {
@@ -107,12 +117,14 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
+                    .disabled(isCreatingQuickSeed)
 
                     Button("기능 둘러보기") {
                         finishOnboardingAndStartTour()
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .disabled(isCreatingQuickSeed)
                 } else {
                     Button(step == .apiKey ? "확인" : "다음") {
                         advanceStep()
@@ -326,6 +338,30 @@ struct OnboardingView: View {
             .background(Color.secondary.opacity(0.05))
             .cornerRadius(10)
 
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("온보딩 종료 시 Quick Seed 자동 생성", isOn: $quickSeedEnabled)
+                    .toggleStyle(.checkbox)
+
+                Text("생성 순서: 미리알림 → 칸반 → 자동화 (최소 1개)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if isCreatingQuickSeed {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Quick Seed 생성 중...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                quickSeedStatusView
+            }
+            .padding()
+            .background(Color.secondary.opacity(0.05))
+            .cornerRadius(10)
+
             Text("설정은 나중에 언제든 변경할 수 있습니다.\n\"기능 둘러보기\"를 눌러 도치의 기능을 알아보세요.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -340,6 +376,49 @@ struct OnboardingView: View {
             Spacer()
             Text(value)
                 .fontWeight(.medium)
+        }
+    }
+
+    @ViewBuilder
+    private var quickSeedStatusView: some View {
+        switch quickSeedStatus {
+        case .idle:
+            EmptyView()
+        case .success(let message):
+            Label(message, systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        case .failure(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Quick Seed 생성 실패", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Button("다시 시도") {
+                        Task { await retryQuickSeed() }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isCreatingQuickSeed)
+
+                    Button("Seed 없이 시작") {
+                        Task { await completeOnboarding(startFeatureTour: false, forceSkipQuickSeed: true) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isCreatingQuickSeed)
+
+                    Button("Seed 없이 둘러보기") {
+                        Task { await completeOnboarding(startFeatureTour: true, forceSkipQuickSeed: true) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isCreatingQuickSeed)
+                }
+            }
         }
     }
 
@@ -382,7 +461,7 @@ struct OnboardingView: View {
         provider.onboardingDefaultModel
     }
 
-    private func saveSettings() {
+    private func persistSettings() {
         settings.llmProvider = selectedProvider.rawValue
         settings.llmModel = defaultModel(for: selectedProvider)
         settings.activeAgentName = agentName.isEmpty ? "도치" : agentName
@@ -397,20 +476,181 @@ struct OnboardingView: View {
             settings.defaultUserId = profile.id.uuidString
             Log.app.info("Created initial user profile: \(trimmedName)")
         }
+    }
 
-        // Mark onboarding complete
+    private func markOnboardingComplete() {
         UserDefaults.standard.set(true, forKey: "onboardingCompleted")
     }
 
     private func finishOnboarding() {
-        saveSettings()
-        onComplete()
+        Task { await completeOnboarding(startFeatureTour: false) }
     }
 
     private func finishOnboardingAndStartTour() {
-        saveSettings()
-        withAnimation {
-            showFeatureTour = true
+        Task { await completeOnboarding(startFeatureTour: true) }
+    }
+
+    private func retryQuickSeed() async {
+        isCreatingQuickSeed = true
+        let result = await createQuickSeed()
+        isCreatingQuickSeed = false
+
+        switch result {
+        case .success(let message):
+            quickSeedStatus = .success(message)
+        case .failure(let message):
+            quickSeedStatus = .failure(message)
         }
+    }
+
+    private func completeOnboarding(startFeatureTour: Bool, forceSkipQuickSeed: Bool = false) async {
+        persistSettingsIfNeeded()
+
+        if quickSeedEnabled && !forceSkipQuickSeed {
+            if case .success = quickSeedStatus {
+                // Seed already prepared; don't create duplicates.
+            } else {
+                isCreatingQuickSeed = true
+                let result = await createQuickSeed()
+                isCreatingQuickSeed = false
+
+                switch result {
+                case .success(let message):
+                    quickSeedStatus = .success(message)
+                case .failure(let message):
+                    quickSeedStatus = .failure(message)
+                    return
+                }
+            }
+        }
+
+        markOnboardingComplete()
+        if startFeatureTour {
+            withAnimation {
+                showFeatureTour = true
+            }
+        } else {
+            onComplete()
+        }
+    }
+
+    private enum QuickSeedCreationResult {
+        case success(String)
+        case failure(String)
+    }
+
+    private enum SeedAttemptResult {
+        case success(String)
+        case failure(String)
+    }
+
+    private func createQuickSeed() async -> QuickSeedCreationResult {
+        var errors: [String] = []
+
+        switch await createReminderSeed() {
+        case .success(let message):
+            return .success(message)
+        case .failure(let error):
+            errors.append("미리알림 실패: \(error)")
+        }
+
+        switch createKanbanSeed() {
+        case .success(let message):
+            return .success(message)
+        case .failure(let error):
+            errors.append("칸반 실패: \(error)")
+        }
+
+        switch createAutomationSeed() {
+        case .success(let message):
+            return .success(message)
+        case .failure(let error):
+            errors.append("자동화 실패: \(error)")
+        }
+
+        return .failure(errors.joined(separator: "\n"))
+    }
+
+    private func createReminderSeed() async -> SeedAttemptResult {
+        let title = "도치 첫 실행 체크"
+        let notes = "온보딩 Quick Seed로 생성된 미리알림입니다."
+
+        let script = """
+        tell application "Reminders"
+            if (count of lists) is 0 then
+                make new list with properties {name:"Dochi"}
+            end if
+            set targetList to first list
+            set seedTitle to "\(CreateReminderTool.escapeAppleScript(title))"
+            set existingReminders to (every reminder of targetList whose name is seedTitle)
+            if (count of existingReminders) is 0 then
+                make new reminder at end of targetList with properties {name:seedTitle, body:"\(CreateReminderTool.escapeAppleScript(notes))"}
+                return "CREATED"
+            end if
+            return "EXISTS"
+        end tell
+        """
+
+        let result = await runAppleScript(script)
+        switch result {
+        case .success:
+            return .success("Quick Seed 준비 완료: 미리알림 1개")
+        case .failure(let error):
+            return .failure(error.message)
+        }
+    }
+
+    private func createKanbanSeed() -> SeedAttemptResult {
+        let boardName = "온보딩 Quick Seed"
+        let cardTitle = "오늘 시작할 일 1개 정하기"
+
+        let existingBoard = KanbanManager.shared
+            .listBoards()
+            .first { $0.name == boardName }
+
+        let board = existingBoard ?? KanbanManager.shared.createBoard(name: boardName)
+        if board.cards.contains(where: { $0.title == cardTitle }) {
+            return .success("Quick Seed 준비 완료: 칸반 1개")
+        }
+
+        guard KanbanManager.shared.addCard(
+            boardId: board.id,
+            title: cardTitle,
+            column: board.columns.first,
+            priority: .medium,
+            description: "온보딩에서 자동 생성된 시작 카드",
+            labels: ["온보딩"]
+        ) != nil else {
+            return .failure("카드 생성에 실패했습니다.")
+        }
+
+        return .success("Quick Seed 준비 완료: 칸반 1개")
+    }
+
+    private func createAutomationSeed() -> SeedAttemptResult {
+        let scheduleName = "온보딩 Quick Seed 브리핑"
+        let scheduler = SchedulerService(settings: settings)
+        scheduler.loadSchedules()
+
+        if scheduler.schedules.contains(where: { $0.name == scheduleName }) {
+            return .success("Quick Seed 준비 완료: 자동화 1개")
+        }
+
+        let schedule = ScheduleEntry(
+            name: scheduleName,
+            icon: "🌱",
+            cronExpression: "0 9 * * *",
+            prompt: "오늘 일정과 할 일을 보고 가장 먼저 시작할 1개를 제안해줘",
+            agentName: settings.activeAgentName.isEmpty ? "도치" : settings.activeAgentName
+        )
+        scheduler.addSchedule(schedule)
+
+        return .success("Quick Seed 준비 완료: 자동화 1개")
+    }
+
+    private func persistSettingsIfNeeded() {
+        guard !didPersistSettings else { return }
+        persistSettings()
+        didPersistSettings = true
     }
 }
