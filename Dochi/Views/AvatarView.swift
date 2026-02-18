@@ -1,13 +1,36 @@
 import SwiftUI
 import RealityKit
+#if canImport(AppKit)
+import AppKit
+#endif
 
 @available(macOS 15.0, *)
 struct AvatarView: View {
     let interactionState: InteractionState
+    let modelName: String
+    @AppStorage("avatarModelName") private var storedModelName = AvatarModelCatalog.defaultModelID
+    @AppStorage("avatarCameraZoom") private var storedCameraZoom = AppSettings.avatarCameraZoomDefault
 
     @State private var manager = AvatarManager()
     @State private var rootEntity: Entity?
     @State private var errorMessage: String?
+
+    private var selectedModelName: String {
+        AvatarModelCatalog.normalizedModelID(storedModelName)
+    }
+
+    private var selectedCameraZoom: Double {
+        AppSettings.normalizedAvatarCameraZoom(storedCameraZoom)
+    }
+
+    private var cameraDistance: Float {
+        let baseDistance: Float = 0.34
+        return baseDistance / Float(selectedCameraZoom)
+    }
+
+    private var cameraConfigurationID: Int {
+        Int((selectedCameraZoom * 100).rounded())
+    }
 
     var body: some View {
         ZStack {
@@ -17,10 +40,10 @@ struct AvatarView: View {
 
                     // Camera: upper body + face framing
                     let camera = PerspectiveCamera()
-                    camera.camera.fieldOfViewInDegrees = 35
+                    camera.camera.fieldOfViewInDegrees = 22
                     camera.look(
-                        at: SIMD3<Float>(0, 0, 0),
-                        from: SIMD3<Float>(0, 0.03, 0.55),
+                        at: SIMD3<Float>(0, 0.04, 0),
+                        from: SIMD3<Float>(0, 0.08, cameraDistance),
                         relativeTo: nil
                     )
                     content.add(camera)
@@ -47,6 +70,7 @@ struct AvatarView: View {
                     )
                     content.add(fillLight)
                 }
+                .id(cameraConfigurationID)
             } else if let errorMessage {
                 placeholderView(message: errorMessage)
             } else {
@@ -57,14 +81,28 @@ struct AvatarView: View {
         .background(
             NightSkyBackground()
         )
+        #if canImport(AppKit)
+        .overlay {
+            AvatarZoomInputOverlay(
+                onScrollDeltaY: applyScrollZoom(deltaY:),
+                onMagnificationDelta: applyMagnifyZoom(delta:)
+            )
+        }
+        #endif
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .task {
-            do {
-                let entity = try manager.loadModel(named: "default_avatar")
-                rootEntity = entity
-            } catch {
-                errorMessage = error.localizedDescription
-                Log.avatar.error("Failed to load avatar: \(error.localizedDescription)")
+        .task(id: selectedModelName) {
+            await loadSelectedModel(named: selectedModelName)
+        }
+        .onChange(of: modelName) { _, newValue in
+            let normalized = AvatarModelCatalog.normalizedModelID(newValue)
+            if storedModelName != normalized {
+                storedModelName = normalized
+            }
+        }
+        .onChange(of: storedCameraZoom) { _, newValue in
+            let normalized = AppSettings.normalizedAvatarCameraZoom(newValue)
+            if normalized != newValue {
+                storedCameraZoom = normalized
             }
         }
         .onChange(of: interactionState) { _, newState in
@@ -72,6 +110,7 @@ struct AvatarView: View {
         }
         .onDisappear {
             manager.cleanup()
+            rootEntity = nil
         }
     }
 
@@ -92,7 +131,86 @@ struct AvatarView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    private func loadSelectedModel(named name: String) async {
+        manager.cleanup()
+        rootEntity = nil
+        errorMessage = nil
+
+        do {
+            let entity = try manager.loadModel(named: name)
+            rootEntity = entity
+        } catch {
+            errorMessage = "모델 '\(name)' 로딩 실패: \(error.localizedDescription)"
+            Log.avatar.error("Failed to load avatar \(name): \(error.localizedDescription)")
+        }
+    }
+
+    private func applyScrollZoom(deltaY: CGFloat) {
+        // Mouse wheel / two-finger vertical scroll while hovering avatar
+        let sensitivity = 0.002
+        updateCameraZoom(selectedCameraZoom + Double(deltaY) * sensitivity)
+    }
+
+    private func applyMagnifyZoom(delta: CGFloat) {
+        // Trackpad pinch delta from NSEvent.magnification
+        updateCameraZoom(selectedCameraZoom * (1 + Double(delta)))
+    }
+
+    private func updateCameraZoom(_ value: Double) {
+        let normalized = AppSettings.normalizedAvatarCameraZoom(value)
+        let quantized = (normalized * 100).rounded() / 100
+        guard quantized != storedCameraZoom else { return }
+        storedCameraZoom = quantized
+    }
 }
+
+#if canImport(AppKit)
+private struct AvatarZoomInputOverlay: NSViewRepresentable {
+    let onScrollDeltaY: (CGFloat) -> Void
+    let onMagnificationDelta: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> AvatarZoomInputNSView {
+        let view = AvatarZoomInputNSView()
+        view.onScrollDeltaY = onScrollDeltaY
+        view.onMagnificationDelta = onMagnificationDelta
+        return view
+    }
+
+    func updateNSView(_ nsView: AvatarZoomInputNSView, context: Context) {
+        nsView.onScrollDeltaY = onScrollDeltaY
+        nsView.onMagnificationDelta = onMagnificationDelta
+    }
+}
+
+private final class AvatarZoomInputNSView: NSView {
+    var onScrollDeltaY: ((CGFloat) -> Void)?
+    var onMagnificationDelta: ((CGFloat) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        self
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let deltaY = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : (event.deltaY * 10)
+        onScrollDeltaY?(deltaY)
+    }
+
+    override func magnify(with event: NSEvent) {
+        onMagnificationDelta?(event.magnification)
+    }
+}
+#endif
 
 // MARK: - Night Sky Background
 

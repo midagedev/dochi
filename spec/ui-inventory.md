@@ -428,7 +428,7 @@ RAGReference 필드:
 | Heartbeat | `heartbeatEnabled`, `heartbeatIntervalMinutes`, `heartbeatCheckCalendar/Kanban/Reminders` |
 | 프로액티브 제안 (K-2) | `proactiveSuggestionEnabled`, `proactiveSuggestionIdleMinutes`, `proactiveSuggestionCooldownMinutes`, `proactiveSuggestionQuietHoursEnabled`, `suggestionType*Enabled`, `notificationProactiveSuggestionEnabled`, `proactiveSuggestionMenuBarEnabled`, `suggestionNotificationChannel` |
 | 알림 센터 (H-3) | `notificationCalendarEnabled`, `notificationKanbanEnabled`, `notificationReminderEnabled`, `notificationMemoryEnabled`, `notificationSoundEnabled`, `notificationReplyEnabled` |
-| 아바타 | `avatarEnabled` |
+| 아바타 | `avatarEnabled`, `avatarModelName` |
 | 가이드 | `hintsEnabled`, `featureTourCompleted`, `featureTourSkipped`, `featureTourBannerDismissed` |
 | 예산 (G-4) | `budgetEnabled`, `monthlyBudgetUSD`, `budgetAlert50`, `budgetAlert80`, `budgetAlert100`, `budgetBlockOnExceed` |
 | 동기화 (G-3) | `autoSyncEnabled`, `realtimeSyncEnabled`, `syncConversations`, `syncMemory`, `syncKanban`, `syncProfiles`, `conflictResolutionStrategy` |

@@ -444,6 +444,28 @@ final class ModelTests: XCTestCase {
     }
 
     @MainActor
+    func testAppSettingsAvatarCameraZoomDefaultsAndPersistence() {
+        UserDefaults.standard.removeObject(forKey: "avatarCameraZoom")
+
+        let settings = AppSettings()
+        XCTAssertEqual(settings.avatarCameraZoom, AppSettings.avatarCameraZoomDefault, accuracy: 0.0001)
+
+        settings.avatarCameraZoom = 1.08
+        let restored = AppSettings()
+        XCTAssertEqual(restored.avatarCameraZoom, 1.08, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testAppSettingsAvatarCameraZoomClampsOutOfRangeValues() {
+        UserDefaults.standard.set(9.9, forKey: "avatarCameraZoom")
+        let settings = AppSettings()
+        XCTAssertEqual(settings.avatarCameraZoom, AppSettings.avatarCameraZoomRange.upperBound, accuracy: 0.0001)
+
+        settings.avatarCameraZoom = -3.0
+        XCTAssertEqual(settings.avatarCameraZoom, AppSettings.avatarCameraZoomRange.lowerBound, accuracy: 0.0001)
+    }
+
+    @MainActor
     func testSetupHealthReportPerfectScoreWhenCoreSetupIsReady() {
         let settings = AppSettings()
         settings.autoSyncEnabled = false

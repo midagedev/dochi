@@ -18,6 +18,7 @@ final class SpeechService: SpeechServiceProtocol {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var silenceTimer: Task<Void, Never>?
+    private var firstSpeechTimeoutTask: Task<Void, Never>?
 
     /// Tracks the last raw partial transcription to detect new speech activity.
     private var lastTranscription: String = ""
@@ -40,26 +41,35 @@ final class SpeechService: SpeechServiceProtocol {
     // MARK: - Authorization
 
     func requestAuthorization() async -> Bool {
-        let status = await Self.requestSpeechAuthorizationStatus()
+        let speechStatus = await Self.requestSpeechAuthorizationStatus()
+        let speechAuthorized: Bool
 
-        switch status {
+        switch speechStatus {
         case .authorized:
-            isAuthorized = true
+            speechAuthorized = true
             Log.stt.info("Speech recognition authorised")
         case .denied:
-            isAuthorized = false
+            speechAuthorized = false
             Log.stt.warning("Speech recognition denied by user")
         case .restricted:
-            isAuthorized = false
+            speechAuthorized = false
             Log.stt.warning("Speech recognition restricted on this device")
         case .notDetermined:
-            isAuthorized = false
+            speechAuthorized = false
             Log.stt.warning("Speech recognition authorisation not determined")
         @unknown default:
-            isAuthorized = false
+            speechAuthorized = false
             Log.stt.warning("Speech recognition authorisation unknown status")
         }
 
+        let microphoneAuthorized = await Self.requestMicrophoneAuthorization()
+        if microphoneAuthorized {
+            Log.stt.info("Microphone access authorised")
+        } else {
+            Log.stt.warning("Microphone access denied or restricted")
+        }
+
+        isAuthorized = speechAuthorized && microphoneAuthorized
         return isAuthorized
     }
 
@@ -70,6 +80,23 @@ final class SpeechService: SpeechServiceProtocol {
             SFSpeechRecognizer.requestAuthorization { status in
                 continuation.resume(returning: status)
             }
+        }
+    }
+
+    nonisolated private static func requestMicrophoneAuthorization() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
         }
     }
 
@@ -113,12 +140,11 @@ final class SpeechService: SpeechServiceProtocol {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
 
-        // Prefer on-device recognition for privacy; fall back to server if unsupported.
+        // Use automatic mode so the system can use server fallback when needed.
+        request.requiresOnDeviceRecognition = false
         if speechRecognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-            Log.stt.info("Using on-device recognition")
+            Log.stt.info("On-device recognition supported (automatic mode)")
         } else {
-            request.requiresOnDeviceRecognition = false
             Log.stt.info("On-device recognition not available — using server")
         }
 
@@ -127,6 +153,11 @@ final class SpeechService: SpeechServiceProtocol {
         // Configure audio engine
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
+        guard recordingFormat.channelCount > 0 else {
+            Log.stt.error("No microphone input channel available")
+            onError(SpeechServiceError.noInputDevice)
+            return
+        }
 
         let tapHandler = Self.makeInputTapHandler(for: request)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat, block: tapHandler)
@@ -151,6 +182,8 @@ final class SpeechService: SpeechServiceProtocol {
                 self?.handleRecognitionResult(result, error: error, silenceTimeout: silenceTimeout)
             }
         }
+
+        scheduleFirstSpeechTimeout(seconds: max(4.0, silenceTimeout + 1.0))
 
         // Silence timer starts only after first speech is detected (in handleRecognitionResult)
     }
@@ -194,6 +227,10 @@ final class SpeechService: SpeechServiceProtocol {
 
         if rawText != lastTranscription {
             lastTranscription = rawText
+            if !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                firstSpeechTimeoutTask?.cancel()
+                firstSpeechTimeoutTask = nil
+            }
             resetSilenceTimer(timeout: silenceTimeout)
         }
 
@@ -218,6 +255,26 @@ final class SpeechService: SpeechServiceProtocol {
             guard let self, self.isListening else { return }
             Log.stt.info("Silence timeout reached (\(timeout)s)")
             self.deliverFinalResult()
+        }
+    }
+
+    private func scheduleFirstSpeechTimeout(seconds: TimeInterval) {
+        firstSpeechTimeoutTask?.cancel()
+        firstSpeechTimeoutTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(seconds))
+            } catch {
+                return
+            }
+
+            guard let self, self.isListening else { return }
+            let trimmed = self.bestTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty else { return }
+
+            Log.stt.warning("No speech detected within \(seconds)s")
+            let callback = self.onError
+            self.cleanup()
+            callback?(SpeechServiceError.noSpeechDetected)
         }
     }
 
@@ -357,6 +414,8 @@ final class SpeechService: SpeechServiceProtocol {
     private func cleanup() {
         silenceTimer?.cancel()
         silenceTimer = nil
+        firstSpeechTimeoutTask?.cancel()
+        firstSpeechTimeoutTask = nil
 
         recognitionTask?.cancel()
         recognitionTask = nil
@@ -384,6 +443,8 @@ enum SpeechServiceError: LocalizedError {
     case recognizerUnavailable
     case audioEngineFailure(Error)
     case recognitionFailed(Error)
+    case noInputDevice
+    case noSpeechDetected
 
     var errorDescription: String? {
         switch self {
@@ -393,6 +454,10 @@ enum SpeechServiceError: LocalizedError {
             return "오디오 엔진 시작 실패: \(underlying.localizedDescription)"
         case .recognitionFailed(let underlying):
             return "음성 인식 실패: \(underlying.localizedDescription)"
+        case .noInputDevice:
+            return "마이크 입력 장치를 찾을 수 없습니다."
+        case .noSpeechDetected:
+            return "음성을 감지하지 못했습니다. 마이크 입력 장치와 권한을 확인해주세요."
         }
     }
 }

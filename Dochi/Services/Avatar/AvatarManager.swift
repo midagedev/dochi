@@ -37,19 +37,7 @@ final class AvatarManager {
 
         // Rotate 180° to face camera
         vrmEntity.entity.transform.rotation = simd_quatf(angle: .pi, axis: SIMD3(0, 1, 0))
-
-        // Auto-position: use head bone to center face in view
-        if let headNode = vrmEntity.humanoid.node(for: .head) {
-            let headWorldPos = headNode.position(relativeTo: nil)
-            vrmEntity.entity.position = SIMD3<Float>(0, -headWorldPos.y, 0)
-            Log.avatar.info("Head bone Y=\(headWorldPos.y), offset applied")
-        } else {
-            // Fallback: use bounding box
-            let bounds = vrmEntity.entity.visualBounds(relativeTo: nil)
-            let centerY = (bounds.min.y + bounds.max.y) * 0.5
-            vrmEntity.entity.position = SIMD3<Float>(0, -centerY, 0)
-            Log.avatar.info("No head bone, using bbox center Y=\(centerY)")
-        }
+        normalizeScaleAndPosition(vrmEntity)
 
         applyIdlePose()
         startUpdateLoop()
@@ -58,6 +46,36 @@ final class AvatarManager {
 
         Log.avatar.info("VRM model loaded successfully")
         return vrmEntity.entity
+    }
+
+    private func normalizeScaleAndPosition(_ vrmEntity: VRMEntity) {
+        let rawBounds = vrmEntity.entity.visualBounds(relativeTo: nil)
+        let rawSize = rawBounds.extents
+
+        // Normalize model size so different VRM assets occupy similar screen space.
+        // Aggressive framing: prioritize upper-body / face crop over full-body view.
+        let targetHeight: Float = 1.08
+        let targetWidth: Float = 0.68
+        let heightScale = targetHeight / max(rawSize.y, 0.0001)
+        let widthScale = targetWidth / max(rawSize.x, 0.0001)
+        let uniformScale = min(heightScale, widthScale)
+
+        vrmEntity.entity.scale = SIMD3<Float>(repeating: uniformScale)
+
+        let scaledBounds = vrmEntity.entity.visualBounds(relativeTo: nil)
+        let centerX = (scaledBounds.min.x + scaledBounds.max.x) * 0.5
+
+        // Auto-position: keep face centered while normalizing horizontal offset.
+        if let headNode = vrmEntity.humanoid.node(for: .head) {
+            let headWorldPos = headNode.position(relativeTo: nil)
+            vrmEntity.entity.position = SIMD3<Float>(-centerX, -headWorldPos.y, 0)
+            Log.avatar.info("Normalized avatar scale=\(uniformScale), headY=\(headWorldPos.y)")
+        } else {
+            // Fallback: use bounding box
+            let centerY = (scaledBounds.min.y + scaledBounds.max.y) * 0.5
+            vrmEntity.entity.position = SIMD3<Float>(-centerX, -centerY, 0)
+            Log.avatar.info("No head bone, scale=\(uniformScale), centerY=\(centerY)")
+        }
     }
 
     // MARK: - Idle Pose (Arms Down)

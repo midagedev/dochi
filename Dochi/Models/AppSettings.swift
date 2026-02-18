@@ -50,6 +50,14 @@ final class AppSettings {
         "ragEmbeddingProvider",
     ]
 
+    static let avatarCameraZoomDefault: Double = 0.9
+    static let avatarCameraZoomRange: ClosedRange<Double> = 0.75...1.25
+
+    static func normalizedAvatarCameraZoom(_ value: Double?) -> Double {
+        let raw = value ?? avatarCameraZoomDefault
+        return min(max(raw, avatarCameraZoomRange.lowerBound), avatarCameraZoomRange.upperBound)
+    }
+
     init() {
         let defaults = UserDefaults.standard
 
@@ -75,6 +83,16 @@ final class AppSettings {
         if OperatingProfile(rawValue: operatingProfile) == nil {
             operatingProfile = OperatingProfile.familyHomeAssistant.rawValue
         }
+
+        // Repair invalid avatar model values to safe default.
+        let normalizedAvatarModel = AvatarModelCatalog.normalizedModelID(defaults.string(forKey: "avatarModelName"))
+        defaults.set(normalizedAvatarModel, forKey: "avatarModelName")
+
+        // Repair invalid avatar camera zoom values to safe default.
+        let normalizedAvatarCameraZoom = Self.normalizedAvatarCameraZoom(
+            defaults.object(forKey: "avatarCameraZoom") as? Double
+        )
+        defaults.set(normalizedAvatarCameraZoom, forKey: "avatarCameraZoom")
     }
 
     // MARK: - P1 Settings
@@ -324,6 +342,30 @@ final class AppSettings {
 
     var avatarEnabled: Bool = UserDefaults.standard.object(forKey: "avatarEnabled") as? Bool ?? false {
         didSet { UserDefaults.standard.set(avatarEnabled, forKey: "avatarEnabled") }
+    }
+
+    var avatarModelName: String = AvatarModelCatalog.normalizedModelID(UserDefaults.standard.string(forKey: "avatarModelName")) {
+        didSet {
+            let normalized = AvatarModelCatalog.normalizedModelID(avatarModelName)
+            if normalized != avatarModelName {
+                avatarModelName = normalized
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: "avatarModelName")
+        }
+    }
+
+    var avatarCameraZoom: Double = AppSettings.normalizedAvatarCameraZoom(
+        UserDefaults.standard.object(forKey: "avatarCameraZoom") as? Double
+    ) {
+        didSet {
+            let normalized = AppSettings.normalizedAvatarCameraZoom(avatarCameraZoom)
+            if normalized != avatarCameraZoom {
+                avatarCameraZoom = normalized
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: "avatarCameraZoom")
+        }
     }
 
     // MARK: - Heartbeat / Proactive Agent
