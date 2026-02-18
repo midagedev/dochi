@@ -15,4 +15,12 @@ enum NotificationChannel: String, Codable, Sendable, CaseIterable {
         case .off: return "끄기"
         }
     }
+
+    var deliversToApp: Bool {
+        self == .appOnly || self == .both
+    }
+
+    var deliversToTelegram: Bool {
+        self == .telegramOnly || self == .both
+    }
 }

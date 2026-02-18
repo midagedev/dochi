@@ -183,7 +183,8 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
     }
 
     func sendProactiveSuggestionNotification(suggestion: ProactiveSuggestion) {
-        guard settings.notificationProactiveSuggestionEnabled else { return }
+        let channel = NotificationChannel(rawValue: settings.suggestionNotificationChannel) ?? .off
+        guard channel.deliversToApp else { return }
         sendNotification(
             title: "도치 - 프로액티브 제안",
             body: "\(suggestion.title)\n\(suggestion.body)",

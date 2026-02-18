@@ -11,9 +11,19 @@ final class AppSettings {
     ]
 
     init() {
+        let defaults = UserDefaults.standard
+
         // Remove stale keys for settings that are no longer exposed or used.
         for key in Self.deprecatedKeys {
-            UserDefaults.standard.removeObject(forKey: key)
+            defaults.removeObject(forKey: key)
+        }
+
+        // Legacy migration: proactive suggestion app notification toggle -> channel policy.
+        // If channel key does not exist, preserve old boolean behavior.
+        if defaults.string(forKey: "suggestionNotificationChannel") == nil {
+            let legacyEnabled = defaults.object(forKey: "notificationProactiveSuggestionEnabled") as? Bool ?? false
+            let migrated: NotificationChannel = legacyEnabled ? .appOnly : .off
+            defaults.set(migrated.rawValue, forKey: "suggestionNotificationChannel")
         }
     }
 
@@ -591,8 +601,29 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(suggestionTypeCostEnabled, forKey: "suggestionTypeCostEnabled") }
     }
 
-    var notificationProactiveSuggestionEnabled: Bool = UserDefaults.standard.object(forKey: "notificationProactiveSuggestionEnabled") as? Bool ?? false {
-        didSet { UserDefaults.standard.set(notificationProactiveSuggestionEnabled, forKey: "notificationProactiveSuggestionEnabled") }
+    var notificationProactiveSuggestionEnabled: Bool {
+        get {
+            let channel = NotificationChannel(rawValue: suggestionNotificationChannel) ?? .off
+            return channel.deliversToApp
+        }
+        set {
+            let current = NotificationChannel(rawValue: suggestionNotificationChannel) ?? .off
+            switch (newValue, current) {
+            case (true, .telegramOnly):
+                suggestionNotificationChannel = NotificationChannel.both.rawValue
+            case (true, .off):
+                suggestionNotificationChannel = NotificationChannel.appOnly.rawValue
+            case (true, _):
+                break
+            case (false, .both):
+                suggestionNotificationChannel = NotificationChannel.telegramOnly.rawValue
+            case (false, .appOnly):
+                suggestionNotificationChannel = NotificationChannel.off.rawValue
+            case (false, _):
+                break
+            }
+            UserDefaults.standard.set(newValue, forKey: "notificationProactiveSuggestionEnabled")
+        }
     }
 
     var proactiveSuggestionMenuBarEnabled: Bool = UserDefaults.standard.object(forKey: "proactiveSuggestionMenuBarEnabled") as? Bool ?? true {
@@ -657,7 +688,7 @@ final class AppSettings {
 
     /// Proactive suggestion notification channel: appOnly / telegramOnly / both / off
     var suggestionNotificationChannel: String =
-        UserDefaults.standard.string(forKey: "suggestionNotificationChannel") ?? "appOnly" {
+        UserDefaults.standard.string(forKey: "suggestionNotificationChannel") ?? NotificationChannel.off.rawValue {
         didSet { UserDefaults.standard.set(suggestionNotificationChannel, forKey: "suggestionNotificationChannel") }
     }
 

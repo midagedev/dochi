@@ -145,18 +145,28 @@ struct ProactiveSuggestionSettingsView: View {
 
             // MARK: - Notification Settings
             Section("알림") {
-                Toggle("알림 센터에 제안 표시", isOn: Binding(
-                    get: { settings.notificationProactiveSuggestionEnabled },
-                    set: { settings.notificationProactiveSuggestionEnabled = $0 }
-                ))
+                Picker("제안 전달 채널", selection: Binding(
+                    get: { NotificationChannel(rawValue: settings.suggestionNotificationChannel) ?? .off },
+                    set: { settings.suggestionNotificationChannel = $0.rawValue }
+                )) {
+                    ForEach(NotificationChannel.allCases, id: \.self) { channel in
+                        Text(channel.displayName).tag(channel)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("앱만/텔레그램만/둘 다/끄기 중 하나의 정책으로 제안 전달 경로를 단일 제어합니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Toggle("메뉴바에 제안 표시", isOn: Binding(
                     get: { settings.proactiveSuggestionMenuBarEnabled },
                     set: { settings.proactiveSuggestionMenuBarEnabled = $0 }
                 ))
 
-                if settings.notificationProactiveSuggestionEnabled || settings.proactiveSuggestionMenuBarEnabled {
-                    Text("새 제안이 생성되면 알림 센터 배너와 메뉴바 팝오버 상단 카드 노출을 각각 토글로 제어합니다.")
+                let channel = NotificationChannel(rawValue: settings.suggestionNotificationChannel) ?? .off
+                if channel != .off || settings.proactiveSuggestionMenuBarEnabled {
+                    Text("새 제안이 생성되면 선택한 채널 정책과 메뉴바 카드 설정에 따라 노출됩니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
