@@ -375,6 +375,16 @@
 - Acceptance Criteria:
   1. CLI에서 스트림 모드로 응답 진행률 확인 가능
   2. 도구 실행 이벤트와 로그를 동일 ID로 추적 가능
+- 상태: done (2026-02-18)
+- 구현 파일:
+  - `Dochi/App/DochiApp.swift`
+  - `Dochi/ViewModels/DochiViewModel.swift`
+  - `Dochi/Services/ControlPlane/ControlPlaneStreamRegistry.swift`
+  - `Dochi/CLIShared/CLICommandSurface.swift`
+  - `DochiCLI/main.swift`
+- 테스트:
+  - `DochiTests/ControlPlaneStreamRegistryTests.swift`
+  - `DochiTests/CLICommandSurfaceTests.swift`
 
 ### F5. [P1][Security] 로컬 API 접근 제어
 - Problem: 로컬 소켓이라도 동일 사용자 세션 내 오용 가능성 존재.

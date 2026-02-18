@@ -673,6 +673,12 @@ struct DochiApp: App {
         let value: [[String: Any]]
     }
 
+    private struct UncheckedViewModel: @unchecked Sendable {
+        let value: DochiViewModel
+    }
+
+    private static let streamRegistry = ControlPlaneStreamRegistry()
+
     nonisolated private static func handleControlPlaneMethod(
         method: String,
         params: [String: Any],
@@ -747,6 +753,15 @@ struct DochiApp: App {
                 return .failure(code: "internal_error", message: error.localizedDescription)
             }
 
+        case "chat.stream.open":
+            return await handleChatStreamOpen(params: params, viewModel: viewModel)
+
+        case "chat.stream.read":
+            return await handleChatStreamRead(params: params)
+
+        case "chat.stream.close":
+            return await handleChatStreamClose(params: params)
+
         case "tool.execute":
             guard let name = (params["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !name.isEmpty else {
@@ -798,6 +813,15 @@ struct DochiApp: App {
                 return .failure(code: "log_fetch_failed", message: error.localizedDescription)
             }
 
+        case "log.tail.open":
+            return await handleLogTailOpen(params: params)
+
+        case "log.tail.read":
+            return await handleLogTailRead(params: params)
+
+        case "log.tail.close":
+            return await handleLogTailClose(params: params)
+
         case "bridge.open":
             return await handleBridgeOpen(params: params, externalToolManager: externalToolManager)
 
@@ -813,6 +837,219 @@ struct DochiApp: App {
         default:
             return .failure(code: "method_not_found", message: "지원하지 않는 메서드입니다: \(method)")
         }
+    }
+
+    nonisolated private static func handleChatStreamOpen(
+        params: [String: Any],
+        viewModel: DochiViewModel
+    ) async -> LocalControlPlaneMethodResult {
+        guard let prompt = nonEmptyString(params["prompt"]) else {
+            return .failure(code: "empty_prompt", message: "prompt가 필요합니다.")
+        }
+
+        let timeoutSeconds = max(5, min(300, params["timeout_seconds"] as? Int ?? 120))
+        let correlationId = nonEmptyString(params["correlation_id"]) ?? UUID().uuidString
+        let streamId = await streamRegistry.createChatSession(correlationId: correlationId)
+        let uncheckedViewModel = UncheckedViewModel(value: viewModel)
+
+        let task = Task {
+            do {
+                _ = try await uncheckedViewModel.value.runControlPlaneChatStream(
+                    prompt: prompt,
+                    correlationId: correlationId,
+                    timeoutSeconds: timeoutSeconds
+                ) { event in
+                    await streamRegistry.appendChatEvent(
+                        streamId: streamId,
+                        type: event.kind.rawValue,
+                        timestamp: event.timestamp,
+                        text: event.text,
+                        toolName: event.toolName
+                    )
+                    logCorrelationEvent(event, correlationId: correlationId)
+                }
+                await streamRegistry.finishChat(streamId: streamId, errorMessage: nil)
+            } catch let error as DochiViewModel.ControlPlaneChatSendError {
+                await streamRegistry.finishChat(
+                    streamId: streamId,
+                    errorMessage: error.errorDescription ?? "chat.stream 실패"
+                )
+            } catch {
+                await streamRegistry.finishChat(streamId: streamId, errorMessage: error.localizedDescription)
+            }
+        }
+
+        await streamRegistry.attachChatTask(streamId: streamId, task: task)
+        return .ok([
+            "stream_id": streamId,
+            "correlation_id": correlationId,
+            "status": "started",
+        ])
+    }
+
+    nonisolated private static func handleChatStreamRead(
+        params: [String: Any]
+    ) async -> LocalControlPlaneMethodResult {
+        guard let streamId = nonEmptyString(params["stream_id"]) else {
+            return .failure(code: "invalid_session_id", message: "stream_id가 필요합니다.")
+        }
+        let limit = max(1, min(500, params["limit"] as? Int ?? 80))
+
+        guard let snapshot = await streamRegistry.readChat(streamId: streamId, limit: limit) else {
+            return .failure(code: "session_not_found", message: "스트림 세션을 찾을 수 없습니다: \(streamId)")
+        }
+
+        var payload: [String: Any] = [
+            "stream_id": snapshot.streamId,
+            "correlation_id": snapshot.correlationId,
+            "done": snapshot.done,
+            "count": snapshot.events.count,
+            "events": snapshot.events.map(serializeStreamEvent(_:)),
+        ]
+        if let errorMessage = snapshot.errorMessage, !errorMessage.isEmpty {
+            payload["error_message"] = errorMessage
+        }
+        return .ok(payload)
+    }
+
+    nonisolated private static func handleChatStreamClose(
+        params: [String: Any]
+    ) async -> LocalControlPlaneMethodResult {
+        guard let streamId = nonEmptyString(params["stream_id"]) else {
+            return .failure(code: "invalid_session_id", message: "stream_id가 필요합니다.")
+        }
+        guard await streamRegistry.closeChat(streamId: streamId) else {
+            return .failure(code: "session_not_found", message: "스트림 세션을 찾을 수 없습니다: \(streamId)")
+        }
+        return .ok([
+            "stream_id": streamId,
+            "status": "closed",
+        ])
+    }
+
+    nonisolated private static func handleLogTailOpen(
+        params: [String: Any]
+    ) async -> LocalControlPlaneMethodResult {
+        let correlationId = nonEmptyString(params["correlation_id"]) ?? UUID().uuidString
+        let category = nonEmptyString(params["category"])
+        let level = nonEmptyString(params["level"])?.lowercased()
+        let contains = nonEmptyString(params["contains"])
+        let lookbackSeconds = max(1, min(3_600, params["lookback_seconds"] as? Int ?? 30))
+        let startAt = Date().addingTimeInterval(-TimeInterval(lookbackSeconds))
+
+        let tailId = await streamRegistry.createLogTailSession(
+            correlationId: correlationId,
+            category: category,
+            level: level,
+            contains: contains,
+            startAt: startAt
+        )
+
+        return .ok([
+            "tail_id": tailId,
+            "correlation_id": correlationId,
+            "status": "started",
+        ])
+    }
+
+    nonisolated private static func handleLogTailRead(
+        params: [String: Any]
+    ) async -> LocalControlPlaneMethodResult {
+        guard let tailId = nonEmptyString(params["tail_id"]) else {
+            return .failure(code: "invalid_session_id", message: "tail_id가 필요합니다.")
+        }
+        let limit = max(1, min(500, params["limit"] as? Int ?? 200))
+
+        guard let state = await streamRegistry.logTailState(tailId: tailId) else {
+            return .failure(code: "session_not_found", message: "log tail 세션을 찾을 수 없습니다: \(tailId)")
+        }
+
+        let elapsedMinutes = max(1, Int(ceil(Date().timeIntervalSince(state.cursorDate) / 60.0)) + 1)
+        let windowMinutes = min(1_440, elapsedMinutes)
+
+        do {
+            let fetchLimit = max(limit * 5, 500)
+            let fetched = try await fetchDochiLogs(
+                minutes: windowMinutes,
+                category: state.category,
+                level: state.level,
+                contains: state.contains,
+                limit: fetchLimit
+            )
+
+            guard let snapshot = await streamRegistry.consumeLogTailEntries(
+                tailId: tailId,
+                entries: fetched,
+                limit: limit
+            ) else {
+                return .failure(code: "session_not_found", message: "log tail 세션을 찾을 수 없습니다: \(tailId)")
+            }
+
+            return .ok([
+                "tail_id": snapshot.tailId,
+                "correlation_id": snapshot.correlationId,
+                "count": snapshot.events.count,
+                "events": snapshot.events.map(serializeStreamEvent(_:)),
+            ])
+        } catch {
+            return .failure(code: "log_fetch_failed", message: error.localizedDescription)
+        }
+    }
+
+    nonisolated private static func handleLogTailClose(
+        params: [String: Any]
+    ) async -> LocalControlPlaneMethodResult {
+        guard let tailId = nonEmptyString(params["tail_id"]) else {
+            return .failure(code: "invalid_session_id", message: "tail_id가 필요합니다.")
+        }
+        guard await streamRegistry.closeLogTail(tailId: tailId) else {
+            return .failure(code: "session_not_found", message: "log tail 세션을 찾을 수 없습니다: \(tailId)")
+        }
+        return .ok([
+            "tail_id": tailId,
+            "status": "closed",
+        ])
+    }
+
+    nonisolated private static func logCorrelationEvent(
+        _ event: DochiViewModel.ControlPlaneStreamEvent,
+        correlationId: String
+    ) {
+        switch event.kind {
+        case .toolCall:
+            let toolName = event.toolName ?? "unknown"
+            Log.tool.info("[cid:\(correlationId)] tool_call \(toolName)")
+        case .toolResult:
+            let preview = String((event.text ?? "").prefix(120))
+            Log.tool.info("[cid:\(correlationId)] tool_result \(preview)")
+        default:
+            break
+        }
+    }
+
+    nonisolated private static func serializeStreamEvent(_ event: ControlPlaneStreamEventRecord) -> [String: Any] {
+        var payload: [String: Any] = [
+            "sequence": event.sequence,
+            "type": event.type,
+            "timestamp": event.timestamp,
+            "correlation_id": event.correlationId,
+        ]
+        if let text = event.text {
+            payload["text"] = text
+        }
+        if let toolName = event.toolName {
+            payload["tool_name"] = toolName
+        }
+        if let category = event.category {
+            payload["category"] = category
+        }
+        if let level = event.level {
+            payload["level"] = level
+        }
+        if let message = event.message {
+            payload["message"] = message
+        }
+        return payload
     }
 
     nonisolated private static func handleBridgeOpen(

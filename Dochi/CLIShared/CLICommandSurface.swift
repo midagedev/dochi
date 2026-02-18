@@ -38,6 +38,8 @@ enum CLISessionAction: Equatable, Sendable {
 enum CLIDevAction: Equatable, Sendable {
     case tool(name: String, argumentsJSON: String?)
     case logRecent(minutes: Int)
+    case logTail(seconds: Int, category: String?, level: String?, contains: String?)
+    case chatStream(prompt: String)
     case bridgeOpen(agent: String)
     case bridgeStatus(sessionId: String?)
     case bridgeSend(sessionId: String, command: String)
@@ -234,16 +236,69 @@ enum CLICommandParser {
 
         case "log":
             let sub = args.dropFirst().first ?? "recent"
-            guard sub == "recent" else {
-                throw CLIParseError.invalidUsage("dev log 하위 명령은 recent만 지원합니다.")
+            let rest = Array(args.dropFirst(2))
+
+            switch sub {
+            case "recent":
+                var minutes = 10
+                if rest.count >= 2, rest[0] == "--minutes", let parsed = Int(rest[1]) {
+                    minutes = max(1, parsed)
+                }
+                return .dev(.logRecent(minutes: minutes))
+
+            case "tail":
+                var seconds = 10
+                var category: String?
+                var level: String?
+                var contains: String?
+
+                var index = 0
+                while index < rest.count {
+                    switch rest[index] {
+                    case "--seconds":
+                        guard index + 1 < rest.count, let parsed = Int(rest[index + 1]) else {
+                            throw CLIParseError.invalidUsage("dev log tail --seconds <N> 형식이 필요합니다.")
+                        }
+                        seconds = max(1, parsed)
+                        index += 2
+                    case "--category":
+                        guard index + 1 < rest.count else {
+                            throw CLIParseError.invalidUsage("dev log tail --category <name> 형식이 필요합니다.")
+                        }
+                        category = rest[index + 1]
+                        index += 2
+                    case "--level":
+                        guard index + 1 < rest.count else {
+                            throw CLIParseError.invalidUsage("dev log tail --level <name> 형식이 필요합니다.")
+                        }
+                        level = rest[index + 1]
+                        index += 2
+                    case "--contains":
+                        guard index + 1 < rest.count else {
+                            throw CLIParseError.invalidUsage("dev log tail --contains <keyword> 형식이 필요합니다.")
+                        }
+                        contains = rest[index + 1]
+                        index += 2
+                    default:
+                        throw CLIParseError.invalidUsage("알 수 없는 옵션입니다: \(rest[index])")
+                    }
+                }
+                return .dev(.logTail(seconds: seconds, category: category, level: level, contains: contains))
+
+            default:
+                throw CLIParseError.invalidUsage("dev log 하위 명령은 recent/tail만 지원합니다.")
             }
 
-            var minutes = 10
-            let rest = Array(args.dropFirst(2))
-            if rest.count >= 2, rest[0] == "--minutes", let parsed = Int(rest[1]) {
-                minutes = max(1, parsed)
+        case "chat":
+            let sub = args.dropFirst().first ?? "stream"
+            guard sub == "stream" else {
+                throw CLIParseError.invalidUsage("dev chat 하위 명령은 stream만 지원합니다.")
             }
-            return .dev(.logRecent(minutes: minutes))
+            let prompt = args.dropFirst(2).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !prompt.isEmpty else {
+                throw CLIParseError.invalidUsage("dev chat stream <prompt> 형식이 필요합니다.")
+            }
+            return .dev(.chatStream(prompt: prompt))
 
         case "bridge":
             let sub = args.dropFirst().first ?? "status"
@@ -271,7 +326,7 @@ enum CLICommandParser {
             }
 
         default:
-            throw CLIParseError.invalidUsage("dev 하위 명령은 tool/log/bridge만 지원합니다.")
+            throw CLIParseError.invalidUsage("dev 하위 명령은 tool/log/chat/bridge만 지원합니다.")
         }
     }
 }
