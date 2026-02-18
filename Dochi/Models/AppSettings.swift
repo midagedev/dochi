@@ -1,6 +1,29 @@
 import Foundation
 import SwiftUI
 
+enum OperatingProfile: String, CaseIterable, Codable, Sendable {
+    case familyHomeAssistant
+    case personalProductivityAssistant
+
+    var displayName: String {
+        switch self {
+        case .familyHomeAssistant:
+            return "가족 홈 어시스턴트"
+        case .personalProductivityAssistant:
+            return "개인 생산성 어시스턴트"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .familyHomeAssistant:
+            return "가족 일정/할 일/생활 운영을 중심으로 돕습니다."
+        case .personalProductivityAssistant:
+            return "개인 목표/집중/업무 실행을 중심으로 돕습니다."
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class AppSettings {
@@ -24,6 +47,16 @@ final class AppSettings {
             let legacyEnabled = defaults.object(forKey: "notificationProactiveSuggestionEnabled") as? Bool ?? false
             let migrated: NotificationChannel = legacyEnabled ? .appOnly : .off
             defaults.set(migrated.rawValue, forKey: "suggestionNotificationChannel")
+        }
+
+        // Repair invalid operating profile values to safe default.
+        if let storedProfile = defaults.string(forKey: "operatingProfile"),
+           OperatingProfile(rawValue: storedProfile) == nil {
+            defaults.set(OperatingProfile.familyHomeAssistant.rawValue, forKey: "operatingProfile")
+        }
+
+        if OperatingProfile(rawValue: operatingProfile) == nil {
+            operatingProfile = OperatingProfile.familyHomeAssistant.rawValue
         }
     }
 
@@ -159,6 +192,14 @@ final class AppSettings {
 
     var defaultUserId: String = UserDefaults.standard.string(forKey: "defaultUserId") ?? "" {
         didSet { UserDefaults.standard.set(defaultUserId, forKey: "defaultUserId") }
+    }
+
+    /// App execution posture chosen during onboarding.
+    /// Defaults to family mode when not selected.
+    var operatingProfile: String =
+        UserDefaults.standard.string(forKey: "operatingProfile")
+        ?? OperatingProfile.familyHomeAssistant.rawValue {
+        didSet { UserDefaults.standard.set(operatingProfile, forKey: "operatingProfile") }
     }
 
     // MARK: - P5 Settings

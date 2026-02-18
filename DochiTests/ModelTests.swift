@@ -413,6 +413,35 @@ final class ModelTests: XCTestCase {
             "text-embedding-3-large"
         )
     }
+
+    @MainActor
+    func testAppSettingsOperatingProfileDefaultsToFamily() {
+        UserDefaults.standard.removeObject(forKey: "operatingProfile")
+
+        let settings = AppSettings()
+
+        XCTAssertEqual(settings.operatingProfile, OperatingProfile.familyHomeAssistant.rawValue)
+    }
+
+    @MainActor
+    func testAppSettingsOperatingProfilePersistence() {
+        UserDefaults.standard.removeObject(forKey: "operatingProfile")
+        let settings = AppSettings()
+        settings.operatingProfile = OperatingProfile.personalProductivityAssistant.rawValue
+
+        let restored = AppSettings()
+
+        XCTAssertEqual(restored.operatingProfile, OperatingProfile.personalProductivityAssistant.rawValue)
+    }
+
+    @MainActor
+    func testAppSettingsRepairsInvalidOperatingProfile() {
+        UserDefaults.standard.set("legacy-unknown-profile", forKey: "operatingProfile")
+
+        let settings = AppSettings()
+
+        XCTAssertEqual(settings.operatingProfile, OperatingProfile.familyHomeAssistant.rawValue)
+    }
 }
 
 // MARK: - TaskComplexityClassifier Tests

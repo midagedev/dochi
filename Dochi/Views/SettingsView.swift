@@ -265,6 +265,26 @@ struct InterfaceSettingsContent: View {
         }
 
         Section {
+            Picker("기본 운영 프로필", selection: Binding(
+                get: { settings.operatingProfile },
+                set: { settings.operatingProfile = $0 }
+            )) {
+                ForEach(OperatingProfile.allCases, id: \.self) { profile in
+                    Text(profile.displayName).tag(profile.rawValue)
+                }
+            }
+
+            Text("현재 프로필: \(OperatingProfile(rawValue: settings.operatingProfile)?.summary ?? OperatingProfile.familyHomeAssistant.summary)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            SettingsSectionHeader(
+                title: "운영 프로필",
+                helpContent: "앱의 기본 운영 성향을 지정합니다. 가족 중심 운영형 또는 개인 생산성 중심형 중 선택할 수 있으며, 언제든 변경 가능합니다."
+            )
+        }
+
+        Section {
             Toggle("3D 아바타 표시", isOn: Binding(
                 get: { settings.avatarEnabled },
                 set: { settings.avatarEnabled = $0 }
