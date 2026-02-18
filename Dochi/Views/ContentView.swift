@@ -1427,6 +1427,7 @@ struct InputBarView: View {
     @Bindable var viewModel: DochiViewModel
     @State private var showSlashCommands = false
     @State private var isDraggingOver = false
+    @State private var hasRecordedTypingActivity = false
 
     private var matchingCommands: [SlashCommand] {
         FeatureCatalog.matchingCommands(for: viewModel.inputText)
@@ -1499,8 +1500,11 @@ struct InputBarView: View {
                         }
                     }
                     .onChange(of: viewModel.inputText) { _, newValue in
-                        if !newValue.isEmpty {
+                        if newValue.isEmpty {
+                            hasRecordedTypingActivity = false
+                        } else if !hasRecordedTypingActivity {
                             viewModel.recordUserActivity()
+                            hasRecordedTypingActivity = true
                         }
                         withAnimation(.easeOut(duration: 0.15)) {
                             showSlashCommands = newValue.hasPrefix("/") && viewModel.interactionState == .idle
