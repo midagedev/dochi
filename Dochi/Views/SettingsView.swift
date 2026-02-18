@@ -40,6 +40,12 @@ struct SettingsView: View {
         .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 180)
         .frame(minWidth: 680, minHeight: 440)
         .frame(idealWidth: 780, idealHeight: 540)
+        .onAppear {
+            applyPendingDeepLinkIfNeeded()
+        }
+        .onChange(of: settings.pendingSettingsDeepLinkSection) { _, _ in
+            applyPendingDeepLinkIfNeeded()
+        }
     }
 
     // MARK: - Content Router
@@ -218,6 +224,13 @@ struct SettingsView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func applyPendingDeepLinkIfNeeded() {
+        guard let raw = settings.pendingSettingsDeepLinkSection else { return }
+        defer { settings.pendingSettingsDeepLinkSection = nil }
+        guard let section = SettingsSection(rawValue: raw) else { return }
+        selectedSection = section
     }
 }
 

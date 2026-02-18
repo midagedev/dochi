@@ -442,6 +442,55 @@ final class ModelTests: XCTestCase {
 
         XCTAssertEqual(settings.operatingProfile, OperatingProfile.familyHomeAssistant.rawValue)
     }
+
+    @MainActor
+    func testSetupHealthReportPerfectScoreWhenCoreSetupIsReady() {
+        let settings = AppSettings()
+        settings.autoSyncEnabled = false
+        settings.defaultUserId = "user-1"
+        settings.proactiveSuggestionEnabled = false
+        settings.heartbeatEnabled = false
+
+        let report = settings.setupHealthReport(hasProviderAPIKey: true)
+
+        XCTAssertEqual(report.score, 100)
+        XCTAssertTrue(report.issues.isEmpty)
+        XCTAssertNil(report.primaryIssue)
+    }
+
+    @MainActor
+    func testSetupHealthReportFlagsMissingAPIKey() {
+        let settings = AppSettings()
+        settings.llmProvider = LLMProvider.openai.rawValue
+        settings.autoSyncEnabled = false
+        settings.defaultUserId = "user-1"
+        settings.proactiveSuggestionEnabled = false
+        settings.heartbeatEnabled = false
+
+        let report = settings.setupHealthReport(hasProviderAPIKey: false)
+
+        XCTAssertTrue(report.issues.contains { $0.id == "api_key_missing" })
+        XCTAssertEqual(report.primaryIssue?.sectionRawValue, "api-key")
+        XCTAssertLessThan(report.score, 100)
+    }
+
+    @MainActor
+    func testSetupHealthReportFlagsMissingSyncConfiguration() {
+        let settings = AppSettings()
+        settings.llmProvider = LLMProvider.ollama.rawValue
+        settings.autoSyncEnabled = true
+        settings.supabaseURL = ""
+        settings.supabaseAnonKey = ""
+        settings.defaultUserId = "user-1"
+        settings.proactiveSuggestionEnabled = false
+        settings.heartbeatEnabled = false
+
+        let report = settings.setupHealthReport(hasProviderAPIKey: true)
+
+        XCTAssertTrue(report.issues.contains { $0.id == "sync_config_missing" })
+        XCTAssertEqual(report.primaryIssue?.sectionRawValue, "account")
+        XCTAssertLessThan(report.score, 100)
+    }
 }
 
 // MARK: - TaskComplexityClassifier Tests
