@@ -10,6 +10,7 @@ struct HeartbeatTickResult: Sendable {
     let notificationSent: Bool
     let error: String?
     let opportunities: [TaskOpportunity]
+    let gitContextSummary: String?
 
     init(
         timestamp: Date,
@@ -17,7 +18,8 @@ struct HeartbeatTickResult: Sendable {
         itemsFound: Int,
         notificationSent: Bool,
         error: String?,
-        opportunities: [TaskOpportunity] = []
+        opportunities: [TaskOpportunity] = [],
+        gitContextSummary: String? = nil
     ) {
         self.timestamp = timestamp
         self.checksPerformed = checksPerformed
@@ -25,6 +27,7 @@ struct HeartbeatTickResult: Sendable {
         self.notificationSent = notificationSent
         self.error = error
         self.opportunities = opportunities
+        self.gitContextSummary = gitContextSummary
     }
 }
 
@@ -144,6 +147,7 @@ final class HeartbeatService: Observable {
         var kanbanContext = ""
         var reminderContext = ""
         var memoryWarning: String?
+        var gitContextSummary: String?
 
         do {
             // 1. Calendar -- upcoming events
@@ -185,10 +189,21 @@ final class HeartbeatService: Observable {
                 }
             }
 
-            // 5. Interest expiration check (K-3)
+            // 5. Git context summary (repo activity + work domain). Keep it as enrichment
+            // and avoid sending heartbeat notifications based on git state alone.
+            if let externalToolManager {
+                checksPerformed.append("git")
+                let roots = await externalToolManager.discoverGitRepositoryInsights(
+                    searchPaths: nil,
+                    limit: 3
+                )
+                gitContextSummary = summarizeGitContext(roots)
+            }
+
+            // 6. Interest expiration check (K-3)
             interestDiscoveryService?.checkExpirations()
 
-            // 6. Resource auto-task pipeline (J-5)
+            // 7. Resource auto-task pipeline (J-5)
             if settings.resourceAutoTaskEnabled, let resourceOptimizer {
                 let enabledTypes = Array(Set(settings.resourceAutoTaskTypes.compactMap(AutoTaskType.init(rawValue:))))
                 if !enabledTypes.isEmpty {
@@ -221,6 +236,10 @@ final class HeartbeatService: Observable {
         let itemsFound = contextParts.count
 
         if !contextParts.isEmpty {
+            if let gitContextSummary, !gitContextSummary.isEmpty {
+                contextParts.append("🧭 Git 컨텍스트:\n\(gitContextSummary)")
+            }
+
             let fullContext = contextParts.joined(separator: "\n\n")
             let message = composeProactiveMessage(context: fullContext)
             if let message {
@@ -261,7 +280,11 @@ final class HeartbeatService: Observable {
             }
         } else {
             notificationSent = false
-            Log.app.debug("HeartbeatService: no actionable context found")
+            if let gitContextSummary, !gitContextSummary.isEmpty {
+                Log.app.debug("HeartbeatService: git context collected, but no actionable signal")
+            } else {
+                Log.app.debug("HeartbeatService: no actionable context found")
+            }
         }
 
         // Record result
@@ -271,7 +294,8 @@ final class HeartbeatService: Observable {
             itemsFound: itemsFound,
             notificationSent: notificationSent,
             error: errorMessage,
-            opportunities: opportunities
+            opportunities: opportunities,
+            gitContextSummary: gitContextSummary
         )
         lastTickDate = result.timestamp
         lastTickResult = result
@@ -452,6 +476,20 @@ final class HeartbeatService: Observable {
             return String(line[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return line
+    }
+
+    private func summarizeGitContext(_ roots: [GitRepositoryInsight]) -> String? {
+        guard !roots.isEmpty else { return nil }
+        let lines = roots.prefix(3).map { root in
+            let remoteLabel: String
+            if let owner = root.remoteOwner, let repo = root.remoteRepository {
+                remoteLabel = "\(owner)/\(repo)"
+            } else {
+                remoteLabel = "origin:unknown"
+            }
+            return "- [\(root.workDomain)] \(root.name) (\(root.branch)) local:\(root.lastCommitRelative) origin:\(root.upstreamLastCommitRelative) dirty:\(root.changedFileCount)+\(root.untrackedFileCount) \(remoteLabel)"
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func parseKanbanContextLine(_ line: String) -> (cardTitle: String, boardName: String?) {

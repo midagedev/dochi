@@ -12,10 +12,11 @@ enum DochiDevBridgeTools {
     ) {
         toolService.registerTool(DochiBridgeOpenTool(manager: manager))
         toolService.registerTool(DochiBridgeStatusTool(manager: manager))
+        toolService.registerTool(DochiBridgeRootsTool(manager: manager))
         toolService.registerTool(DochiBridgeSendTool(manager: manager))
         toolService.registerTool(DochiBridgeReadTool(manager: manager))
         toolService.registerTool(DochiLogRecentTool())
-        Log.tool.info("Registered 5 dochi dev bridge tools")
+        Log.tool.info("Registered 6 dochi dev bridge tools")
     }
 }
 
@@ -191,6 +192,50 @@ final class DochiBridgeStatusTool: BuiltInToolProtocol {
         let lines = manager.sessions.map { session -> String in
             let profileName = manager.profiles.first(where: { $0.id == session.profileId })?.name ?? "?"
             return "- \(profileName): \(session.status.rawValue) (session_id: \(session.id.uuidString))"
+        }
+        return ToolResult(toolCallId: "", content: lines.joined(separator: "\n"))
+    }
+}
+
+@MainActor
+final class DochiBridgeRootsTool: BuiltInToolProtocol {
+    let name = "dochi.bridge_roots"
+    let category: ToolCategory = .safe
+    let description = "로컬 Git 루트를 검색하고 활성도 기반 추천 순서로 반환합니다."
+    let isBaseline = false
+
+    private let manager: ExternalToolSessionManagerProtocol
+
+    init(manager: ExternalToolSessionManagerProtocol) {
+        self.manager = manager
+    }
+
+    var inputSchema: [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "limit": ["type": "integer", "description": "반환 개수 (기본 20, 최대 200)"],
+                "search_paths": [
+                    "type": "array",
+                    "items": ["type": "string"],
+                    "description": "탐색할 시작 경로 목록",
+                ],
+            ] as [String: Any],
+        ]
+    }
+
+    func execute(arguments: [String: Any]) async -> ToolResult {
+        let limit = max(1, min(200, arguments["limit"] as? Int ?? 20))
+        let searchPaths = arguments["search_paths"] as? [String]
+        let roots = await manager.discoverGitRepositoryInsights(searchPaths: searchPaths, limit: limit)
+
+        guard !roots.isEmpty else {
+            return ToolResult(toolCallId: "", content: "추천 가능한 Git 루트를 찾지 못했습니다.")
+        }
+
+        let lines = roots.map { root in
+            let dirty = "\(root.changedFileCount)+\(root.untrackedFileCount)"
+            return "[\(root.score)] \(root.name) (\(root.branch)) | \(root.workDomain) | local:\(root.lastCommitRelative) / origin:\(root.upstreamLastCommitRelative) | 30d:\(root.recentCommitCount30d) | dirty:\(dirty)\n\(root.path)"
         }
         return ToolResult(toolCallId: "", content: lines.joined(separator: "\n"))
     }

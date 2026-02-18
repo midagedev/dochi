@@ -477,6 +477,38 @@ enum DochiCLI {
                 return CLIResult(exitCode: .runtimeError, command: "dev.bridge.open", message: "요청 실패: \(error.localizedDescription)")
             }
 
+        case .bridgeRoots(let limit, let searchPaths):
+            do {
+                var params: [String: Any] = ["limit": max(1, min(200, limit))]
+                if !searchPaths.isEmpty {
+                    params["search_paths"] = searchPaths
+                }
+                let result = try client.call(method: "bridge.roots", params: params)
+                let roots = result["roots"] as? [[String: Any]] ?? []
+                guard !roots.isEmpty else {
+                    return CLIResult(exitCode: .success, command: "dev.bridge.roots", message: "추천 가능한 Git 루트를 찾지 못했습니다.", data: result)
+                }
+
+                let lines = roots.enumerated().map { index, root -> String in
+                    let score = root["score"] as? Int ?? 0
+                    let name = root["name"] as? String ?? "-"
+                    let path = root["path"] as? String ?? "-"
+                    let branch = root["branch"] as? String ?? "-"
+                    let workDomain = root["work_domain"] as? String ?? "unknown"
+                    let relative = root["last_commit_relative"] as? String ?? "unknown"
+                    let upstreamRelative = root["upstream_last_commit_relative"] as? String ?? "unknown"
+                    let recentCommitCount30d = root["recent_commit_count_30d"] as? Int ?? 0
+                    let changedFileCount = root["changed_file_count"] as? Int ?? 0
+                    let untrackedFileCount = root["untracked_file_count"] as? Int ?? 0
+                    return "\(index + 1). [\(score)] \(name) (\(branch)) | \(workDomain) | local:\(relative) / origin:\(upstreamRelative) | 30d:\(recentCommitCount30d) | dirty:\(changedFileCount)+\(untrackedFileCount)\n   \(path)"
+                }
+                return CLIResult(exitCode: .success, command: "dev.bridge.roots", message: lines.joined(separator: "\n"), data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.roots")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.roots", message: "요청 실패: \(error.localizedDescription)")
+            }
+
         case .bridgeStatus(let sessionId):
             do {
                 let params: [String: Any]
@@ -919,6 +951,7 @@ enum DochiCLI {
           dochi dev log tail [--seconds N] [--category C] [--level L] [--contains K]
           dochi dev chat stream <prompt>
           dochi dev bridge open [agent]
+          dochi dev bridge roots [--limit N] [--path DIR]...
           dochi dev bridge status [session_id]
           dochi dev bridge send <session_id> <command>
           dochi dev bridge read <session_id> [lines]

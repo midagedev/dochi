@@ -958,6 +958,7 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var lastSavedProfile: ExternalToolProfile?
     var lastSentCommand: String?
     var mockOutputLines: [String] = ["line1", "line2"]
+    var mockGitRepositoryInsights: [GitRepositoryInsight] = []
 
     func loadProfiles() {
         loadProfilesCallCount += 1
@@ -1029,6 +1030,10 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     func captureOutput(sessionId: UUID, lines: Int) async -> [String] {
         captureOutputCallCount += 1
         return Array(mockOutputLines.prefix(lines))
+    }
+
+    func discoverGitRepositoryInsights(searchPaths: [String]?, limit: Int) async -> [GitRepositoryInsight] {
+        Array(mockGitRepositoryInsights.prefix(max(1, limit)))
     }
 }
 

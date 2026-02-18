@@ -37,6 +37,19 @@ final class CLICommandSurfaceTests: XCTestCase {
         XCTAssertEqual(invocation.command, .dev(.bridgeSend(sessionId: "abc-123", command: "run tests")))
     }
 
+    func testParseDevBridgeRootsWithOptions() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "roots",
+            "--limit", "15",
+            "--path", "~/repo",
+            "--path", "~/work",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeRoots(limit: 15, searchPaths: ["~/repo", "~/work"]))
+        )
+    }
+
     func testParseDevChatStream() throws {
         let invocation = try CLICommandParser.parse(["dev", "chat", "stream", "실시간", "테스트"])
         XCTAssertEqual(invocation.command, .dev(.chatStream(prompt: "실시간 테스트")))
