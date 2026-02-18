@@ -5,25 +5,45 @@ struct PluginSettingsView: View {
     var pluginManager: PluginManagerProtocol?
 
     @State private var selectedPlugin: PluginInfo?
+    @State private var launchErrorMessage: String?
 
     var body: some View {
-        if let pluginManager {
-            pluginContent(pluginManager)
-        } else {
-            VStack(spacing: 12) {
-                Spacer()
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.secondary)
-                Text("플러그인")
-                    .font(.headline)
-                Text("플러그인 관리자가 초기화되지 않았습니다.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
+        Group {
+            if let pluginManager {
+                pluginContent(pluginManager)
+            } else {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.secondary)
+                    Text("플러그인")
+                        .font(.headline)
+                    Text("플러그인 관리자가 초기화되지 않았습니다.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .alert(
+            "앱 열기 실패",
+            isPresented: Binding(
+                get: { launchErrorMessage != nil },
+                set: { newValue in
+                    if !newValue { launchErrorMessage = nil }
+                }
+            ),
+            actions: {
+                Button("확인", role: .cancel) {
+                    launchErrorMessage = nil
+                }
+            },
+            message: {
+                Text(launchErrorMessage ?? "")
+            }
+        )
     }
 
     @ViewBuilder
@@ -44,7 +64,7 @@ struct PluginSettingsView: View {
                     }
                     Spacer()
                     Button("폴더 열기") {
-                        NSWorkspace.shared.open(manager.pluginDirectory)
+                        openPluginDirectory(manager.pluginDirectory)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -70,7 +90,7 @@ struct PluginSettingsView: View {
                             .font(.subheadline)
                             .foregroundStyle(.tertiary)
                         Button("플러그인 폴더 열기") {
-                            NSWorkspace.shared.open(manager.pluginDirectory)
+                            openPluginDirectory(manager.pluginDirectory)
                         }
                         .buttonStyle(.bordered)
                     }
@@ -115,6 +135,12 @@ struct PluginSettingsView: View {
             if let manager = pluginManager {
                 PluginDetailSheet(pluginId: plugin.id, pluginManager: manager)
             }
+        }
+    }
+
+    private func openPluginDirectory(_ url: URL) {
+        if !NSWorkspace.shared.open(url) {
+            launchErrorMessage = UIFeedbackMessageBuilder.appOpenFailure(appName: "플러그인 폴더")
         }
     }
 }

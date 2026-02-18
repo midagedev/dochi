@@ -933,7 +933,9 @@ struct ContentView: View {
                 Task { await manager.checkAllHealth() }
             }
         case .openShortcutsApp:
-            NSWorkspace.shared.open(URL(string: "shortcuts://")!)
+            if !NSWorkspace.shared.open(URL(string: "shortcuts://")!) {
+                viewModel.errorMessage = UIFeedbackMessageBuilder.appOpenFailure(appName: "단축어 앱")
+            }
         case .custom(let id):
             if id.hasPrefix("switchUser-") {
                 let userIdStr = String(id.dropFirst("switchUser-".count))
@@ -1764,11 +1766,18 @@ struct InputBarView: View {
         panel.begin { response in
             guard response == .OK else { return }
             let urls = Array(panel.urls.prefix(remaining))
+            var failedCount = 0
             for url in urls {
-                if let data = try? Data(contentsOf: url) {
+                do {
+                    let data = try Data(contentsOf: url)
                     let fileName = url.lastPathComponent
                     viewModel.addImageFromData(data, fileName: fileName)
+                } catch {
+                    failedCount += 1
                 }
+            }
+            if failedCount > 0 {
+                viewModel.errorMessage = UIFeedbackMessageBuilder.imageAttachmentFailure(count: failedCount)
             }
         }
     }
@@ -1778,6 +1787,7 @@ struct InputBarView: View {
 
         // Check for image data on clipboard
         guard let types = pasteboard.types else { return false }
+        var failedCount = 0
 
         // Try to get image from pasteboard
         let imageTypes: [NSPasteboard.PasteboardType] = [.tiff, .png]
@@ -1787,6 +1797,7 @@ struct InputBarView: View {
                     viewModel.addImage(image, fileName: "clipboard")
                     return true
                 }
+                failedCount += 1
             }
         }
 
@@ -1795,13 +1806,19 @@ struct InputBarView: View {
             for url in urls {
                 let ext = url.pathExtension.lowercased()
                 guard ImageAttachment.supportedExtensions.contains(ext) else { continue }
-                if let data = try? Data(contentsOf: url) {
+                do {
+                    let data = try Data(contentsOf: url)
                     viewModel.addImageFromData(data, fileName: url.lastPathComponent)
                     return true
+                } catch {
+                    failedCount += 1
                 }
             }
         }
 
+        if failedCount > 0 {
+            viewModel.errorMessage = UIFeedbackMessageBuilder.imageAttachmentFailure(count: failedCount)
+        }
         return false
     }
 
@@ -1809,10 +1826,14 @@ struct InputBarView: View {
         for provider in providers {
             // Try loading as NSImage
             if provider.canLoadObject(ofClass: NSImage.self) {
-                _ = provider.loadObject(ofClass: NSImage.self) { image, _ in
+                _ = provider.loadObject(ofClass: NSImage.self) { image, error in
                     if let nsImage = image as? NSImage {
                         Task { @MainActor in
                             viewModel.addImage(nsImage, fileName: "dropped")
+                        }
+                    } else if error != nil {
+                        Task { @MainActor in
+                            viewModel.errorMessage = UIFeedbackMessageBuilder.imageAttachmentFailure(count: 1)
                         }
                     }
                 }
@@ -1824,9 +1845,14 @@ struct InputBarView: View {
                        let url = URL(dataRepresentation: data, relativeTo: nil) {
                         let ext = url.pathExtension.lowercased()
                         guard ImageAttachment.supportedExtensions.contains(ext) else { return }
-                        if let fileData = try? Data(contentsOf: url) {
+                        do {
+                            let fileData = try Data(contentsOf: url)
                             Task { @MainActor in
                                 viewModel.addImageFromData(fileData, fileName: url.lastPathComponent)
+                            }
+                        } catch {
+                            Task { @MainActor in
+                                viewModel.errorMessage = UIFeedbackMessageBuilder.imageAttachmentFailure(count: 1)
                             }
                         }
                     }
