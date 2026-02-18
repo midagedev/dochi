@@ -116,7 +116,12 @@ struct DocumentLibraryView: View {
                                 refreshDocuments()
                             } onReindex: {
                                 Task {
-                                    try? await documentIndexer.indexFile(at: URL(fileURLWithPath: doc.filePath))
+                                    do {
+                                        try await documentIndexer.indexFile(at: URL(fileURLWithPath: doc.filePath))
+                                        errorMessage = nil
+                                    } catch {
+                                        errorMessage = "재인덱싱 실패: \(error.localizedDescription)"
+                                    }
                                     refreshDocuments()
                                 }
                             }
