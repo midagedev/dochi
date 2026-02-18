@@ -232,7 +232,7 @@ enum AppGuideContentBuilder {
             GuideItem(title: "일반", description: "글꼴 크기, 상호작용 모드, 웨이크워드, 아바타, 하트비트 설정", shortcut: "⌘,", category: "설정", example: nil),
             GuideItem(title: "AI 모델", description: "LLM 프로바이더 선택, 컨텍스트 크기, 용도별 모델 라우팅 (자동 선택)", shortcut: nil, category: "설정", example: "모델 바꿔줘"),
             GuideItem(title: "API 키", description: "프로바이더별 API 키 관리 (macOS 키체인 암호화 저장)", shortcut: nil, category: "설정", example: nil),
-            GuideItem(title: "음성", description: "TTS 프로바이더 선택 (시스템/Google Cloud/Supertonic), 속도, 음높이", shortcut: nil, category: "설정", example: nil),
+            GuideItem(title: "음성", description: "TTS 프로바이더 선택 (시스템/Google Cloud/Typecast/Supertonic), 속도, 음높이", shortcut: nil, category: "설정", example: nil),
             GuideItem(title: "가족", description: "여러 사용자가 하나의 도치를 공유. 각 사용자별 메모리/대화 분리", shortcut: nil, category: "설정", example: nil),
             GuideItem(title: "에이전트", description: "에이전트 생성/편집/삭제. 템플릿, 페르소나, 도구 권한 설정", shortcut: nil, category: "설정", example: nil),
             GuideItem(title: "도구", description: "35개+ 내장 도구 목록 확인. 기본/조건부 도구, 권한 등급 표시", shortcut: nil, category: "설정", example: nil),
@@ -318,7 +318,7 @@ enum AppGuideContentBuilder {
         [
             GuideItem(title: "음성 입력", description: "마이크 버튼을 클릭하거나 웨이크워드를 말해 음성 입력을 시작합니다.", shortcut: nil, category: "사용법", example: nil),
             GuideItem(title: "웨이크워드", description: "기본값 \"도치야\". 설정에서 변경 가능. \"항상 대기 모드\"를 켜면 앱이 활성화된 동안 계속 감지합니다.", shortcut: nil, category: "설정", example: nil),
-            GuideItem(title: "TTS (텍스트→음성)", description: "AI 응답을 음성으로 읽어줍니다. 시스템 TTS, Google Cloud TTS, Supertonic(로컬 ONNX) 중 선택.", shortcut: nil, category: "설정", example: nil),
+            GuideItem(title: "TTS (텍스트→음성)", description: "AI 응답을 음성으로 읽어줍니다. 시스템 TTS, Google Cloud TTS, Typecast TTS, Supertonic(로컬 ONNX) 중 선택.", shortcut: nil, category: "설정", example: nil),
             GuideItem(title: "상호작용 모드", description: "\"음성 + 텍스트\" 또는 \"텍스트 전용\" 모드를 선택합니다. 텍스트 전용이면 음성 기능 비활성화.", shortcut: nil, category: "설정", example: nil),
             GuideItem(title: "침묵 감지", description: "말하다 멈추면 자동으로 음성 입력을 종료합니다. 감지 시간은 설정에서 조절.", shortcut: nil, category: "설정", example: nil),
         ]
