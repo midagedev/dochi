@@ -165,4 +165,46 @@ final class ContextServiceTests: XCTestCase {
         XCTAssertEqual(service.loadUserMemory(userId: "alice"), "alice data")
         XCTAssertEqual(service.loadUserMemory(userId: "bob"), "bob data")
     }
+
+    // MARK: - Project context
+
+    func testRegisterAndLoadProject() {
+        let wsId = UUID()
+        let project = service.registerProject(
+            workspaceId: wsId,
+            repoRootPath: "~/repo/dochi",
+            defaultBranch: "main"
+        )
+
+        let loaded = service.loadProject(workspaceId: wsId, projectId: project.id)
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.id, project.id)
+        XCTAssertEqual(loaded?.defaultBranch, "main")
+        XCTAssertTrue(loaded?.repoRootPath.hasSuffix("/repo/dochi") == true)
+    }
+
+    func testListProjectsSortedByName() {
+        let wsId = UUID()
+        let p1 = ProjectContext(repoRootPath: "/tmp/zeta-repo", displayName: "Zeta")
+        let p2 = ProjectContext(repoRootPath: "/tmp/alpha-repo", displayName: "Alpha")
+        service.saveProject(workspaceId: wsId, project: p1)
+        service.saveProject(workspaceId: wsId, project: p2)
+
+        let listed = service.listProjects(workspaceId: wsId)
+        XCTAssertEqual(listed.map(\.displayName), ["Alpha", "Zeta"])
+    }
+
+    func testProjectMemorySaveAndAppend() {
+        let wsId = UUID()
+        let project = ProjectContext(repoRootPath: "/tmp/my-repo")
+        service.saveProject(workspaceId: wsId, project: project)
+
+        service.saveProjectMemory(workspaceId: wsId, projectId: project.id, content: "rule1")
+        service.appendProjectMemory(workspaceId: wsId, projectId: project.id, content: "rule2")
+
+        let memory = service.loadProjectMemory(workspaceId: wsId, projectId: project.id)
+        XCTAssertNotNil(memory)
+        XCTAssertTrue(memory?.contains("rule1") == true)
+        XCTAssertTrue(memory?.contains("rule2") == true)
+    }
 }

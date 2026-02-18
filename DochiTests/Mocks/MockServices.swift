@@ -67,6 +67,8 @@ final class MockContextService: ContextServiceProtocol {
     var profiles: [UserProfile] = []
     var userMemory: [String: String] = [:]
     var workspaceMemory: [UUID: String] = [:]
+    var projectsByWorkspace: [UUID: [String: ProjectContext]] = [:]
+    var projectMemoriesByWorkspace: [UUID: [String: String]] = [:]
     var agentPersonas: [String: String] = [:]
     var agentMemories: [String: String] = [:]
     var agentConfigs: [String: AgentConfig] = [:]
@@ -96,6 +98,43 @@ final class MockContextService: ContextServiceProtocol {
     func saveWorkspaceMemory(workspaceId: UUID, content: String) { workspaceMemory[workspaceId] = content }
     func appendWorkspaceMemory(workspaceId: UUID, content: String) {
         workspaceMemory[workspaceId] = (workspaceMemory[workspaceId] ?? "") + "\n" + content
+    }
+
+    func listProjects(workspaceId: UUID) -> [ProjectContext] {
+        Array(projectsByWorkspace[workspaceId, default: [:]].values)
+            .sorted { $0.displayName < $1.displayName }
+    }
+
+    func loadProject(workspaceId: UUID, projectId: String) -> ProjectContext? {
+        projectsByWorkspace[workspaceId]?[projectId]
+    }
+
+    func saveProject(workspaceId: UUID, project: ProjectContext) {
+        projectsByWorkspace[workspaceId, default: [:]][project.id] = project
+    }
+
+    func removeProject(workspaceId: UUID, projectId: String) {
+        projectsByWorkspace[workspaceId]?[projectId] = nil
+        projectMemoriesByWorkspace[workspaceId]?[projectId] = nil
+    }
+
+    func registerProject(workspaceId: UUID, repoRootPath: String, defaultBranch: String?) -> ProjectContext {
+        let project = ProjectContext(repoRootPath: repoRootPath, defaultBranch: defaultBranch)
+        saveProject(workspaceId: workspaceId, project: project)
+        return project
+    }
+
+    func loadProjectMemory(workspaceId: UUID, projectId: String) -> String? {
+        projectMemoriesByWorkspace[workspaceId]?[projectId]
+    }
+
+    func saveProjectMemory(workspaceId: UUID, projectId: String, content: String) {
+        projectMemoriesByWorkspace[workspaceId, default: [:]][projectId] = content
+    }
+
+    func appendProjectMemory(workspaceId: UUID, projectId: String, content: String) {
+        let current = loadProjectMemory(workspaceId: workspaceId, projectId: projectId) ?? ""
+        saveProjectMemory(workspaceId: workspaceId, projectId: projectId, content: current + "\n" + content)
     }
 
     private func agentKey(_ wsId: UUID, _ name: String) -> String { "\(wsId)|\(name)" }
