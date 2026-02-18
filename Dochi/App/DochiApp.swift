@@ -569,11 +569,12 @@ struct DochiApp: App {
 
     private var proactiveSuggestionNotificationTrigger: String {
         let suggestionId = viewModel.currentSuggestion?.id.uuidString ?? "none"
-        return "\(settings.notificationProactiveSuggestionEnabled)-\(suggestionId)"
+        return "\(settings.suggestionNotificationChannel)-\(suggestionId)"
     }
 
     private func syncProactiveSuggestionNotification() async {
-        guard settings.notificationProactiveSuggestionEnabled,
+        let channel = NotificationChannel(rawValue: settings.suggestionNotificationChannel) ?? .off
+        guard channel.deliversToApp,
               let suggestion = viewModel.currentSuggestion else { return }
         guard !NSApp.isActive else { return }
 

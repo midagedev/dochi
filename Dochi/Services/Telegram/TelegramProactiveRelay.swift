@@ -109,7 +109,7 @@ final class TelegramProactiveRelay: TelegramProactiveRelayProtocol {
     // MARK: - Channel Logic
 
     func shouldSendToTelegram(channel: NotificationChannel) -> Bool {
-        guard channel == .telegramOnly || channel == .both else { return false }
+        guard channel.deliversToTelegram else { return false }
 
         if settings.telegramSkipWhenAppActive && NSApp.isActive {
             Log.telegram.debug("앱이 활성 상태이므로 텔레그램 전송 생략")
