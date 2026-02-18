@@ -14,8 +14,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        Task { @MainActor [weak self] in
+            self?.ensurePrimaryWindowVisible()
+        }
+
+        // In some launch paths, SwiftUI scenes are attached after this callback.
+        // Retry once shortly after launch so we don't end up with a headless app.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            Task { @MainActor in
+                self?.ensurePrimaryWindowVisible()
+            }
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { @MainActor [weak self] in
+            self?.ensurePrimaryWindowVisible()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -32,6 +47,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Toggle menu bar popover (called from NSStatusItem button action)
     @MainActor @objc func toggleMenuBarPopover() {
         menuBarManager?.togglePopover()
+    }
+
+    @MainActor
+    private func ensurePrimaryWindowVisible() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        if let primaryWindow = Self.findPrimaryWindow() {
+            primaryWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        // Ask the responder chain to create a main window if none exists.
+        for actionName in ["newWindowForTab:", "newWindow:", "newDocument:"] {
+            _ = NSApp.sendAction(Selector(actionName), to: nil, from: nil)
+        }
+
+        if let primaryWindow = Self.findPrimaryWindow() {
+            primaryWindow.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    @MainActor
+    private static func findPrimaryWindow() -> NSWindow? {
+        NSApp.windows.first(where: { window in
+            let className = window.className
+            return className != "NSStatusBarWindow" && className != "_NSPopoverWindow"
+        })
     }
 }
 

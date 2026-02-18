@@ -51,7 +51,7 @@ final class AppSettings {
     ]
 
     static let avatarCameraZoomDefault: Double = 0.9
-    static let avatarCameraZoomRange: ClosedRange<Double> = 0.75...1.25
+    static let avatarCameraZoomRange: ClosedRange<Double> = 0.5...1.25
 
     static func normalizedAvatarCameraZoom(_ value: Double?) -> Double {
         let raw = value ?? avatarCameraZoomDefault

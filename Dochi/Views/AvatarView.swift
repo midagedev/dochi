@@ -28,10 +28,6 @@ struct AvatarView: View {
         return baseDistance / Float(selectedCameraZoom)
     }
 
-    private var cameraConfigurationID: Int {
-        Int((selectedCameraZoom * 100).rounded())
-    }
-
     var body: some View {
         ZStack {
             if let rootEntity {
@@ -40,12 +36,8 @@ struct AvatarView: View {
 
                     // Camera: upper body + face framing
                     let camera = PerspectiveCamera()
-                    camera.camera.fieldOfViewInDegrees = 22
-                    camera.look(
-                        at: SIMD3<Float>(0, 0.04, 0),
-                        from: SIMD3<Float>(0, 0.08, cameraDistance),
-                        relativeTo: nil
-                    )
+                    camera.name = "avatar-camera"
+                    configureCamera(camera)
                     content.add(camera)
 
                     // Soft key light from upper-right
@@ -69,8 +61,13 @@ struct AvatarView: View {
                         relativeTo: nil
                     )
                     content.add(fillLight)
+                } update: { content in
+                    // Keep zoom updates lightweight by reconfiguring existing camera
+                    // instead of rebuilding the entire RealityView tree.
+                    if let camera = content.entities.first(where: { $0.name == "avatar-camera" }) as? PerspectiveCamera {
+                        configureCamera(camera)
+                    }
                 }
-                .id(cameraConfigurationID)
             } else if let errorMessage {
                 placeholderView(message: errorMessage)
             } else {
@@ -144,6 +141,15 @@ struct AvatarView: View {
             errorMessage = "모델 '\(name)' 로딩 실패: \(error.localizedDescription)"
             Log.avatar.error("Failed to load avatar \(name): \(error.localizedDescription)")
         }
+    }
+
+    private func configureCamera(_ camera: PerspectiveCamera) {
+        camera.camera.fieldOfViewInDegrees = 22
+        camera.look(
+            at: SIMD3<Float>(0, 0.04, 0),
+            from: SIMD3<Float>(0, 0.08, cameraDistance),
+            relativeTo: nil
+        )
     }
 
     private func applyScrollZoom(deltaY: CGFloat) {
