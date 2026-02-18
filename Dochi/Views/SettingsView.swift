@@ -102,7 +102,13 @@ struct SettingsView: View {
 
         case .heartbeat:
             Form {
-                HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService, notificationManager: notificationManager, keychainService: keychainService)
+                HeartbeatSettingsContent(
+                    settings: settings,
+                    heartbeatService: heartbeatService,
+                    notificationManager: notificationManager,
+                    keychainService: keychainService,
+                    onOpenProactiveSettings: { selectedSection = .proactiveSuggestion }
+                )
             }
             .formStyle(.grouped)
             .padding()
@@ -495,6 +501,7 @@ struct HeartbeatSettingsContent: View {
     var heartbeatService: HeartbeatService?
     var notificationManager: NotificationManager?
     var keychainService: KeychainServiceProtocol?
+    var onOpenProactiveSettings: (() -> Void)? = nil
 
     var body: some View {
         Section {
@@ -646,20 +653,6 @@ struct HeartbeatSettingsContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Picker("프로액티브 제안 채널", selection: Binding(
-                    get: { NotificationChannel(rawValue: settings.suggestionNotificationChannel) ?? .appOnly },
-                    set: { settings.suggestionNotificationChannel = $0.rawValue }
-                )) {
-                    ForEach(NotificationChannel.allCases, id: \.self) { channel in
-                        Text(channel.displayName).tag(channel)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text("유휴 감지 기반 제안의 전달 채널")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
                 Toggle("앱 활성 시 텔레그램 전송 생략", isOn: Binding(
                     get: { settings.telegramSkipWhenAppActive },
                     set: { settings.telegramSkipWhenAppActive = $0 }
@@ -762,115 +755,59 @@ struct HeartbeatSettingsContent: View {
             }
         }
 
-        // MARK: - Proactive Suggestions (K-2)
+        // MARK: - Proactive Summary (C2)
 
         Section {
-            Toggle("프로액티브 제안 활성화", isOn: Binding(
-                get: { settings.proactiveSuggestionEnabled },
-                set: { settings.proactiveSuggestionEnabled = $0 }
-            ))
+            let proactiveChannel = NotificationChannel(rawValue: settings.suggestionNotificationChannel) ?? .off
 
-            Text("유휴 상태일 때 칸반/메모리/관심사 기반 제안을 자동 표시")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Group {
-                HStack {
-                    Text("유휴 감지: \(settings.proactiveSuggestionIdleMinutes)분")
-                    Slider(
-                        value: Binding(
-                            get: { Double(settings.proactiveSuggestionIdleMinutes) },
-                            set: { settings.proactiveSuggestionIdleMinutes = Int($0.rounded()) }
-                        ),
-                        in: 5...120,
-                        step: 5
-                    )
-                }
-
-                HStack {
-                    Text("쿨다운: \(settings.proactiveSuggestionCooldownMinutes)분")
-                    Slider(
-                        value: Binding(
-                            get: { Double(settings.proactiveSuggestionCooldownMinutes) },
-                            set: { settings.proactiveSuggestionCooldownMinutes = Int($0.rounded()) }
-                        ),
-                        in: 10...240,
-                        step: 10
-                    )
-                }
-
-                Stepper(
-                    value: Binding(
-                        get: { settings.proactiveDailyCap },
-                        set: { settings.proactiveDailyCap = min(max($0, 0), 20) }
-                    ),
-                    in: 0...20
-                ) {
-                    Text("일일 제안 한도: \(settings.proactiveDailyCap)개")
-                }
-
-                Toggle("조용한 시간에 제안 중지", isOn: Binding(
-                    get: { settings.proactiveSuggestionQuietHoursEnabled },
-                    set: { settings.proactiveSuggestionQuietHoursEnabled = $0 }
-                ))
+            HStack {
+                Text("활성 상태")
+                Spacer()
+                Text(settings.proactiveSuggestionEnabled ? "활성" : "비활성")
+                    .foregroundStyle(settings.proactiveSuggestionEnabled ? .primary : .secondary)
             }
-            .disabled(!settings.proactiveSuggestionEnabled)
+
+            HStack {
+                Text("유휴 감지")
+                Spacer()
+                Text("\(settings.proactiveSuggestionIdleMinutes)분")
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("쿨다운")
+                Spacer()
+                Text("\(settings.proactiveSuggestionCooldownMinutes)분")
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("일일 제안 한도")
+                Spacer()
+                Text("\(settings.proactiveDailyCap)개")
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("전달 채널")
+                Spacer()
+                Text(proactiveChannel.displayName)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let onOpenProactiveSettings {
+                Button {
+                    onOpenProactiveSettings()
+                } label: {
+                    Label("프로액티브 상세 설정 열기", systemImage: "arrow.right.circle")
+                }
+                .buttonStyle(.plain)
+            }
         } header: {
             SettingsSectionHeader(
                 title: "프로액티브 제안",
-                helpContent: "사용자가 일정 시간 유휴 상태일 때, 칸반 진행 상황/메모리 기한/대화 주제 등을 기반으로 자동 제안합니다. 조용한 시간 설정은 하트비트와 공유합니다."
+                helpContent: "프로액티브 세부 설정은 전용 화면(Settings > 프로액티브 제안)에서만 변경됩니다. 이 영역은 현재 상태 요약과 이동 링크만 제공합니다."
             )
-        }
-
-        Section("제안 유형") {
-            ForEach(SuggestionType.allCases, id: \.rawValue) { type in
-                Toggle(isOn: suggestionTypeBinding(for: type)) {
-                    HStack(spacing: 8) {
-                        Image(systemName: type.icon)
-                            .foregroundStyle(suggestionTypeBadgeColor(type))
-                            .frame(width: 20)
-                        Text(type.displayName)
-                    }
-                }
-            }
-        }
-        .disabled(!settings.proactiveSuggestionEnabled)
-    }
-
-    private func suggestionTypeBinding(for type: SuggestionType) -> Binding<Bool> {
-        Binding(
-            get: {
-                switch type {
-                case .newsTrend: return settings.suggestionTypeNewsEnabled
-                case .deepDive: return settings.suggestionTypeDeepDiveEnabled
-                case .relatedResearch: return settings.suggestionTypeResearchEnabled
-                case .kanbanCheck: return settings.suggestionTypeKanbanEnabled
-                case .memoryRemind: return settings.suggestionTypeMemoryEnabled
-                case .costReport: return settings.suggestionTypeCostEnabled
-                }
-            },
-            set: { newValue in
-                switch type {
-                case .newsTrend: settings.suggestionTypeNewsEnabled = newValue
-                case .deepDive: settings.suggestionTypeDeepDiveEnabled = newValue
-                case .relatedResearch: settings.suggestionTypeResearchEnabled = newValue
-                case .kanbanCheck: settings.suggestionTypeKanbanEnabled = newValue
-                case .memoryRemind: settings.suggestionTypeMemoryEnabled = newValue
-                case .costReport: settings.suggestionTypeCostEnabled = newValue
-                }
-            }
-        )
-    }
-
-    private func suggestionTypeBadgeColor(_ type: SuggestionType) -> Color {
-        switch type.badgeColor {
-        case "blue": return .blue
-        case "purple": return .purple
-        case "teal": return .teal
-        case "orange": return .orange
-        case "green": return .green
-        case "red": return .red
-        default: return .gray
         }
     }
 }
