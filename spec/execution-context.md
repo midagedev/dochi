@@ -354,6 +354,13 @@
   1. 앱 미실행 시 3초 내 실패 + 안내 출력
   2. `dochi doctor`로 최소 점검 항목 5개 출력
   3. 재현 가능한 종료 코드 체계 유지
+- 상태: done (2026-02-18)
+- 구현 파일:
+  - `DochiCLI/main.swift`
+  - `Dochi/CLIShared/CLIControlPlaneClient.swift`
+- 테스트:
+  - `DochiTests/CLIControlPlaneClientTests.swift`
+  - `DochiTests/CLICommandSurfaceTests.swift`
 
 ### F4. [P1][Debug] 실시간 이벤트/로그 스트림
 - Problem: 현재는 단발 로그 조회 중심이라 디버깅 루프가 느림.
