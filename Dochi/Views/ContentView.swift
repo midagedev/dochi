@@ -733,6 +733,8 @@ struct ContentView: View {
     // MARK: - Palette Action Execution
 
     private func executePaletteAction(_ action: CommandPaletteItem.PaletteAction) {
+        viewModel.recordUserActivity()
+
         switch action {
         case .newConversation:
             viewModel.newConversation()
@@ -1484,6 +1486,9 @@ struct InputBarView: View {
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
                     .padding(8)
+                    .onTapGesture {
+                        viewModel.recordUserActivity()
+                    }
                     .onSubmit {
                         if !NSEvent.modifierFlags.contains(.shift) {
                             if showSlashCommands && !matchingCommands.isEmpty {
@@ -1494,6 +1499,9 @@ struct InputBarView: View {
                         }
                     }
                     .onChange(of: viewModel.inputText) { _, newValue in
+                        if !newValue.isEmpty {
+                            viewModel.recordUserActivity()
+                        }
                         withAnimation(.easeOut(duration: 0.15)) {
                             showSlashCommands = newValue.hasPrefix("/") && viewModel.interactionState == .idle
                         }

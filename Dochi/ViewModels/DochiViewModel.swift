@@ -915,6 +915,8 @@ final class DochiViewModel {
     }
 
     func newConversation() {
+        recordUserActivity()
+
         // I-2: 이전 대화에 대해 메모리 자동 정리 트리거
         triggerMemoryConsolidation(for: currentConversation)
 
@@ -931,6 +933,7 @@ final class DochiViewModel {
 
     func selectConversation(id: UUID) {
         guard interactionState == .idle else { return }
+        recordUserActivity()
 
         // I-2: 이전 대화에 대해 메모리 자동 정리 트리거
         triggerMemoryConsolidation(for: currentConversation)
@@ -958,6 +961,7 @@ final class DochiViewModel {
 
     func switchWorkspace(id: UUID) {
         guard interactionState == .idle else { return }
+        recordUserActivity()
 
         saveConversation()
         settings.currentWorkspaceId = id.uuidString
@@ -978,6 +982,7 @@ final class DochiViewModel {
     }
 
     func switchUser(profile: UserProfile) {
+        recordUserActivity()
         sessionContext.currentUserId = profile.id.uuidString
         settings.defaultUserId = profile.id.uuidString
         currentUserName = profile.name
@@ -998,6 +1003,7 @@ final class DochiViewModel {
 
     func switchAgent(name: String) {
         guard interactionState == .idle else { return }
+        recordUserActivity()
 
         saveConversation()
         settings.activeAgentName = name
@@ -1358,6 +1364,8 @@ final class DochiViewModel {
 
     /// Start listening via STT (triggered by wake word or UI button).
     func startListening() {
+        recordUserActivity()
+
         guard interactionState == .idle else {
             Log.app.warning("Cannot start listening: not idle")
             return
