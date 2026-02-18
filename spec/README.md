@@ -29,7 +29,6 @@
 | [tools.md](./tools.md) | 내장 도구 스키마 (정본) |
 | [security.md](./security.md) | 보안, 권한 분류, 확인 UX |
 | [supabase.md](./supabase.md) | 클라우드 테이블, 동기화 정책, RLS |
-| [rewrite-plan.md](./rewrite-plan.md) | 리라이트 이력/품질 목표 참고 문서 (역사적 기록 중심) |
 | [open-questions.md](./open-questions.md) | 미결 과제 |
 
 ---
@@ -38,7 +37,7 @@
 
 | 항목 | 정본 위치 |
 |------|----------|
-| 수치 목표 (레이턴시, 크기, 재시도) | rewrite-plan.md |
+| 수치 목표 (레이턴시, 크기, 재시도) | tech-spec.md (Performance) |
 | 도구 스키마 | tools.md |
 | 컨텍스트 조합 순서 | flows.md §7 |
 | 상태 전이 규칙 | states.md |

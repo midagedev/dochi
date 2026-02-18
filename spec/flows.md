@@ -17,7 +17,7 @@
 6. processing → idle (텍스트 모드) 또는 processing → speaking (음성 모드)
 
 ### 수용 기준
-- Given 유효한 모델/키, When 텍스트 전송, Then 첫 부분 응답이 목표 레이턴시 이내 표시 (목표값: [rewrite-plan.md](./rewrite-plan.md))
+- Given 유효한 모델/키, When 텍스트 전송, Then 첫 부분 응답이 목표 레이턴시 이내 표시 (목표값: [tech-spec.md](./tech-spec.md#performance))
 - Given tool call 필요, When 도구 허용됨, Then 도구 결과 포함 응답 또는 에러+안내 반환
 - Given 사용자 취소, When 스트리밍 중, Then 즉시 중단. 이미 수신된 부분 응답은 대화에 보존
 

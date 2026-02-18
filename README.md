@@ -60,7 +60,6 @@ open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.ap
 | [spec/execution-context.md](./spec/execution-context.md) | 이슈 작업 정본 (완료 축약 + 구현 예정 상세 + UX 계약) |
 | [CONCEPT.md](./CONCEPT.md) | 제품 비전, 시나리오, 설계 원칙 |
 | [spec/](./spec/README.md) | 설계 스펙 전체 (모델, 플로우, 상태, 권한 등) |
-| [spec/rewrite-plan.md](./spec/rewrite-plan.md) | 리라이트 이력/품질 목표 참고 문서 |
 | [ROADMAP.md](./ROADMAP.md) | 장기 비전 (Phase 6+) |
 
 ## 라이선스

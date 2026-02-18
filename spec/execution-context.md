@@ -272,7 +272,7 @@
 상세 스펙은 기존 문서 링크:
 - `spec/supabase.md`
 - `spec/voice-and-audio.md`
-- `spec/rewrite-plan.md`
+- `spec/tech-spec.md`
 
 ---
 
@@ -293,4 +293,3 @@
 2. 구현 파일/테스트 링크
 
 문서 분산을 막기 위해, 실행 관련 신규 문서 추가는 원칙적으로 금지한다.
-

@@ -10,7 +10,7 @@
 - 도구 스키마: [spec/tools.md](./spec/tools.md)
 - LLM 규칙: [spec/llm-requirements.md](./spec/llm-requirements.md)
 - 보안/권한: [spec/security.md](./spec/security.md)
-- 리라이트 계획: [spec/rewrite-plan.md](./spec/rewrite-plan.md)
+- 실행 컨텍스트: [spec/execution-context.md](./spec/execution-context.md)
 
 ## Build Commands
 

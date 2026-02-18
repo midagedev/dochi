@@ -1,7 +1,7 @@
 # Dochi - 로드맵
 
-리라이트 Phase (0~5)는 [spec/rewrite-plan.md](./spec/rewrite-plan.md) 참조.
-아래는 리라이트 이후 장기 비전.
+단기 실행 계획/우선순위는 [spec/execution-context.md](./spec/execution-context.md) 참조.
+아래는 그 이후 장기 비전.
 
 ---
 
