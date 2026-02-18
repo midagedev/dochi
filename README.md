@@ -37,6 +37,20 @@ open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.ap
 2. 텍스트로 바로 대화 시작
 3. 음성: 웨이크워드 활성화 → "도치야" → 연속 대화
 
+## CLI 빠른 시작
+
+```bash
+xcodegen generate
+xcodebuild -project Dochi.xcodeproj -scheme DochiCLI -configuration Debug build
+
+CLI_BIN="$(find ~/Library/Developer/Xcode/DerivedData -path '*Build/Products/Debug/dochi' -type f | head -n 1)"
+"$CLI_BIN" doctor
+```
+
+- 기본 모드(`--mode auto`)는 실행 중인 Dochi 앱의 로컬 API(Control Plane)에 연결합니다.
+- 앱 없이 직접 LLM API를 호출하려면 `--mode standalone`을 사용합니다.
+- 상세 명령/운영 가이드: [`DochiCLI/README.md`](./DochiCLI/README.md)
+
 ## 컨텍스트 구조
 
 ```
@@ -58,6 +72,7 @@ open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.ap
 | 문서 | 내용 |
 |------|------|
 | [spec/execution-context.md](./spec/execution-context.md) | 이슈 작업 정본 (완료 축약 + 구현 예정 상세 + UX 계약) |
+| [DochiCLI/README.md](./DochiCLI/README.md) | CLI 사용법 (모드, 명령, 디버깅, 트러블슈팅) |
 | [CONCEPT.md](./CONCEPT.md) | 제품 비전, 시나리오, 설계 원칙 |
 | [spec/](./spec/README.md) | 설계 스펙 전체 (모델, 플로우, 상태, 권한 등) |
 | [ROADMAP.md](./ROADMAP.md) | 장기 비전 (Phase 6+) |
