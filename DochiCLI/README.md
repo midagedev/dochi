@@ -133,3 +133,40 @@ dochi --mode standalone --allow-standalone ask "테스트"
 - `3`: 설정 오류
 - `4`: 앱 연결 오류
 - `5`: 인증 오류
+
+## 9) 비-UI 기능 검증 표준 절차 (Host 모드)
+
+비-UI 기능 검증 기본 원칙:
+- 제품 검증은 `--mode app`(또는 `auto`)로 수행
+- CLI와 앱은 같은 빌드 산출물(같은 DerivedData) 쌍으로 실행
+- `standalone`은 보조 디버깅 경로이며 제품 E2E 검증 기준이 아님
+
+### 권장 순서
+
+```bash
+APP_BIN="$(find ~/Library/Developer/Xcode/DerivedData -path '*Build/Products/Debug/Dochi.app' -type d | head -n 1)"
+CLI_BIN="$(find ~/Library/Developer/Xcode/DerivedData -path '*Build/Products/Debug/dochi' -type f | head -n 1)"
+
+open "$APP_BIN"
+"$CLI_BIN" --mode app doctor
+"$CLI_BIN" --mode app session list --json
+"$CLI_BIN" --mode app dev log recent --minutes 5 --json
+"$CLI_BIN" --mode app ask "host mode 왕복 검증. OK만 답해줘" --json
+```
+
+### 합격 기준
+
+- `doctor`가 `정상` (`app_running`, `control_plane_socket`, `control_plane_ping` 모두 `OK`)
+- `session list`가 정상 응답
+- `dev log recent`가 정상 응답
+- `ask` 요청이 앱에서 처리되어 응답이 반환됨
+
+### 자주 헷갈리는 케이스
+
+- 앱이 여러 위치에서 실행되는 경우:
+  - 예) `/Applications/Dochi.app` + DerivedData `Dochi.app`
+  - 현상: 간헐적 `Dochi 앱이 실행 중이 아닙니다`, `Control Plane 연결 실패`
+  - 대응: 하나만 실행하고, CLI도 같은 빌드 산출물 경로로 고정
+- `interaction_busy`:
+  - 앱이 다른 요청 처리 중인 상태
+  - 잠시 후 재시도하거나 UI에서 현재 작업 완료 후 재검증

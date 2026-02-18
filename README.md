@@ -52,6 +52,25 @@ CLI_BIN="$(find ~/Library/Developer/Xcode/DerivedData -path '*Build/Products/Deb
 - standalone은 디버그 전용이며 `--mode standalone --allow-standalone`으로만 활성화됩니다.
 - 상세 명령/운영 가이드: [`DochiCLI/README.md`](./DochiCLI/README.md)
 
+## 비-UI 기능 검증 가이드 (Host Mode CLI)
+
+UI가 아닌 기능(로컬 API, 세션/대화, 로그, 도구 실행)은 Dochi 앱 + CLI를 같은 빌드 산출물로 맞춘 뒤 Host 모드(`--mode app`)로 검증하는 것을 기본 경로로 사용합니다.
+
+```bash
+APP_BIN="$(find ~/Library/Developer/Xcode/DerivedData -path '*Build/Products/Debug/Dochi.app' -type d | head -n 1)"
+CLI_BIN="$(find ~/Library/Developer/Xcode/DerivedData -path '*Build/Products/Debug/dochi' -type f | head -n 1)"
+
+open "$APP_BIN"
+"$CLI_BIN" --mode app doctor
+"$CLI_BIN" --mode app session list --json
+"$CLI_BIN" --mode app dev log recent --minutes 5 --json
+"$CLI_BIN" --mode app ask "host mode 연결 검증. OK만 답해줘" --json
+```
+
+- `doctor`에서 `app_running`, `control_plane_socket`, `control_plane_ping`이 모두 `OK`여야 합니다.
+- `/Applications/Dochi.app`와 DerivedData 빌드 앱이 섞이면 연결 실패가 발생할 수 있으므로 한 쌍으로 고정해 사용합니다.
+- `standalone`은 제품 동작 검증 경로가 아니라, LLM 직접 호출 디버깅용 보조 경로입니다.
+
 ## 컨텍스트 구조
 
 ```
