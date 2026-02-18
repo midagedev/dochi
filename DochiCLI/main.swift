@@ -107,10 +107,10 @@ enum DochiCLI {
             return CLIResult(exitCode: .success, command: "version", message: "dochi-cli v1.1.0")
 
         case .ask(let query):
-            return await handleAsk(query)
+            return await handleAsk(query, runtimeMode: invocation.runtimeMode)
 
         case .chat:
-            return await handleChat(outputMode: invocation.outputMode)
+            return await handleChat(outputMode: invocation.outputMode, runtimeMode: invocation.runtimeMode)
 
         case .context(let action):
             return handleContext(action)
@@ -122,11 +122,7 @@ enum DochiCLI {
             return handleConfig(action)
 
         case .session(let action):
-            return handleRequiresAppConnection(
-                command: sessionCommandName(action),
-                runtimeMode: invocation.runtimeMode,
-                hint: "session 명령은 #228 Control Plane 구현 이후 활성화됩니다."
-            )
+            return handleSession(action, runtimeMode: invocation.runtimeMode)
 
         case .dev(let action):
             return handleDev(action, runtimeMode: invocation.runtimeMode)
@@ -138,7 +134,27 @@ enum DochiCLI {
 
     // MARK: - Ask / Chat
 
-    private static func handleAsk(_ query: String) async -> CLIResult {
+    private static func handleAsk(_ query: String, runtimeMode: CLIRuntimeMode) async -> CLIResult {
+        if runtimeMode == .standalone {
+            return await handleStandaloneAsk(query)
+        }
+
+        guard let client = appConnectedClient(runtimeMode: runtimeMode) else {
+            return appConnectionFailure(command: "ask", reason: "Dochi 앱이 실행 중이 아닙니다.")
+        }
+
+        do {
+            let result = try client.call(method: "chat.send", params: ["prompt": query])
+            let assistantMessage = result["assistant_message"] as? String ?? "(응답 없음)"
+            return CLIResult(exitCode: .success, command: "ask", message: assistantMessage, data: result)
+        } catch let error as CLIControlPlaneError {
+            return mapControlPlaneError(error, command: "ask")
+        } catch {
+            return CLIResult(exitCode: .runtimeError, command: "ask", message: "요청 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private static func handleStandaloneAsk(_ query: String) async -> CLIResult {
         let config = CLIConfig.load()
         guard let apiKey = config.apiKey, !apiKey.isEmpty else {
             return CLIResult(
@@ -157,7 +173,48 @@ enum DochiCLI {
         }
     }
 
-    private static func handleChat(outputMode: CLIOutputMode) async -> CLIResult {
+    private static func handleChat(outputMode: CLIOutputMode, runtimeMode: CLIRuntimeMode) async -> CLIResult {
+        if outputMode == .json {
+            return CLIResult(exitCode: .invalidUsage, command: "chat", message: "chat 대화 모드는 --json 출력과 함께 사용할 수 없습니다.")
+        }
+
+        if runtimeMode == .standalone {
+            return await handleStandaloneChat(outputMode: outputMode)
+        }
+
+        guard let client = appConnectedClient(runtimeMode: runtimeMode) else {
+            return appConnectionFailure(command: "chat", reason: "Dochi 앱이 실행 중이 아닙니다.")
+        }
+
+        print("도치 대화 모드 시작 (앱 연결 모드, /quit 종료)")
+
+        while true {
+            print("\n> ", terminator: "")
+            fflush(stdout)
+
+            guard let input = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines), !input.isEmpty else {
+                continue
+            }
+            if input == "/quit" || input == "/exit" {
+                break
+            }
+
+            do {
+                let result = try client.call(method: "chat.send", params: ["prompt": input])
+                let assistantMessage = result["assistant_message"] as? String ?? "(응답 없음)"
+                print("\n\(assistantMessage)")
+            } catch let error as CLIControlPlaneError {
+                let mapped = mapControlPlaneError(error, command: "chat")
+                print("\n오류: \(mapped.message)")
+            } catch {
+                print("\n오류: \(error.localizedDescription)")
+            }
+        }
+
+        return CLIResult(exitCode: .success, command: "chat", message: "대화 모드를 종료했습니다.")
+    }
+
+    private static func handleStandaloneChat(outputMode: CLIOutputMode) async -> CLIResult {
         if outputMode == .json {
             return CLIResult(exitCode: .invalidUsage, command: "chat", message: "chat 대화 모드는 --json 출력과 함께 사용할 수 없습니다.")
         }
@@ -315,77 +372,161 @@ enum DochiCLI {
 
     // MARK: - Dev / Session (App connection required)
 
-    private static func handleDev(_ action: CLIDevAction, runtimeMode: CLIRuntimeMode) -> CLIResult {
+    private static func handleSession(_ action: CLISessionAction, runtimeMode: CLIRuntimeMode) -> CLIResult {
+        guard let client = appConnectedClient(runtimeMode: runtimeMode) else {
+            return appConnectionFailure(
+                command: sessionCommandName(action),
+                reason: "Dochi 앱이 실행 중이 아니거나 연결할 수 없습니다."
+            )
+        }
+
         switch action {
-        case .logRecent(let minutes):
-            return handleRequiresAppConnection(
-                command: "dev.log.recent",
-                runtimeMode: runtimeMode,
-                hint: "dev log recent (minutes=\(minutes))는 #228 이후 활성화됩니다."
-            )
+        case .list:
+            do {
+                let result = try client.call(method: "session.list")
+                let sessions = result["sessions"] as? [[String: Any]] ?? []
+                if sessions.isEmpty {
+                    return CLIResult(exitCode: .success, command: "session.list", message: "활성 대화 세션이 없습니다.", data: result)
+                }
 
-        case .tool(let name, let argumentsJSON):
-            let argsHint = argumentsJSON ?? "{}"
-            return handleRequiresAppConnection(
-                command: "dev.tool",
-                runtimeMode: runtimeMode,
-                hint: "dev tool \(name) \(argsHint)는 #228 이후 활성화됩니다."
-            )
-
-        case .bridgeOpen(let agent):
-            return handleRequiresAppConnection(
-                command: "dev.bridge.open",
-                runtimeMode: runtimeMode,
-                hint: "dev bridge open \(agent)는 #228 이후 활성화됩니다."
-            )
-
-        case .bridgeStatus(let sessionId):
-            return handleRequiresAppConnection(
-                command: "dev.bridge.status",
-                runtimeMode: runtimeMode,
-                hint: "dev bridge status \(sessionId ?? "")는 #228 이후 활성화됩니다."
-            )
-
-        case .bridgeSend(let sessionId, let command):
-            return handleRequiresAppConnection(
-                command: "dev.bridge.send",
-                runtimeMode: runtimeMode,
-                hint: "dev bridge send \(sessionId) \(command) 는 #228 이후 활성화됩니다."
-            )
-
-        case .bridgeRead(let sessionId, let lines):
-            return handleRequiresAppConnection(
-                command: "dev.bridge.read",
-                runtimeMode: runtimeMode,
-                hint: "dev bridge read \(sessionId) \(lines)는 #228 이후 활성화됩니다."
-            )
+                var lines: [String] = ["세션 \(sessions.count)개"]
+                for (index, session) in sessions.enumerated() {
+                    let title = session["title"] as? String ?? "(제목 없음)"
+                    let id = session["id"] as? String ?? "unknown"
+                    let active = (session["is_active"] as? Bool == true) ? " [active]" : ""
+                    lines.append("\(index + 1). \(title)\(active) (\(id))")
+                }
+                return CLIResult(exitCode: .success, command: "session.list", message: lines.joined(separator: "\n"), data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "session.list")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "session.list", message: "요청 실패: \(error.localizedDescription)")
+            }
         }
     }
 
-    private static func handleRequiresAppConnection(
-        command: String,
-        runtimeMode: CLIRuntimeMode,
-        hint: String
-    ) -> CLIResult {
-        let appRunning = AppConnectionProbe.isDochiAppRunning()
-
-        if runtimeMode == .standalone {
-            return CLIResult(
-                exitCode: .connectionError,
-                command: command,
-                message: "이 명령은 standalone 모드에서 지원하지 않습니다. --mode app 또는 auto를 사용하세요."
-            )
+    private static func handleDev(_ action: CLIDevAction, runtimeMode: CLIRuntimeMode) -> CLIResult {
+        guard let client = appConnectedClient(runtimeMode: runtimeMode) else {
+            return appConnectionFailure(command: "dev", reason: "Dochi 앱이 실행 중이 아니거나 연결할 수 없습니다.")
         }
 
-        if !appRunning {
-            return CLIResult(
-                exitCode: .connectionError,
-                command: command,
-                message: "Dochi 앱이 실행 중이 아닙니다. 앱을 실행한 뒤 다시 시도하세요."
-            )
-        }
+        switch action {
+        case .logRecent(let minutes):
+            do {
+                let result = try client.call(method: "log.recent", params: ["minutes": minutes])
+                let entries = result["entries"] as? [[String: Any]] ?? []
+                if entries.isEmpty {
+                    return CLIResult(exitCode: .success, command: "dev.log.recent", message: "최근 로그가 없습니다.", data: result)
+                }
+                let lines = entries.map { entry in
+                    let ts = entry["timestamp"] as? String ?? "-"
+                    let category = entry["category"] as? String ?? "-"
+                    let level = entry["level"] as? String ?? "-"
+                    let message = entry["message"] as? String ?? ""
+                    return "[\(ts)] [\(category)] [\(level)] \(message)"
+                }
+                return CLIResult(exitCode: .success, command: "dev.log.recent", message: lines.joined(separator: "\n"), data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.log.recent")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.log.recent", message: "요청 실패: \(error.localizedDescription)")
+            }
 
-        return CLIResult(exitCode: .connectionError, command: command, message: hint)
+        case .tool(let name, let argumentsJSON):
+            do {
+                let arguments = try parseJSONArguments(argumentsJSON)
+                let result = try client.call(method: "tool.execute", params: [
+                    "name": name,
+                    "arguments": arguments,
+                ])
+                let content = result["content"] as? String ?? "(도구 응답 없음)"
+                return CLIResult(exitCode: .success, command: "dev.tool", message: content, data: result)
+            } catch let error as CLIParseError {
+                return CLIResult(exitCode: .invalidUsage, command: "dev.tool", message: error.localizedDescription)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.tool")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.tool", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeOpen(let agent):
+            do {
+                let result = try client.call(method: "bridge.open", params: ["agent": agent])
+                let sessionId = result["session_id"] as? String ?? "-"
+                let profile = result["profile_name"] as? String ?? "-"
+                let status = result["status"] as? String ?? "-"
+                let reused = (result["reused"] as? Bool == true) ? "재사용" : "새로 생성"
+                let message = "bridge.open \(reused): profile=\(profile), session_id=\(sessionId), status=\(status)"
+                return CLIResult(exitCode: .success, command: "dev.bridge.open", message: message, data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.open")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.open", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeStatus(let sessionId):
+            do {
+                let params: [String: Any]
+                if let sessionId {
+                    params = ["session_id": sessionId]
+                } else {
+                    params = [:]
+                }
+                let result = try client.call(method: "bridge.status", params: params)
+                if let sessions = result["sessions"] as? [[String: Any]] {
+                    let lines = sessions.map { session -> String in
+                        let id = session["session_id"] as? String ?? "-"
+                        let profile = session["profile_name"] as? String ?? "-"
+                        let status = session["status"] as? String ?? "-"
+                        return "- \(profile): \(status) (\(id))"
+                    }
+                    let message = lines.isEmpty ? "브리지 세션이 없습니다." : lines.joined(separator: "\n")
+                    return CLIResult(exitCode: .success, command: "dev.bridge.status", message: message, data: result)
+                }
+
+                let id = result["session_id"] as? String ?? "-"
+                let profile = result["profile_name"] as? String ?? "-"
+                let status = result["status"] as? String ?? "-"
+                return CLIResult(
+                    exitCode: .success,
+                    command: "dev.bridge.status",
+                    message: "\(profile): \(status) (\(id))",
+                    data: result
+                )
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.status")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.status", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeSend(let sessionId, let command):
+            do {
+                let result = try client.call(method: "bridge.send", params: [
+                    "session_id": sessionId,
+                    "command": command,
+                ])
+                return CLIResult(exitCode: .success, command: "dev.bridge.send", message: "전송 완료", data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.send")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.send", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeRead(let sessionId, let lines):
+            do {
+                let result = try client.call(method: "bridge.read", params: [
+                    "session_id": sessionId,
+                    "lines": lines,
+                ])
+                let output = result["lines"] as? [String] ?? []
+                let message = output.isEmpty ? "(출력 없음)" : output.joined(separator: "\n")
+                return CLIResult(exitCode: .success, command: "dev.bridge.read", message: message, data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.read")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.read", message: "요청 실패: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Doctor
@@ -395,12 +536,37 @@ enum DochiCLI {
         let configFile = CLIConfig.configFile
         let config = CLIConfig.load()
         let appRunning = AppConnectionProbe.isDochiAppRunning()
+        let appRequired = runtimeMode != .standalone
+        let socketPath = CLIControlPlaneClient.defaultSocketURL.path
+        let socketExists = FileManager.default.fileExists(atPath: socketPath)
+
+        let pingOK: Bool
+        let pingDetail: String
+        if appRequired && appRunning && socketExists {
+            do {
+                let pingResult = try CLIControlPlaneClient().call(method: "app.ping")
+                let version = pingResult["version"] as? String ?? "unknown"
+                pingOK = true
+                pingDetail = "connected (version: \(version))"
+            } catch {
+                pingOK = false
+                pingDetail = "connection failed: \(error.localizedDescription)"
+            }
+        } else if appRequired {
+            pingOK = false
+            pingDetail = "skipped (app/socket unavailable)"
+        } else {
+            pingOK = true
+            pingDetail = "skipped in standalone mode"
+        }
 
         let checks: [(name: String, ok: Bool, detail: String)] = [
             ("context_dir", FileManager.default.fileExists(atPath: contextDir.path), contextDir.path),
             ("config_file", FileManager.default.fileExists(atPath: configFile.path), configFile.path),
             ("api_key", (config.apiKey?.isEmpty == false), "api_key configured"),
-            ("app_running", appRunning, "bundle: com.hckim.dochi"),
+            ("app_running", !appRequired || appRunning, appRequired ? "bundle: com.hckim.dochi" : "standalone mode"),
+            ("control_plane_socket", !appRequired || socketExists, socketPath),
+            ("control_plane_ping", pingOK, pingDetail),
             ("mode", true, runtimeMode.rawValue),
         ]
 
@@ -412,14 +578,74 @@ enum DochiCLI {
             lines.append("- \(check.ok ? "OK" : "FAIL") \(check.name): \(check.detail)")
         }
 
+        let structuredChecks = checks.map { check -> [String: Any] in
+            [
+                "name": check.name,
+                "ok": check.ok,
+                "detail": check.detail,
+            ]
+        }
+
         return CLIResult(
             exitCode: okCount == checks.count ? .success : .connectionError,
             command: "doctor",
-            message: lines.joined(separator: "\n")
+            message: lines.joined(separator: "\n"),
+            data: [
+                "status": status,
+                "ok_count": okCount,
+                "total_count": checks.count,
+                "checks": structuredChecks,
+            ]
         )
     }
 
     // MARK: - Helpers
+
+    private static func appConnectedClient(runtimeMode: CLIRuntimeMode) -> CLIControlPlaneClient? {
+        if runtimeMode == .standalone {
+            return nil
+        }
+
+        guard AppConnectionProbe.isDochiAppRunning() else {
+            return nil
+        }
+        return CLIControlPlaneClient()
+    }
+
+    private static func appConnectionFailure(command: String, reason: String) -> CLIResult {
+        let message = """
+            \(reason)
+            확인할 항목:
+            1) Dochi 앱이 실행 중인지 확인하세요.
+            2) `dochi doctor`로 연결 상태를 점검하세요.
+            3) 앱 없이 실행하려면 `--mode standalone`을 사용하세요.
+            """
+        return CLIResult(exitCode: .connectionError, command: command, message: message)
+    }
+
+    private static func mapControlPlaneError(_ error: CLIControlPlaneError, command: String) -> CLIResult {
+        switch error {
+        case .connectFailed, .responseReadFailed:
+            return appConnectionFailure(command: command, reason: "Control Plane 연결에 실패했습니다.")
+        case .socketPathTooLong, .requestEncodeFailed, .responseDecodeFailed:
+            return CLIResult(exitCode: .runtimeError, command: command, message: "Control Plane 처리 오류: \(error.localizedDescription)")
+        case .remoteError(let code, let message):
+            return CLIResult(exitCode: .runtimeError, command: command, message: "앱 요청 실패 (\(code)): \(message)")
+        }
+    }
+
+    private static func parseJSONArguments(_ argumentsJSON: String?) throws -> [String: Any] {
+        guard let argumentsJSON, !argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return [:]
+        }
+        guard let data = argumentsJSON.data(using: .utf8) else {
+            throw CLIParseError.invalidUsage("arguments_json은 유효한 UTF-8 문자열이어야 합니다.")
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CLIParseError.invalidUsage("arguments_json은 JSON object 형태여야 합니다.")
+        }
+        return json
+    }
 
     private static func configValue(_ config: CLIConfig, key: String) -> String? {
         switch key {
