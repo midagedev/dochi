@@ -80,11 +80,11 @@
 
 | 도구 | 카테고리 | 입력 |
 |------|---------|------|
-| `git.status` | safe | { path? } |
-| `git.log` | safe | { path?, count? } |
-| `git.diff` | safe | { path?, staged? } |
-| `git.commit` | restricted | { message, path? } |
-| `git.branch` | restricted | { action: "list"\|"create"\|"switch"\|"delete", name? } |
+| `git.status` | safe | { repo_path? } |
+| `git.log` | safe | { repo_path?, count?, oneline? } |
+| `git.diff` | safe | { repo_path?, staged?, file? } |
+| `git.commit` | restricted | { message, repo_path?, add_all?, files? } |
+| `git.branch` | safe | { repo_path?, action: "list"\|"create"\|"switch", name? } |
 
 ### 조건부 — GitHub (safe/sensitive)
 
@@ -106,8 +106,8 @@
 
 | 도구 | 카테고리 | 입력 |
 |------|---------|------|
-| `coding.run_task` | restricted | { task, working_directory? } |
-| `coding.review` | sensitive | { file_path?, diff? } |
+| `coding.run_task` | restricted | { task, work_dir?, tool?, timeout_seconds? } |
+| `coding.review` | sensitive | { work_dir?, focus? } |
 
 ### 조건부 — Open URL (sensitive)
 

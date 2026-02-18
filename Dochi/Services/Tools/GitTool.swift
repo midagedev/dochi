@@ -47,8 +47,12 @@ private func runGit(args: [String], at repoPath: String) async -> CLIOutput {
     }
 }
 
-private func resolveRepoPath(_ arguments: [String: Any]) -> String {
+@MainActor
+private func resolveRepoPath(_ arguments: [String: Any], sessionContext: SessionContext? = nil) -> String {
     if let path = arguments["repo_path"] as? String, !path.isEmpty {
+        return NSString(string: path).expandingTildeInPath
+    }
+    if let path = sessionContext?.currentRepoPath, !path.isEmpty {
         return NSString(string: path).expandingTildeInPath
     }
     return NSHomeDirectory()
@@ -62,6 +66,11 @@ final class GitStatusTool: BuiltInToolProtocol {
     let category: ToolCategory = .safe
     let description = "Git 저장소의 현재 상태를 조회합니다."
     let isBaseline = false
+    private let sessionContext: SessionContext?
+
+    init(sessionContext: SessionContext? = nil) {
+        self.sessionContext = sessionContext
+    }
 
     var inputSchema: [String: Any] {
         [
@@ -73,7 +82,7 @@ final class GitStatusTool: BuiltInToolProtocol {
     }
 
     func execute(arguments: [String: Any]) async -> ToolResult {
-        let path = resolveRepoPath(arguments)
+        let path = resolveRepoPath(arguments, sessionContext: sessionContext)
 
         let branchResult = await runGit(args: ["branch", "--show-current"], at: path)
         let statusResult = await runGit(args: ["status", "--short"], at: path)
@@ -101,6 +110,11 @@ final class GitLogTool: BuiltInToolProtocol {
     let category: ToolCategory = .safe
     let description = "Git 커밋 로그를 조회합니다."
     let isBaseline = false
+    private let sessionContext: SessionContext?
+
+    init(sessionContext: SessionContext? = nil) {
+        self.sessionContext = sessionContext
+    }
 
     var inputSchema: [String: Any] {
         [
@@ -114,7 +128,7 @@ final class GitLogTool: BuiltInToolProtocol {
     }
 
     func execute(arguments: [String: Any]) async -> ToolResult {
-        let path = resolveRepoPath(arguments)
+        let path = resolveRepoPath(arguments, sessionContext: sessionContext)
         let count = arguments["count"] as? Int ?? 10
         let oneline = arguments["oneline"] as? Bool ?? true
 
@@ -147,6 +161,11 @@ final class GitDiffTool: BuiltInToolProtocol {
     let category: ToolCategory = .safe
     let description = "Git 변경사항(diff)을 조회합니다."
     let isBaseline = false
+    private let sessionContext: SessionContext?
+
+    init(sessionContext: SessionContext? = nil) {
+        self.sessionContext = sessionContext
+    }
 
     var inputSchema: [String: Any] {
         [
@@ -160,7 +179,7 @@ final class GitDiffTool: BuiltInToolProtocol {
     }
 
     func execute(arguments: [String: Any]) async -> ToolResult {
-        let path = resolveRepoPath(arguments)
+        let path = resolveRepoPath(arguments, sessionContext: sessionContext)
         let staged = arguments["staged"] as? Bool ?? false
 
         if let file = arguments["file"] as? String, !file.isEmpty {
@@ -205,6 +224,11 @@ final class GitCommitTool: BuiltInToolProtocol {
     let category: ToolCategory = .restricted
     let description = "Git 커밋을 생성합니다. 변경사항을 스테이징하고 커밋합니다."
     let isBaseline = false
+    private let sessionContext: SessionContext?
+
+    init(sessionContext: SessionContext? = nil) {
+        self.sessionContext = sessionContext
+    }
 
     var inputSchema: [String: Any] {
         [
@@ -227,7 +251,7 @@ final class GitCommitTool: BuiltInToolProtocol {
         guard let message = arguments["message"] as? String, !message.isEmpty else {
             return ToolResult(toolCallId: "", content: "message 파라미터가 필요합니다.", isError: true)
         }
-        let path = resolveRepoPath(arguments)
+        let path = resolveRepoPath(arguments, sessionContext: sessionContext)
         let addAll = arguments["add_all"] as? Bool ?? false
 
         if addAll {
@@ -260,6 +284,11 @@ final class GitBranchTool: BuiltInToolProtocol {
     let category: ToolCategory = .safe
     let description = "Git 브랜치를 조회하거나 생성/전환합니다."
     let isBaseline = false
+    private let sessionContext: SessionContext?
+
+    init(sessionContext: SessionContext? = nil) {
+        self.sessionContext = sessionContext
+    }
 
     var inputSchema: [String: Any] {
         [
@@ -277,7 +306,7 @@ final class GitBranchTool: BuiltInToolProtocol {
     }
 
     func execute(arguments: [String: Any]) async -> ToolResult {
-        let path = resolveRepoPath(arguments)
+        let path = resolveRepoPath(arguments, sessionContext: sessionContext)
         let action = arguments["action"] as? String ?? "list"
 
         switch action {
