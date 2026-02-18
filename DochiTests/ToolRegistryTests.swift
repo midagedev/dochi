@@ -202,4 +202,35 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertFalse(registry.enabledToolNames.contains("tool.b"))
         XCTAssertTrue(registry.enabledToolNames.contains("tool.c"))
     }
+
+    // MARK: - ToolsEnableTool
+
+    func testToolsEnableToolActivatesNewTools() async {
+        registry.register(StubTool(name: "codex.desktop_activate"))
+        let tool = ToolsEnableTool(registry: registry)
+
+        let result = await tool.execute(arguments: [
+            "names": ["codex.desktop_activate"]
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.content.contains("도구 활성화 완료"))
+        XCTAssertTrue(result.content.contains("codex.desktop_activate"))
+    }
+
+    func testToolsEnableToolRepeatedCallReturnsGuidance() async {
+        registry.register(StubTool(name: "codex.desktop_activate"))
+        let tool = ToolsEnableTool(registry: registry)
+
+        _ = await tool.execute(arguments: [
+            "names": ["codex.desktop_activate"]
+        ])
+        let result = await tool.execute(arguments: [
+            "names": ["codex.desktop_activate"]
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.content.contains("이미 활성화된 도구"))
+        XCTAssertTrue(result.content.contains("반복하지 말고"))
+    }
 }

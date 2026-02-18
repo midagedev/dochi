@@ -2747,6 +2747,7 @@ final class DochiViewModel {
                 lines.append("- \(tool.name): \(tool.description) (\(tool.category.rawValue))")
             }
             lines.append("사용자가 관련 작업을 요청하면 tools.enable으로 먼저 활성화하세요.")
+            lines.append("같은 tools.enable을 반복 호출하지 말고, 활성화 후에는 요청된 실제 도구를 바로 호출하세요.")
             parts.append(lines.joined(separator: "\n"))
         }
 

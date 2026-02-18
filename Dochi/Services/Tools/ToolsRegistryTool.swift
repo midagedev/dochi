@@ -76,16 +76,29 @@ final class ToolsEnableTool: BuiltInToolProtocol {
             return ToolResult(toolCallId: "", content: "오류: names는 필수입니다 (문자열 배열).", isError: true)
         }
 
+        let previouslyEnabled = registry.enabledToolNames
         registry.enable(names: names)
 
         let valid = names.filter { registry.tool(named: $0) != nil }
         let invalid = names.filter { registry.tool(named: $0) == nil }
+        let newlyEnabled = valid.filter { !previouslyEnabled.contains($0) }
+        let alreadyEnabled = valid.filter { previouslyEnabled.contains($0) }
 
-        var msg = "도구 활성화 완료: \(valid.joined(separator: ", "))"
-        if !invalid.isEmpty {
-            msg += "\n찾을 수 없는 도구: \(invalid.joined(separator: ", "))"
+        var lines: [String] = []
+        if !newlyEnabled.isEmpty {
+            lines.append("도구 활성화 완료: \(newlyEnabled.joined(separator: ", "))")
         }
-        return ToolResult(toolCallId: "", content: msg)
+        if !alreadyEnabled.isEmpty {
+            lines.append("이미 활성화된 도구: \(alreadyEnabled.joined(separator: ", "))")
+            lines.append("같은 tools.enable 호출을 반복하지 말고, 이제 실제 작업 도구를 호출하세요.")
+        }
+        if !invalid.isEmpty {
+            lines.append("찾을 수 없는 도구: \(invalid.joined(separator: ", "))")
+        }
+        if lines.isEmpty {
+            lines.append("활성화 가능한 도구가 없습니다.")
+        }
+        return ToolResult(toolCallId: "", content: lines.joined(separator: "\n"))
     }
 }
 

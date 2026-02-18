@@ -354,6 +354,7 @@ struct DochiApp: App {
                     viewModel.configureExternalToolManager(externalToolManager)
                     heartbeatService.setExternalToolManager(externalToolManager)
                     ExternalToolTools.register(toolService: toolService, manager: externalToolManager)
+                    DochiDevBridgeTools.register(toolService: toolService, manager: externalToolManager)
 
                     // Configure DevicePolicyService (J-1)
                     let devicePolicyService = DevicePolicyService(settings: settings)
