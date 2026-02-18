@@ -148,6 +148,7 @@ final class HeartbeatService: Observable {
         var reminderContext = ""
         var memoryWarning: String?
         var gitContextSummary: String?
+        var gitInsights: [GitRepositoryInsight] = []
 
         do {
             // 1. Calendar -- upcoming events
@@ -197,6 +198,7 @@ final class HeartbeatService: Observable {
                     searchPaths: nil,
                     limit: 3
                 )
+                gitInsights = roots
                 gitContextSummary = summarizeGitContext(roots)
             }
 
@@ -210,7 +212,8 @@ final class HeartbeatService: Observable {
                     checksPerformed.append("resourceAutoTask")
                     let queuedCount = await resourceOptimizer.evaluateAndQueueAutoTasks(
                         enabledTypes: enabledTypes,
-                        onlyWasteRisk: settings.resourceAutoTaskOnlyWasteRisk
+                        onlyWasteRisk: settings.resourceAutoTaskOnlyWasteRisk,
+                        gitInsights: gitInsights.isEmpty ? nil : gitInsights
                     )
                     if queuedCount > 0 {
                         Log.app.info("Heartbeat queued \(queuedCount) resource auto task(s)")
