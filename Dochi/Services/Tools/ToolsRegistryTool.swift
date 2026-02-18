@@ -76,11 +76,12 @@ final class ToolsEnableTool: BuiltInToolProtocol {
             return ToolResult(toolCallId: "", content: "오류: names는 필수입니다 (문자열 배열).", isError: true)
         }
 
+        let normalizedNames = normalizeRequestedNames(names)
         let previouslyEnabled = registry.enabledToolNames
-        registry.enable(names: names)
+        registry.enable(names: normalizedNames)
 
-        let valid = names.filter { registry.tool(named: $0) != nil }
-        let invalid = names.filter { registry.tool(named: $0) == nil }
+        let valid = normalizedNames.filter { registry.tool(named: $0) != nil }
+        let invalid = normalizedNames.filter { registry.tool(named: $0) == nil }
         let newlyEnabled = valid.filter { !previouslyEnabled.contains($0) }
         let alreadyEnabled = valid.filter { previouslyEnabled.contains($0) }
 
@@ -99,6 +100,45 @@ final class ToolsEnableTool: BuiltInToolProtocol {
             lines.append("활성화 가능한 도구가 없습니다.")
         }
         return ToolResult(toolCallId: "", content: lines.joined(separator: "\n"))
+    }
+
+    private func normalizeRequestedNames(_ names: [String]) -> [String] {
+        var result: [String] = []
+        var seen: Set<String> = []
+
+        for rawName in names {
+            let normalized = normalizeRequestedName(rawName)
+            if seen.insert(normalized).inserted {
+                result.append(normalized)
+            }
+        }
+
+        return result
+    }
+
+    private func normalizeRequestedName(_ rawName: String) -> String {
+        var name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return name }
+
+        // LLM이 반환하는 sanitized 표기(codex-_-desktop_activate)를 복원
+        name = name.replacingOccurrences(of: "-_-", with: ".")
+
+        // 일부 모델이 잘못 붙이는 function namespace 접두어 제거
+        for prefix in ["functions.", "function."] {
+            while name.hasPrefix(prefix) {
+                name.removeFirst(prefix.count)
+            }
+        }
+
+        if registry.tool(named: name) != nil {
+            return name
+        }
+
+        if let canonical = registry.allToolNames.first(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
+            return canonical
+        }
+
+        return name
     }
 }
 

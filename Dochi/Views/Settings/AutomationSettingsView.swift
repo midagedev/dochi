@@ -187,7 +187,7 @@ struct ScheduleRowView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("에이전트: \(schedule.agentName)")
+                Text(schedule.targetSummary)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

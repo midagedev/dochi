@@ -206,31 +206,59 @@ final class ToolRegistryTests: XCTestCase {
     // MARK: - ToolsEnableTool
 
     func testToolsEnableToolActivatesNewTools() async {
-        registry.register(StubTool(name: "codex.desktop_activate"))
+        registry.register(StubTool(name: "dochi.bridge_open"))
         let tool = ToolsEnableTool(registry: registry)
 
         let result = await tool.execute(arguments: [
-            "names": ["codex.desktop_activate"]
+            "names": ["dochi.bridge_open"]
         ])
 
         XCTAssertFalse(result.isError)
         XCTAssertTrue(result.content.contains("도구 활성화 완료"))
-        XCTAssertTrue(result.content.contains("codex.desktop_activate"))
+        XCTAssertTrue(result.content.contains("dochi.bridge_open"))
     }
 
     func testToolsEnableToolRepeatedCallReturnsGuidance() async {
-        registry.register(StubTool(name: "codex.desktop_activate"))
+        registry.register(StubTool(name: "dochi.bridge_open"))
         let tool = ToolsEnableTool(registry: registry)
 
         _ = await tool.execute(arguments: [
-            "names": ["codex.desktop_activate"]
+            "names": ["dochi.bridge_open"]
         ])
         let result = await tool.execute(arguments: [
-            "names": ["codex.desktop_activate"]
+            "names": ["dochi.bridge_open"]
         ])
 
         XCTAssertFalse(result.isError)
         XCTAssertTrue(result.content.contains("이미 활성화된 도구"))
         XCTAssertTrue(result.content.contains("반복하지 말고"))
+    }
+
+    func testToolsEnableToolNormalizesFunctionsPrefix() async {
+        registry.register(StubTool(name: "generate_image"))
+        let tool = ToolsEnableTool(registry: registry)
+
+        let result = await tool.execute(arguments: [
+            "names": ["functions.generate_image"]
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.content.contains("도구 활성화 완료"))
+        XCTAssertTrue(result.content.contains("generate_image"))
+        XCTAssertTrue(registry.enabledToolNames.contains("generate_image"))
+    }
+
+    func testToolsEnableToolNormalizesSanitizedName() async {
+        registry.register(StubTool(name: "dochi.bridge_open"))
+        let tool = ToolsEnableTool(registry: registry)
+
+        let result = await tool.execute(arguments: [
+            "names": ["dochi-_-bridge_open"]
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.content.contains("도구 활성화 완료"))
+        XCTAssertTrue(result.content.contains("dochi.bridge_open"))
+        XCTAssertTrue(registry.enabledToolNames.contains("dochi.bridge_open"))
     }
 }

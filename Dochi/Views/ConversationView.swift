@@ -132,7 +132,33 @@ struct ConversationView: View {
 
     /// Filter out system messages from display.
     private var visibleMessages: [Message] {
-        messages.filter { $0.role != .system }
+        messages.filter { message in
+            guard message.role != .system else { return false }
+
+            // Hide empty assistant placeholders that only carry tool calls.
+            if message.role == .assistant,
+               message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let toolCalls = message.toolCalls,
+               !toolCalls.isEmpty {
+                return false
+            }
+
+            // Keep tool messages only when they are useful in chat:
+            // errors and visual outputs (e.g., generated images).
+            if message.role == .tool {
+                if let imageURLs = message.imageURLs, !imageURLs.isEmpty {
+                    return true
+                }
+
+                let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return false }
+                return trimmed.hasPrefix("오류:")
+                    || trimmed.localizedCaseInsensitiveContains("error")
+                    || trimmed.localizedCaseInsensitiveContains("실패")
+            }
+
+            return true
+        }
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {

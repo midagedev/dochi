@@ -109,6 +109,38 @@
 | `coding.run_task` | restricted | { task, work_dir?, tool?, timeout_seconds? } |
 | `coding.review` | sensitive | { work_dir?, focus? } |
 
+#### 코딩 툴 1차 목표 (2026-02-18)
+
+- 우선 안정화 대상: `Codex CLI` + `Claude Code`
+- 데스크톱 앱 UI 자동화 경로는 운영 범위에서 제외
+
+#### Codex CLI 로컬 저장 메모 (2026-02-18 확인)
+
+- 핵심 경로 (`codex` binary)
+  - `~/.codex/config.toml`
+  - `~/.codex/history.jsonl`
+  - `~/.codex/sessions/YYYY/MM/DD/*.jsonl`
+  - `~/.codex/archived_sessions/*.jsonl`
+
+구현 가이드:
+- Codex 대화 목록/검색은 `~/.codex/sessions/**`와 `~/.codex/history.jsonl` 기반으로 설계한다.
+- 세션 인덱싱 실패 시 `history.jsonl` 기반 최근 기록 조회로 degrade 한다.
+
+#### Claude Code 대화기록 확인 메모 (2026-02-18 확인)
+
+Claude Code 대화 이력은 CLI 홈(`~/.claude`) 기준의 JSONL 파일에서 확인 가능하다.
+
+- 핵심 경로
+  - `~/.claude/history.jsonl` (전역 히스토리)
+  - `~/.claude/projects/<workspace-slug>/*.jsonl` (프로젝트별 세션)
+  - `~/.claude/projects/<workspace-slug>/sessions-index.json` (세션 인덱스)
+  - `~/.claude/projects/<workspace-slug>/<session-id>/subagents/*.jsonl` (서브에이전트 기록)
+  - `~/.claude/projects/<workspace-slug>/<session-id>/tool-results/*.txt` (도구 실행 산출물)
+
+구현 가이드:
+- Claude Code 대화 목록/검색은 `~/.claude/projects/*/*.jsonl`을 1순위 소스로 사용한다.
+- 전역 히스토리(`~/.claude/history.jsonl`)는 빠른 최근 기록 조회 보조 인덱스로 사용한다.
+
 ### 조건부 — Open URL (sensitive)
 
 | 도구 | 입력 |

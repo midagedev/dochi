@@ -48,7 +48,7 @@ struct ScheduleEditSheet: View {
     }
 
     private var isValid: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty &&
+        return !name.trimmingCharacters(in: .whitespaces).isEmpty &&
         !prompt.trimmingCharacters(in: .whitespaces).isEmpty &&
         !agentName.trimmingCharacters(in: .whitespaces).isEmpty &&
         CronExpression.parse(cronExpression) != nil
@@ -395,13 +395,14 @@ struct ScheduleEditSheet: View {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespaces)
         let trimmedAgentName = agentName.trimmingCharacters(in: .whitespaces)
+        let resolvedAgentName = trimmedAgentName.isEmpty ? defaultAgentName : trimmedAgentName
 
         if var existing = editingSchedule {
             existing.name = trimmedName
             existing.icon = icon
             existing.cronExpression = cronExpression
             existing.prompt = trimmedPrompt
-            existing.agentName = trimmedAgentName
+            existing.agentName = resolvedAgentName
             existing.isEnabled = isEnabled
             schedulerService.updateSchedule(existing)
         } else {
@@ -410,7 +411,7 @@ struct ScheduleEditSheet: View {
                 icon: icon,
                 cronExpression: cronExpression,
                 prompt: trimmedPrompt,
-                agentName: trimmedAgentName,
+                agentName: resolvedAgentName,
                 isEnabled: isEnabled
             )
             schedulerService.addSchedule(entry)

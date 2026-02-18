@@ -218,9 +218,31 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(decoded.isEnabled, entry.isEnabled)
     }
 
+    func testScheduleEntryDecodesLegacyPayloadWithDefaults() throws {
+        let legacyJSON = """
+        {
+          "id": "\(UUID().uuidString)",
+          "name": "legacy",
+          "icon": "⏰",
+          "cronExpression": "0 9 * * *",
+          "prompt": "legacy prompt",
+          "agentName": "도치",
+          "isEnabled": true,
+          "createdAt": "2026-02-18T00:00:00Z"
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(ScheduleEntry.self, from: Data(legacyJSON.utf8))
+
+        XCTAssertEqual(decoded.agentName, "도치")
+    }
+
     func testScheduleEntryRepeatSummary() {
         let daily = ScheduleEntry(name: "Test", cronExpression: "0 9 * * *", prompt: "test")
         XCTAssertEqual(daily.repeatSummary, "매일 09:00")
+        XCTAssertEqual(daily.targetSummary, "에이전트: 도치")
 
         let invalid = ScheduleEntry(name: "Test", cronExpression: "invalid", prompt: "test")
         XCTAssertEqual(invalid.repeatSummary, "invalid")
@@ -494,7 +516,7 @@ final class SchedulerTests: XCTestCase {
 
     func testExecuteScheduledAutomationSwitchesAgentAndDispatchesPrompt() async throws {
         let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        let (viewModel, settings, contextService) = makeScheduleExecutionViewModel(workspaceId: wsId)
+        let (viewModel, settings, contextService, _) = makeScheduleExecutionViewModel(workspaceId: wsId)
         contextService.agents[wsId] = ["도치", "연구원"]
         settings.activeAgentName = "도치"
 
@@ -515,7 +537,7 @@ final class SchedulerTests: XCTestCase {
 
     func testExecuteScheduledAutomationFailsWhenTargetAgentMissing() async {
         let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        let (viewModel, _, contextService) = makeScheduleExecutionViewModel(workspaceId: wsId)
+        let (viewModel, _, contextService, _) = makeScheduleExecutionViewModel(workspaceId: wsId)
         contextService.agents[wsId] = ["도치"]
 
         let schedule = ScheduleEntry(
@@ -540,7 +562,7 @@ final class SchedulerTests: XCTestCase {
         }
     }
 
-    private func makeScheduleExecutionViewModel(workspaceId: UUID) -> (DochiViewModel, AppSettings, MockContextService) {
+    private func makeScheduleExecutionViewModel(workspaceId: UUID) -> (DochiViewModel, AppSettings, MockContextService, MockBuiltInToolService) {
         let settings = AppSettings()
         settings.taskRoutingEnabled = false
         settings.activeAgentName = "도치"
@@ -549,9 +571,10 @@ final class SchedulerTests: XCTestCase {
         try? keychainService.save(account: LLMProvider.openai.keychainAccount, value: "test-key")
 
         let contextService = MockContextService()
+        let toolService = MockBuiltInToolService()
         let viewModel = DochiViewModel(
             llmService: MockLLMService(),
-            toolService: MockBuiltInToolService(),
+            toolService: toolService,
             contextService: contextService,
             conversationService: MockConversationService(),
             keychainService: keychainService,
@@ -561,6 +584,6 @@ final class SchedulerTests: XCTestCase {
             settings: settings,
             sessionContext: SessionContext(workspaceId: workspaceId, currentUserId: nil)
         )
-        return (viewModel, settings, contextService)
+        return (viewModel, settings, contextService, toolService)
     }
 }
