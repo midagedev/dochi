@@ -15,6 +15,8 @@ struct AccountSettingsView: View {
     @State private var lastSyncTime: Date?
     @State private var showInitialSyncWizard = false
     @State private var showConflictSheet = false
+    @State private var isSigningOut = false
+    @State private var authStatusMessage: String?
 
     var body: some View {
         Form {
@@ -65,13 +67,34 @@ struct AccountSettingsView: View {
                         Text(authEmail ?? "로그인됨")
                             .font(.system(size: 13))
                         Spacer()
-                        Button("로그아웃") {
-                            Task {
-                                try? await service.signOut()
+                        Button {
+                            Task { @MainActor in
+                                isSigningOut = true
+                                defer { isSigningOut = false }
+                                do {
+                                    try await service.signOut()
+                                    authStatusMessage = "로그아웃 완료"
+                                } catch {
+                                    authStatusMessage = "로그아웃 실패: \(error.localizedDescription)"
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                if isSigningOut {
+                                    ProgressView()
+                                        .scaleEffect(0.5)
+                                }
+                                Text("로그아웃")
                             }
                         }
+                        .disabled(isSigningOut)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                    }
+                    if let authStatusMessage {
+                        Text(authStatusMessage)
+                            .font(.caption)
+                            .foregroundStyle(authStatusMessage.contains("실패") ? .red : .secondary)
                     }
                 } else {
                     HStack {
