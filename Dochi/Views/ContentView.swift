@@ -65,6 +65,7 @@ struct ContentView: View {
     // K-4: 외부 도구
     @State private var selectedToolSessionId: UUID?
     @State private var selectedToolProfileId: UUID?
+    @State private var isStartingToolSession = false
 
     var body: some View {
         mainContent
@@ -650,11 +651,28 @@ struct ContentView: View {
                     Text(profile?.name ?? "")
                         .font(.title3)
                         .foregroundStyle(.secondary)
+                    if isStartingToolSession {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
                     Button("세션 시작") {
-                        Task { try? await manager.startSession(profileId: profileId) }
+                        Task { @MainActor in
+                            isStartingToolSession = true
+                            defer { isStartingToolSession = false }
+                            do {
+                                try await manager.startSession(profileId: profileId)
+                                if let active = manager.activeSession(for: profileId) {
+                                    selectedToolSessionId = active.id
+                                    selectedToolProfileId = nil
+                                }
+                            } catch {
+                                viewModel.errorMessage = "세션 시작 실패: \(error.localizedDescription)"
+                            }
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
+                    .disabled(isStartingToolSession)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

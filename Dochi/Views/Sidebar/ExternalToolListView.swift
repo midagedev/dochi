@@ -7,6 +7,8 @@ struct ExternalToolListView: View {
     @State private var showProfileEditor = false
     @State private var editingProfile: ExternalToolProfile?
     @State private var searchText = ""
+    @State private var startingProfileId: UUID?
+    @State private var startErrorMessage: String?
 
     private var runningSessions: [ExternalToolSession] {
         manager.sessions.filter { $0.status != .dead }
@@ -62,6 +64,23 @@ struct ExternalToolListView: View {
                 }
             )
         }
+        .alert(
+            "세션 시작 실패",
+            isPresented: Binding(
+                get: { startErrorMessage != nil },
+                set: { newValue in
+                    if !newValue { startErrorMessage = nil }
+                }
+            ),
+            actions: {
+                Button("확인", role: .cancel) {
+                    startErrorMessage = nil
+                }
+            },
+            message: {
+                Text(startErrorMessage ?? "")
+            }
+        )
     }
 
     @ViewBuilder
@@ -208,6 +227,11 @@ struct ExternalToolListView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
+                if startingProfileId == profile.id {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+
                 Spacer()
             }
             .padding(.horizontal, 10)
@@ -221,8 +245,25 @@ struct ExternalToolListView: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button("시작") {
-                Task { try? await manager.startSession(profileId: profile.id) }
+                Task { @MainActor in
+                    startingProfileId = profile.id
+                    defer {
+                        if startingProfileId == profile.id {
+                            startingProfileId = nil
+                        }
+                    }
+                    do {
+                        try await manager.startSession(profileId: profile.id)
+                        if let active = manager.activeSession(for: profile.id) {
+                            selectedSessionId = active.id
+                            selectedProfileId = nil
+                        }
+                    } catch {
+                        startErrorMessage = error.localizedDescription
+                    }
+                }
             }
+            .disabled(startingProfileId == profile.id)
             Button("편집") {
                 editingProfile = profile
                 showProfileEditor = true

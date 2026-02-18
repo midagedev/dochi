@@ -18,6 +18,7 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
     func startSession(profileId: UUID) async throws
     func stopSession(id: UUID) async
     func restartSession(id: UUID) async throws
+    func activeSession(for profileId: UUID) -> ExternalToolSession?
 
     // Work dispatch
     func sendCommand(sessionId: UUID, command: String) async throws
@@ -233,6 +234,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         await stopSession(id: id)
         sessions.removeAll { $0.id == id }
         try await startSession(profileId: profileId)
+    }
+
+    func activeSession(for profileId: UUID) -> ExternalToolSession? {
+        sessions.first { $0.profileId == profileId && $0.status != .dead }
     }
 
     // MARK: - Work Dispatch
