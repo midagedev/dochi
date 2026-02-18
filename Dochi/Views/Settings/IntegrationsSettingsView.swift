@@ -11,6 +11,8 @@ struct IntegrationsSettingsView: View {
     @State private var botUsername: String?
     @State private var botCheckError: String?
     @State private var isCheckingBot = false
+    @State private var telegramSaveStatus: String?
+    @State private var connectionErrorMessage: String?
 
     // MCP state
     @State private var showMCPServerEdit = false
@@ -117,6 +119,18 @@ struct IntegrationsSettingsView: View {
                     .foregroundStyle(.red)
             }
 
+            if let status = telegramSaveStatus {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let connectionErrorMessage {
+                Text(connectionErrorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
             Toggle("스트리밍 답변", isOn: Binding(
                 get: { settings.telegramStreamReplies },
                 set: { settings.telegramStreamReplies = $0 }
@@ -190,15 +204,25 @@ struct IntegrationsSettingsView: View {
     }
 
     private func saveBotToken() {
-        let token = botToken.trimmingCharacters(in: .whitespaces)
-        if token.isEmpty {
-            try? keychainService.delete(account: "telegram_bot_token")
-            stopTelegramConnection()
-        } else {
-            try? keychainService.save(account: "telegram_bot_token", value: token)
-            if settings.telegramEnabled {
-                startTelegramConnectionIfPossible()
+        switch KeychainWriteCoordinator.saveTrimmedToken(
+            botToken,
+            account: "telegram_bot_token",
+            keychain: keychainService
+        ) {
+        case .success(let hasToken):
+            botCheckError = nil
+            connectionErrorMessage = nil
+            telegramSaveStatus = hasToken ? "토큰 저장 완료" : "토큰 삭제 완료"
+            if hasToken {
+                if settings.telegramEnabled {
+                    startTelegramConnectionIfPossible()
+                }
+            } else {
+                stopTelegramConnection()
             }
+        case .failure(let error):
+            telegramSaveStatus = nil
+            botCheckError = "토큰 저장 실패: \(error.localizedDescription)"
         }
     }
 
@@ -210,15 +234,20 @@ struct IntegrationsSettingsView: View {
 
         // Reset existing connection before switching transport mode.
         stopTelegramConnection()
+        connectionErrorMessage = nil
 
         let mode = TelegramConnectionMode(rawValue: settings.telegramConnectionMode) ?? .polling
         if mode == .webhook, !settings.telegramWebhookURL.isEmpty {
-            Task {
-                try? await telegramService?.startWebhook(
-                    token: token,
-                    url: settings.telegramWebhookURL,
-                    port: UInt16(settings.telegramWebhookPort)
-                )
+            Task { @MainActor in
+                do {
+                    try await telegramService?.startWebhook(
+                        token: token,
+                        url: settings.telegramWebhookURL,
+                        port: UInt16(settings.telegramWebhookPort)
+                    )
+                } catch {
+                    connectionErrorMessage = "웹훅 시작 실패: \(error.localizedDescription)"
+                }
             }
         } else {
             telegramService?.startPolling(token: token)
@@ -227,7 +256,13 @@ struct IntegrationsSettingsView: View {
 
     private func stopTelegramConnection() {
         telegramService?.stopPolling()
-        Task { try? await telegramService?.stopWebhook() }
+        Task { @MainActor in
+            do {
+                try await telegramService?.stopWebhook()
+            } catch {
+                connectionErrorMessage = "웹훅 중지 실패: \(error.localizedDescription)"
+            }
+        }
     }
 
     private func checkBot() {

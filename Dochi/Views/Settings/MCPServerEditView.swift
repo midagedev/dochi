@@ -169,6 +169,7 @@ struct MCPServerEditView: View {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedCommand = command.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty, !trimmedCommand.isEmpty else { return }
+        errorMessage = nil
 
         let args = arguments.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         var env: [String: String] = [:]
@@ -203,7 +204,12 @@ struct MCPServerEditView: View {
         mcpService?.addServer(config: config)
 
         // Persist to AppStorage
-        persistMCPServers()
+        do {
+            try persistMCPServers()
+        } catch {
+            errorMessage = "MCP 서버 저장 실패: \(error.localizedDescription)"
+            return
+        }
 
         // Auto-connect if enabled
         if isEnabled {
@@ -226,11 +232,16 @@ struct MCPServerEditView: View {
         }
     }
 
-    private func persistMCPServers() {
+    private func persistMCPServers() throws {
         let servers = mcpService?.listServers() ?? []
-        if let data = try? JSONEncoder().encode(servers),
-           let json = String(data: data, encoding: .utf8) {
-            UserDefaults.standard.set(json, forKey: "mcpServersJSON")
+        let data = try JSONEncoder().encode(servers)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw NSError(
+                domain: "MCPServerEditView",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "MCP 서버 목록 직렬화에 실패했습니다."]
+            )
         }
+        UserDefaults.standard.set(json, forKey: "mcpServersJSON")
     }
 }

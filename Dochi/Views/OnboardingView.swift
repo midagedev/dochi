@@ -449,8 +449,18 @@ struct OnboardingView: View {
         guard !apiKey.isEmpty else { return }
         errorMessage = nil
 
-        // Save key immediately
-        try? keychainService.save(account: selectedProvider.keychainAccount, value: apiKey)
+        // Save key immediately and block step transition on failure.
+        switch KeychainWriteCoordinator.saveRequiredValue(
+            apiKey,
+            account: selectedProvider.keychainAccount,
+            keychain: keychainService
+        ) {
+        case .success:
+            break
+        case .failure(let error):
+            errorMessage = "API 키 저장 실패: \(error.localizedDescription)"
+            return
+        }
 
         withAnimation {
             step = .profile
