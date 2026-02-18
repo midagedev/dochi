@@ -1,5 +1,8 @@
 # 리라이트 계획서 (Rewrite Plan)
 
+> 현재 이슈 단위 실행 정본은 `spec/execution-context.md`입니다.  
+> 이 문서는 리라이트 이력과 품질 목표를 보존하는 참고 문서입니다.
+
 ## Meta
 - DRI: @hckim
 - 상태: Phase 0~5 완료, UI/기능 확장 Phase F 완료
@@ -55,7 +58,7 @@
 - UX 사운드 (SoundService)
 
 ### Phase 3 — 도구 & 권한 ✅
-- 전체 내장 도구 구현 (13개)
+- 초기 내장 도구 세트 구현 (당시 기준 13개)
 - MCP 서버 연동 (MCPService)
 - 권한 시스템 (safe/sensitive/restricted)
 - 사용자 확인 UX (ToolConfirmationBannerView)
