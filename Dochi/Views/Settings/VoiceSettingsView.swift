@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct VoiceSettingsView: View {
@@ -8,7 +9,16 @@ struct VoiceSettingsView: View {
 
     @State private var testPlaying = false
     @State private var gcpAPIKey: String = ""
-    @State private var saveStatus: String?
+    @State private var typecastAPIKey: String = ""
+    @State private var gcpSaveStatus: String?
+    @State private var typecastSaveStatus: String?
+    @State private var typecastVoices: [TypecastVoiceOption] = []
+    @State private var isLoadingTypecastVoices = false
+    @State private var typecastVoiceLoadError: String?
+
+    private static let typecastDefaultEmotions = [
+        "normal", "happy", "sad", "angry", "whisper", "toneup", "tonedown",
+    ]
 
     var body: some View {
         Form {
@@ -35,7 +45,7 @@ struct VoiceSettingsView: View {
             } header: {
                 SettingsSectionHeader(
                     title: "TTS 프로바이더",
-                    helpContent: "텍스트를 음성으로 변환하는 엔진을 선택합니다. \"시스템 TTS\"는 추가 설정 없이 사용 가능하며, Google Cloud TTS는 고품질 클라우드 음성을, 로컬 TTS (ONNX)는 오프라인 음성 합성을 제공합니다."
+                    helpContent: "텍스트를 음성으로 변환하는 엔진을 선택합니다. \"시스템 TTS\"는 추가 설정 없이 사용 가능하며, Google Cloud/Typecast는 클라우드 음성을, 로컬 TTS (ONNX)는 오프라인 음성 합성을 제공합니다."
                 )
             }
 
@@ -72,7 +82,153 @@ struct VoiceSettingsView: View {
                         }
                     }
 
-                    if let status = saveStatus {
+                    if let status = gcpSaveStatus {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if settings.currentTTSProvider == .typecast {
+                Section("Typecast TTS") {
+                    HStack(spacing: 8) {
+                        Button {
+                            Task { await loadTypecastVoices() }
+                        } label: {
+                            Label("음성 목록 새로고침", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(isLoadingTypecastVoices)
+
+                        if isLoadingTypecastVoices {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+
+                    if let error = typecastVoiceLoadError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    if !typecastVoicesForSelectedModel.isEmpty {
+                        Picker("음성", selection: Binding(
+                            get: { settings.typecastVoiceId },
+                            set: { settings.typecastVoiceId = $0 }
+                        )) {
+                            ForEach(typecastVoicesForSelectedModel) { voice in
+                                Text(typecastVoiceDisplayName(voice)).tag(voice.voiceId)
+                            }
+                        }
+                    } else {
+                        Text("선택한 모델(\(settings.typecastModel))에 맞는 음성을 불러오지 못했습니다. Voice ID를 직접 입력하세요.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    TextField("Voice ID (직접 입력)", text: Binding(
+                        get: { settings.typecastVoiceId },
+                        set: { settings.typecastVoiceId = $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+
+                    Picker("모델", selection: Binding(
+                        get: { settings.typecastModel },
+                        set: { settings.typecastModel = $0 }
+                    )) {
+                        Text("ssfm-v30").tag("ssfm-v30")
+                        Text("ssfm-v21").tag("ssfm-v21")
+                    }
+
+                    Picker("언어", selection: Binding(
+                        get: { settings.typecastLanguage },
+                        set: { settings.typecastLanguage = $0 }
+                    )) {
+                        Text("한국어 (kor)").tag("kor")
+                        Text("영어 (eng)").tag("eng")
+                        Text("일본어 (jpn)").tag("jpn")
+                    }
+
+                    Picker("감정 모드", selection: Binding(
+                        get: { settings.typecastEmotionType },
+                        set: { settings.typecastEmotionType = $0 }
+                    )) {
+                        Text("Preset").tag("preset")
+                        Text("Smart").tag("smart")
+                    }
+
+                    if settings.typecastEmotionType == "preset" {
+                        Picker("감정 프리셋", selection: Binding(
+                            get: { settings.typecastEmotionPreset },
+                            set: { settings.typecastEmotionPreset = $0 }
+                        )) {
+                            ForEach(typecastEmotionPresetsForCurrentSelection, id: \.self) { emotion in
+                                Text(emotion).tag(emotion)
+                            }
+                        }
+
+                        HStack {
+                            Text("감정 강도: \(String(format: "%.1f", settings.typecastEmotionIntensity))")
+                            Slider(value: Binding(
+                                get: { settings.typecastEmotionIntensity },
+                                set: { settings.typecastEmotionIntensity = $0 }
+                            ), in: 0.0...2.0, step: 0.1)
+                        }
+                    } else {
+                        Text("Smart 모드는 텍스트 문맥 기반으로 감정을 자동 추론합니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("볼륨: \(settings.typecastVolume)")
+                        Slider(value: Binding(
+                            get: { Double(settings.typecastVolume) },
+                            set: { settings.typecastVolume = Int($0.rounded()) }
+                        ), in: 0...200, step: 1)
+                    }
+
+                    HStack {
+                        Text("피치: \(settings.typecastAudioPitch)")
+                        Slider(value: Binding(
+                            get: { Double(settings.typecastAudioPitch) },
+                            set: { settings.typecastAudioPitch = Int($0.rounded()) }
+                        ), in: -12...12, step: 1)
+                    }
+
+                    Picker("출력 포맷", selection: Binding(
+                        get: { settings.typecastAudioFormat },
+                        set: { settings.typecastAudioFormat = $0 }
+                    )) {
+                        Text("WAV").tag("wav")
+                        Text("MP3").tag("mp3")
+                    }
+
+                    Text("속도 슬라이더 값은 Typecast audio_tempo(0.5~2.0)로 전달됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        SecureField("Typecast API 키", text: $typecastAPIKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+
+                        Button("저장") {
+                            saveTypecastKey()
+                        }
+
+                        if let account = keychainService?.load(account: TTSProvider.typecast.keychainAccount),
+                           !account.isEmpty {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.caption)
+                                .help("저장됨")
+                        }
+                    }
+
+                    if let status = typecastSaveStatus {
                         Text(status)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -188,6 +344,23 @@ struct VoiceSettingsView: View {
         .padding()
         .onAppear {
             gcpAPIKey = keychainService?.load(account: TTSProvider.googleCloud.keychainAccount) ?? ""
+            typecastAPIKey = keychainService?.load(account: TTSProvider.typecast.keychainAccount) ?? ""
+            normalizeTypecastSettings()
+            if settings.currentTTSProvider == .typecast, !typecastAPIKey.isEmpty {
+                Task { await loadTypecastVoices() }
+            }
+        }
+        .onChange(of: settings.typecastModel) { _ in
+            syncSelectedTypecastVoiceForCurrentModel()
+            normalizeTypecastEmotionPreset()
+        }
+        .onChange(of: settings.typecastVoiceId) { _ in
+            normalizeTypecastEmotionPreset()
+        }
+        .onChange(of: settings.ttsProvider) { _ in
+            if settings.currentTTSProvider == .typecast, !typecastAPIKey.isEmpty, typecastVoices.isEmpty {
+                Task { await loadTypecastVoices() }
+            }
         }
     }
 
@@ -219,6 +392,113 @@ struct VoiceSettingsView: View {
         }
     }
 
+    private var typecastVoicesForSelectedModel: [TypecastVoiceOption] {
+        typecastVoices.filter { voice in
+            voice.models.contains(where: { $0.version == settings.typecastModel })
+        }
+    }
+
+    private var selectedTypecastVoice: TypecastVoiceOption? {
+        typecastVoices.first { $0.voiceId == settings.typecastVoiceId }
+    }
+
+    private var typecastEmotionPresetsForCurrentSelection: [String] {
+        guard let selectedTypecastVoice else { return Self.typecastDefaultEmotions }
+        let emotions = selectedTypecastVoice.models
+            .first(where: { $0.version == settings.typecastModel })?
+            .emotions
+            .filter { !$0.isEmpty } ?? []
+        return emotions.isEmpty ? Self.typecastDefaultEmotions : emotions
+    }
+
+    private func typecastVoiceDisplayName(_ voice: TypecastVoiceOption) -> String {
+        let gender = (voice.gender?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (voice.gender ?? "unknown") : "unknown"
+        let age = (voice.age?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (voice.age ?? "unknown") : "unknown"
+        return "\(voice.voiceName) (\(gender), \(age))"
+    }
+
+    private func normalizeTypecastSettings() {
+        let allowedEmotionTypes = ["preset", "smart"]
+        if !allowedEmotionTypes.contains(settings.typecastEmotionType) {
+            settings.typecastEmotionType = "preset"
+        }
+
+        let allowedFormats = ["wav", "mp3"]
+        if !allowedFormats.contains(settings.typecastAudioFormat) {
+            settings.typecastAudioFormat = "wav"
+        }
+
+        if settings.typecastLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            settings.typecastLanguage = "kor"
+        }
+
+        settings.typecastEmotionIntensity = min(max(settings.typecastEmotionIntensity, 0.0), 2.0)
+        settings.typecastVolume = min(max(settings.typecastVolume, 0), 200)
+        settings.typecastAudioPitch = min(max(settings.typecastAudioPitch, -12), 12)
+        normalizeTypecastEmotionPreset()
+    }
+
+    private func normalizeTypecastEmotionPreset() {
+        let allowed = typecastEmotionPresetsForCurrentSelection
+        if !allowed.contains(settings.typecastEmotionPreset) {
+            settings.typecastEmotionPreset = allowed.first ?? "normal"
+        }
+    }
+
+    private func syncSelectedTypecastVoiceForCurrentModel() {
+        guard !typecastVoicesForSelectedModel.isEmpty else { return }
+        let current = settings.typecastVoiceId
+        let supported = typecastVoicesForSelectedModel.contains { $0.voiceId == current }
+        if !supported {
+            settings.typecastVoiceId = typecastVoicesForSelectedModel[0].voiceId
+        }
+    }
+
+    private func loadTypecastVoices() async {
+        guard let keychainService else {
+            typecastVoiceLoadError = "키체인 서비스를 찾을 수 없습니다."
+            return
+        }
+
+        let apiKey = keychainService.load(account: TTSProvider.typecast.keychainAccount) ?? ""
+        guard !apiKey.isEmpty else {
+            typecastVoiceLoadError = "Typecast API 키를 먼저 저장하세요."
+            return
+        }
+
+        isLoadingTypecastVoices = true
+        typecastVoiceLoadError = nil
+        defer { isLoadingTypecastVoices = false }
+
+        do {
+            var request = URLRequest(url: URL(string: "https://api.typecast.ai/v2/voices")!)
+            request.httpMethod = "GET"
+            request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw TypecastVoiceLoadError.invalidResponse
+            }
+            guard (200...299).contains(http.statusCode) else {
+                let message = String(data: data, encoding: .utf8) ?? "unknown"
+                throw TypecastVoiceLoadError.httpError(statusCode: http.statusCode, message: message)
+            }
+
+            let decoded = try JSONDecoder().decode([TypecastVoiceOption].self, from: data)
+            typecastVoices = decoded.sorted { lhs, rhs in
+                lhs.voiceName.localizedCaseInsensitiveCompare(rhs.voiceName) == .orderedAscending
+            }
+            syncSelectedTypecastVoiceForCurrentModel()
+            normalizeTypecastEmotionPreset()
+
+            if typecastVoicesForSelectedModel.isEmpty {
+                typecastVoiceLoadError = "선택한 모델(\(settings.typecastModel))을 지원하는 음성이 없습니다."
+            }
+        } catch {
+            typecastVoiceLoadError = "음성 목록 로드 실패: \(error.localizedDescription)"
+        }
+    }
+
     private func saveGCPKey() {
         guard let keychainService else { return }
         do {
@@ -227,16 +507,77 @@ struct VoiceSettingsView: View {
             } else {
                 try keychainService.save(account: TTSProvider.googleCloud.keychainAccount, value: gcpAPIKey)
             }
-            saveStatus = "저장 완료"
+            gcpSaveStatus = "저장 완료"
             Log.app.info("Google Cloud TTS API key saved")
         } catch {
-            saveStatus = "저장 실패: \(error.localizedDescription)"
+            gcpSaveStatus = "저장 실패: \(error.localizedDescription)"
             Log.app.error("Google Cloud TTS API key save failed: \(error.localizedDescription)")
         }
 
         Task {
             try? await Task.sleep(for: .seconds(3))
-            saveStatus = nil
+            gcpSaveStatus = nil
+        }
+    }
+
+    private func saveTypecastKey() {
+        guard let keychainService else { return }
+        do {
+            if typecastAPIKey.isEmpty {
+                try keychainService.delete(account: TTSProvider.typecast.keychainAccount)
+            } else {
+                try keychainService.save(account: TTSProvider.typecast.keychainAccount, value: typecastAPIKey)
+            }
+            typecastSaveStatus = "저장 완료"
+            Log.app.info("Typecast TTS API key saved")
+            Task { await loadTypecastVoices() }
+        } catch {
+            typecastSaveStatus = "저장 실패: \(error.localizedDescription)"
+            Log.app.error("Typecast TTS API key save failed: \(error.localizedDescription)")
+        }
+
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            typecastSaveStatus = nil
+        }
+    }
+
+    private struct TypecastVoiceOption: Identifiable, Decodable {
+        let voiceId: String
+        let voiceName: String
+        let models: [TypecastVoiceModel]
+        let gender: String?
+        let age: String?
+        let useCases: [String]
+
+        var id: String { voiceId }
+
+        enum CodingKeys: String, CodingKey {
+            case voiceId = "voice_id"
+            case voiceName = "voice_name"
+            case models
+            case gender
+            case age
+            case useCases = "use_cases"
+        }
+    }
+
+    private struct TypecastVoiceModel: Decodable {
+        let version: String
+        let emotions: [String]
+    }
+
+    private enum TypecastVoiceLoadError: LocalizedError {
+        case invalidResponse
+        case httpError(statusCode: Int, message: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidResponse:
+                return "Typecast 음성 목록 응답이 올바르지 않습니다."
+            case let .httpError(statusCode, message):
+                return "Typecast API 오류 (\(statusCode)): \(message)"
+            }
         }
     }
 

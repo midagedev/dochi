@@ -21,6 +21,12 @@ final class ONNXTTSTests: XCTestCase {
         XCTAssertFalse(TTSProvider.googleCloud.isLocal)
     }
 
+    func testTTSProviderTypecastRequiresAPIKey() {
+        XCTAssertTrue(TTSProvider.typecast.requiresAPIKey)
+        XCTAssertFalse(TTSProvider.typecast.isLocal)
+        XCTAssertEqual(TTSProvider.typecast.keychainAccount, "typecast_tts_api_key")
+    }
+
     func testTTSProviderShortDescription() {
         for provider in TTSProvider.allCases {
             XCTAssertFalse(provider.shortDescription.isEmpty, "Provider \(provider) should have a short description")
@@ -29,7 +35,8 @@ final class ONNXTTSTests: XCTestCase {
 
     func testTTSProviderAllCasesIncludesOnnxLocal() {
         XCTAssertTrue(TTSProvider.allCases.contains(.onnxLocal))
-        XCTAssertEqual(TTSProvider.allCases.count, 3)
+        XCTAssertTrue(TTSProvider.allCases.contains(.typecast))
+        XCTAssertEqual(TTSProvider.allCases.count, 4)
     }
 
     func testTTSProviderRawValueRoundTrip() {
@@ -53,6 +60,30 @@ final class ONNXTTSTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "ttsOfflineFallbackEnabled")
         let settings = AppSettings()
         XCTAssertFalse(settings.ttsOfflineFallbackEnabled)
+    }
+
+    @MainActor
+    func testAppSettingsTypecastDefaults() {
+        UserDefaults.standard.removeObject(forKey: "typecastVoiceId")
+        UserDefaults.standard.removeObject(forKey: "typecastModel")
+        UserDefaults.standard.removeObject(forKey: "typecastLanguage")
+        UserDefaults.standard.removeObject(forKey: "typecastEmotionType")
+        UserDefaults.standard.removeObject(forKey: "typecastEmotionPreset")
+        UserDefaults.standard.removeObject(forKey: "typecastEmotionIntensity")
+        UserDefaults.standard.removeObject(forKey: "typecastVolume")
+        UserDefaults.standard.removeObject(forKey: "typecastAudioPitch")
+        UserDefaults.standard.removeObject(forKey: "typecastAudioFormat")
+
+        let settings = AppSettings()
+        XCTAssertEqual(settings.typecastVoiceId, "")
+        XCTAssertEqual(settings.typecastModel, "ssfm-v30")
+        XCTAssertEqual(settings.typecastLanguage, "kor")
+        XCTAssertEqual(settings.typecastEmotionType, "preset")
+        XCTAssertEqual(settings.typecastEmotionPreset, "normal")
+        XCTAssertEqual(settings.typecastEmotionIntensity, 1.0, accuracy: 0.001)
+        XCTAssertEqual(settings.typecastVolume, 100)
+        XCTAssertEqual(settings.typecastAudioPitch, 0)
+        XCTAssertEqual(settings.typecastAudioFormat, "wav")
     }
 
     @MainActor
@@ -80,6 +111,40 @@ final class ONNXTTSTests: XCTestCase {
         XCTAssertEqual(settings.currentTTSProvider, .onnxLocal)
         // Cleanup
         settings.ttsProvider = TTSProvider.system.rawValue
+    }
+
+    @MainActor
+    func testAppSettingsTypecastPersistence() {
+        let settings = AppSettings()
+        settings.typecastVoiceId = "voice-123"
+        settings.typecastModel = "ssfm-v21"
+        settings.typecastLanguage = "eng"
+        settings.typecastEmotionType = "smart"
+        settings.typecastEmotionPreset = "happy"
+        settings.typecastEmotionIntensity = 1.4
+        settings.typecastVolume = 120
+        settings.typecastAudioPitch = 2
+        settings.typecastAudioFormat = "mp3"
+
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "typecastVoiceId"), "voice-123")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "typecastModel"), "ssfm-v21")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "typecastLanguage"), "eng")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "typecastEmotionType"), "smart")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "typecastEmotionPreset"), "happy")
+        XCTAssertEqual(UserDefaults.standard.object(forKey: "typecastEmotionIntensity") as? Double ?? 0.0, 1.4, accuracy: 0.001)
+        XCTAssertEqual(UserDefaults.standard.object(forKey: "typecastVolume") as? Int, 120)
+        XCTAssertEqual(UserDefaults.standard.object(forKey: "typecastAudioPitch") as? Int, 2)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "typecastAudioFormat"), "mp3")
+
+        UserDefaults.standard.removeObject(forKey: "typecastVoiceId")
+        UserDefaults.standard.removeObject(forKey: "typecastModel")
+        UserDefaults.standard.removeObject(forKey: "typecastLanguage")
+        UserDefaults.standard.removeObject(forKey: "typecastEmotionType")
+        UserDefaults.standard.removeObject(forKey: "typecastEmotionPreset")
+        UserDefaults.standard.removeObject(forKey: "typecastEmotionIntensity")
+        UserDefaults.standard.removeObject(forKey: "typecastVolume")
+        UserDefaults.standard.removeObject(forKey: "typecastAudioPitch")
+        UserDefaults.standard.removeObject(forKey: "typecastAudioFormat")
     }
 
     // MARK: - PiperModelInfo Tests
@@ -241,6 +306,10 @@ final class ONNXTTSTests: XCTestCase {
 
         // Switch to onnxLocal
         settings.ttsProvider = TTSProvider.onnxLocal.rawValue
+        _ = router.engineState
+
+        // Switch to Typecast
+        settings.ttsProvider = TTSProvider.typecast.rawValue
         _ = router.engineState
 
         // Cleanup

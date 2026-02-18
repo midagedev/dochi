@@ -145,6 +145,45 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(googleCloudVoiceName, forKey: "googleCloudVoiceName") }
     }
 
+    var typecastVoiceId: String = UserDefaults.standard.string(forKey: "typecastVoiceId") ?? "" {
+        didSet { UserDefaults.standard.set(typecastVoiceId, forKey: "typecastVoiceId") }
+    }
+
+    var typecastModel: String = UserDefaults.standard.string(forKey: "typecastModel") ?? "ssfm-v30" {
+        didSet { UserDefaults.standard.set(typecastModel, forKey: "typecastModel") }
+    }
+
+    var typecastLanguage: String = UserDefaults.standard.string(forKey: "typecastLanguage") ?? "kor" {
+        didSet { UserDefaults.standard.set(typecastLanguage, forKey: "typecastLanguage") }
+    }
+
+    /// preset | smart
+    var typecastEmotionType: String = UserDefaults.standard.string(forKey: "typecastEmotionType") ?? "preset" {
+        didSet { UserDefaults.standard.set(typecastEmotionType, forKey: "typecastEmotionType") }
+    }
+
+    /// normal | happy | sad | angry | whisper | toneup | tonedown
+    var typecastEmotionPreset: String = UserDefaults.standard.string(forKey: "typecastEmotionPreset") ?? "normal" {
+        didSet { UserDefaults.standard.set(typecastEmotionPreset, forKey: "typecastEmotionPreset") }
+    }
+
+    var typecastEmotionIntensity: Double = UserDefaults.standard.object(forKey: "typecastEmotionIntensity") as? Double ?? 1.0 {
+        didSet { UserDefaults.standard.set(typecastEmotionIntensity, forKey: "typecastEmotionIntensity") }
+    }
+
+    var typecastVolume: Int = UserDefaults.standard.object(forKey: "typecastVolume") as? Int ?? 100 {
+        didSet { UserDefaults.standard.set(typecastVolume, forKey: "typecastVolume") }
+    }
+
+    var typecastAudioPitch: Int = UserDefaults.standard.object(forKey: "typecastAudioPitch") as? Int ?? 0 {
+        didSet { UserDefaults.standard.set(typecastAudioPitch, forKey: "typecastAudioPitch") }
+    }
+
+    /// wav | mp3
+    var typecastAudioFormat: String = UserDefaults.standard.string(forKey: "typecastAudioFormat") ?? "wav" {
+        didSet { UserDefaults.standard.set(typecastAudioFormat, forKey: "typecastAudioFormat") }
+    }
+
     // MARK: - P4 Settings
 
     var telegramEnabled: Bool = UserDefaults.standard.object(forKey: "telegramEnabled") as? Bool ?? false {

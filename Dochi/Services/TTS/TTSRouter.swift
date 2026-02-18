@@ -7,6 +7,7 @@ final class TTSRouter: TTSServiceProtocol {
 
     private let systemTTS = SystemTTSService()
     private let googleCloudTTS = GoogleCloudTTSService()
+    private let typecastTTS = TypecastTTSService()
     private let supertonicTTS = SupertonicService()
 
     /// Tracks whether we're currently using a fallback provider.
@@ -21,6 +22,7 @@ final class TTSRouter: TTSServiceProtocol {
         didSet {
             systemTTS.onComplete = onComplete
             googleCloudTTS.onComplete = onComplete
+            typecastTTS.onComplete = onComplete
             supertonicTTS.onComplete = onComplete
         }
     }
@@ -30,7 +32,7 @@ final class TTSRouter: TTSServiceProtocol {
     }
 
     var isSpeaking: Bool {
-        systemTTS.isSpeaking || googleCloudTTS.isSpeaking || supertonicTTS.isSpeaking
+        systemTTS.isSpeaking || googleCloudTTS.isSpeaking || typecastTTS.isSpeaking || supertonicTTS.isSpeaking
     }
 
     init(settings: AppSettings, keychainService: KeychainServiceProtocol) {
@@ -44,6 +46,8 @@ final class TTSRouter: TTSServiceProtocol {
         switch settings.currentTTSProvider {
         case .googleCloud:
             return googleCloudTTS
+        case .typecast:
+            return typecastTTS
         case .system:
             return systemTTS
         case .onnxLocal:
@@ -62,6 +66,18 @@ final class TTSRouter: TTSServiceProtocol {
         googleCloudTTS.pitch = Float(settings.ttsPitch)
         googleCloudTTS.voiceName = settings.googleCloudVoiceName
         googleCloudTTS.apiKey = keychainService.load(account: TTSProvider.googleCloud.keychainAccount) ?? ""
+
+        typecastTTS.speed = speed
+        typecastTTS.voiceId = settings.typecastVoiceId
+        typecastTTS.model = settings.typecastModel
+        typecastTTS.language = settings.typecastLanguage
+        typecastTTS.emotionType = settings.typecastEmotionType
+        typecastTTS.emotionPreset = settings.typecastEmotionPreset
+        typecastTTS.emotionIntensity = Float(settings.typecastEmotionIntensity)
+        typecastTTS.volume = settings.typecastVolume
+        typecastTTS.audioPitch = settings.typecastAudioPitch
+        typecastTTS.audioFormat = settings.typecastAudioFormat
+        typecastTTS.apiKey = keychainService.load(account: TTSProvider.typecast.keychainAccount) ?? ""
 
         supertonicTTS.speed = speed
         supertonicTTS.diffusionSteps = settings.ttsDiffusionSteps
@@ -89,6 +105,7 @@ final class TTSRouter: TTSServiceProtocol {
     func unloadEngine() {
         systemTTS.unloadEngine()
         googleCloudTTS.unloadEngine()
+        typecastTTS.unloadEngine()
         supertonicTTS.unloadEngine()
     }
 
@@ -100,6 +117,7 @@ final class TTSRouter: TTSServiceProtocol {
     func stopAndClear() {
         systemTTS.stopAndClear()
         googleCloudTTS.stopAndClear()
+        typecastTTS.stopAndClear()
         supertonicTTS.stopAndClear()
     }
 
