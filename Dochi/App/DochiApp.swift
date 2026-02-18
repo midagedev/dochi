@@ -407,7 +407,7 @@ struct DochiApp: App {
                 viewModel.configureSchedulerService(schedulerService)
                 schedulerService.setExecutionHandler { [weak viewModel] schedule in
                     guard let viewModel else { return }
-                    Log.app.info("Scheduler executing: \(schedule.name) [agent=\(schedule.agentName)] — \(schedule.prompt)")
+                    Log.app.info("Scheduler executing: \(schedule.name) [target=\(schedule.targetSummary)] — \(schedule.prompt)")
                     try await viewModel.executeScheduledAutomation(schedule)
                 }
                 schedulerService.start()

@@ -5,7 +5,7 @@ import os
 final class GenerateImageTool: BuiltInToolProtocol {
     let name = "generate_image"
     let category: ToolCategory = .safe
-    let description = "fal.ai를 사용하여 이미지를 생성합니다."
+    let description = "fal.ai를 사용하여 이미지를 생성합니다. prompt는 반드시 영어로 전달해야 합니다."
     let isBaseline = true
 
     private let keychainService: KeychainServiceProtocol
@@ -22,7 +22,10 @@ final class GenerateImageTool: BuiltInToolProtocol {
         [
             "type": "object",
             "properties": [
-                "prompt": ["type": "string", "description": "이미지 생성 프롬프트"],
+                "prompt": [
+                    "type": "string",
+                    "description": "이미지 생성용 영문 프롬프트 (필수). 사용자가 한국어로 요청해도 의미를 보존해 영어로 작성."
+                ],
                 "image_size": [
                     "type": "string",
                     "enum": ["square_hd", "square", "landscape_4_3", "landscape_16_9", "portrait_4_3", "portrait_16_9"],

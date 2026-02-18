@@ -232,8 +232,6 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         // Coding agent (conditional, restricted/sensitive)
         registry.register(CodingRunTaskTool(sessionContext: sessionContext))
         registry.register(CodingReviewTool(sessionContext: sessionContext))
-        registry.register(CodexDesktopActivateTool())
-        registry.register(CodexDesktopSendPromptTool())
 
         // Coding session management (conditional, safe/restricted)
         let codingSessionManager = CodingSessionManager()

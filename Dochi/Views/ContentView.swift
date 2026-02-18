@@ -39,6 +39,9 @@ struct ContentView: View {
     // UX-10: 빠른 모델 팝오버
     @State private var showQuickModelPopover = false
 
+    // Tool detail logs (chat-minimal policy)
+    @State private var showToolLogs = false
+
     // G-3: 동기화
     @State private var showSyncConflictSheet = false
     @State private var showInitialSyncWizard = false
@@ -206,6 +209,12 @@ struct ContentView: View {
                     )
                 }
             }
+            .sheet(isPresented: $showToolLogs) {
+                ToolLogsView(
+                    conversations: viewModel.conversations,
+                    selectedConversationID: viewModel.currentConversation?.id
+                )
+            }
             .sheet(isPresented: $showDelegationMonitor) {
                 if let manager = viewModel.delegationManager {
                     DelegationMonitorView(delegationManager: manager)
@@ -347,6 +356,14 @@ struct ContentView: View {
                                 }
                                 .help("메모리 인스펙터 (⌘I)")
                                 .keyboardShortcut("i", modifiers: .command)
+
+                                Button {
+                                    showToolLogs = true
+                                } label: {
+                                    Label("툴 로그", systemImage: "list.bullet.rectangle.portrait")
+                                }
+                                .help("툴 호출 상세 로그")
+                                .disabled(viewModel.conversations.isEmpty)
                             }
                         }
                     }

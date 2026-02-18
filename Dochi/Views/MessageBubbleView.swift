@@ -61,17 +61,9 @@ struct MessageBubbleView: View {
                         isHovering = hovering
                     }
 
-                // UX-7: Archived tool execution records (preferred over raw tool calls)
+                // Completed turn: keep only compact tool summary in chat.
                 if let records = message.toolExecutionRecords, !records.isEmpty {
-                    ForEach(Array(records.enumerated()), id: \.offset) { _, record in
-                        ToolExecutionRecordCardView(record: record)
-                    }
-                }
-                // Fallback: Raw tool calls display (for messages without execution records)
-                else if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
-                    ForEach(toolCalls, id: \.id) { call in
-                        toolCallView(call)
-                    }
+                    ToolExecutionSummaryRow(records: records)
                 }
 
                 // I-3: Inline base64 images (Vision)
@@ -239,6 +231,10 @@ struct MessageBubbleView: View {
 
     @ViewBuilder
     private var contentView: some View {
+        if shouldSuppressToolTextForVisualOutput {
+            EmptyView()
+                .frame(width: 0, height: 0)
+        } else
         if message.content.isEmpty && message.toolCalls != nil {
             // Assistant message with only tool calls, no text content
             EmptyView()
@@ -258,6 +254,12 @@ struct MessageBubbleView: View {
         return AttributedString(message.content)
     }
 
+    private var shouldSuppressToolTextForVisualOutput: Bool {
+        guard message.role == .tool else { return false }
+        guard let imageURLs = message.imageURLs, !imageURLs.isEmpty else { return false }
+        return true
+    }
+
     // MARK: - Inline Image Data Display (I-3)
 
     @ViewBuilder
@@ -271,27 +273,6 @@ struct MessageBubbleView: View {
                 InlineImageContentView(imageContent: imageContent)
             }
         }
-    }
-
-    // MARK: - Tool Call Display
-
-    private func toolCallView(_ call: CodableToolCall) -> some View {
-        DisclosureGroup {
-            Text(call.argumentsJSON)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(6)
-        } label: {
-            Label(call.name, systemImage: "function")
-                .font(.caption)
-                .foregroundStyle(.orange)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.orange.opacity(0.08))
-        .cornerRadius(8)
     }
 
     // MARK: - Helpers
@@ -321,6 +302,66 @@ struct MessageBubbleView: View {
 
     private var foregroundColor: Color {
         message.role == .user ? .white : .primary
+    }
+}
+
+// MARK: - Compact Tool Summary
+
+private struct ToolExecutionSummaryRow: View {
+    let records: [ToolExecutionRecord]
+
+    private var successCount: Int {
+        records.filter { !$0.isError }.count
+    }
+
+    private var errorCount: Int {
+        records.filter { $0.isError }.count
+    }
+
+    private var totalDuration: TimeInterval {
+        records.compactMap(\.durationSeconds).reduce(0, +)
+    }
+
+    private var statusIcon: String {
+        errorCount > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+    }
+
+    private var statusColor: Color {
+        errorCount > 0 ? .orange : .green
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: statusIcon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(statusColor)
+
+            Text("도구 \(records.count)개")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Text("성공 \(successCount)")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+
+            if errorCount > 0 {
+                Text("실패 \(errorCount)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+            }
+
+            if totalDuration > 0 {
+                Text(String(format: "%.1f초", totalDuration))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.secondary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 

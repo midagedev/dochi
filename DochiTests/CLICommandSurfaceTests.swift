@@ -81,6 +81,19 @@ final class CLICommandSurfaceTests: XCTestCase {
         XCTAssertEqual(invocation.command, .dev(.chatStream(prompt: "실시간 테스트")))
     }
 
+    func testParseDevToolWithDottedBuiltInToolName() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev",
+            "tool",
+            "dochi.bridge_open",
+            "{\"agent\":\"codex\"}",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.tool(name: "dochi.bridge_open", argumentsJSON: "{\"agent\":\"codex\"}"))
+        )
+    }
+
     func testParseDevLogTailWithOptions() throws {
         let invocation = try CLICommandParser.parse([
             "dev", "log", "tail",
