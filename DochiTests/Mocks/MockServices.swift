@@ -983,6 +983,7 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var profiles: [ExternalToolProfile] = []
     var sessions: [ExternalToolSession] = []
     var isTmuxAvailable: Bool = true
+    var managedRepositories: [ManagedGitRepository] = []
 
     var loadProfilesCallCount = 0
     var saveProfileCallCount = 0
@@ -995,6 +996,10 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var checkHealthCallCount = 0
     var checkAllHealthCallCount = 0
     var captureOutputCallCount = 0
+    var initializeRepositoryCallCount = 0
+    var cloneRepositoryCallCount = 0
+    var attachRepositoryCallCount = 0
+    var removeManagedRepositoryCallCount = 0
 
     var lastSavedProfile: ExternalToolProfile?
     var lastSentCommand: String?
@@ -1086,6 +1091,69 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     func discoverGitRepositoryInsights(searchPaths: [String]?, limit: Int) async -> [GitRepositoryInsight] {
         Array(mockGitRepositoryInsights.prefix(max(1, limit)))
+    }
+
+    func initializeRepository(
+        path: String,
+        defaultBranch: String,
+        createReadme: Bool,
+        createGitignore: Bool
+    ) async throws -> ManagedGitRepository {
+        initializeRepositoryCallCount += 1
+        let normalizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        let repository = ManagedGitRepository(
+            name: URL(fileURLWithPath: normalizedPath).lastPathComponent,
+            rootPath: normalizedPath,
+            source: .initialized,
+            originURL: nil,
+            defaultBranch: defaultBranch
+        )
+        managedRepositories.insert(repository, at: 0)
+        return repository
+    }
+
+    func cloneRepository(
+        remoteURL: String,
+        destinationPath: String,
+        branch: String?
+    ) async throws -> ManagedGitRepository {
+        cloneRepositoryCallCount += 1
+        let normalizedPath = URL(fileURLWithPath: destinationPath).standardizedFileURL.path
+        let repository = ManagedGitRepository(
+            name: URL(fileURLWithPath: normalizedPath).lastPathComponent,
+            rootPath: normalizedPath,
+            source: .cloned,
+            originURL: remoteURL,
+            defaultBranch: branch ?? "main"
+        )
+        managedRepositories.insert(repository, at: 0)
+        return repository
+    }
+
+    func attachRepository(path: String) async throws -> ManagedGitRepository {
+        attachRepositoryCallCount += 1
+        let normalizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        let repository = ManagedGitRepository(
+            name: URL(fileURLWithPath: normalizedPath).lastPathComponent,
+            rootPath: normalizedPath,
+            source: .attached,
+            originURL: nil,
+            defaultBranch: "main"
+        )
+        managedRepositories.insert(repository, at: 0)
+        return repository
+    }
+
+    func removeManagedRepository(id: UUID, deleteDirectory: Bool) async throws {
+        _ = deleteDirectory
+        removeManagedRepositoryCallCount += 1
+        guard let index = managedRepositories.firstIndex(where: { $0.id == id }) else {
+            throw ExternalToolError.repositoryNotFound(id)
+        }
+        var repository = managedRepositories[index]
+        repository.isArchived = true
+        repository.updatedAt = Date()
+        managedRepositories[index] = repository
     }
 }
 

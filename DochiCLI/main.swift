@@ -536,13 +536,31 @@ enum DochiCLI {
                 }
                 let result = try client.call(method: "bridge.status", params: params)
                 if let sessions = result["sessions"] as? [[String: Any]] {
-                    let lines = sessions.map { session -> String in
+                    var lines = sessions.map { session -> String in
                         let id = session["session_id"] as? String ?? "-"
                         let profile = session["profile_name"] as? String ?? "-"
                         let status = session["status"] as? String ?? "-"
                         return "- \(profile): \(status) (\(id))"
                     }
-                    let message = lines.isEmpty ? "브리지 세션이 없습니다." : lines.joined(separator: "\n")
+
+                    if let discovered = result["discovered_sessions"] as? [[String: Any]], !discovered.isEmpty {
+                        if !lines.isEmpty {
+                            lines.append("")
+                        }
+                        lines.append("파일 기반 감지 세션 \(discovered.count)개")
+                        for item in discovered.prefix(20) {
+                            let provider = item["provider"] as? String ?? "unknown"
+                            let sessionId = item["session_id"] as? String ?? "-"
+                            let active = (item["is_active"] as? Bool == true) ? "active" : "inactive"
+                            let path = item["path"] as? String ?? "-"
+                            lines.append("- [\(provider)] \(sessionId) \(active) @ \(path)")
+                        }
+                        if discovered.count > 20 {
+                            lines.append("... \(discovered.count - 20)개 추가")
+                        }
+                    }
+
+                    let message = lines.isEmpty ? "브리지/파일 기반 세션이 없습니다." : lines.joined(separator: "\n")
                     return CLIResult(exitCode: .success, command: "dev.bridge.status", message: message, data: result)
                 }
 
@@ -587,6 +605,90 @@ enum DochiCLI {
                 return mapControlPlaneError(error, command: "dev.bridge.read")
             } catch {
                 return CLIResult(exitCode: .runtimeError, command: "dev.bridge.read", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeRepoList:
+            do {
+                let result = try client.call(method: "bridge.repo.list")
+                let repositories = result["repositories"] as? [[String: Any]] ?? []
+                guard !repositories.isEmpty else {
+                    return CLIResult(exitCode: .success, command: "dev.bridge.repo.list", message: "등록된 레포가 없습니다.", data: result)
+                }
+
+                let lines = repositories.enumerated().map { index, repository in
+                    let id = repository["repository_id"] as? String ?? "-"
+                    let name = repository["name"] as? String ?? "-"
+                    let path = repository["root_path"] as? String ?? "-"
+                    let branch = repository["default_branch"] as? String ?? "-"
+                    let source = repository["source"] as? String ?? "unknown"
+                    return "\(index + 1). \(name) [\(source)] (\(branch))\n   id=\(id)\n   \(path)"
+                }
+                return CLIResult(exitCode: .success, command: "dev.bridge.repo.list", message: lines.joined(separator: "\n"), data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.repo.list")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.repo.list", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeRepoInit(let path, let defaultBranch, let createReadme, let createGitignore):
+            do {
+                let result = try client.call(method: "bridge.repo.init", params: [
+                    "path": path,
+                    "default_branch": defaultBranch,
+                    "create_readme": createReadme,
+                    "create_gitignore": createGitignore,
+                ])
+                let repository = result["repository"] as? [String: Any]
+                let rootPath = repository?["root_path"] as? String ?? path
+                return CLIResult(exitCode: .success, command: "dev.bridge.repo.init", message: "레포 초기화 및 등록 완료: \(rootPath)", data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.repo.init")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.repo.init", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeRepoClone(let remoteURL, let destinationPath, let branch):
+            do {
+                var params: [String: Any] = [
+                    "remote_url": remoteURL,
+                    "destination_path": destinationPath,
+                ]
+                if let branch, !branch.isEmpty {
+                    params["branch"] = branch
+                }
+                let result = try client.call(method: "bridge.repo.clone", params: params)
+                let repository = result["repository"] as? [String: Any]
+                let rootPath = repository?["root_path"] as? String ?? destinationPath
+                return CLIResult(exitCode: .success, command: "dev.bridge.repo.clone", message: "레포 클론 및 등록 완료: \(rootPath)", data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.repo.clone")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.repo.clone", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeRepoAttach(let path):
+            do {
+                let result = try client.call(method: "bridge.repo.attach", params: ["path": path])
+                let repository = result["repository"] as? [String: Any]
+                let rootPath = repository?["root_path"] as? String ?? path
+                return CLIResult(exitCode: .success, command: "dev.bridge.repo.attach", message: "레포 연결 완료: \(rootPath)", data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.repo.attach")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.repo.attach", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeRepoRemove(let repositoryId, let deleteDirectory):
+            do {
+                let result = try client.call(method: "bridge.repo.remove", params: [
+                    "repository_id": repositoryId,
+                    "delete_directory": deleteDirectory,
+                ])
+                return CLIResult(exitCode: .success, command: "dev.bridge.repo.remove", message: "레포 제거 완료: \(repositoryId)", data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.repo.remove")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.repo.remove", message: "요청 실패: \(error.localizedDescription)")
             }
         }
     }
@@ -972,6 +1074,11 @@ enum DochiCLI {
           dochi dev bridge status [session_id]
           dochi dev bridge send <session_id> <command>
           dochi dev bridge read <session_id> [lines]
+          dochi dev bridge repo list
+          dochi dev bridge repo init <path> [--branch NAME] [--readme] [--gitignore]
+          dochi dev bridge repo clone <remote_url> <destination_path> [--branch NAME]
+          dochi dev bridge repo attach <path>
+          dochi dev bridge repo remove <repository_id> [--delete-directory]
           dochi doctor
 
         전역 옵션:

@@ -76,6 +76,66 @@ final class CLICommandSurfaceTests: XCTestCase {
         )
     }
 
+    func testParseDevBridgeRepoInitWithOptions() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "repo", "init", "~/repo/new-project",
+            "--branch", "develop",
+            "--readme",
+            "--gitignore",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeRepoInit(
+                path: "~/repo/new-project",
+                defaultBranch: "develop",
+                createReadme: true,
+                createGitignore: true
+            ))
+        )
+    }
+
+    func testParseDevBridgeRepoCloneWithBranch() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "repo", "clone",
+            "git@github.com:midagedev/dochi.git",
+            "~/repo/dochi-clone",
+            "--branch", "main",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeRepoClone(
+                remoteURL: "git@github.com:midagedev/dochi.git",
+                destinationPath: "~/repo/dochi-clone",
+                branch: "main"
+            ))
+        )
+    }
+
+    func testParseDevBridgeRepoRemoveWithDeleteDirectory() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "repo", "remove",
+            "11111111-2222-3333-4444-555555555555",
+            "--delete-directory",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeRepoRemove(
+                repositoryId: "11111111-2222-3333-4444-555555555555",
+                deleteDirectory: true
+            ))
+        )
+    }
+
+    func testParseDevBridgeRepoRemoveWithUnknownOptionThrows() {
+        XCTAssertThrowsError(try CLICommandParser.parse([
+            "dev", "bridge", "repo", "remove",
+            "11111111-2222-3333-4444-555555555555",
+            "--dry-run",
+        ])) { error in
+            XCTAssertTrue(error.localizedDescription.contains("알 수 없는 옵션"))
+        }
+    }
+
     func testParseDevChatStream() throws {
         let invocation = try CLICommandParser.parse(["dev", "chat", "stream", "실시간", "테스트"])
         XCTAssertEqual(invocation.command, .dev(.chatStream(prompt: "실시간 테스트")))

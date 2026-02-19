@@ -900,6 +900,21 @@ struct DochiApp: App {
         case "bridge.roots":
             return await handleBridgeRoots(params: params, externalToolManager: externalToolManager)
 
+        case "bridge.repo.list":
+            return await handleBridgeRepositoryList(externalToolManager: externalToolManager)
+
+        case "bridge.repo.init":
+            return await handleBridgeRepositoryInit(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.repo.clone":
+            return await handleBridgeRepositoryClone(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.repo.attach":
+            return await handleBridgeRepositoryAttach(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.repo.remove":
+            return await handleBridgeRepositoryRemove(params: params, externalToolManager: externalToolManager)
+
         default:
             return .failure(code: "method_not_found", message: "지원하지 않는 메서드입니다: \(method)")
         }
@@ -1260,10 +1275,24 @@ struct DochiApp: App {
             return UncheckedJSONArray(value: sessions)
         }
         let sessions = sessionsPayload.value
+        let discoveredSessions = await externalToolManager.discoverLocalCodingSessions(limit: 80)
+        let discoveredPayload: [[String: Any]] = discoveredSessions.map { session in
+            [
+                "source": session.source.rawValue,
+                "provider": session.provider,
+                "session_id": session.sessionId,
+                "working_directory": session.workingDirectory ?? NSNull(),
+                "path": session.path,
+                "updated_at": isoTimestamp(session.updatedAt),
+                "is_active": session.isActive,
+            ]
+        }
 
         return .ok([
             "count": sessions.count,
             "sessions": sessions,
+            "discovered_count": discoveredPayload.count,
+            "discovered_sessions": discoveredPayload,
         ])
     }
 
@@ -1359,6 +1388,130 @@ struct DochiApp: App {
             "count": payload.count,
             "roots": payload,
         ])
+    }
+
+    nonisolated private static func handleBridgeRepositoryList(
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        let repositories = await MainActor.run {
+            externalToolManager.managedRepositories
+                .filter { !$0.isArchived }
+                .sorted(by: { $0.updatedAt > $1.updatedAt })
+        }
+        let payload = repositories.map(serializeManagedRepository(_:))
+        return .ok([
+            "count": payload.count,
+            "repositories": payload,
+        ])
+    }
+
+    nonisolated private static func handleBridgeRepositoryInit(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let path = nonEmptyString(params["path"]) else {
+            return .failure(code: "invalid_path", message: "path가 필요합니다.")
+        }
+        let defaultBranch = nonEmptyString(params["default_branch"]) ?? "main"
+        let createReadme = params["create_readme"] as? Bool ?? false
+        let createGitignore = params["create_gitignore"] as? Bool ?? false
+
+        do {
+            let repository = try await externalToolManager.initializeRepository(
+                path: path,
+                defaultBranch: defaultBranch,
+                createReadme: createReadme,
+                createGitignore: createGitignore
+            )
+            return .ok([
+                "status": "initialized",
+                "repository": serializeManagedRepository(repository),
+            ])
+        } catch {
+            return .failure(code: "bridge_repo_init_failed", message: error.localizedDescription)
+        }
+    }
+
+    nonisolated private static func handleBridgeRepositoryClone(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let remoteURL = nonEmptyString(params["remote_url"]) else {
+            return .failure(code: "missing_remote_url", message: "remote_url이 필요합니다.")
+        }
+        guard let destinationPath = nonEmptyString(params["destination_path"]) else {
+            return .failure(code: "missing_destination_path", message: "destination_path가 필요합니다.")
+        }
+        let branch = nonEmptyString(params["branch"])
+
+        do {
+            let repository = try await externalToolManager.cloneRepository(
+                remoteURL: remoteURL,
+                destinationPath: destinationPath,
+                branch: branch
+            )
+            return .ok([
+                "status": "cloned",
+                "repository": serializeManagedRepository(repository),
+            ])
+        } catch {
+            return .failure(code: "bridge_repo_clone_failed", message: error.localizedDescription)
+        }
+    }
+
+    nonisolated private static func handleBridgeRepositoryAttach(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let path = nonEmptyString(params["path"]) else {
+            return .failure(code: "invalid_path", message: "path가 필요합니다.")
+        }
+
+        do {
+            let repository = try await externalToolManager.attachRepository(path: path)
+            return .ok([
+                "status": "attached",
+                "repository": serializeManagedRepository(repository),
+            ])
+        } catch {
+            return .failure(code: "bridge_repo_attach_failed", message: error.localizedDescription)
+        }
+    }
+
+    nonisolated private static func handleBridgeRepositoryRemove(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let repositoryIdRaw = nonEmptyString(params["repository_id"]),
+              let repositoryId = UUID(uuidString: repositoryIdRaw) else {
+            return .failure(code: "invalid_repository_id", message: "유효한 repository_id가 필요합니다.")
+        }
+        let deleteDirectory = params["delete_directory"] as? Bool ?? false
+
+        do {
+            try await externalToolManager.removeManagedRepository(id: repositoryId, deleteDirectory: deleteDirectory)
+            return .ok([
+                "status": "removed",
+                "repository_id": repositoryId.uuidString,
+                "delete_directory": deleteDirectory,
+            ])
+        } catch {
+            return .failure(code: "bridge_repo_remove_failed", message: error.localizedDescription)
+        }
+    }
+
+    nonisolated private static func serializeManagedRepository(_ repository: ManagedGitRepository) -> [String: Any] {
+        [
+            "repository_id": repository.id.uuidString,
+            "name": repository.name,
+            "root_path": repository.rootPath,
+            "source": repository.source.rawValue,
+            "origin_url": repository.originURL ?? NSNull(),
+            "default_branch": repository.defaultBranch ?? NSNull(),
+            "is_archived": repository.isArchived,
+            "created_at": isoTimestamp(repository.createdAt),
+            "updated_at": isoTimestamp(repository.updatedAt),
+        ]
     }
 
     @MainActor
