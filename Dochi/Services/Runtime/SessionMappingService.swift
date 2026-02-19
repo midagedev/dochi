@@ -35,18 +35,16 @@ final class SessionMappingService {
 
     // MARK: - CRUD
 
-    /// Look up an existing active mapping by composite key.
+    /// Look up an existing active mapping by composite key (deviceId excluded for cross-device resume).
     func findActive(
         workspaceId: String,
         agentId: String,
-        conversationId: String,
-        deviceId: String
+        conversationId: String
     ) -> SessionMapping? {
         let key = SessionLookupKey(
             workspaceId: workspaceId,
             agentId: agentId,
-            conversationId: conversationId,
-            deviceId: deviceId
+            conversationId: conversationId
         )
         guard let idx = lookupIndex[key],
               idx < store.mappings.count,

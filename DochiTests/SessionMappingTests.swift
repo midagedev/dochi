@@ -64,7 +64,27 @@ final class SessionMappingTests: XCTestCase {
         XCTAssertEqual(key.workspaceId, "ws-1")
         XCTAssertEqual(key.agentId, "a-1")
         XCTAssertEqual(key.conversationId, "c-1")
-        XCTAssertEqual(key.deviceId, "d-1")
+    }
+
+    func testLookupKeyExcludesDeviceId() {
+        // Two mappings with different deviceIds should have the same lookupKey
+        let mapping1 = SessionMapping(
+            sessionId: "s-1", sdkSessionId: "sdk-1",
+            workspaceId: "ws-1", agentId: "a-1",
+            conversationId: "c-1", userId: "u-1",
+            deviceId: "device-A",
+            status: .active,
+            createdAt: Date(), lastActiveAt: Date()
+        )
+        let mapping2 = SessionMapping(
+            sessionId: "s-2", sdkSessionId: "sdk-2",
+            workspaceId: "ws-1", agentId: "a-1",
+            conversationId: "c-1", userId: "u-1",
+            deviceId: "device-B",
+            status: .active,
+            createdAt: Date(), lastActiveAt: Date()
+        )
+        XCTAssertEqual(mapping1.lookupKey, mapping2.lookupKey)
     }
 
     func testSessionMappingStatusValues() {
@@ -74,9 +94,9 @@ final class SessionMappingTests: XCTestCase {
     }
 
     func testLookupKeyHashEquality() {
-        let key1 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c", deviceId: "d")
-        let key2 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c", deviceId: "d")
-        let key3 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c", deviceId: "other")
+        let key1 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c")
+        let key2 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c")
+        let key3 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "other")
 
         XCTAssertEqual(key1, key2)
         XCTAssertEqual(key1.hashValue, key2.hashValue)
@@ -121,7 +141,7 @@ final class SessionMappingTests: XCTestCase {
 
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1"
+            conversationId: "c-1"
         )
         XCTAssertNotNil(found)
         XCTAssertEqual(found?.sessionId, "s-1")
@@ -145,7 +165,7 @@ final class SessionMappingTests: XCTestCase {
 
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1"
+            conversationId: "c-1"
         )
         XCTAssertNil(found)
     }
@@ -233,7 +253,7 @@ final class SessionMappingTests: XCTestCase {
         // Same composite key should find the existing active session
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1"
+            conversationId: "c-1"
         )
         XCTAssertNotNil(found)
         XCTAssertEqual(found?.sessionId, "s-1")
@@ -247,7 +267,7 @@ final class SessionMappingTests: XCTestCase {
         // Different conversation ID
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "other-conv", deviceId: "d-1"
+            conversationId: "other-conv"
         )
         XCTAssertNil(found)
     }
@@ -261,7 +281,7 @@ final class SessionMappingTests: XCTestCase {
         // Same key but session is closed — should not reuse
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1"
+            conversationId: "c-1"
         )
         XCTAssertNil(found)
     }

@@ -1691,3 +1691,77 @@ final class MockExecutionLeaseService: ExecutionLeaseServiceProtocol {
         expireCallCount += 1
     }
 }
+
+// MARK: - MockCrossDeviceResumeService (#291)
+
+@MainActor
+final class MockCrossDeviceResumeService: CrossDeviceResumeServiceProtocol {
+    var transferHistory: [DeviceTransferRecord] = []
+
+    var resolveCallCount = 0
+    var recordTransferCallCount = 0
+    var lastResolveWorkspaceId: String?
+    var lastResolveAgentId: String?
+    var lastResolveConversationId: String?
+    var lastResolveDeviceId: String?
+
+    var stubbedResult: CrossDeviceResumeResult = .created(sessionId: "mock-session", sdkSessionId: "mock-sdk")
+
+    func resolveSession(
+        workspaceId: String,
+        agentId: String,
+        conversationId: String,
+        userId: String,
+        deviceId: String
+    ) async -> CrossDeviceResumeResult {
+        resolveCallCount += 1
+        lastResolveWorkspaceId = workspaceId
+        lastResolveAgentId = agentId
+        lastResolveConversationId = conversationId
+        lastResolveDeviceId = deviceId
+        return stubbedResult
+    }
+
+    func recordDeviceTransfer(sessionId: String, fromDeviceId: String, toDeviceId: String) {
+        recordTransferCallCount += 1
+        let record = DeviceTransferRecord(
+            sessionId: sessionId,
+            fromDeviceId: fromDeviceId,
+            toDeviceId: toDeviceId
+        )
+        transferHistory.append(record)
+    }
+}
+
+// MARK: - MockSessionResumeService (#291)
+
+@MainActor
+final class MockSessionResumeService: SessionResumeServiceProtocol {
+    var resumeCallCount = 0
+    var canResumeCallCount = 0
+    var normalizeCallCount = 0
+
+    var lastRequest: SessionResumeRequest?
+    var stubbedResult: SessionResumeResult = .newSession(
+        sessionId: "mock-session",
+        deviceId: UUID(),
+        reason: .sessionNotFound
+    )
+    var stubbedCanResume: Bool = false
+
+    func resumeSession(_ request: SessionResumeRequest) async throws -> SessionResumeResult {
+        resumeCallCount += 1
+        lastRequest = request
+        return stubbedResult
+    }
+
+    func canResume(conversationId: String) -> Bool {
+        canResumeCallCount += 1
+        return stubbedCanResume
+    }
+
+    func normalizeSessionKey(workspaceId: UUID, agentId: String, conversationId: String) -> String {
+        normalizeCallCount += 1
+        return "\(workspaceId.uuidString):\(agentId):\(conversationId)"
+    }
+}
