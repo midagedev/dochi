@@ -909,6 +909,9 @@ struct DochiApp: App {
         case "bridge.orchestrator.select_session":
             return await handleBridgeOrchestratorSelectSession(params: params, externalToolManager: externalToolManager)
 
+        case "bridge.orchestrator.policy_matrix":
+            return await handleBridgeOrchestratorPolicyMatrix(externalToolManager: externalToolManager)
+
         case "bridge.orchestrator.guard_command":
             return await handleBridgeOrchestratorGuardCommand(params: params, externalToolManager: externalToolManager)
 
@@ -1504,6 +1507,27 @@ struct DochiApp: App {
         return .ok(serializeOrchestrationSelection(selection))
     }
 
+    nonisolated private static func handleBridgeOrchestratorPolicyMatrix(
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        let rules = await MainActor.run {
+            externalToolManager.orchestrationGuardPolicyRules()
+        }
+        let payload: [[String: Any]] = rules.map { rule in
+            [
+                "tier": rule.tier.rawValue,
+                "command_class": rule.commandClass.rawValue,
+                "decision": rule.decisionKind.rawValue,
+                "policy_code": rule.policyCode.rawValue,
+                "reason": rule.reason,
+            ]
+        }
+        return .ok([
+            "count": payload.count,
+            "rules": payload,
+        ])
+    }
+
     nonisolated private static func handleBridgeOrchestratorGuardCommand(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
@@ -1524,14 +1548,16 @@ struct DochiApp: App {
         }
 
         if decision.kind == .denied {
-            return .failure(code: "execution_denied", message: decision.reason)
+            return .failure(code: decision.policyCode.rawValue, message: decision.reason)
         }
         if decision.kind == .confirmationRequired {
-            return .failure(code: "confirmation_required", message: decision.reason)
+            return .failure(code: decision.policyCode.rawValue, message: decision.reason)
         }
 
         return .ok([
             "decision": decision.kind.rawValue,
+            "policy_code": decision.policyCode.rawValue,
+            "command_class": decision.commandClass.rawValue,
             "reason": decision.reason,
             "is_destructive_command": decision.isDestructiveCommand,
         ])
@@ -1561,10 +1587,10 @@ struct DochiApp: App {
             }
 
             if decision.kind == .denied {
-                return .failure(code: "execution_denied", message: decision.reason)
+                return .failure(code: decision.policyCode.rawValue, message: decision.reason)
             }
             if decision.kind == .confirmationRequired, !confirmed {
-                return .failure(code: "confirmation_required", message: decision.reason)
+                return .failure(code: decision.policyCode.rawValue, message: decision.reason)
             }
 
             guard let runtimeSessionId = session.runtimeSessionId,
@@ -1580,6 +1606,8 @@ struct DochiApp: App {
                     "selection": serializeOrchestrationSelection(selection),
                     "guard": [
                         "decision": decision.kind.rawValue,
+                        "policy_code": decision.policyCode.rawValue,
+                        "command_class": decision.commandClass.rawValue,
                         "reason": decision.reason,
                         "is_destructive_command": decision.isDestructiveCommand,
                     ],
@@ -1593,6 +1621,15 @@ struct DochiApp: App {
                 message: "실행 가능한 세션이 없어 새 T0 세션 생성이 필요합니다."
             )
         case .analyzeOnly:
+            if let session = selection.selectedSession {
+                let decision = await MainActor.run {
+                    externalToolManager.evaluateOrchestrationExecutionGuard(
+                        tier: session.controllabilityTier,
+                        command: command
+                    )
+                }
+                return .failure(code: decision.policyCode.rawValue, message: decision.reason)
+            }
             return .failure(
                 code: "analyze_only_fallback",
                 message: "현재는 분석 전용(T2/T3) 세션만 존재하여 실행이 차단되었습니다."

@@ -99,6 +99,27 @@ final class SessionHistoryRAGTests: XCTestCase {
         XCTAssertTrue(masked.contains("[REDACTED_PRIVATE_KEY]"))
     }
 
+    func testMaskSensitiveContentRedactsAuthorizationBearer() {
+        let input = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature"
+        let masked = ExternalToolSessionManager.maskSensitiveContent(input)
+
+        XCTAssertFalse(masked.localizedCaseInsensitiveContains("eyJhbGciOiJIUzI1Ni"))
+        XCTAssertTrue(masked.contains("[REDACTED_BEARER_TOKEN]"))
+    }
+
+    func testSessionHistoryMaskingPolicyIncludesCoreRules() {
+        let rules = ExternalToolSessionManager.sessionHistoryMaskingPolicyRules()
+        let codes = Set(rules.map(\.code))
+
+        XCTAssertTrue(codes.contains("openai_api_key"))
+        XCTAssertTrue(codes.contains("github_token"))
+        XCTAssertTrue(codes.contains("slack_token"))
+        XCTAssertTrue(codes.contains("aws_access_key"))
+        XCTAssertTrue(codes.contains("authorization_bearer"))
+        XCTAssertTrue(codes.contains("generic_credential_kv"))
+        XCTAssertTrue(codes.contains("private_key_block"))
+    }
+
     func testBuildSessionHistoryChunksIndexesJsonlAndMasksContent() throws {
         let temp = FileManager.default.temporaryDirectory
             .appendingPathComponent("dochi-session-rag-\(UUID().uuidString)", isDirectory: true)
@@ -134,4 +155,3 @@ final class SessionHistoryRAGTests: XCTestCase {
         XCTAssertTrue(chunks.contains(where: { $0.repositoryRoot == repoRoot.path }))
     }
 }
-

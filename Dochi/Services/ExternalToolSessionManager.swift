@@ -62,12 +62,14 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
 
     // Orchestrator selection/guard
     func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection
+    func orchestrationGuardPolicyRules() -> [OrchestrationGuardPolicyRule]
     func evaluateOrchestrationExecutionGuard(
         tier: CodingSessionControllabilityTier,
         command: String
     ) -> OrchestrationExecutionDecision
 
     // Session history RAG
+    func sessionHistoryMaskingRules() -> [SessionHistoryMaskingRule]
     func rebuildSessionHistoryIndex(limit: Int) async -> Int
     func searchSessionHistory(query: SessionHistorySearchQuery) async -> [SessionHistorySearchResult]
 }
@@ -122,6 +124,10 @@ extension ExternalToolSessionManagerProtocol {
         )
     }
 
+    func orchestrationGuardPolicyRules() -> [OrchestrationGuardPolicyRule] {
+        []
+    }
+
     func evaluateOrchestrationExecutionGuard(
         tier: CodingSessionControllabilityTier,
         command: String
@@ -129,9 +135,15 @@ extension ExternalToolSessionManagerProtocol {
         _ = (tier, command)
         return OrchestrationExecutionDecision(
             kind: .denied,
+            policyCode: .t3DenyExecution,
+            commandClass: .nonDestructive,
             reason: "실행 가드를 지원하지 않습니다.",
             isDestructiveCommand: false
         )
+    }
+
+    func sessionHistoryMaskingRules() -> [SessionHistoryMaskingRule] {
+        []
     }
 
     func rebuildSessionHistoryIndex(limit _: Int) async -> Int {
@@ -863,11 +875,19 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }.value
     }
 
+    func orchestrationGuardPolicyRules() -> [OrchestrationGuardPolicyRule] {
+        Self.orchestrationGuardPolicyMatrix()
+    }
+
     func evaluateOrchestrationExecutionGuard(
         tier: CodingSessionControllabilityTier,
         command: String
     ) -> OrchestrationExecutionDecision {
         Self.evaluateOrchestrationExecutionGuard(tier: tier, command: command)
+    }
+
+    func sessionHistoryMaskingRules() -> [SessionHistoryMaskingRule] {
+        Self.sessionHistoryMaskingPolicyRules()
     }
 
     func rebuildSessionHistoryIndex(limit: Int) async -> Int {
@@ -991,34 +1011,122 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         tier: CodingSessionControllabilityTier,
         command: String
     ) -> OrchestrationExecutionDecision {
-        let destructive = isDestructiveCommand(command)
+        let commandClass = orchestrationCommandClass(command)
+        let rule = orchestrationGuardPolicyMatrix().first(where: {
+            $0.tier == tier && $0.commandClass == commandClass
+        }) ?? fallbackOrchestrationGuardRule(for: tier, commandClass: commandClass)
+        return OrchestrationExecutionDecision(
+            kind: rule.decisionKind,
+            policyCode: rule.policyCode,
+            commandClass: commandClass,
+            reason: rule.reason,
+            isDestructiveCommand: commandClass == .destructive
+        )
+    }
+
+    nonisolated static func orchestrationGuardPolicyMatrix() -> [OrchestrationGuardPolicyRule] {
+        orchestrationGuardPolicyMatrixStorage
+    }
+
+    nonisolated private static let orchestrationGuardPolicyMatrixStorage: [OrchestrationGuardPolicyRule] = [
+            OrchestrationGuardPolicyRule(
+                tier: .t0Full,
+                commandClass: .nonDestructive,
+                decisionKind: .allowed,
+                policyCode: .t0AllowAll,
+                reason: "T0 세션은 비파괴 명령을 자동 실행할 수 있습니다."
+            ),
+            OrchestrationGuardPolicyRule(
+                tier: .t0Full,
+                commandClass: .destructive,
+                decisionKind: .allowed,
+                policyCode: .t0AllowAll,
+                reason: "T0 세션은 파괴적 명령도 자동 실행할 수 있습니다."
+            ),
+            OrchestrationGuardPolicyRule(
+                tier: .t1Attach,
+                commandClass: .nonDestructive,
+                decisionKind: .allowed,
+                policyCode: .t1AllowNonDestructive,
+                reason: "T1 세션의 비파괴 명령은 실행 가능합니다."
+            ),
+            OrchestrationGuardPolicyRule(
+                tier: .t1Attach,
+                commandClass: .destructive,
+                decisionKind: .confirmationRequired,
+                policyCode: .t1ConfirmDestructive,
+                reason: "T1 세션의 파괴적 명령은 사용자 확인이 필요합니다."
+            ),
+            OrchestrationGuardPolicyRule(
+                tier: .t2Observe,
+                commandClass: .nonDestructive,
+                decisionKind: .denied,
+                policyCode: .t2DenyExecution,
+                reason: "T2 세션은 실행 금지이며 제안 전용입니다."
+            ),
+            OrchestrationGuardPolicyRule(
+                tier: .t2Observe,
+                commandClass: .destructive,
+                decisionKind: .denied,
+                policyCode: .t2DenyExecution,
+                reason: "T2 세션은 실행 금지이며 제안 전용입니다."
+            ),
+            OrchestrationGuardPolicyRule(
+                tier: .t3Unknown,
+                commandClass: .nonDestructive,
+                decisionKind: .denied,
+                policyCode: .t3DenyExecution,
+                reason: "T3 세션은 실행 금지이며 제안 전용입니다."
+            ),
+            OrchestrationGuardPolicyRule(
+                tier: .t3Unknown,
+                commandClass: .destructive,
+                decisionKind: .denied,
+                policyCode: .t3DenyExecution,
+                reason: "T3 세션은 실행 금지이며 제안 전용입니다."
+            ),
+        ]
+
+    nonisolated static func orchestrationCommandClass(_ command: String) -> OrchestrationCommandClass {
+        isDestructiveCommand(command) ? .destructive : .nonDestructive
+    }
+
+    nonisolated private static func fallbackOrchestrationGuardRule(
+        for tier: CodingSessionControllabilityTier,
+        commandClass: OrchestrationCommandClass
+    ) -> OrchestrationGuardPolicyRule {
+        let policyCode: OrchestrationGuardPolicyCode
+        let decisionKind: OrchestrationExecutionDecisionKind
+        let reason: String
         switch tier {
         case .t0Full:
-            return OrchestrationExecutionDecision(
-                kind: .allowed,
-                reason: "T0 세션은 자동 실행이 허용됩니다.",
-                isDestructiveCommand: destructive
-            )
+            policyCode = .t0AllowAll
+            decisionKind = .allowed
+            reason = commandClass == .destructive
+                ? "T0 세션은 파괴적 명령도 자동 실행할 수 있습니다."
+                : "T0 세션은 비파괴 명령을 자동 실행할 수 있습니다."
         case .t1Attach:
-            if destructive {
-                return OrchestrationExecutionDecision(
-                    kind: .confirmationRequired,
-                    reason: "T1 세션의 파괴적 명령은 사용자 확인이 필요합니다.",
-                    isDestructiveCommand: true
-                )
-            }
-            return OrchestrationExecutionDecision(
-                kind: .allowed,
-                reason: "T1 세션의 비파괴 명령은 실행 가능합니다.",
-                isDestructiveCommand: false
-            )
-        case .t2Observe, .t3Unknown:
-            return OrchestrationExecutionDecision(
-                kind: .denied,
-                reason: "T2/T3 세션은 실행 금지이며 제안 전용입니다.",
-                isDestructiveCommand: destructive
-            )
+            policyCode = commandClass == .destructive ? .t1ConfirmDestructive : .t1AllowNonDestructive
+            decisionKind = commandClass == .destructive ? .confirmationRequired : .allowed
+            reason = commandClass == .destructive
+                ? "T1 세션의 파괴적 명령은 사용자 확인이 필요합니다."
+                : "T1 세션의 비파괴 명령은 실행 가능합니다."
+        case .t2Observe:
+            policyCode = .t2DenyExecution
+            decisionKind = .denied
+            reason = "T2 세션은 실행 금지이며 제안 전용입니다."
+        case .t3Unknown:
+            policyCode = .t3DenyExecution
+            decisionKind = .denied
+            reason = "T3 세션은 실행 금지이며 제안 전용입니다."
         }
+        return OrchestrationGuardPolicyRule(
+            tier: tier,
+            commandClass: commandClass,
+            decisionKind: decisionKind,
+            policyCode: policyCode,
+            reason: reason
+        )
     }
 
     nonisolated static func isDestructiveCommand(_ command: String) -> Bool {
@@ -1279,17 +1387,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     nonisolated static func maskSensitiveContent(_ text: String) -> String {
         var masked = text
-        let patterns: [(String, String, NSRegularExpression.Options)] = [
-            ("sk-[A-Za-z0-9]{16,}", "[REDACTED_OPENAI_KEY]", []),
-            ("gh[pousr]_[A-Za-z0-9]{20,}", "[REDACTED_GITHUB_TOKEN]", []),
-            ("xox[baprs]-[A-Za-z0-9-]{10,}", "[REDACTED_SLACK_TOKEN]", []),
-            ("AKIA[0-9A-Z]{16}", "[REDACTED_AWS_ACCESS_KEY]", []),
-            ("(?i)(api[_-]?key|token|secret|password|passwd|authorization)\\s*[:=]\\s*[\"']?[^\\s\"']{6,}[\"']?", "$1=[REDACTED]", []),
-            ("-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----", "[REDACTED_PRIVATE_KEY]", [.dotMatchesLineSeparators]),
-        ]
-
-        for (pattern, replacement, options) in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+        for rule in sessionHistoryMaskingPolicyRules() {
+            guard let regex = try? NSRegularExpression(pattern: rule.pattern, options: rule.options) else {
                 continue
             }
             let range = NSRange(masked.startIndex..<masked.endIndex, in: masked)
@@ -1297,11 +1396,54 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 in: masked,
                 options: [],
                 range: range,
-                withTemplate: replacement
+                withTemplate: rule.replacement
             )
         }
         return masked
     }
+
+    nonisolated static func sessionHistoryMaskingPolicyRules() -> [SessionHistoryMaskingRule] {
+        sessionHistoryMaskingPolicyRulesStorage
+    }
+
+    nonisolated private static let sessionHistoryMaskingPolicyRulesStorage: [SessionHistoryMaskingRule] = [
+            SessionHistoryMaskingRule(
+                code: "openai_api_key",
+                pattern: "sk-[A-Za-z0-9]{16,}",
+                replacement: "[REDACTED_OPENAI_KEY]"
+            ),
+            SessionHistoryMaskingRule(
+                code: "github_token",
+                pattern: "gh[pousr]_[A-Za-z0-9]{20,}",
+                replacement: "[REDACTED_GITHUB_TOKEN]"
+            ),
+            SessionHistoryMaskingRule(
+                code: "slack_token",
+                pattern: "xox[baprs]-[A-Za-z0-9-]{10,}",
+                replacement: "[REDACTED_SLACK_TOKEN]"
+            ),
+            SessionHistoryMaskingRule(
+                code: "aws_access_key",
+                pattern: "AKIA[0-9A-Z]{16}",
+                replacement: "[REDACTED_AWS_ACCESS_KEY]"
+            ),
+            SessionHistoryMaskingRule(
+                code: "authorization_bearer",
+                pattern: "(?i)authorization\\s*[:=]\\s*bearer\\s+[A-Za-z0-9._\\-=]{8,}",
+                replacement: "authorization=[REDACTED_BEARER_TOKEN]"
+            ),
+            SessionHistoryMaskingRule(
+                code: "generic_credential_kv",
+                pattern: "(?i)(api[_-]?key|token|secret|password|passwd|authorization)\\s*[:=]\\s*[\"']?(?!\\[REDACTED)[^\\s\"']{6,}[\"']?",
+                replacement: "$1=[REDACTED]"
+            ),
+            SessionHistoryMaskingRule(
+                code: "private_key_block",
+                pattern: "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+                replacement: "[REDACTED_PRIVATE_KEY]",
+                options: [.dotMatchesLineSeparators]
+            ),
+        ]
 
     nonisolated private static func chunkSessionHistoryEvents(
         events: [SessionHistoryEvent],

@@ -123,7 +123,11 @@ final class OrchestratorSessionSelectorTests: XCTestCase {
         )
 
         XCTAssertEqual(t2.kind, .denied)
+        XCTAssertEqual(t2.policyCode, .t2DenyExecution)
+        XCTAssertEqual(t2.commandClass, .nonDestructive)
         XCTAssertEqual(t3.kind, .denied)
+        XCTAssertEqual(t3.policyCode, .t3DenyExecution)
+        XCTAssertEqual(t3.commandClass, .nonDestructive)
     }
 
     func testExecutionGuardRequiresConfirmationForDestructiveT1Command() {
@@ -133,6 +137,8 @@ final class OrchestratorSessionSelectorTests: XCTestCase {
         )
 
         XCTAssertEqual(decision.kind, .confirmationRequired)
+        XCTAssertEqual(decision.policyCode, .t1ConfirmDestructive)
+        XCTAssertEqual(decision.commandClass, .destructive)
         XCTAssertTrue(decision.isDestructiveCommand)
     }
 
@@ -143,7 +149,24 @@ final class OrchestratorSessionSelectorTests: XCTestCase {
         )
 
         XCTAssertEqual(decision.kind, .allowed)
+        XCTAssertEqual(decision.policyCode, .t1AllowNonDestructive)
+        XCTAssertEqual(decision.commandClass, .nonDestructive)
         XCTAssertFalse(decision.isDestructiveCommand)
+    }
+
+    func testOrchestrationPolicyMatrixCoversAllTierAndCommandClasses() {
+        let matrix = ExternalToolSessionManager.orchestrationGuardPolicyMatrix()
+        let tiers: [CodingSessionControllabilityTier] = [.t0Full, .t1Attach, .t2Observe, .t3Unknown]
+        let commandClasses: [OrchestrationCommandClass] = [.nonDestructive, .destructive]
+
+        XCTAssertEqual(matrix.count, tiers.count * commandClasses.count)
+        for tier in tiers {
+            for commandClass in commandClasses {
+                XCTAssertTrue(matrix.contains(where: { rule in
+                    rule.tier == tier && rule.commandClass == commandClass
+                }))
+            }
+        }
     }
 
     private func makeSession(
@@ -172,4 +195,3 @@ final class OrchestratorSessionSelectorTests: XCTestCase {
         )
     }
 }
-
