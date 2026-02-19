@@ -9,6 +9,10 @@ protocol BuiltInToolServiceProtocol {
     /// Called before executing sensitive tools to get user confirmation.
     var confirmationHandler: ToolConfirmationHandler? { get set }
 
+    /// Human-readable label for the capability selection that produced
+    /// the most recently compiled tool schema list.
+    var selectedCapabilityLabel: String? { get }
+
     /// Returns summaries of non-baseline tools (name, description, category) for system prompt.
     var nonBaselineToolSummaries: [(name: String, description: String, category: ToolCategory)] { get }
 
@@ -26,6 +30,8 @@ protocol BuiltInToolServiceProtocol {
 }
 
 extension BuiltInToolServiceProtocol {
+    var selectedCapabilityLabel: String? { nil }
+
     func toolInfo(named name: String) -> ToolInfo? {
         allToolInfos.first { $0.name == name }
     }

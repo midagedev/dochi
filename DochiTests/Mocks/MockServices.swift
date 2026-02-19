@@ -216,6 +216,7 @@ final class MockKeychainService: KeychainServiceProtocol {
 @MainActor
 final class MockBuiltInToolService: BuiltInToolServiceProtocol {
     var confirmationHandler: ToolConfirmationHandler?
+    var selectedCapabilityLabel: String?
     var stubbedSchemas: [[String: Any]] = []
     var stubbedResult = ToolResult(toolCallId: "mock", content: "ok")
     var executeCallCount = 0
