@@ -989,6 +989,7 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var startSessionCallCount = 0
     var stopSessionCallCount = 0
     var restartSessionCallCount = 0
+    var openInTerminalCallCount = 0
     var sendCommandCallCount = 0
     var checkHealthCallCount = 0
     var checkAllHealthCallCount = 0
@@ -1052,6 +1053,13 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     func activeSession(for profileId: UUID) -> ExternalToolSession? {
         sessions.first { $0.profileId == profileId && $0.status != .dead }
+    }
+
+    func openInTerminal(sessionId: UUID) async throws {
+        openInTerminalCallCount += 1
+        guard sessions.contains(where: { $0.id == sessionId }) else {
+            throw ExternalToolError.sessionNotFound(sessionId)
+        }
     }
 
     func sendCommand(sessionId: UUID, command: String) async throws {

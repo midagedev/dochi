@@ -257,6 +257,8 @@ struct ExternalToolListView: View {
                         if let active = manager.activeSession(for: profile.id) {
                             selectedSessionId = active.id
                             selectedProfileId = nil
+                        } else {
+                            startErrorMessage = "세션이 즉시 종료되었습니다. 프로파일 설정을 확인해주세요."
                         }
                     } catch {
                         startErrorMessage = error.localizedDescription

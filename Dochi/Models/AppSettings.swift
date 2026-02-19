@@ -80,8 +80,18 @@ final class AppSettings {
             defaults.set(OperatingProfile.familyHomeAssistant.rawValue, forKey: "operatingProfile")
         }
 
+        // Repair invalid external terminal app values to safe default.
+        if let storedTerminalApp = defaults.string(forKey: "externalToolTerminalApp"),
+           ExternalTerminalApp(rawValue: storedTerminalApp) == nil {
+            defaults.set(ExternalTerminalApp.auto.rawValue, forKey: "externalToolTerminalApp")
+        }
+
         if OperatingProfile(rawValue: operatingProfile) == nil {
             operatingProfile = OperatingProfile.familyHomeAssistant.rawValue
+        }
+
+        if ExternalTerminalApp(rawValue: externalToolTerminalApp) == nil {
+            externalToolTerminalApp = ExternalTerminalApp.auto.rawValue
         }
 
         // Repair invalid avatar model values to safe default.
@@ -877,6 +887,10 @@ final class AppSettings {
 
     var externalToolSessionPrefix: String = UserDefaults.standard.string(forKey: "externalToolSessionPrefix") ?? "dochi-" {
         didSet { UserDefaults.standard.set(externalToolSessionPrefix, forKey: "externalToolSessionPrefix") }
+    }
+
+    var externalToolTerminalApp: String = UserDefaults.standard.string(forKey: "externalToolTerminalApp") ?? ExternalTerminalApp.auto.rawValue {
+        didSet { UserDefaults.standard.set(externalToolTerminalApp, forKey: "externalToolTerminalApp") }
     }
 
     // MARK: - Interest Discovery (K-3)

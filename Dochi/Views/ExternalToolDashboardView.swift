@@ -4,6 +4,7 @@ struct ExternalToolDashboardView: View {
     let manager: ExternalToolSessionManagerProtocol
     let session: ExternalToolSession
     let settings: AppSettings
+    let onSessionRestarted: (UUID) -> Void
     @State private var commandInput = ""
     @State private var isStarting = false
     @State private var showProfileEditor = false
@@ -124,6 +125,9 @@ struct ExternalToolDashboardView: View {
                         defer { isStarting = false }
                         do {
                             try await manager.restartSession(id: session.id)
+                            if let refreshed = manager.activeSession(for: session.profileId) {
+                                onSessionRestarted(refreshed.id)
+                            }
                             actionErrorMessage = nil
                         } catch {
                             actionErrorMessage = "재시작 실패: \(error.localizedDescription)"
@@ -137,6 +141,24 @@ struct ExternalToolDashboardView: View {
                 .foregroundStyle(.secondary)
                 .help("재시작")
                 .disabled(isStarting)
+
+                Button {
+                    Task { @MainActor in
+                        do {
+                            try await manager.openInTerminal(sessionId: session.id)
+                            actionErrorMessage = nil
+                        } catch {
+                            actionErrorMessage = "터미널 열기 실패: \(error.localizedDescription)"
+                        }
+                    }
+                } label: {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("터미널에서 열기")
+                .disabled(session.status == .dead)
 
                 Button {
                     showProfileEditor = true
