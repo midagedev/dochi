@@ -1330,6 +1330,18 @@ final class MockRuntimeBridgeService: RuntimeBridgeProtocol {
     var stopCallCount = 0
     var healthCallCount = 0
 
+    // Session stubs
+    var stubbedOpenResult: SessionOpenResult?
+    var stubbedSessionEvents: [BridgeEvent] = []
+    var stubbedInterruptResult: SessionInterruptResult?
+    var stubbedCloseResult: SessionCloseResult?
+
+    var openCallCount = 0
+    var runCallCount = 0
+    var interruptCallCount = 0
+    var closeCallCount = 0
+    var lastRunParams: SessionRunParams?
+
     func startRuntime() async throws {
         startCallCount += 1
         if let error = stubbedError { throw error }
@@ -1349,6 +1361,51 @@ final class MockRuntimeBridgeService: RuntimeBridgeProtocol {
             uptimeMs: 1000,
             activeSessions: 0,
             lastError: nil
+        )
+    }
+
+    func openSession(params: SessionOpenParams) async throws -> SessionOpenResult {
+        openCallCount += 1
+        if let error = stubbedError { throw error }
+        return stubbedOpenResult ?? SessionOpenResult(
+            sessionId: "mock-session",
+            sdkSessionId: "mock-sdk",
+            created: true
+        )
+    }
+
+    func runSession(params: SessionRunParams) -> AsyncThrowingStream<BridgeEvent, Error> {
+        runCallCount += 1
+        lastRunParams = params
+        let events = stubbedSessionEvents
+        let error = stubbedError
+        return AsyncThrowingStream { continuation in
+            if let error {
+                continuation.finish(throwing: error)
+                return
+            }
+            for event in events {
+                continuation.yield(event)
+            }
+            continuation.finish()
+        }
+    }
+
+    func interruptSession(sessionId: String) async throws -> SessionInterruptResult {
+        interruptCallCount += 1
+        if let error = stubbedError { throw error }
+        return stubbedInterruptResult ?? SessionInterruptResult(
+            interrupted: true,
+            sessionId: sessionId
+        )
+    }
+
+    func closeSession(sessionId: String) async throws -> SessionCloseResult {
+        closeCallCount += 1
+        if let error = stubbedError { throw error }
+        return stubbedCloseResult ?? SessionCloseResult(
+            closed: true,
+            sessionId: sessionId
         )
     }
 }
