@@ -1558,3 +1558,136 @@ final class MockMemoryPipelineService: MemoryPipelineProtocol {
         return currentProjections
     }
 }
+
+// MARK: - MockExecutionLeaseService (#290)
+
+@MainActor
+final class MockExecutionLeaseService: ExecutionLeaseServiceProtocol {
+    var leases: [UUID: ExecutionLease] = [:]
+    var conversationLeaseMap: [String: UUID] = [:]
+    var records: [SessionRoutingRecord] = []
+
+    var acquireCallCount = 0
+    var renewCallCount = 0
+    var releaseCallCount = 0
+    var reassignCallCount = 0
+    var expireCallCount = 0
+
+    var stubbedError: Error?
+    var lastAcquireConversationId: String?
+    var lastRequiredCapabilities: DeviceCapabilities?
+
+    private var nextDeviceId = UUID()
+
+    /// Set the device ID that will be assigned on the next acquireLease call.
+    func setNextDeviceId(_ id: UUID) {
+        nextDeviceId = id
+    }
+
+    func acquireLease(
+        workspaceId: UUID,
+        agentId: String,
+        conversationId: String,
+        requiredCapabilities: DeviceCapabilities?
+    ) async throws -> ExecutionLease {
+        acquireCallCount += 1
+        lastAcquireConversationId = conversationId
+        lastRequiredCapabilities = requiredCapabilities
+        if let error = stubbedError { throw error }
+
+        let lease = ExecutionLease(
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: conversationId,
+            assignedDeviceId: nextDeviceId
+        )
+        leases[lease.leaseId] = lease
+        conversationLeaseMap[conversationId] = lease.leaseId
+
+        let record = SessionRoutingRecord(
+            leaseId: lease.leaseId,
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: conversationId,
+            toDeviceId: nextDeviceId,
+            reason: .initialAssignment
+        )
+        records.append(record)
+        return lease
+    }
+
+    func renewLease(leaseId: UUID) throws -> ExecutionLease {
+        renewCallCount += 1
+        if let error = stubbedError { throw error }
+        guard var lease = leases[leaseId] else {
+            throw ExecutionLeaseError.leaseNotFound(leaseId)
+        }
+        lease.expiresAt = Date().addingTimeInterval(ExecutionLease.defaultTTL)
+        lease.renewedAt = Date()
+        leases[leaseId] = lease
+        return lease
+    }
+
+    func releaseLease(leaseId: UUID) throws {
+        releaseCallCount += 1
+        if let error = stubbedError { throw error }
+        guard var lease = leases[leaseId] else {
+            throw ExecutionLeaseError.leaseNotFound(leaseId)
+        }
+        lease.status = .released
+        leases[leaseId] = lease
+        conversationLeaseMap.removeValue(forKey: lease.conversationId)
+    }
+
+    func reassignLease(leaseId: UUID, reason: LeaseRoutingReason) throws -> ExecutionLease {
+        reassignCallCount += 1
+        if let error = stubbedError { throw error }
+        guard var oldLease = leases[leaseId] else {
+            throw ExecutionLeaseError.leaseNotFound(leaseId)
+        }
+        let previousDeviceId = oldLease.assignedDeviceId
+        oldLease.status = .reassigned
+        leases[leaseId] = oldLease
+
+        let newLease = ExecutionLease(
+            workspaceId: oldLease.workspaceId,
+            agentId: oldLease.agentId,
+            conversationId: oldLease.conversationId,
+            assignedDeviceId: nextDeviceId,
+            previousDeviceId: previousDeviceId
+        )
+        leases[newLease.leaseId] = newLease
+        conversationLeaseMap[oldLease.conversationId] = newLease.leaseId
+
+        let record = SessionRoutingRecord(
+            leaseId: newLease.leaseId,
+            workspaceId: oldLease.workspaceId,
+            agentId: oldLease.agentId,
+            conversationId: oldLease.conversationId,
+            fromDeviceId: previousDeviceId,
+            toDeviceId: nextDeviceId,
+            reason: reason
+        )
+        records.append(record)
+        return newLease
+    }
+
+    func activeLease(for conversationId: String) -> ExecutionLease? {
+        guard let leaseId = conversationLeaseMap[conversationId],
+              let lease = leases[leaseId],
+              lease.status == .active,
+              !lease.isExpired else {
+            return nil
+        }
+        return lease
+    }
+
+    func routingHistory(for conversationId: String) -> [SessionRoutingRecord] {
+        records.filter { $0.conversationId == conversationId }
+            .sorted { $0.timestamp < $1.timestamp }
+    }
+
+    func expireStaleLeases() {
+        expireCallCount += 1
+    }
+}
