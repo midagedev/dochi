@@ -14,6 +14,7 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
 
     var lastEvaluatedTypes: [AutoTaskType] = []
     var lastOnlyWasteRisk: Bool?
+    var lastGitInsights: [GitRepositoryInsight]?
     var evaluateAndQueueAutoTasksResult = 0
 
     func addSubscription(_ plan: SubscriptionPlan) async {
@@ -51,7 +52,12 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
         return results
     }
 
-    func calculateRiskLevel(usageRatio: Double, remainingRatio: Double) -> WasteRiskLevel {
+    func calculateRiskLevel(
+        usageRatio: Double,
+        remainingRatio: Double,
+        projectedUsageRatio: Double?,
+        reserveBufferRatio: Double
+    ) -> WasteRiskLevel {
         if usageRatio < 0.5 && remainingRatio < 0.15 {
             return .wasteRisk
         }
@@ -64,18 +70,30 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
         return .normal
     }
 
-    func queueAutoTask(type: AutoTaskType, subscriptionId: UUID) async {
+    func queueAutoTask(
+        type: AutoTaskType,
+        subscriptionId: UUID,
+        dedupeKey: String?,
+        summary: String
+    ) async {
         queueAutoTaskCallCount += 1
         autoTaskRecords.append(AutoTaskRecord(
             taskType: type,
-            subscriptionId: subscriptionId
+            subscriptionId: subscriptionId,
+            dedupeKey: dedupeKey,
+            summary: summary
         ))
     }
 
-    func evaluateAndQueueAutoTasks(enabledTypes: [AutoTaskType], onlyWasteRisk: Bool) async -> Int {
+    func evaluateAndQueueAutoTasks(
+        enabledTypes: [AutoTaskType],
+        onlyWasteRisk: Bool,
+        gitInsights: [GitRepositoryInsight]?
+    ) async -> Int {
         evaluateAndQueueAutoTasksCallCount += 1
         lastEvaluatedTypes = enabledTypes
         lastOnlyWasteRisk = onlyWasteRisk
+        lastGitInsights = gitInsights
         return evaluateAndQueueAutoTasksResult
     }
 }

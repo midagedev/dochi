@@ -39,6 +39,9 @@ struct ContentView: View {
     // UX-10: 빠른 모델 팝오버
     @State private var showQuickModelPopover = false
 
+    // Tool detail logs (chat-minimal policy)
+    @State private var showToolLogs = false
+
     // G-3: 동기화
     @State private var showSyncConflictSheet = false
     @State private var showInitialSyncWizard = false
@@ -62,6 +65,7 @@ struct ContentView: View {
     // K-4: 외부 도구
     @State private var selectedToolSessionId: UUID?
     @State private var selectedToolProfileId: UUID?
+    @State private var isStartingToolSession = false
 
     var body: some View {
         mainContent
@@ -206,6 +210,12 @@ struct ContentView: View {
                     )
                 }
             }
+            .sheet(isPresented: $showToolLogs) {
+                ToolLogsView(
+                    conversations: viewModel.conversations,
+                    selectedConversationID: viewModel.currentConversation?.id
+                )
+            }
             .sheet(isPresented: $showDelegationMonitor) {
                 if let manager = viewModel.delegationManager {
                     DelegationMonitorView(delegationManager: manager)
@@ -347,6 +357,14 @@ struct ContentView: View {
                                 }
                                 .help("메모리 인스펙터 (⌘I)")
                                 .keyboardShortcut("i", modifiers: .command)
+
+                                Button {
+                                    showToolLogs = true
+                                } label: {
+                                    Label("툴 로그", systemImage: "list.bullet.rectangle.portrait")
+                                }
+                                .help("툴 호출 상세 로그")
+                                .disabled(viewModel.conversations.isEmpty)
                             }
                         }
                     }
@@ -614,38 +632,73 @@ struct ContentView: View {
 
     @ViewBuilder
     private var toolsDetailView: some View {
-        if let manager = viewModel.externalToolManager {
-            if let sessionId = selectedToolSessionId,
-               let session = manager.sessions.first(where: { $0.id == sessionId }) {
-                ExternalToolDashboardView(
-                    manager: manager,
-                    session: session,
-                    settings: viewModel.settings
-                )
-            } else if let profileId = selectedToolProfileId {
-                // Profile selected but no session — show start prompt
-                VStack(spacing: 16) {
-                    Spacer()
-                    let profile = manager.profiles.first(where: { $0.id == profileId })
-                    Image(systemName: profile?.icon ?? "terminal.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.tertiary)
-                    Text(profile?.name ?? "")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                    Button("세션 시작") {
-                        Task { try? await manager.startSession(profileId: profileId) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
-                    Spacer()
+        VStack(spacing: 0) {
+            if let error = viewModel.errorMessage {
+                ErrorBannerView(message: error) {
+                    viewModel.errorMessage = nil
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            if let manager = viewModel.externalToolManager {
+                if let sessionId = selectedToolSessionId,
+                   let session = manager.sessions.first(where: { $0.id == sessionId }) {
+                    ExternalToolDashboardView(
+                        manager: manager,
+                        session: session,
+                        settings: viewModel.settings,
+                        onSessionRestarted: { refreshedSessionId in
+                            selectedToolSessionId = refreshedSessionId
+                            selectedToolProfileId = nil
+                        }
+                    )
+                } else if let profileId = selectedToolProfileId {
+                    // Profile selected but no session — show start prompt
+                    VStack(spacing: 16) {
+                        Spacer()
+                        let profile = manager.profiles.first(where: { $0.id == profileId })
+                        Image(systemName: profile?.icon ?? "terminal.fill")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.tertiary)
+                        Text(profile?.name ?? "")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                        Text("작업 위치: \(profile?.workingDirectory ?? "~")")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                        if isStartingToolSession {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Button("세션 시작") {
+                            Task { @MainActor in
+                                isStartingToolSession = true
+                                defer { isStartingToolSession = false }
+                                do {
+                                    try await manager.startSession(profileId: profileId)
+                                    if let active = manager.activeSession(for: profileId) {
+                                        viewModel.errorMessage = nil
+                                        selectedToolSessionId = active.id
+                                        selectedToolProfileId = nil
+                                    } else {
+                                        viewModel.errorMessage = "세션이 즉시 종료되었습니다. 프로파일 설정을 확인해주세요."
+                                    }
+                                } catch {
+                                    viewModel.errorMessage = "세션 시작 실패: \(error.localizedDescription)"
+                                }
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                        .disabled(isStartingToolSession)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ExternalToolEmptyDashboardView()
+                }
             } else {
                 ExternalToolEmptyDashboardView()
             }
-        } else {
-            ExternalToolEmptyDashboardView()
         }
     }
 
@@ -898,7 +951,10 @@ struct ContentView: View {
                 Task { await manager.checkAllHealth() }
             }
         case .openShortcutsApp:
-            NSWorkspace.shared.open(URL(string: "shortcuts://")!)
+            guard let shortcutsURL = URL(string: "shortcuts://"), NSWorkspace.shared.open(shortcutsURL) else {
+                viewModel.errorMessage = UIFeedbackMessageBuilder.appOpenFailure(appName: "단축어 앱")
+                return
+            }
         case .custom(let id):
             if id.hasPrefix("switchUser-") {
                 let userIdStr = String(id.dropFirst("switchUser-".count))
@@ -1729,11 +1785,18 @@ struct InputBarView: View {
         panel.begin { response in
             guard response == .OK else { return }
             let urls = Array(panel.urls.prefix(remaining))
+            var failedNames: [String] = []
             for url in urls {
-                if let data = try? Data(contentsOf: url) {
+                do {
+                    let data = try Data(contentsOf: url)
                     let fileName = url.lastPathComponent
                     viewModel.addImageFromData(data, fileName: fileName)
+                } catch {
+                    failedNames.append(url.lastPathComponent)
                 }
+            }
+            if !failedNames.isEmpty {
+                viewModel.errorMessage = UIFeedbackMessageBuilder.imageAttachmentFailure(failedNames: failedNames)
             }
         }
     }
@@ -1743,6 +1806,7 @@ struct InputBarView: View {
 
         // Check for image data on clipboard
         guard let types = pasteboard.types else { return false }
+        var failedNames: [String] = []
 
         // Try to get image from pasteboard
         let imageTypes: [NSPasteboard.PasteboardType] = [.tiff, .png]
@@ -1752,6 +1816,7 @@ struct InputBarView: View {
                     viewModel.addImage(image, fileName: "clipboard")
                     return true
                 }
+                failedNames.append("클립보드 이미지")
             }
         }
 
@@ -1760,13 +1825,19 @@ struct InputBarView: View {
             for url in urls {
                 let ext = url.pathExtension.lowercased()
                 guard ImageAttachment.supportedExtensions.contains(ext) else { continue }
-                if let data = try? Data(contentsOf: url) {
+                do {
+                    let data = try Data(contentsOf: url)
                     viewModel.addImageFromData(data, fileName: url.lastPathComponent)
                     return true
+                } catch {
+                    failedNames.append(url.lastPathComponent)
                 }
             }
         }
 
+        if !failedNames.isEmpty {
+            viewModel.errorMessage = UIFeedbackMessageBuilder.imageAttachmentFailure(failedNames: failedNames)
+        }
         return false
     }
 
@@ -1774,10 +1845,14 @@ struct InputBarView: View {
         for provider in providers {
             // Try loading as NSImage
             if provider.canLoadObject(ofClass: NSImage.self) {
-                _ = provider.loadObject(ofClass: NSImage.self) { image, _ in
+                _ = provider.loadObject(ofClass: NSImage.self) { image, error in
                     if let nsImage = image as? NSImage {
                         Task { @MainActor in
                             viewModel.addImage(nsImage, fileName: "dropped")
+                        }
+                    } else if error != nil {
+                        Task { @MainActor in
+                            viewModel.errorMessage = UIFeedbackMessageBuilder.imageAttachmentFailure(failedNames: ["드롭된 이미지"])
                         }
                     }
                 }
@@ -1789,9 +1864,14 @@ struct InputBarView: View {
                        let url = URL(dataRepresentation: data, relativeTo: nil) {
                         let ext = url.pathExtension.lowercased()
                         guard ImageAttachment.supportedExtensions.contains(ext) else { return }
-                        if let fileData = try? Data(contentsOf: url) {
+                        do {
+                            let fileData = try Data(contentsOf: url)
                             Task { @MainActor in
                                 viewModel.addImageFromData(fileData, fileName: url.lastPathComponent)
+                            }
+                        } catch {
+                            Task { @MainActor in
+                                viewModel.errorMessage = UIFeedbackMessageBuilder.imageAttachmentFailure(failedNames: [url.lastPathComponent])
                             }
                         }
                     }

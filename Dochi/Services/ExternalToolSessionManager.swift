@@ -19,6 +19,8 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
     func startSession(profileId: UUID) async throws
     func stopSession(id: UUID) async
     func restartSession(id: UUID) async throws
+    func activeSession(for profileId: UUID) -> ExternalToolSession?
+    func openInTerminal(sessionId: UUID) async throws
 
     // Work dispatch
     func sendCommand(sessionId: UUID, command: String) async throws
@@ -94,6 +96,8 @@ enum ExternalToolError: LocalizedError {
     case invalidRepositoryPath(String)
     case repositoryNotFound(UUID)
     case repositoryOperationFailed(String)
+    case commandDispatchFailed(String)
+    case externalTerminalLaunchFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -113,6 +117,10 @@ enum ExternalToolError: LocalizedError {
             return "저장소를 찾을 수 없습니다: \(id)"
         case .repositoryOperationFailed(let reason):
             return "저장소 작업 실패: \(reason)"
+        case .commandDispatchFailed(let reason):
+            return "명령 전송 실패: \(reason)"
+        case .externalTerminalLaunchFailed(let reason):
+            return "터미널 열기 실패: \(reason)"
         }
     }
 }
@@ -376,6 +384,18 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
         let sessionName = tmuxSessionName(for: profile)
 
+        // If tmux session already exists (e.g. app restart), attach instead of failing.
+        if await tmuxSessionExists(sessionName, profile: profile) {
+            let session = Self.reuseOrCreateSessionEntry(
+                sessions: &sessions,
+                profileId: profileId,
+                tmuxSessionName: sessionName
+            )
+            Log.app.info("Attached to existing external tool session: \(profile.name) (\(sessionName))")
+            await checkHealth(sessionId: session.id)
+            return
+        }
+
         // Build tmux new-session command
         let fullCommand = ([profile.command] + profile.arguments).joined(separator: " ")
         let tmuxArgs: [String]
@@ -384,24 +404,34 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             let remoteCmd = "\(settings.externalToolTmuxPath) new-session -d -s \(sessionName) -c \(profile.workingDirectory) '\(fullCommand)'"
             tmuxArgs = ["ssh"] + sshKeyArgs + ["-p", "\(ssh.port)", "\(ssh.user)@\(ssh.host)", remoteCmd]
         } else {
-            tmuxArgs = [settings.externalToolTmuxPath, "new-session", "-d", "-s", sessionName, "-c", profile.workingDirectory, fullCommand]
+            let localWorkingDirectory = try Self.resolveLocalWorkingDirectory(profile.workingDirectory)
+            tmuxArgs = [settings.externalToolTmuxPath, "new-session", "-d", "-s", sessionName, "-c", localWorkingDirectory, fullCommand]
         }
 
-        let (_, exitCode) = await runProcess(tmuxArgs)
+        let (output, exitCode) = await runProcess(tmuxArgs)
         guard exitCode == 0 else {
-            throw ExternalToolError.sessionStartFailed("tmux exit code: \(exitCode)")
+            let reason = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if reason.localizedCaseInsensitiveContains("duplicate session") {
+                let session = Self.reuseOrCreateSessionEntry(
+                    sessions: &sessions,
+                    profileId: profileId,
+                    tmuxSessionName: sessionName
+                )
+                Log.app.info("Reused existing external tool session after duplicate error: \(profile.name) (\(sessionName))")
+                await checkHealth(sessionId: session.id)
+                return
+            }
+            if reason.isEmpty {
+                throw ExternalToolError.sessionStartFailed("tmux exit code: \(exitCode)")
+            }
+            throw ExternalToolError.sessionStartFailed(reason)
         }
 
-        // Remove any dead session for this profile
-        sessions.removeAll { $0.profileId == profileId && $0.status == .dead }
-
-        let session = ExternalToolSession(
+        let session = Self.reuseOrCreateSessionEntry(
+            sessions: &sessions,
             profileId: profileId,
-            tmuxSessionName: sessionName,
-            status: .unknown,
-            startedAt: Date()
+            tmuxSessionName: sessionName
         )
-        sessions.append(session)
         Log.app.info("Started external tool session: \(profile.name) (\(sessionName))")
 
         // Initial health check
@@ -436,6 +466,52 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         try await startSession(profileId: profileId)
     }
 
+    func activeSession(for profileId: UUID) -> ExternalToolSession? {
+        sessions.first { $0.profileId == profileId && $0.status != .dead }
+    }
+
+    func openInTerminal(sessionId: UUID) async throws {
+        guard let session = sessions.first(where: { $0.id == sessionId }) else {
+            throw ExternalToolError.sessionNotFound(sessionId)
+        }
+        guard let profile = profiles.first(where: { $0.id == session.profileId }) else {
+            throw ExternalToolError.profileNotFound(session.profileId)
+        }
+
+        let command = Self.buildAttachShellCommand(
+            tmuxPath: settings.externalToolTmuxPath,
+            sessionName: session.tmuxSessionName,
+            profile: profile
+        )
+        let preference = ExternalTerminalApp(rawValue: settings.externalToolTerminalApp) ?? .auto
+        let terminalApp = Self.resolveExternalTerminalApp(preference: preference)
+
+        let args: [String]
+        switch terminalApp {
+        case .terminal:
+            args = Self.buildTerminalAppleScriptArguments(command: command)
+        case .ghostty:
+            if !Self.ghosttyAppExists() {
+                throw ExternalToolError.externalTerminalLaunchFailed("Ghostty 앱을 찾을 수 없습니다. /Applications 또는 ~/Applications에 설치하세요.")
+            }
+            args = Self.buildGhosttyOpenArguments(
+                command: command,
+                shellPath: settings.terminalShellPath
+            )
+        case .auto:
+            args = Self.buildTerminalAppleScriptArguments(command: command)
+        }
+
+        let (output, exitCode) = await runProcess(args)
+        guard exitCode == 0 else {
+            let reason = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if reason.isEmpty {
+                throw ExternalToolError.externalTerminalLaunchFailed("외장 터미널 실행 실패 (exit code: \(exitCode))")
+            }
+            throw ExternalToolError.externalTerminalLaunchFailed(reason)
+        }
+    }
+
     // MARK: - Work Dispatch
 
     func sendCommand(sessionId: UUID, command: String) async throws {
@@ -454,9 +530,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             sendKeysArgs = [settings.externalToolTmuxPath, "send-keys", "-t", session.tmuxSessionName, command, "Enter"]
         }
 
-        let (_, exitCode) = await runProcess(sendKeysArgs)
+        let (output, exitCode) = await runProcess(sendKeysArgs)
         if exitCode != 0 {
             Log.app.warning("send-keys failed for session \(session.tmuxSessionName)")
+            let reason = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if reason.isEmpty {
+                throw ExternalToolError.commandDispatchFailed("send-keys exit code: \(exitCode)")
+            }
+            throw ExternalToolError.commandDispatchFailed(reason)
         } else {
             session.status = .busy
             session.lastActivityText = String(command.prefix(80))
@@ -613,6 +694,142 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             .replacingOccurrences(of: " ", with: "-")
             .filter { $0.isLetter || $0.isNumber || $0 == "-" }
         return "\(prefix)\(sanitized)"
+    }
+
+    nonisolated static func resolveLocalWorkingDirectory(
+        _ rawPath: String,
+        homeDirectoryPath: String = NSHomeDirectory(),
+        fileManager: FileManager = .default
+    ) throws -> String {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = trimmed.isEmpty ? "~" : trimmed
+
+        let resolvedPath: String
+        if candidate == "~" {
+            resolvedPath = homeDirectoryPath
+        } else if candidate.hasPrefix("~/") {
+            resolvedPath = URL(fileURLWithPath: homeDirectoryPath)
+                .appendingPathComponent(String(candidate.dropFirst(2)))
+                .path
+        } else {
+            resolvedPath = candidate
+        }
+
+        let standardizedPath = URL(fileURLWithPath: resolvedPath).standardizedFileURL.path
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: standardizedPath, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw ExternalToolError.sessionStartFailed("작업 디렉터리를 찾을 수 없습니다: \(standardizedPath)")
+        }
+        return standardizedPath
+    }
+
+    nonisolated static func buildAttachShellCommand(
+        tmuxPath: String,
+        sessionName: String,
+        profile: ExternalToolProfile
+    ) -> String {
+        let quotedTmux = shellQuote(tmuxPath)
+        let quotedSession = shellQuote(sessionName)
+
+        if profile.isRemote, let ssh = profile.sshConfig {
+            let remoteAttach = "\(quotedTmux) attach -t \(quotedSession)"
+            var parts: [String] = ["ssh", "-p", "\(ssh.port)"]
+            if let keyPath = ssh.keyPath, !keyPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("-i")
+                parts.append(shellQuote(keyPath))
+            }
+            parts.append("\(ssh.user)@\(ssh.host)")
+            parts.append(shellQuote(remoteAttach))
+            return parts.joined(separator: " ")
+        }
+
+        return "\(quotedTmux) attach -t \(quotedSession)"
+    }
+
+    nonisolated static func resolveExternalTerminalApp(
+        preference: ExternalTerminalApp,
+        fileManager: FileManager = .default,
+        homeDirectoryPath: String = NSHomeDirectory(),
+        systemApplicationsPath: String = "/Applications"
+    ) -> ExternalTerminalApp {
+        switch preference {
+        case .terminal, .ghostty:
+            return preference
+        case .auto:
+            return ghosttyAppExists(
+                fileManager: fileManager,
+                homeDirectoryPath: homeDirectoryPath,
+                systemApplicationsPath: systemApplicationsPath
+            ) ? .ghostty : .terminal
+        }
+    }
+
+    nonisolated static func ghosttyAppExists(
+        fileManager: FileManager = .default,
+        homeDirectoryPath: String = NSHomeDirectory(),
+        systemApplicationsPath: String = "/Applications"
+    ) -> Bool {
+        let candidates = [
+            URL(fileURLWithPath: systemApplicationsPath).appendingPathComponent("Ghostty.app").path,
+            URL(fileURLWithPath: homeDirectoryPath).appendingPathComponent("Applications/Ghostty.app").path
+        ]
+        return candidates.contains { fileManager.fileExists(atPath: $0) }
+    }
+
+    nonisolated static func buildTerminalAppleScriptArguments(command: String) -> [String] {
+        let escaped = escapeAppleScriptString(command)
+        return [
+            "/usr/bin/osascript",
+            "-e", "tell application \"Terminal\" to activate",
+            "-e", "tell application \"Terminal\" to do script \"\(escaped)\""
+        ]
+    }
+
+    nonisolated static func buildGhosttyOpenArguments(command: String, shellPath: String) -> [String] {
+        [
+            "/usr/bin/open",
+            "-na", "Ghostty.app",
+            "--args",
+            "-e", shellPath,
+            "-lc", command
+        ]
+    }
+
+    nonisolated static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+
+    nonisolated static func escapeAppleScriptString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    @MainActor
+    static func reuseOrCreateSessionEntry(
+        sessions: inout [ExternalToolSession],
+        profileId: UUID,
+        tmuxSessionName: String,
+        now: Date = Date()
+    ) -> ExternalToolSession {
+        sessions.removeAll { $0.profileId == profileId && $0.status == .dead }
+
+        if let existing = sessions.first(where: { $0.profileId == profileId && $0.tmuxSessionName == tmuxSessionName }) {
+            existing.status = .unknown
+            if existing.startedAt == nil {
+                existing.startedAt = now
+            }
+            return existing
+        }
+
+        let session = ExternalToolSession(
+            profileId: profileId,
+            tmuxSessionName: tmuxSessionName,
+            status: .unknown,
+            startedAt: now
+        )
+        sessions.append(session)
+        return session
     }
 
     private func matchesPattern(_ text: String, pattern: String) -> Bool {

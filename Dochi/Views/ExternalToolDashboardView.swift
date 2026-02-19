@@ -4,9 +4,11 @@ struct ExternalToolDashboardView: View {
     let manager: ExternalToolSessionManagerProtocol
     let session: ExternalToolSession
     let settings: AppSettings
+    let onSessionRestarted: (UUID) -> Void
     @State private var commandInput = ""
     @State private var isStarting = false
     @State private var showProfileEditor = false
+    @State private var actionErrorMessage: String?
 
     private var profile: ExternalToolProfile? {
         manager.profiles.first(where: { $0.id == session.profileId })
@@ -34,6 +36,10 @@ struct ExternalToolDashboardView: View {
             // Waiting banner
             if session.status == .waiting {
                 waitingBanner
+            }
+
+            if let actionErrorMessage {
+                errorBanner(message: actionErrorMessage)
             }
 
             // Output area
@@ -114,10 +120,18 @@ struct ExternalToolDashboardView: View {
                 }
 
                 Button {
-                    isStarting = true
-                    Task {
-                        try? await manager.restartSession(id: session.id)
-                        isStarting = false
+                    Task { @MainActor in
+                        isStarting = true
+                        defer { isStarting = false }
+                        do {
+                            try await manager.restartSession(id: session.id)
+                            if let refreshed = manager.activeSession(for: session.profileId) {
+                                onSessionRestarted(refreshed.id)
+                            }
+                            actionErrorMessage = nil
+                        } catch {
+                            actionErrorMessage = "재시작 실패: \(error.localizedDescription)"
+                        }
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise.circle")
@@ -126,6 +140,25 @@ struct ExternalToolDashboardView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .help("재시작")
+                .disabled(isStarting)
+
+                Button {
+                    Task { @MainActor in
+                        do {
+                            try await manager.openInTerminal(sessionId: session.id)
+                            actionErrorMessage = nil
+                        } catch {
+                            actionErrorMessage = error.localizedDescription
+                        }
+                    }
+                } label: {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("터미널에서 열기")
+                .disabled(session.status == .dead)
 
                 Button {
                     showProfileEditor = true
@@ -239,12 +272,44 @@ struct ExternalToolDashboardView: View {
         .padding(.vertical, 8)
     }
 
+    @ViewBuilder
+    private func errorBanner(message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.red)
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundStyle(.red)
+                .lineLimit(2)
+            Spacer()
+            Button {
+                actionErrorMessage = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.08))
+    }
+
     private func sendCommand() {
         let text = commandInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        let previousInput = commandInput
         commandInput = ""
-        Task {
-            try? await manager.sendCommand(sessionId: session.id, command: text)
+        Task { @MainActor in
+            do {
+                try await manager.sendCommand(sessionId: session.id, command: text)
+                actionErrorMessage = nil
+            } catch {
+                commandInput = previousInput
+                actionErrorMessage = error.localizedDescription
+            }
         }
     }
 }

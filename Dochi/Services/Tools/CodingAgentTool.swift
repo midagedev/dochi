@@ -89,6 +89,11 @@ final class CodingRunTaskTool: BuiltInToolProtocol {
     let category: ToolCategory = .restricted
     let description = "Claude Code 또는 Codex CLI로 코딩 작업을 실행합니다. 디렉토리에서 코드를 생성/수정/리뷰합니다."
     let isBaseline = false
+    private let sessionContext: SessionContext?
+
+    init(sessionContext: SessionContext? = nil) {
+        self.sessionContext = sessionContext
+    }
 
     var inputSchema: [String: Any] {
         [
@@ -103,7 +108,7 @@ final class CodingRunTaskTool: BuiltInToolProtocol {
                 ],
                 "timeout_seconds": ["type": "integer", "description": "타임아웃 (초, 기본: 300)"],
             ] as [String: Any],
-            "required": ["task", "work_dir"],
+            "required": ["task"],
         ]
     }
 
@@ -111,8 +116,10 @@ final class CodingRunTaskTool: BuiltInToolProtocol {
         guard let task = arguments["task"] as? String, !task.isEmpty else {
             return ToolResult(toolCallId: "", content: "task 파라미터가 필요합니다.", isError: true)
         }
-        guard let workDir = arguments["work_dir"] as? String, !workDir.isEmpty else {
-            return ToolResult(toolCallId: "", content: "work_dir 파라미터가 필요합니다.", isError: true)
+        let workDir = (arguments["work_dir"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? sessionContext?.currentRepoPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let workDir, !workDir.isEmpty else {
+            return ToolResult(toolCallId: "", content: "work_dir 파라미터가 필요합니다. 프로젝트 컨텍스트의 repo 경로를 설정하거나 work_dir를 전달해주세요.", isError: true)
         }
 
         let expandedDir = NSString(string: workDir).expandingTildeInPath
@@ -160,6 +167,11 @@ final class CodingReviewTool: BuiltInToolProtocol {
     let category: ToolCategory = .sensitive
     let description = "현재 디렉토리의 변경사항을 코드 리뷰합니다."
     let isBaseline = false
+    private let sessionContext: SessionContext?
+
+    init(sessionContext: SessionContext? = nil) {
+        self.sessionContext = sessionContext
+    }
 
     var inputSchema: [String: Any] {
         [
@@ -168,16 +180,21 @@ final class CodingReviewTool: BuiltInToolProtocol {
                 "work_dir": ["type": "string", "description": "저장소 경로"],
                 "focus": ["type": "string", "description": "리뷰 초점 (예: 보안, 성능, 코드스타일)"],
             ] as [String: Any],
-            "required": ["work_dir"],
+            "required": [],
         ]
     }
 
     func execute(arguments: [String: Any]) async -> ToolResult {
-        guard let workDir = arguments["work_dir"] as? String, !workDir.isEmpty else {
-            return ToolResult(toolCallId: "", content: "work_dir 파라미터가 필요합니다.", isError: true)
+        let workDir = (arguments["work_dir"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? sessionContext?.currentRepoPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let workDir, !workDir.isEmpty else {
+            return ToolResult(toolCallId: "", content: "work_dir 파라미터가 필요합니다. 프로젝트 컨텍스트의 repo 경로를 설정하거나 work_dir를 전달해주세요.", isError: true)
         }
 
         let expandedDir = NSString(string: workDir).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: expandedDir) else {
+            return ToolResult(toolCallId: "", content: "디렉토리를 찾을 수 없습니다: \(workDir)", isError: true)
+        }
         let focus = arguments["focus"] as? String ?? "전반적인 코드 품질"
 
         guard let cliPath = findCLI("claude") else {

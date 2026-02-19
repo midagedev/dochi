@@ -48,7 +48,37 @@ struct ResourceUtilization: Sendable {
     let usedTokens: Int
     let daysInPeriod: Int
     let daysRemaining: Int
+    let velocityTokensPerDay: Double
+    let projectedUsageRatio: Double
+    let reserveBufferRatio: Double
     let riskLevel: WasteRiskLevel
+
+    init(
+        subscription: SubscriptionPlan,
+        usedTokens: Int,
+        daysInPeriod: Int,
+        daysRemaining: Int,
+        velocityTokensPerDay: Double = 0,
+        projectedUsageRatio: Double? = nil,
+        reserveBufferRatio: Double = 0.08,
+        riskLevel: WasteRiskLevel
+    ) {
+        self.subscription = subscription
+        self.usedTokens = usedTokens
+        self.daysInPeriod = daysInPeriod
+        self.daysRemaining = daysRemaining
+        self.velocityTokensPerDay = velocityTokensPerDay
+        self.reserveBufferRatio = reserveBufferRatio
+
+        let baseUsageRatio: Double
+        if let limit = subscription.monthlyTokenLimit, limit > 0 {
+            baseUsageRatio = Double(usedTokens) / Double(limit)
+        } else {
+            baseUsageRatio = 0
+        }
+        self.projectedUsageRatio = projectedUsageRatio ?? baseUsageRatio
+        self.riskLevel = riskLevel
+    }
 
     var usageRatio: Double {
         guard let limit = subscription.monthlyTokenLimit, limit > 0 else { return 0 }
@@ -69,6 +99,10 @@ struct ResourceUtilization: Sendable {
         guard let limit = subscription.monthlyTokenLimit, limit > 0 else { return 0 }
         let remaining = max(0, limit - usedTokens)
         return (Double(remaining) / Double(limit)) * 100
+    }
+
+    var projectedRemainingPercent: Double {
+        max(0, (1.0 - projectedUsageRatio) * 100)
     }
 }
 
@@ -97,6 +131,7 @@ enum AutoTaskType: String, Codable, CaseIterable, Sendable {
     case memoryCleanup = "memory_cleanup"
     case documentSummary = "document_summary"
     case kanbanCleanup = "kanban_cleanup"
+    case gitScanReview = "git_scan_review"
 
     var displayName: String {
         switch self {
@@ -104,6 +139,7 @@ enum AutoTaskType: String, Codable, CaseIterable, Sendable {
         case .memoryCleanup: return "메모리 정리"
         case .documentSummary: return "문서 요약"
         case .kanbanCleanup: return "칸반 정리"
+        case .gitScanReview: return "Git 스캔 리뷰"
         }
     }
 
@@ -113,6 +149,7 @@ enum AutoTaskType: String, Codable, CaseIterable, Sendable {
         case .memoryCleanup: return "brain.head.profile"
         case .documentSummary: return "doc.text"
         case .kanbanCleanup: return "rectangle.3.group"
+        case .gitScanReview: return "point.3.connected.trianglepath.dotted"
         }
     }
 }
@@ -124,6 +161,7 @@ struct AutoTaskRecord: Codable, Sendable, Identifiable {
     let taskType: AutoTaskType
     let subscriptionId: UUID
     let executedAt: Date
+    let dedupeKey: String?
     let tokensUsed: Int
     let summary: String
 
@@ -132,6 +170,7 @@ struct AutoTaskRecord: Codable, Sendable, Identifiable {
         taskType: AutoTaskType,
         subscriptionId: UUID,
         executedAt: Date = Date(),
+        dedupeKey: String? = nil,
         tokensUsed: Int = 0,
         summary: String = ""
     ) {
@@ -139,6 +178,7 @@ struct AutoTaskRecord: Codable, Sendable, Identifiable {
         self.taskType = taskType
         self.subscriptionId = subscriptionId
         self.executedAt = executedAt
+        self.dedupeKey = dedupeKey
         self.tokensUsed = tokensUsed
         self.summary = summary
     }

@@ -322,6 +322,8 @@ private struct CloudSyncTabView: View {
     var syncEngine: SyncEngine?
 
     @State private var showConflictSheet = false
+    @State private var isLegacySyncing = false
+    @State private var legacySyncStatus: String?
 
     var body: some View {
         if let service = supabaseService, service.authState.isSignedIn {
@@ -568,18 +570,39 @@ private struct CloudSyncTabView: View {
                 .buttonStyle(.bordered)
                 .disabled(engine.syncState == .syncing)
             } else {
-                Button {
-                    Task {
-                        try? await service.syncContext()
-                        try? await service.syncConversations()
+                VStack(alignment: .leading, spacing: 4) {
+                    Button {
+                        Task { @MainActor in
+                            isLegacySyncing = true
+                            defer { isLegacySyncing = false }
+                            do {
+                                try await service.syncContext()
+                                try await service.syncConversations()
+                                legacySyncStatus = "동기화 완료"
+                            } catch {
+                                legacySyncStatus = "동기화 실패: \(error.localizedDescription)"
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isLegacySyncing {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            Text("수동 동기화")
+                        }
                     }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                        Text("수동 동기화")
+                    .buttonStyle(.bordered)
+                    .disabled(isLegacySyncing)
+
+                    if let legacySyncStatus {
+                        Text(legacySyncStatus)
+                            .font(.system(size: 11))
+                            .foregroundStyle(legacySyncStatus.contains("실패") ? .red : .secondary)
                     }
                 }
-                .buttonStyle(.bordered)
             }
 
             Spacer()

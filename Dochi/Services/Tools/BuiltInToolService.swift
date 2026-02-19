@@ -209,11 +209,11 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(WorkflowHistoryTool())
 
         // Git (conditional, safe/restricted)
-        registry.register(GitStatusTool())
-        registry.register(GitLogTool())
-        registry.register(GitDiffTool())
-        registry.register(GitCommitTool())
-        registry.register(GitBranchTool())
+        registry.register(GitStatusTool(sessionContext: sessionContext))
+        registry.register(GitLogTool(sessionContext: sessionContext))
+        registry.register(GitDiffTool(sessionContext: sessionContext))
+        registry.register(GitCommitTool(sessionContext: sessionContext))
+        registry.register(GitBranchTool(sessionContext: sessionContext))
 
         // GitHub (conditional, safe/sensitive)
         registry.register(GitHubListIssuesTool())
@@ -234,10 +234,8 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.register(AgentDelegationStatusTool(delegationManager: delegationManager))
 
         // Coding agent (conditional, restricted/sensitive)
-        registry.register(CodingRunTaskTool())
-        registry.register(CodingReviewTool())
-        registry.register(CodexDesktopActivateTool())
-        registry.register(CodexDesktopSendPromptTool())
+        registry.register(CodingRunTaskTool(sessionContext: sessionContext))
+        registry.register(CodingReviewTool(sessionContext: sessionContext))
 
         // Coding session management (conditional, safe/restricted)
         let codingSessionManager = CodingSessionManager()

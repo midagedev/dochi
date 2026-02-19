@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ShortcutsSettingsView: View {
     @State private var executionLogs: [ShortcutExecutionLog] = []
+    @State private var launchErrorMessage: String?
 
     var body: some View {
         Form {
@@ -16,6 +17,23 @@ struct ShortcutsSettingsView: View {
         .onAppear {
             loadLogs()
         }
+        .alert(
+            "앱 열기 실패",
+            isPresented: Binding(
+                get: { launchErrorMessage != nil },
+                set: { newValue in
+                    if !newValue { launchErrorMessage = nil }
+                }
+            ),
+            actions: {
+                Button("확인", role: .cancel) {
+                    launchErrorMessage = nil
+                }
+            },
+            message: {
+                Text(launchErrorMessage ?? "")
+            }
+        )
     }
 
     // MARK: - Shortcuts Status Section
@@ -161,11 +179,15 @@ struct ShortcutsSettingsView: View {
     // MARK: - Actions
 
     private func openShortcutsApp() {
-        NSWorkspace.shared.open(URL(string: "shortcuts://")!)
+        if !NSWorkspace.shared.open(URL(string: "shortcuts://")!) {
+            launchErrorMessage = UIFeedbackMessageBuilder.appOpenFailure(appName: "단축어 앱")
+        }
     }
 
     private func openSiriSettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.Siri")!)
+        if !NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.Siri")!) {
+            launchErrorMessage = UIFeedbackMessageBuilder.appOpenFailure(appName: "Siri 설정")
+        }
     }
 
     private func loadLogs() {

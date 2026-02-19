@@ -6,9 +6,21 @@ import Foundation
 final class SessionContext {
     var workspaceId: UUID
     var currentUserId: String?
+    var currentProjectId: String?
+    var currentRepoPath: String?
+    var currentBranch: String?
 
-    init(workspaceId: UUID, currentUserId: String? = nil) {
+    init(
+        workspaceId: UUID,
+        currentUserId: String? = nil,
+        currentProjectId: String? = nil,
+        currentRepoPath: String? = nil,
+        currentBranch: String? = nil
+    ) {
         self.workspaceId = workspaceId
         self.currentUserId = currentUserId
+        self.currentProjectId = currentProjectId
+        self.currentRepoPath = currentRepoPath
+        self.currentBranch = currentBranch
     }
 }

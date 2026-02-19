@@ -187,6 +187,20 @@ struct ProactiveSuggestionSettingsView: View {
             }
             .disabled(!settings.proactiveSuggestionEnabled)
 
+            Section("유휴자원 연동") {
+                HStack {
+                    Text("Git 스캔 자동작업")
+                    Spacer()
+                    Text(gitScanAutomationStatusLabel)
+                        .font(.caption)
+                        .foregroundStyle(gitScanAutomationStatusColor)
+                }
+
+                Text(gitScanAutomationStatusDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             // MARK: - Service Status
             if let service = proactiveSuggestionService {
                 Section("상태") {
@@ -338,5 +352,40 @@ struct ProactiveSuggestionSettingsView: View {
         case .deferred: return .orange
         case .dismissed: return .red
         }
+    }
+
+    private var gitScanAutomationEnabled: Bool {
+        settings.resourceAutoTaskEnabled
+            && settings.resourceAutoTaskTypes.contains(AutoTaskType.gitScanReview.rawValue)
+    }
+
+    private var gitScanAutomationStatusLabel: String {
+        if gitScanAutomationEnabled {
+            return "활성"
+        }
+        if settings.resourceAutoTaskEnabled {
+            return "부분 활성"
+        }
+        return "비활성"
+    }
+
+    private var gitScanAutomationStatusColor: Color {
+        if gitScanAutomationEnabled {
+            return .green
+        }
+        if settings.resourceAutoTaskEnabled {
+            return .orange
+        }
+        return .secondary
+    }
+
+    private var gitScanAutomationStatusDescription: String {
+        if gitScanAutomationEnabled {
+            return "유휴 시간 평가 시 Git 변경셋이 감지되면 스캔 리뷰 자동작업이 큐잉됩니다."
+        }
+        if settings.resourceAutoTaskEnabled {
+            return "사용량 > 자동 작업 설정에서 \"Git 스캔 리뷰\" 유형을 켜면 연동됩니다."
+        }
+        return "사용량 > 자동 작업 설정을 활성화하면 프로액티브와 유휴자원 자동작업이 연동됩니다."
     }
 }

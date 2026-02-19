@@ -47,12 +47,57 @@ struct ScheduleEntry: Codable, Identifiable, Sendable, Equatable {
         self.nextRunAt = nextRunAt
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case icon
+        case cronExpression
+        case prompt
+        case agentName
+        case isEnabled
+        case createdAt
+        case lastRunAt
+        case nextRunAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.icon = try container.decode(String.self, forKey: .icon)
+        self.cronExpression = try container.decode(String.self, forKey: .cronExpression)
+        self.prompt = try container.decode(String.self, forKey: .prompt)
+        self.agentName = try container.decodeIfPresent(String.self, forKey: .agentName) ?? "도치"
+        self.isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        self.createdAt = try container.decode(Date.self, forKey: .createdAt)
+        self.lastRunAt = try container.decodeIfPresent(Date.self, forKey: .lastRunAt)
+        self.nextRunAt = try container.decodeIfPresent(Date.self, forKey: .nextRunAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(icon, forKey: .icon)
+        try container.encode(cronExpression, forKey: .cronExpression)
+        try container.encode(prompt, forKey: .prompt)
+        try container.encode(agentName, forKey: .agentName)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(lastRunAt, forKey: .lastRunAt)
+        try container.encodeIfPresent(nextRunAt, forKey: .nextRunAt)
+    }
+
     /// Human-readable summary of the schedule
     var repeatSummary: String {
         guard let parsed = CronExpression.parse(cronExpression) else {
             return cronExpression
         }
         return parsed.humanReadable
+    }
+
+    var targetSummary: String {
+        "에이전트: \(agentName)"
     }
 }
 

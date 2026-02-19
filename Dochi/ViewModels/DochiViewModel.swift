@@ -619,15 +619,18 @@ final class DochiViewModel {
         schedulerService?.clearCurrentExecution()
     }
 
-    /// Execute a scheduler entry by routing to the selected agent context and dispatching the prompt.
+    /// Execute a scheduler entry by routing to the selected target and dispatching the prompt.
     func executeScheduledAutomation(_ schedule: ScheduleEntry) async throws {
-        guard interactionState == .idle else {
-            throw ScheduledAutomationExecutionError.interactionBusy
-        }
-
         let prompt = schedule.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
             throw ScheduledAutomationExecutionError.emptyPrompt
+        }
+        try await executeAgentScheduledAutomation(schedule: schedule, prompt: prompt)
+    }
+
+    private func executeAgentScheduledAutomation(schedule: ScheduleEntry, prompt: String) async throws {
+        guard interactionState == .idle else {
+            throw ScheduledAutomationExecutionError.interactionBusy
         }
 
         let requestedAgent = schedule.agentName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2515,6 +2518,8 @@ final class DochiViewModel {
                 appendAssistantMessage(finalText, metadata: buildMessageMetadata(), toolExecutionRecords: records)
                 conversation = currentConversation!
                 saveConversation()
+                // Keep live cards only while running. After completion, archived summary stays in message.
+                toolExecutions = []
 
                 // Flush remaining TTS text from sentence chunker
                 if isVoiceMode, let remaining = sentenceChunker.flush() {
@@ -2977,7 +2982,16 @@ final class DochiViewModel {
             }
         }
 
-        // 10. Non-baseline tool listing for LLM awareness
+        // 10. Tool behavior hints
+        parts.append(
+            """
+            ## 도구 사용 규칙
+            - generate_image 호출 시 prompt는 반드시 영어로 작성하세요.
+            - 사용자가 한국어로 요청하면 의미를 보존해 영어 이미지 프롬프트로 변환한 뒤 generate_image를 호출하세요.
+            """
+        )
+
+        // 11. Non-baseline tool listing for LLM awareness
         let nonBaseline = toolService.nonBaselineToolSummaries
         if !nonBaseline.isEmpty {
             var lines: [String] = ["## 추가 도구", "필요 시 tools.enable으로 활성화할 수 있는 도구:"]

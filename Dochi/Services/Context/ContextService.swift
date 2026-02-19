@@ -111,6 +111,107 @@ final class ContextService: ContextServiceProtocol {
         saveWorkspaceMemory(workspaceId: workspaceId, content: existing + "\n" + content)
     }
 
+    // MARK: - Project context (repo-level)
+
+    func listProjects(workspaceId: UUID) -> [ProjectContext] {
+        let base = projectsBaseURL(workspaceId)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: base,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        return entries.compactMap { dir in
+            let file = dir.appendingPathComponent("project.json")
+            guard let data = try? Data(contentsOf: file) else { return nil }
+            return try? decoder.decode(ProjectContext.self, from: data)
+        }
+        .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    func loadProject(workspaceId: UUID, projectId: String) -> ProjectContext? {
+        let file = projectURL(workspaceId: workspaceId, projectId: projectId).appendingPathComponent("project.json")
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(ProjectContext.self, from: data)
+    }
+
+    func saveProject(workspaceId: UUID, project: ProjectContext) {
+        do {
+            let dir = projectURL(workspaceId: workspaceId, projectId: project.id)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let file = dir.appendingPathComponent("project.json")
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(project)
+            try data.write(to: file, options: .atomic)
+        } catch {
+            Log.storage.error("Failed to save project context: \(error.localizedDescription)")
+        }
+    }
+
+    func removeProject(workspaceId: UUID, projectId: String) {
+        let dir = projectURL(workspaceId: workspaceId, projectId: projectId)
+        do {
+            try FileManager.default.removeItem(at: dir)
+        } catch {
+            Log.storage.error("Failed to remove project context: \(error.localizedDescription)")
+        }
+    }
+
+    func registerProject(workspaceId: UUID, repoRootPath: String, defaultBranch: String?) -> ProjectContext {
+        let projectId = ProjectContext.makeID(repoRootPath: ProjectContext.normalizePath(repoRootPath))
+        if var existing = loadProject(workspaceId: workspaceId, projectId: projectId) {
+            if let defaultBranch,
+               !defaultBranch.isEmpty,
+               existing.defaultBranch != defaultBranch
+            {
+                existing.defaultBranch = defaultBranch
+                existing.updatedAt = Date()
+                saveProject(workspaceId: workspaceId, project: existing)
+            }
+            return existing
+        }
+
+        let project = ProjectContext(
+            id: projectId,
+            repoRootPath: repoRootPath,
+            defaultBranch: defaultBranch
+        )
+        saveProject(workspaceId: workspaceId, project: project)
+        return project
+    }
+
+    func loadProjectMemory(workspaceId: UUID, projectId: String) -> String? {
+        let file = projectURL(workspaceId: workspaceId, projectId: projectId).appendingPathComponent("memory.md")
+        return try? String(contentsOf: file, encoding: .utf8)
+    }
+
+    func saveProjectMemory(workspaceId: UUID, projectId: String, content: String) {
+        let file = projectURL(workspaceId: workspaceId, projectId: projectId).appendingPathComponent("memory.md")
+        do {
+            try FileManager.default.createDirectory(
+                at: projectURL(workspaceId: workspaceId, projectId: projectId),
+                withIntermediateDirectories: true
+            )
+            try content.write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            Log.storage.error("Failed to save project memory: \(error.localizedDescription)")
+        }
+    }
+
+    func appendProjectMemory(workspaceId: UUID, projectId: String, content: String) {
+        let existing = loadProjectMemory(workspaceId: workspaceId, projectId: projectId) ?? ""
+        saveProjectMemory(workspaceId: workspaceId, projectId: projectId, content: existing + "\n" + content)
+    }
+
     // MARK: - Agent persona
 
     func loadAgentPersona(workspaceId: UUID, agentName: String) -> String? {
@@ -195,6 +296,7 @@ final class ContextService: ContextServiceProtocol {
         let wsURL = workspaceURL(id)
         try? FileManager.default.createDirectory(at: wsURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: wsURL.appendingPathComponent("agents"), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: wsURL.appendingPathComponent("projects"), withIntermediateDirectories: true)
         Log.storage.info("Created local workspace: \(id)")
     }
 
@@ -344,6 +446,14 @@ final class ContextService: ContextServiceProtocol {
 
     private func workspaceURL(_ workspaceId: UUID) -> URL {
         baseURL.appendingPathComponent("workspaces/\(workspaceId.uuidString)")
+    }
+
+    private func projectsBaseURL(_ workspaceId: UUID) -> URL {
+        workspaceURL(workspaceId).appendingPathComponent("projects")
+    }
+
+    private func projectURL(workspaceId: UUID, projectId: String) -> URL {
+        projectsBaseURL(workspaceId).appendingPathComponent(projectId)
     }
 
     private func agentURL(workspaceId: UUID, agentName: String) -> URL {

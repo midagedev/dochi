@@ -42,6 +42,29 @@ struct ExternalToolSettingsView: View {
                 )
             }
 
+            Section {
+                Picker(
+                    "외장 터미널 앱",
+                    selection: Binding(
+                        get: { settings.externalToolTerminalApp },
+                        set: { settings.externalToolTerminalApp = $0 }
+                    )
+                ) {
+                    ForEach(ExternalTerminalApp.allCases, id: \.rawValue) { app in
+                        Text(app.displayName).tag(app.rawValue)
+                    }
+                }
+
+                Text("자동을 선택하면 Ghostty 설치 시 Ghostty를 우선 사용하고, 없으면 Terminal.app으로 엽니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                SettingsSectionHeader(
+                    title: "외장 터미널",
+                    helpContent: "세션 연결 버튼으로 열릴 터미널 앱을 선택합니다."
+                )
+            }
+
             // Health check settings
             Section {
                 HStack {

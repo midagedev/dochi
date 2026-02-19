@@ -27,6 +27,7 @@
 | [llm-requirements.md](./llm-requirements.md) | LLM 규칙, 프로바이더 어댑터, 컨텍스트 압축 |
 | [voice-and-audio.md](./voice-and-audio.md) | 웨이크워드, STT, TTS, 에이전트 라우팅 |
 | [tools.md](./tools.md) | 내장 도구 스키마 (정본) |
+| [project-context-proactive-ux.md](./project-context-proactive-ux.md) | 프로젝트 컨텍스트/프로액티브/유휴토큰 UX 명세 (MVP) |
 | [security.md](./security.md) | 보안, 권한 분류, 확인 UX |
 | [supabase.md](./supabase.md) | 클라우드 테이블, 동기화 정책, RLS |
 | [open-questions.md](./open-questions.md) | 미결 과제 |
