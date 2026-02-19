@@ -54,32 +54,45 @@ final class CrossDeviceResumeService: CrossDeviceResumeServiceProtocol {
             agentId: agentId,
             conversationId: conversationId
         ) {
-            // Determine if this is a cross-device resume or same-device resume
-            let isCrossDevice = existing.deviceId != deviceId && !existing.deviceId.isEmpty && !deviceId.isEmpty
-            let previousDeviceId: String? = isCrossDevice ? existing.deviceId : nil
-
-            if isCrossDevice {
-                recordDeviceTransfer(
-                    sessionId: existing.sessionId,
-                    fromDeviceId: existing.deviceId,
-                    toDeviceId: deviceId
-                )
-                Log.runtime.info("Cross-device resume: session=\(existing.sessionId), from=\(existing.deviceId), to=\(deviceId)")
+            // Security: Verify the requesting user owns this session.
+            // If userId doesn't match, refuse to resume and create a new session instead
+            // to prevent session hijacking via known conversationId.
+            let userIdMismatch = !existing.userId.isEmpty && !userId.isEmpty && existing.userId != userId
+            if userIdMismatch {
+                Log.runtime.warning("Cross-device resume denied: userId mismatch (existing=\(existing.userId), requesting=\(userId)), creating new session")
+                // Fall through to Step 2 to create a new session
             } else {
-                Log.runtime.info("Same-device resume: session=\(existing.sessionId)")
+                // Determine if this is a cross-device resume or same-device resume
+                let isCrossDevice = existing.deviceId != deviceId && !existing.deviceId.isEmpty && !deviceId.isEmpty
+                let previousDeviceId: String? = isCrossDevice ? existing.deviceId : nil
+
+                if isCrossDevice {
+                    recordDeviceTransfer(
+                        sessionId: existing.sessionId,
+                        fromDeviceId: existing.deviceId,
+                        toDeviceId: deviceId
+                    )
+                    Log.runtime.info("Cross-device resume: session=\(existing.sessionId), from=\(existing.deviceId), to=\(deviceId)")
+                } else {
+                    Log.runtime.info("Same-device resume: session=\(existing.sessionId)")
+                }
+
+                // Update the mapping: touch lastActiveAt and update deviceId for cross-device transfers.
+                if isCrossDevice {
+                    sessionMappingService.updateDeviceId(sessionId: existing.sessionId, newDeviceId: deviceId)
+                } else {
+                    sessionMappingService.touch(sessionId: existing.sessionId)
+                }
+
+                return .resumed(
+                    sessionId: existing.sessionId,
+                    sdkSessionId: existing.sdkSessionId,
+                    previousDeviceId: previousDeviceId
+                )
             }
-
-            // Touch the mapping to update lastActiveAt
-            sessionMappingService.touch(sessionId: existing.sessionId)
-
-            return .resumed(
-                sessionId: existing.sessionId,
-                sdkSessionId: existing.sdkSessionId,
-                previousDeviceId: previousDeviceId
-            )
         }
 
-        // Step 2: No active session — open a new one
+        // Step 2: No active session (or userId mismatch) — open a new one
         do {
             let result = try await bridge.openSession(params: SessionOpenParams(
                 workspaceId: workspaceId,

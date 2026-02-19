@@ -27,7 +27,7 @@ final class SessionResumeTests: XCTestCase {
 
         sessionMappingService = SessionMappingService(baseURL: tempDir)
         mockLeaseService = MockExecutionLeaseService()
-        channelMapper = ChannelSessionMapper()
+        channelMapper = ChannelSessionMapper(baseURL: tempDir)
 
         // Configure mock lease service to have device available
         mockLeaseService.setNextDeviceId(deviceA)
@@ -52,6 +52,7 @@ final class SessionResumeTests: XCTestCase {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: "user-1",
             requestingDeviceId: deviceA,
             previousSessionId: "prev-session-123"
         )
@@ -68,6 +69,7 @@ final class SessionResumeTests: XCTestCase {
         XCTAssertEqual(decoded.workspaceId, workspaceId)
         XCTAssertEqual(decoded.agentId, agentId)
         XCTAssertEqual(decoded.conversationId, conversationId)
+        XCTAssertEqual(decoded.userId, "user-1")
         XCTAssertEqual(decoded.requestingDeviceId, deviceA)
         XCTAssertEqual(decoded.previousSessionId, "prev-session-123")
     }
@@ -78,6 +80,7 @@ final class SessionResumeTests: XCTestCase {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: "user-1",
             requestingDeviceId: deviceA
         )
 
@@ -188,6 +191,7 @@ final class SessionResumeTests: XCTestCase {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: "user-1",
             requestingDeviceId: deviceA
         )
 
@@ -237,6 +241,7 @@ final class SessionResumeTests: XCTestCase {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: "user-1",
             requestingDeviceId: deviceB
         )
 
@@ -268,16 +273,20 @@ final class SessionResumeTests: XCTestCase {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: "user-1",
             requestingDeviceId: deviceA
         )
 
         let result = try await sut.resumeSession(request)
 
         switch result {
-        case .newSession(_, let deviceId, let reason):
+        case .newSession(let sessionId, let deviceId, let reason):
             XCTAssertEqual(deviceId, deviceA)
             XCTAssertEqual(reason, .sessionNotFound)
             XCTAssertEqual(mockLeaseService.acquireCallCount, 1)
+            // Verify the new mapping stores the userId from the request
+            let mapping = sessionMappingService.findBySessionId(sessionId)
+            XCTAssertEqual(mapping?.userId, "user-1")
         default:
             XCTFail("Expected .newSession but got \(result)")
         }
@@ -304,10 +313,11 @@ final class SessionResumeTests: XCTestCase {
         mockLeaseService.setNextDeviceId(deviceB)
 
         let request = SessionResumeRequest(
-            sourceChannel: .messenger,
+            sourceChannel: .text,
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: "user-1",
             requestingDeviceId: deviceB
         )
 
@@ -333,6 +343,7 @@ final class SessionResumeTests: XCTestCase {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: "user-1",
             requestingDeviceId: deviceA
         )
 
@@ -384,6 +395,7 @@ final class SessionResumeTests: XCTestCase {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: "user-1",
             requestingDeviceId: deviceB
         )
 
@@ -492,6 +504,128 @@ final class SessionResumeTests: XCTestCase {
         XCTAssertEqual(result, "conv-new")
     }
 
+    // MARK: - Channel Mapper Persistence (Critical 3)
+
+    func testChannelMapperPersistsMappingsToFile() {
+        // Register mappings and verify the file exists
+        channelMapper.registerMessengerMapping(externalChatId: "tg-100", conversationId: "conv-persist-1")
+        channelMapper.registerMessengerMapping(externalChatId: "tg-200", conversationId: "conv-persist-2")
+
+        let fileURL = tempDir.appendingPathComponent("channel_mappings.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path), "channel_mappings.json should exist after registering mappings")
+
+        // Create a new mapper from the same directory and verify it loads the mappings
+        let freshMapper = ChannelSessionMapper(baseURL: tempDir)
+        XCTAssertEqual(freshMapper.allMessengerMappings.count, 2)
+        XCTAssertEqual(freshMapper.messengerConversationId(for: "tg-100"), "conv-persist-1")
+        XCTAssertEqual(freshMapper.messengerConversationId(for: "tg-200"), "conv-persist-2")
+    }
+
+    func testChannelMapperPersistsAfterRemoval() {
+        channelMapper.registerMessengerMapping(externalChatId: "tg-100", conversationId: "conv-1")
+        channelMapper.registerMessengerMapping(externalChatId: "tg-200", conversationId: "conv-2")
+        channelMapper.removeMessengerMapping(externalChatId: "tg-100")
+
+        // Reload from disk
+        let freshMapper = ChannelSessionMapper(baseURL: tempDir)
+        XCTAssertEqual(freshMapper.allMessengerMappings.count, 1)
+        XCTAssertNil(freshMapper.messengerConversationId(for: "tg-100"))
+        XCTAssertEqual(freshMapper.messengerConversationId(for: "tg-200"), "conv-2")
+    }
+
+    func testChannelMapperEmptyFileLoadsEmpty() {
+        // No registrations — create fresh mapper from same dir
+        let freshMapper = ChannelSessionMapper(baseURL: tempDir)
+        XCTAssertEqual(freshMapper.allMessengerMappings.count, 0)
+    }
+
+    // MARK: - userId Validation (C3 Hijack Prevention)
+
+    func testResumeUserIdMismatchCreatesNewSession() async throws {
+        // Pre-seed an active session owned by user-1
+        let mapping = SessionMapping(
+            sessionId: "session-owned",
+            sdkSessionId: "sdk-owned",
+            workspaceId: workspaceId.uuidString,
+            agentId: agentId,
+            conversationId: conversationId,
+            userId: "user-1",
+            deviceId: deviceA.uuidString,
+            status: .active,
+            createdAt: Date(),
+            lastActiveAt: Date()
+        )
+        sessionMappingService.insert(mapping)
+        mockLeaseService.setNextDeviceId(deviceB)
+
+        // A different user (user-2) attempts to resume -> hijack prevention
+        let request = SessionResumeRequest(
+            sourceChannel: .text,
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: conversationId,
+            userId: "user-2",
+            requestingDeviceId: deviceB
+        )
+
+        let result = try await sut.resumeSession(request)
+
+        switch result {
+        case .newSession(_, _, let reason):
+            XCTAssertEqual(reason, .sessionNotFound, "userId mismatch should create new session with .sessionNotFound reason")
+            // The new session should be owned by user-2
+            let newMappings = sessionMappingService.activeMappings.filter { $0.userId == "user-2" }
+            XCTAssertEqual(newMappings.count, 1)
+        default:
+            XCTFail("Expected .newSession (hijack prevention) but got \(result)")
+        }
+    }
+
+    func testResumeUserIdMatchResumesSameDevice() async throws {
+        // Pre-seed an active session owned by user-1
+        let mapping = SessionMapping(
+            sessionId: "session-owned",
+            sdkSessionId: "sdk-owned",
+            workspaceId: workspaceId.uuidString,
+            agentId: agentId,
+            conversationId: conversationId,
+            userId: "user-1",
+            deviceId: deviceA.uuidString,
+            status: .active,
+            createdAt: Date(),
+            lastActiveAt: Date()
+        )
+        sessionMappingService.insert(mapping)
+
+        let lease = ExecutionLease(
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: conversationId,
+            assignedDeviceId: deviceA
+        )
+        mockLeaseService.leases[lease.leaseId] = lease
+        mockLeaseService.conversationLeaseMap[conversationId] = lease.leaseId
+
+        // Same user resumes -> should succeed
+        let request = SessionResumeRequest(
+            sourceChannel: .voice,
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: conversationId,
+            userId: "user-1",
+            requestingDeviceId: deviceA
+        )
+
+        let result = try await sut.resumeSession(request)
+
+        switch result {
+        case .resumed(let sessionId, _, _):
+            XCTAssertEqual(sessionId, "session-owned")
+        default:
+            XCTFail("Expected .resumed but got \(result)")
+        }
+    }
+
     // MARK: - Resume Error Tests
 
     func testSessionResumeErrorDescriptions() {
@@ -518,6 +652,7 @@ final class SessionResumeTests: XCTestCase {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: "user-1",
             requestingDeviceId: deviceA
         )
 
@@ -549,24 +684,67 @@ final class SessionResumeTests: XCTestCase {
         XCTAssertEqual(mock.normalizeCallCount, 1)
     }
 
-    // MARK: - Messenger Resume Integration
+    // MARK: - Messenger Resume Integration (S1: channelMapper used in resumeSession)
 
-    func testMessengerResumeUsesChannelMapper() async throws {
-        // Register a messenger mapping
+    func testMessengerResumeResolvesExternalChatIdViaChannelMapper() async throws {
+        // Register a messenger mapping: external chatId -> internal conversationId
         channelMapper.registerMessengerMapping(externalChatId: "tg-555", conversationId: conversationId)
 
-        // Resolve the conversation ID from the messenger identifier
-        let resolved = channelMapper.resolveConversationId(channel: .messenger, identifier: "tg-555")
-        XCTAssertEqual(resolved, conversationId)
+        // Pre-seed an active session for the internal conversationId
+        let mapping = SessionMapping(
+            sessionId: "session-tg",
+            sdkSessionId: "sdk-tg",
+            workspaceId: workspaceId.uuidString,
+            agentId: agentId,
+            conversationId: conversationId,
+            userId: "user-1",
+            deviceId: deviceA.uuidString,
+            status: .active,
+            createdAt: Date(),
+            lastActiveAt: Date()
+        )
+        sessionMappingService.insert(mapping)
 
-        // Now resume using the resolved conversation ID
-        mockLeaseService.setNextDeviceId(deviceA)
+        let lease = ExecutionLease(
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: conversationId,
+            assignedDeviceId: deviceA
+        )
+        mockLeaseService.leases[lease.leaseId] = lease
+        mockLeaseService.conversationLeaseMap[conversationId] = lease.leaseId
 
+        // Resume using the EXTERNAL chat ID (channelMapper should resolve it)
         let request = SessionResumeRequest(
             sourceChannel: .messenger,
             workspaceId: workspaceId,
             agentId: agentId,
-            conversationId: resolved!,
+            conversationId: "tg-555",  // external chat ID, NOT internal conversationId
+            userId: "user-1",
+            requestingDeviceId: deviceA
+        )
+
+        let result = try await sut.resumeSession(request)
+
+        // Should resume the existing session after resolving via channelMapper
+        switch result {
+        case .resumed(let sessionId, _, _):
+            XCTAssertEqual(sessionId, "session-tg")
+        default:
+            XCTFail("Expected .resumed after channel mapper resolution but got \(result)")
+        }
+    }
+
+    func testMessengerResumeWithoutMappingCreatesNewSession() async throws {
+        mockLeaseService.setNextDeviceId(deviceA)
+
+        // No channel mapping registered for "unknown-chat"
+        let request = SessionResumeRequest(
+            sourceChannel: .messenger,
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: "unknown-chat",
+            userId: "user-1",
             requestingDeviceId: deviceA
         )
 
@@ -574,9 +752,32 @@ final class SessionResumeTests: XCTestCase {
 
         switch result {
         case .newSession(_, _, let reason):
-            XCTAssertEqual(reason, .sessionNotFound)
+            XCTAssertEqual(reason, .sessionNotFound, "Unmapped messenger chat should create new session")
         default:
-            break // Also acceptable if a mapping already existed
+            XCTFail("Expected .newSession for unmapped messenger chat but got \(result)")
+        }
+    }
+
+    func testVoiceChannelBypassesChannelMapper() async throws {
+        mockLeaseService.setNextDeviceId(deviceA)
+
+        // Voice channel should use conversationId directly, not go through channelMapper
+        let request = SessionResumeRequest(
+            sourceChannel: .voice,
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: conversationId,
+            userId: "user-1",
+            requestingDeviceId: deviceA
+        )
+
+        let result = try await sut.resumeSession(request)
+
+        switch result {
+        case .newSession:
+            break // Expected — no existing session
+        default:
+            XCTFail("Expected .newSession for voice channel but got \(result)")
         }
     }
 }

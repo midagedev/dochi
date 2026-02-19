@@ -43,33 +43,65 @@ final class SessionResumeService: SessionResumeServiceProtocol {
     func resumeSession(_ request: SessionResumeRequest) async throws -> SessionResumeResult {
         Log.app.info("SessionResume: attempting resume — conversation=\(request.conversationId), channel=\(request.sourceChannel.rawValue), device=\(request.requestingDeviceId)")
 
+        // Resolve the conversationId through the channel mapper for messenger channels.
+        // For voice/text, this returns the input as-is; for messenger, it translates the
+        // external chat ID (e.g. Telegram chatId) to the internal conversationId.
+        let resolvedRequest: SessionResumeRequest
+        if request.sourceChannel == .messenger {
+            guard let mapped = channelMapper.resolveConversationId(
+                channel: .messenger,
+                identifier: request.conversationId
+            ) else {
+                Log.app.info("SessionResume: no channel mapping for messenger identifier=\(request.conversationId), creating new session")
+                return await createNewSession(request: request, reason: .sessionNotFound)
+            }
+            resolvedRequest = SessionResumeRequest(
+                sourceChannel: request.sourceChannel,
+                workspaceId: request.workspaceId,
+                agentId: request.agentId,
+                conversationId: mapped,
+                userId: request.userId,
+                requestingDeviceId: request.requestingDeviceId,
+                previousSessionId: request.previousSessionId
+            )
+            Log.app.debug("SessionResume: messenger identifier=\(request.conversationId) resolved to conversationId=\(mapped)")
+        } else {
+            resolvedRequest = request
+        }
+
         let sessionKey = normalizeSessionKey(
-            workspaceId: request.workspaceId,
-            agentId: request.agentId,
-            conversationId: request.conversationId
+            workspaceId: resolvedRequest.workspaceId,
+            agentId: resolvedRequest.agentId,
+            conversationId: resolvedRequest.conversationId
         )
 
         // Step 1: Search for an active session mapping across all devices.
         let activeMapping = findActiveMapping(
-            workspaceId: request.workspaceId,
-            agentId: request.agentId,
-            conversationId: request.conversationId
+            workspaceId: resolvedRequest.workspaceId,
+            agentId: resolvedRequest.agentId,
+            conversationId: resolvedRequest.conversationId
         )
 
         if let mapping = activeMapping {
-            return try await handleActiveMapping(mapping, request: request, sessionKey: sessionKey)
+            // Security: Verify the requesting user owns this session (hijack prevention).
+            let userIdMismatch = !mapping.userId.isEmpty && !resolvedRequest.userId.isEmpty && mapping.userId != resolvedRequest.userId
+            if userIdMismatch {
+                Log.app.warning("SessionResume: userId mismatch (existing=\(mapping.userId), requesting=\(resolvedRequest.userId)), creating new session to prevent hijack")
+                return await createNewSession(request: resolvedRequest, reason: .sessionNotFound)
+            }
+            return try await handleActiveMapping(mapping, request: resolvedRequest, sessionKey: sessionKey)
         }
 
         // Step 2: Check for any mapping (closed/interrupted) to build metadata.
-        let anyMapping = findAnyMapping(conversationId: request.conversationId)
+        let anyMapping = findAnyMapping(conversationId: resolvedRequest.conversationId)
 
         if let mapping = anyMapping {
-            return await handleClosedMapping(mapping, request: request, sessionKey: sessionKey)
+            return await handleClosedMapping(mapping, request: resolvedRequest, sessionKey: sessionKey)
         }
 
         // Step 3: No session found at all.
         Log.app.info("SessionResume: no session found for key=\(sessionKey), creating new session")
-        return await createNewSession(request: request, reason: .sessionNotFound)
+        return await createNewSession(request: resolvedRequest, reason: .sessionNotFound)
     }
 
     func canResume(conversationId: String) -> Bool {
@@ -194,7 +226,7 @@ final class SessionResumeService: SessionResumeServiceProtocol {
                 workspaceId: request.workspaceId.uuidString,
                 agentId: request.agentId,
                 conversationId: request.conversationId,
-                userId: "",
+                userId: request.userId,
                 deviceId: request.requestingDeviceId.uuidString,
                 status: .active,
                 createdAt: Date(),

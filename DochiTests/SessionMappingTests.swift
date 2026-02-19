@@ -286,6 +286,46 @@ final class SessionMappingTests: XCTestCase {
         XCTAssertNil(found)
     }
 
+    // MARK: - Update Device ID (C1 fix)
+
+    @MainActor
+    func testUpdateDeviceId() {
+        let service = SessionMappingService(baseURL: tempDir)
+        let original = makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", deviceId: "device-A")
+        service.insert(original)
+
+        service.updateDeviceId(sessionId: "s-1", newDeviceId: "device-B")
+
+        let updated = service.findBySessionId("s-1")
+        XCTAssertNotNil(updated)
+        XCTAssertEqual(updated?.deviceId, "device-B")
+        XCTAssertGreaterThanOrEqual(updated!.lastActiveAt, original.lastActiveAt)
+    }
+
+    @MainActor
+    func testUpdateDeviceIdPersists() {
+        let service1 = SessionMappingService(baseURL: tempDir)
+        service1.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", deviceId: "device-A"))
+        service1.updateDeviceId(sessionId: "s-1", newDeviceId: "device-B")
+
+        // Reload from disk
+        let service2 = SessionMappingService(baseURL: tempDir)
+        let mapping = service2.findBySessionId("s-1")
+        XCTAssertEqual(mapping?.deviceId, "device-B")
+    }
+
+    @MainActor
+    func testUpdateDeviceIdForNonexistentSessionDoesNothing() {
+        let service = SessionMappingService(baseURL: tempDir)
+        service.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", deviceId: "device-A"))
+
+        // Update nonexistent session — should be a no-op
+        service.updateDeviceId(sessionId: "nonexistent", newDeviceId: "device-B")
+
+        let mapping = service.findBySessionId("s-1")
+        XCTAssertEqual(mapping?.deviceId, "device-A")
+    }
+
     // MARK: - Prune
 
     @MainActor

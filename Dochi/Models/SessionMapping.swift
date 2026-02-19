@@ -20,7 +20,8 @@ struct SessionMapping: Codable, Sendable, Equatable {
     /// User who initiated this session.
     let userId: String
     /// Device where the session was last active. Stored for audit only; not part of lookup key.
-    let deviceId: String
+    /// Mutable: updated on cross-device resume so the mapping reflects the current device.
+    var deviceId: String
     /// Session status.
     var status: SessionMappingStatus
     /// ISO 8601 creation timestamp.

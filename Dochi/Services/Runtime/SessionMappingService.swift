@@ -76,6 +76,19 @@ final class SessionMappingService {
         save()
     }
 
+    /// Update the device ID for a session mapping (cross-device resume).
+    ///
+    /// Called when a session is resumed from a different device so the mapping
+    /// reflects the current device for audit and future lookups.
+    func updateDeviceId(sessionId: String, newDeviceId: String) {
+        guard let idx = store.mappings.firstIndex(where: { $0.sessionId == sessionId }) else {
+            return
+        }
+        store.mappings[idx].deviceId = newDeviceId
+        store.mappings[idx].lastActiveAt = Date()
+        save()
+    }
+
     /// Touch the last-active timestamp for a session.
     /// Does not call `rebuildIndex()` since status is unchanged.
     func touch(sessionId: String) {

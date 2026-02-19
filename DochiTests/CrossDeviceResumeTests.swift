@@ -111,6 +111,44 @@ final class CrossDeviceResumeTests: XCTestCase {
         XCTAssertEqual(resumeService.transferHistory[0].toDeviceId, "mac-office")
         // Bridge should NOT have been called to open a new session
         XCTAssertEqual(mockBridge.openCallCount, 0)
+        // The mapping's deviceId should be updated to the new device (Critical 2 fix)
+        let updatedMapping = mappingService.findBySessionId("s-1")
+        XCTAssertEqual(updatedMapping?.deviceId, "mac-office")
+    }
+
+    // MARK: - Cross-device Resume Updates DeviceId (Critical 2)
+
+    @MainActor
+    func testCrossDeviceResumeUpdatesDeviceIdPreventsRepeatCrossDeviceFlag() async {
+        let (mappingService, _, resumeService) = makeServices()
+
+        // Session created on mac-home
+        let mapping = makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", deviceId: "mac-home")
+        mappingService.insert(mapping)
+
+        // First resume from mac-office (cross-device)
+        _ = await resumeService.resolveSession(
+            workspaceId: "ws-1", agentId: "agent-1",
+            conversationId: "conv-1", userId: "user-1",
+            deviceId: "mac-office"
+        )
+        XCTAssertEqual(resumeService.transferHistory.count, 1)
+
+        // Second resume from mac-office (same device — should NOT be cross-device)
+        let result = await resumeService.resolveSession(
+            workspaceId: "ws-1", agentId: "agent-1",
+            conversationId: "conv-1", userId: "user-1",
+            deviceId: "mac-office"
+        )
+
+        // No new transfer should be recorded
+        XCTAssertEqual(resumeService.transferHistory.count, 1, "Subsequent resume from same device should not trigger cross-device transfer")
+        // Should still resume successfully
+        if case .resumed(_, _, let previousDeviceId) = result {
+            XCTAssertNil(previousDeviceId, "Same-device resume should have nil previousDeviceId")
+        } else {
+            XCTFail("Expected .resumed but got \(result)")
+        }
     }
 
     // MARK: - New Session (no existing)
@@ -370,6 +408,96 @@ final class CrossDeviceResumeTests: XCTestCase {
 
         // No device transfer recorded when original deviceId is empty
         XCTAssertEqual(resumeService.transferHistory.count, 0)
+    }
+
+    // MARK: - userId Validation (C3 Hijack Prevention)
+
+    @MainActor
+    func testUserIdMismatchCreatesNewSessionInsteadOfResuming() async {
+        let (mappingService, mockBridge, resumeService) = makeServices()
+
+        // Session owned by user-1
+        let mapping = makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", userId: "user-1", deviceId: "mac-home")
+        mappingService.insert(mapping)
+
+        mockBridge.stubbedOpenResult = SessionOpenResult(
+            sessionId: "new-s-1",
+            sdkSessionId: "new-sdk-1",
+            created: true
+        )
+
+        // A different user (user-2) tries to resume the same conversation
+        let result = await resumeService.resolveSession(
+            workspaceId: "ws-1",
+            agentId: "agent-1",
+            conversationId: "conv-1",
+            userId: "user-2",
+            deviceId: "attacker-device"
+        )
+
+        // Should create a new session, NOT resume the existing one (hijack prevention)
+        if case .created(let sessionId, _) = result {
+            XCTAssertEqual(sessionId, "new-s-1")
+        } else {
+            XCTFail("Expected .created (hijack prevention) but got \(result)")
+        }
+
+        // The original session should remain untouched
+        let original = mappingService.findBySessionId("s-1")
+        XCTAssertEqual(original?.userId, "user-1")
+        XCTAssertEqual(original?.deviceId, "mac-home")
+
+        // No device transfer should be recorded (this is not a legitimate transfer)
+        XCTAssertEqual(resumeService.transferHistory.count, 0)
+    }
+
+    @MainActor
+    func testUserIdMatchAllowsResumeNormally() async {
+        let (mappingService, _, resumeService) = makeServices()
+
+        // Session owned by user-1
+        let mapping = makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", userId: "user-1", deviceId: "mac-home")
+        mappingService.insert(mapping)
+
+        // Same user resumes from a different device
+        let result = await resumeService.resolveSession(
+            workspaceId: "ws-1",
+            agentId: "agent-1",
+            conversationId: "conv-1",
+            userId: "user-1",
+            deviceId: "mac-office"
+        )
+
+        // Should resume (user owns this session)
+        if case .resumed(let sessionId, _, _) = result {
+            XCTAssertEqual(sessionId, "s-1")
+        } else {
+            XCTFail("Expected .resumed but got \(result)")
+        }
+    }
+
+    @MainActor
+    func testEmptyUserIdBypassesValidation() async {
+        let (mappingService, _, resumeService) = makeServices()
+
+        // Session with empty userId (legacy mapping)
+        let mapping = makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", userId: "", deviceId: "mac-home")
+        mappingService.insert(mapping)
+
+        // Any user can resume a session with empty userId (backward compatibility)
+        let result = await resumeService.resolveSession(
+            workspaceId: "ws-1",
+            agentId: "agent-1",
+            conversationId: "conv-1",
+            userId: "user-2",
+            deviceId: "mac-office"
+        )
+
+        if case .resumed(let sessionId, _, _) = result {
+            XCTAssertEqual(sessionId, "s-1")
+        } else {
+            XCTFail("Expected .resumed (empty userId bypasses validation) but got \(result)")
+        }
     }
 
     // MARK: - Mock Protocol Conformance

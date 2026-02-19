@@ -19,7 +19,8 @@ const sessions = new Map<string, SessionEntry>();
 
 export function handleSessionOpen(params: SessionOpenParams): SessionOpenResult {
   // Build lookup key (deviceId excluded for cross-device resume — Issue #291)
-  const lookupKey = `${params.workspaceId}|${params.agentId}|${params.conversationId}`;
+  // Uses `:` separator — must match Swift SessionResumeService.normalizeSessionKey
+  const lookupKey = `${params.workspaceId}:${params.agentId}:${params.conversationId}`;
 
   // Check for existing active session with same key
   for (const [, entry] of sessions) {

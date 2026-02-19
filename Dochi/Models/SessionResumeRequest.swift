@@ -25,6 +25,8 @@ struct SessionResumeRequest: Codable, Sendable, Equatable {
     let agentId: String
     /// Conversation to resume.
     let conversationId: String
+    /// User requesting the resume.
+    let userId: String
     /// Device requesting the resume.
     let requestingDeviceId: UUID
     /// Previous session ID if known (used as hint for faster lookup).
@@ -35,6 +37,7 @@ struct SessionResumeRequest: Codable, Sendable, Equatable {
         workspaceId: UUID,
         agentId: String,
         conversationId: String,
+        userId: String,
         requestingDeviceId: UUID,
         previousSessionId: String? = nil
     ) {
@@ -42,6 +45,7 @@ struct SessionResumeRequest: Codable, Sendable, Equatable {
         self.workspaceId = workspaceId
         self.agentId = agentId
         self.conversationId = conversationId
+        self.userId = userId
         self.requestingDeviceId = requestingDeviceId
         self.previousSessionId = previousSessionId
     }
