@@ -1000,11 +1000,14 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var cloneRepositoryCallCount = 0
     var attachRepositoryCallCount = 0
     var removeManagedRepositoryCallCount = 0
+    var rebuildSessionHistoryIndexCallCount = 0
+    var searchSessionHistoryCallCount = 0
 
     var lastSavedProfile: ExternalToolProfile?
     var lastSentCommand: String?
     var mockOutputLines: [String] = ["line1", "line2"]
     var mockGitRepositoryInsights: [GitRepositoryInsight] = []
+    var mockSessionHistoryResults: [SessionHistorySearchResult] = []
 
     func loadProfiles() {
         loadProfilesCallCount += 1
@@ -1154,6 +1157,18 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         repository.isArchived = true
         repository.updatedAt = Date()
         managedRepositories[index] = repository
+    }
+
+    func rebuildSessionHistoryIndex(limit: Int) async -> Int {
+        _ = limit
+        rebuildSessionHistoryIndexCallCount += 1
+        return mockSessionHistoryResults.count
+    }
+
+    func searchSessionHistory(query: SessionHistorySearchQuery) async -> [SessionHistorySearchResult] {
+        _ = query
+        searchSessionHistoryCallCount += 1
+        return mockSessionHistoryResults
     }
 }
 
