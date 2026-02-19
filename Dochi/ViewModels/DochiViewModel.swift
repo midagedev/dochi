@@ -1265,6 +1265,7 @@ final class DochiViewModel {
     /// Configures the runtime bridge for SDK session support.
     func configureRuntimeBridge(_ bridge: any RuntimeBridgeProtocol) {
         self.runtimeBridge = bridge
+        bridge.configureToolDispatch(toolService: toolService)
     }
 
     /// Process user input through the SDK runtime session.

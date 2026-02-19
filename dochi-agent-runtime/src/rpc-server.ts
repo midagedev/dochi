@@ -21,11 +21,17 @@ import {
   handleSessionClose,
   handleSessionList,
 } from "./handlers/session";
+import {
+  handleToolResult,
+  dispatchToolToApp,
+  cancelPendingDispatches,
+} from "./handlers/tool";
 import type {
   SessionOpenParams,
   SessionRunParams,
   SessionInterruptParams,
   SessionCloseParams,
+  ToolResultParams,
 } from "./handlers/types";
 
 type Handler = (params?: Record<string, unknown>) => unknown;
@@ -40,6 +46,7 @@ const handlers: Record<string, Handler> = {
   "session.interrupt": (params) => handleSessionInterrupt(params as unknown as SessionInterruptParams),
   "session.close": (params) => handleSessionClose(params as unknown as SessionCloseParams),
   "session.list": () => handleSessionList(),
+  "tool.result": (params) => handleToolResult(params as unknown as ToolResultParams),
 };
 
 function processRequest(request: JsonRpcRequest): JsonRpcResponse {
@@ -81,15 +88,23 @@ function processRequest(request: JsonRpcRequest): JsonRpcResponse {
 
 /**
  * Emit stub streaming events for session.run (echo mode).
- * Sends the input text back as partial deltas, then a completed event.
+ * Sends the input text back as partial deltas.
+ * If input contains "tool:" prefix, dispatches a tool call to the app.
  */
-function emitSessionRunEvents(conn: net.Socket, params: SessionRunParams): void {
+async function emitSessionRunEvents(conn: net.Socket, params: SessionRunParams): Promise<void> {
   const sessionId = params.sessionId;
   const input = params.input;
+
+  // Tool dispatch mode: "tool:toolName arg1 arg2"
+  const toolMatch = input.match(/^tool:(\S+)\s*(.*)/);
+  if (toolMatch) {
+    await emitToolDispatchFlow(conn, sessionId, toolMatch[1], toolMatch[2]);
+    return;
+  }
+
   const words = input.split(/\s+/).filter((w) => w.length > 0);
 
   if (words.length === 0) {
-    // Empty input: emit completed immediately
     const notification = {
       jsonrpc: "2.0",
       method: "bridge.event",
@@ -109,7 +124,7 @@ function emitSessionRunEvents(conn: net.Socket, params: SessionRunParams): void 
   let delay = 0;
 
   for (const word of words) {
-    delay += 50; // 50ms per word
+    delay += 50;
     const delta = (accumulated ? " " : "") + word;
     accumulated += delta;
     const capturedDelta = delta;
@@ -131,7 +146,6 @@ function emitSessionRunEvents(conn: net.Socket, params: SessionRunParams): void 
     }, delay);
   }
 
-  // Completed event after all partials
   const finalText = accumulated;
   setTimeout(() => {
     if (conn.destroyed) return;
@@ -148,6 +162,89 @@ function emitSessionRunEvents(conn: net.Socket, params: SessionRunParams): void 
     };
     conn.write(JSON.stringify(notification) + "\n");
   }, delay + 100);
+}
+
+/**
+ * Emit a tool dispatch flow: tool_call event → tool.dispatch → wait for result → tool_result event → completed.
+ */
+async function emitToolDispatchFlow(
+  conn: net.Socket,
+  sessionId: string,
+  toolName: string,
+  argsStr: string,
+): Promise<void> {
+  const toolCallId = crypto.randomUUID();
+
+  // Parse simple "key=value" arguments
+  const args: Record<string, unknown> = {};
+  for (const pair of argsStr.split(/\s+/).filter((s) => s.includes("="))) {
+    const [key, ...rest] = pair.split("=");
+    args[key] = rest.join("=");
+  }
+
+  // 1. Emit session.tool_call event
+  conn.write(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: "bridge.event",
+      params: {
+        eventId: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        sessionId,
+        eventType: "session.tool_call",
+        payload: { toolName, toolCallId },
+      },
+    }) + "\n",
+  );
+
+  // 2. Dispatch tool to app and wait for result
+  const result = await dispatchToolToApp(conn, {
+    toolCallId,
+    toolName,
+    arguments: args,
+    sessionId,
+    riskLevel: "safe",
+  });
+
+  if (conn.destroyed) return;
+
+  // 3. Emit session.tool_result event
+  conn.write(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: "bridge.event",
+      params: {
+        eventId: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        sessionId,
+        eventType: "session.tool_result",
+        payload: {
+          toolCallId,
+          content: result.content,
+          success: result.success,
+        },
+      },
+    }) + "\n",
+  );
+
+  // 4. Emit session.completed with tool result as final text
+  conn.write(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: "bridge.event",
+      params: {
+        eventId: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        sessionId,
+        eventType: "session.completed",
+        payload: {
+          text: result.success
+            ? `Tool '${toolName}' result: ${result.content}`
+            : `Tool '${toolName}' failed: ${result.content}`,
+        },
+      },
+    }) + "\n",
+  );
 }
 
 export function createRpcServer(socketPath: string): net.Server {
@@ -188,7 +285,25 @@ export function createRpcServer(socketPath: string): net.Server {
 
         // After ack for session.run, emit streaming events (stub echo mode)
         if (request.method === "session.run" && !response.error) {
-          emitSessionRunEvents(conn, request.params as unknown as SessionRunParams);
+          // Fire-and-forget: async tool dispatch may await app response
+          emitSessionRunEvents(conn, request.params as unknown as SessionRunParams).catch(
+            (err) => console.error(`[rpc-server] emitSessionRunEvents error: ${err}`),
+          );
+        }
+
+        // Cancel pending tool dispatches on session interrupt/close
+        if (
+          (request.method === "session.interrupt" || request.method === "session.close") &&
+          !response.error &&
+          request.params
+        ) {
+          const sid = (request.params as { sessionId?: string }).sessionId;
+          if (sid) {
+            const cancelled = cancelPendingDispatches(sid);
+            if (cancelled > 0) {
+              console.error(`[rpc-server] cancelled ${cancelled} pending tool dispatches for ${sid}`);
+            }
+          }
         }
       }
     });

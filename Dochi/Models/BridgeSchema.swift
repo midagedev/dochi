@@ -16,6 +16,10 @@ enum BridgeErrorCode: Int, Codable, Sendable {
     case sessionAlreadyClosed = -32002
     case runtimeNotReady = -32003
     case sessionLimitExceeded = -32004
+    case toolNotFound = -32010
+    case toolExecutionFailed = -32011
+    case toolTimeout = -32012
+    case toolPermissionDenied = -32013
 }
 
 // MARK: - Session RPC Types
@@ -89,6 +93,39 @@ struct SessionListResult: Codable, Sendable {
     let sessions: [SessionSummary]
 }
 
+// MARK: - Tool Dispatch RPC Types
+
+/// Parameters for `tool.dispatch` (runtime → app notification).
+struct ToolDispatchParams: Codable, Sendable {
+    let toolCallId: String
+    let toolName: String
+    let arguments: [String: AnyCodableValue]
+    let sessionId: String
+    let riskLevel: String  // "safe", "sensitive", "restricted"
+}
+
+/// Parameters for `tool.result` (app → runtime RPC).
+struct ToolResultParams: Codable, Sendable {
+    let toolCallId: String
+    let sessionId: String
+    let success: Bool
+    let content: String
+    let errorCode: Int?
+}
+
+/// Result from `tool.result` ack.
+struct ToolResultAck: Codable, Sendable {
+    let received: Bool
+    let toolCallId: String
+}
+
+/// Timeout budget per tool category (seconds).
+enum ToolTimeoutPolicy {
+    static let safe: TimeInterval = 30
+    static let sensitive: TimeInterval = 60
+    static let restricted: TimeInterval = 120
+}
+
 // MARK: - Event Envelope
 
 /// Common envelope for all runtime events (spec §5).
@@ -111,6 +148,7 @@ enum BridgeEventType: String, Codable, Sendable {
     case sessionToolResult = "session.tool_result"
     case sessionCompleted = "session.completed"
     case sessionFailed = "session.failed"
+    case toolDispatch = "tool.dispatch"
     case approvalRequired = "approval.required"
     case policyBlocked = "policy.blocked"
 }

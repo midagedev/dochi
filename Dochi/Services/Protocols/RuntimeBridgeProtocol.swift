@@ -18,6 +18,11 @@ protocol RuntimeBridgeProtocol {
     /// Query the runtime health status.
     func health() async throws -> RuntimeHealthResponse
 
+    // MARK: - Tool Dispatch
+
+    /// Configure tool dispatch with the app's built-in tool service.
+    func configureToolDispatch(toolService: any BuiltInToolServiceProtocol)
+
     // MARK: - Session Management
 
     /// Open or reuse a session for the given parameters.
