@@ -9,6 +9,11 @@ struct ExternalToolListView: View {
     @State private var searchText = ""
     @State private var startingProfileId: UUID?
     @State private var startErrorMessage: String?
+    @State private var unifiedSessions: [UnifiedCodingSession] = []
+    @State private var isRefreshingUnified = false
+    @State private var explorerFilter = SessionExplorerFilter()
+    @State private var sortOption: SessionExplorerSortOption = .activity
+    @State private var mappingNotice: String?
 
     private var runningSessions: [ExternalToolSession] {
         manager.sessions.filter { $0.status != .dead }
@@ -23,9 +28,53 @@ struct ExternalToolListView: View {
         return manager.profiles.filter { !activeProfileIds.contains($0.id) }
     }
 
+    private var managedRepositories: [ManagedGitRepository] {
+        manager.managedRepositories.filter { !$0.isArchived }
+    }
+
+    private var repositorySummaries: [RepositoryDashboardSummary] {
+        SessionExplorerViewStateBuilder.repositorySummaries(from: unifiedSessions)
+    }
+
+    private var filteredUnifiedSessions: [UnifiedCodingSession] {
+        let filtered = SessionExplorerViewStateBuilder.filteredSessions(
+            sessions: unifiedSessions,
+            filter: explorerFilter,
+            sort: sortOption
+        )
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return filtered }
+        return filtered.filter { session in
+            let haystack = [
+                session.provider,
+                session.nativeSessionId,
+                session.path,
+                session.repositoryRoot ?? "",
+                session.workingDirectory ?? "",
+            ].joined(separator: " ").lowercased()
+            return haystack.contains(query)
+        }
+    }
+
+    private var unassignedUnifiedSessions: [UnifiedCodingSession] {
+        unifiedSessions
+            .filter(\.isUnassigned)
+            .sorted(by: ExternalToolSessionManager.isPreferredUnifiedSessionOrder(_:_:))
+    }
+
+    private var repositoryFilterOptions: [String] {
+        var options = Set(managedRepositories.map { normalizedRepositoryPath($0.rootPath) })
+        options.formUnion(unifiedSessions.compactMap(\.repositoryRoot).map { normalizedRepositoryPath($0) })
+        return options.sorted()
+    }
+
+    private var providerFilterOptions: [String] {
+        Array(Set(unifiedSessions.map(\.provider))).sorted()
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if manager.profiles.isEmpty {
+            if manager.profiles.isEmpty && unifiedSessions.isEmpty {
                 emptyStateView
             } else {
                 listContent
@@ -81,6 +130,26 @@ struct ExternalToolListView: View {
                 Text(startErrorMessage ?? "")
             }
         )
+        .alert(
+            "세션 매핑",
+            isPresented: Binding(
+                get: { mappingNotice != nil },
+                set: { newValue in
+                    if !newValue { mappingNotice = nil }
+                }
+            ),
+            actions: {
+                Button("확인", role: .cancel) {
+                    mappingNotice = nil
+                }
+            },
+            message: {
+                Text(mappingNotice ?? "")
+            }
+        )
+        .task {
+            await refreshUnifiedSessions()
+        }
     }
 
     @ViewBuilder
@@ -112,6 +181,15 @@ struct ExternalToolListView: View {
     private var listContent: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                observabilitySectionHeader
+                repoDashboardSection
+                sessionExplorerSection
+                unassignedQueueSection
+
+                Divider()
+                    .padding(.top, 10)
+                    .padding(.bottom, 6)
+
                 // Running sessions
                 if !runningSessions.isEmpty {
                     sectionHeader("실행 중")
@@ -138,6 +216,226 @@ struct ExternalToolListView: View {
             }
             .padding(.vertical, 4)
         }
+    }
+
+    @ViewBuilder
+    private var observabilitySectionHeader: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("세션 탐색기")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("레포 대시보드 / 필터 / Unassigned 매핑")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if isRefreshingUnified {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Button("새로고침") {
+                Task { await refreshUnifiedSessions() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var repoDashboardSection: some View {
+        sectionHeader("Repo Dashboard")
+
+        if repositorySummaries.isEmpty {
+            Text("표시할 레포 상태가 없습니다.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(repositorySummaries) { summary in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(summary.displayName)
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                            Text("세션 \(summary.sessionCount) · 활성 \(summary.activeSessionCount) · 오류 \(summary.errorSessionCount)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                            if let repositoryRoot = summary.repositoryRoot {
+                                let branch = managedRepositories.first(where: {
+                                    URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path == repositoryRoot
+                                })?.defaultBranch ?? "-"
+                                Text("브랜치 \(branch)")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                            } else {
+                                Text("Unassigned")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(8)
+                        .frame(width: 170, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                        )
+                    }
+                }
+                .padding(.horizontal, 10)
+            }
+            .padding(.bottom, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var sessionExplorerSection: some View {
+        sectionHeader("Session Explorer")
+
+        VStack(spacing: 6) {
+            TextField("세션 검색 (provider/id/path)", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+
+            HStack(spacing: 6) {
+                Menu("repo") {
+                    Button("전체") { explorerFilter.repositoryRoot = nil }
+                    ForEach(repositoryFilterOptions, id: \.self) { root in
+                        Button(root) { explorerFilter.repositoryRoot = root }
+                    }
+                }
+                Menu("provider") {
+                    Button("전체") { explorerFilter.provider = nil }
+                    ForEach(providerFilterOptions, id: \.self) { provider in
+                        Button(provider) { explorerFilter.provider = provider }
+                    }
+                }
+                Menu("tier") {
+                    Button("전체") { explorerFilter.tier = nil }
+                    Button("T0") { explorerFilter.tier = .t0Full }
+                    Button("T1") { explorerFilter.tier = .t1Attach }
+                    Button("T2") { explorerFilter.tier = .t2Observe }
+                    Button("T3") { explorerFilter.tier = .t3Unknown }
+                }
+                Menu("정렬") {
+                    Button("활성도") { sortOption = .activity }
+                    Button("최근 활동") { sortOption = .updatedAt }
+                    Button("Provider") { sortOption = .provider }
+                }
+            }
+            .font(.system(size: 10))
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 6) {
+                Toggle("활성만", isOn: $explorerFilter.activeOnly)
+                    .toggleStyle(.checkbox)
+                Toggle("Unassigned만", isOn: $explorerFilter.unassignedOnly)
+                    .toggleStyle(.checkbox)
+                Spacer()
+                Text("\(filteredUnifiedSessions.count)개")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 10))
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+
+        if filteredUnifiedSessions.isEmpty {
+            Text("필터 조건에 맞는 세션이 없습니다.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        } else {
+            ForEach(
+                filteredUnifiedSessions.map { (key: ExternalToolSessionManager.sessionStableKey($0), value: $0) },
+                id: \.key
+            ) { item in
+                unifiedSessionRow(item.value)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var unassignedQueueSection: some View {
+        sectionHeader("Unassigned Queue")
+
+        if unassignedUnifiedSessions.isEmpty {
+            Text("Unassigned 세션이 없습니다.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        } else {
+            ForEach(
+                unassignedUnifiedSessions.map { (key: ExternalToolSessionManager.sessionStableKey($0), value: $0) },
+                id: \.key
+            ) { item in
+                let session = item.value
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("[\(session.provider)] \(session.nativeSessionId)")
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                        Text(session.path)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Menu("레포 연결") {
+                        if managedRepositories.isEmpty {
+                            Text("관리 중인 레포가 없습니다.")
+                        } else {
+                            ForEach(managedRepositories) { repository in
+                                Button(repository.name) {
+                                    applyManualMapping(session: session, repositoryRoot: repository.rootPath)
+                                }
+                            }
+                        }
+                    }
+                    .font(.system(size: 10))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func unifiedSessionRow(_ session: UnifiedCodingSession) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(activityColor(session.activityState))
+                .frame(width: 7, height: 7)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("[\(session.provider)] \(session.nativeSessionId)")
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                    Text(session.controllabilityTier.rawValue)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+
+                Text("state=\(session.activityState.rawValue), score=\(session.activityScore), repo=\(session.repositoryRoot ?? "(unassigned)")")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -283,6 +581,53 @@ struct ExternalToolListView: View {
             .fill(status.color)
             .frame(width: 8, height: 8)
             .opacity(status == .unknown ? 0.5 : 1.0)
+    }
+
+    @MainActor
+    private func refreshUnifiedSessions() async {
+        guard !isRefreshingUnified else { return }
+        isRefreshingUnified = true
+        unifiedSessions = await manager.listUnifiedCodingSessions(limit: 180)
+        if let repositoryRoot = explorerFilter.repositoryRoot {
+            explorerFilter.repositoryRoot = normalizedRepositoryPath(repositoryRoot)
+        }
+        isRefreshingUnified = false
+    }
+
+    @MainActor
+    private func applyManualMapping(session: UnifiedCodingSession, repositoryRoot: String) {
+        let normalizedRepositoryRoot = normalizedRepositoryPath(repositoryRoot)
+        manager.setManualRepositoryBinding(
+            provider: session.provider,
+            nativeSessionId: session.nativeSessionId,
+            path: session.path,
+            repositoryRoot: normalizedRepositoryRoot
+        )
+        if let filterRoot = explorerFilter.repositoryRoot {
+            explorerFilter.repositoryRoot = normalizedRepositoryPath(filterRoot)
+        }
+        let repoName = URL(fileURLWithPath: normalizedRepositoryRoot).lastPathComponent
+        mappingNotice = "[\(session.nativeSessionId)] 세션을 \(repoName) 레포로 연결했습니다."
+        Task {
+            await refreshUnifiedSessions()
+        }
+    }
+
+    private func normalizedRepositoryPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private func activityColor(_ state: CodingSessionActivityState) -> Color {
+        switch state {
+        case .active:
+            return .green
+        case .idle:
+            return .blue
+        case .stale:
+            return .orange
+        case .dead:
+            return .gray
+        }
     }
 }
 
