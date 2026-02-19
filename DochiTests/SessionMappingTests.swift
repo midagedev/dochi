@@ -26,6 +26,7 @@ final class SessionMappingTests: XCTestCase {
             workspaceId: "ws-1",
             agentId: "agent-1",
             conversationId: "conv-1",
+            userId: "user-1",
             deviceId: "dev-1",
             status: .active,
             createdAt: Date(timeIntervalSince1970: 1700000000),
@@ -45,6 +46,7 @@ final class SessionMappingTests: XCTestCase {
         XCTAssertEqual(decoded.workspaceId, "ws-1")
         XCTAssertEqual(decoded.agentId, "agent-1")
         XCTAssertEqual(decoded.conversationId, "conv-1")
+        XCTAssertEqual(decoded.userId, "user-1")
         XCTAssertEqual(decoded.deviceId, "dev-1")
         XCTAssertEqual(decoded.status, .active)
     }
@@ -53,7 +55,8 @@ final class SessionMappingTests: XCTestCase {
         let mapping = SessionMapping(
             sessionId: "s-1", sdkSessionId: "sdk-1",
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1",
+            conversationId: "c-1", userId: "u-1",
+            deviceId: "d-1",
             status: .active,
             createdAt: Date(), lastActiveAt: Date()
         )
@@ -86,7 +89,8 @@ final class SessionMappingTests: XCTestCase {
         let mapping = SessionMapping(
             sessionId: "s-1", sdkSessionId: "sdk-1",
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1",
+            conversationId: "c-1", userId: "u-1",
+            deviceId: "d-1",
             status: .active,
             createdAt: Date(timeIntervalSince1970: 1700000000),
             lastActiveAt: Date(timeIntervalSince1970: 1700000000)
@@ -302,6 +306,7 @@ final class SessionMappingTests: XCTestCase {
         workspaceId: String = "ws-1",
         agentId: String = "a-1",
         conversationId: String = "c-1",
+        userId: String = "u-1",
         deviceId: String = "d-1"
     ) -> SessionMapping {
         SessionMapping(
@@ -310,6 +315,7 @@ final class SessionMappingTests: XCTestCase {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: userId,
             deviceId: deviceId,
             status: .active,
             createdAt: Date(),

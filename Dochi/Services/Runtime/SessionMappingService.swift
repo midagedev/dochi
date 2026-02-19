@@ -79,6 +79,7 @@ final class SessionMappingService {
     }
 
     /// Touch the last-active timestamp for a session.
+    /// Does not call `rebuildIndex()` since status is unchanged.
     func touch(sessionId: String) {
         guard let idx = store.mappings.firstIndex(where: { $0.sessionId == sessionId }) else {
             return

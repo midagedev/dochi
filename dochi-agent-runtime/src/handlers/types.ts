@@ -110,6 +110,7 @@ export interface SessionEntry {
   workspaceId: string;
   agentId: string;
   conversationId: string;
+  userId: string;
   deviceId: string;
   status: "active" | "closed" | "interrupted";
   lookupKey: string;

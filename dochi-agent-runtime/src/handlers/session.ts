@@ -45,6 +45,7 @@ export function handleSessionOpen(params: SessionOpenParams): SessionOpenResult 
     workspaceId: params.workspaceId,
     agentId: params.agentId,
     conversationId: params.conversationId,
+    userId: params.userId,
     deviceId: params.deviceId ?? "",
     status: "active",
     lookupKey,

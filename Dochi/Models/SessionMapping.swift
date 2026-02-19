@@ -16,6 +16,8 @@ struct SessionMapping: Codable, Sendable, Equatable {
     let agentId: String
     /// Conversation this session belongs to.
     let conversationId: String
+    /// User who initiated this session.
+    let userId: String
     /// Device where the session was created. Empty string if not specified.
     let deviceId: String
     /// Session status.
