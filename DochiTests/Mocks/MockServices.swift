@@ -1005,6 +1005,8 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var orchestrationGuardPolicyRulesCallCount = 0
     var evaluateOrchestrationExecutionGuardCallCount = 0
     var sessionHistoryMaskingRulesCallCount = 0
+    var recordActivityClassificationFeedbackCallCount = 0
+    var sessionManagementKPIReportCallCount = 0
     var rebuildSessionHistoryIndexCallCount = 0
     var searchSessionHistoryCallCount = 0
 
@@ -1027,6 +1029,15 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     )
     var mockOrchestrationPolicyRules: [OrchestrationGuardPolicyRule] = []
     var mockSessionHistoryMaskingRules: [SessionHistoryMaskingRule] = []
+    var mockSessionManagementKPIReport = SessionManagementKPIReport(
+        generatedAt: Date(timeIntervalSince1970: 0),
+        repositoryAssignmentSuccessRate: 0,
+        dedupCorrectionRate: 0,
+        activityClassificationAccuracy: nil,
+        sessionSelectionFailureRate: 0,
+        historySearchHitRate: 0,
+        counters: SessionManagementKPICounters()
+    )
     var mockSessionHistoryResults: [SessionHistorySearchResult] = []
 
     func loadProfiles() {
@@ -1212,6 +1223,19 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     func sessionHistoryMaskingRules() -> [SessionHistoryMaskingRule] {
         sessionHistoryMaskingRulesCallCount += 1
         return mockSessionHistoryMaskingRules
+    }
+
+    func recordActivityClassificationFeedback(
+        expected: CodingSessionActivityState,
+        observed: CodingSessionActivityState
+    ) {
+        _ = (expected, observed)
+        recordActivityClassificationFeedbackCallCount += 1
+    }
+
+    func sessionManagementKPIReport() -> SessionManagementKPIReport {
+        sessionManagementKPIReportCallCount += 1
+        return mockSessionManagementKPIReport
     }
 
     func rebuildSessionHistoryIndex(limit: Int) async -> Int {

@@ -70,6 +70,11 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
 
     // Session history RAG
     func sessionHistoryMaskingRules() -> [SessionHistoryMaskingRule]
+    func recordActivityClassificationFeedback(
+        expected: CodingSessionActivityState,
+        observed: CodingSessionActivityState
+    )
+    func sessionManagementKPIReport() -> SessionManagementKPIReport
     func rebuildSessionHistoryIndex(limit: Int) async -> Int
     func searchSessionHistory(query: SessionHistorySearchQuery) async -> [SessionHistorySearchResult]
 }
@@ -146,6 +151,23 @@ extension ExternalToolSessionManagerProtocol {
         []
     }
 
+    func recordActivityClassificationFeedback(
+        expected _: CodingSessionActivityState,
+        observed _: CodingSessionActivityState
+    ) {}
+
+    func sessionManagementKPIReport() -> SessionManagementKPIReport {
+        SessionManagementKPIReport(
+            generatedAt: Date(),
+            repositoryAssignmentSuccessRate: 0,
+            dedupCorrectionRate: 0,
+            activityClassificationAccuracy: nil,
+            sessionSelectionFailureRate: 0,
+            historySearchHitRate: 0,
+            counters: SessionManagementKPICounters()
+        )
+    }
+
     func rebuildSessionHistoryIndex(limit _: Int) async -> Int {
         0
     }
@@ -215,6 +237,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private var localDiscoveryCacheDate: Date?
     private var manualRepositoryBindings: [String: String] = [:]
     private var sessionHistoryChunks: [SessionHistoryChunk] = []
+    private var sessionKPICounters = SessionManagementKPICounters()
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -856,23 +879,35 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             )
         }.value
 
-        return await Task.detached(priority: .utility) {
+        let dedupResult = await Task.detached(priority: .utility) {
             let adjusted = Self.applyManualRepositoryBindings(
                 merged,
                 manualBindings: manualBindings
             )
-            return Self.deduplicateUnifiedCodingSessions(adjusted, limit: effectiveLimit)
+            let deduplicated = Self.deduplicateUnifiedCodingSessions(adjusted, limit: effectiveLimit)
+            return (sessions: deduplicated, dedupCandidates: adjusted.count)
         }.value
+
+        updateKPIForUnifiedSnapshot(
+            sessions: dedupResult.sessions,
+            dedupCandidateCount: dedupResult.dedupCandidates
+        )
+        return dedupResult.sessions
     }
 
     func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {
         let unified = await listUnifiedCodingSessions(limit: 240)
-        return await Task.detached(priority: .utility) {
+        let selection = await Task.detached(priority: .utility) {
             Self.selectSessionForOrchestration(
                 sessions: unified,
                 repositoryRoot: repositoryRoot
             )
         }.value
+        incrementKPICounter(\.selectionAttemptCount)
+        if Self.isSelectionFailure(selection) {
+            incrementKPICounter(\.selectionFailureCount)
+        }
+        return selection
     }
 
     func orchestrationGuardPolicyRules() -> [OrchestrationGuardPolicyRule] {
@@ -888,6 +923,20 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     func sessionHistoryMaskingRules() -> [SessionHistoryMaskingRule] {
         Self.sessionHistoryMaskingPolicyRules()
+    }
+
+    func recordActivityClassificationFeedback(
+        expected: CodingSessionActivityState,
+        observed: CodingSessionActivityState
+    ) {
+        incrementKPICounter(\.activityFeedbackSampleCount)
+        if expected == observed {
+            incrementKPICounter(\.activityFeedbackMatchedCount)
+        }
+    }
+
+    func sessionManagementKPIReport() -> SessionManagementKPIReport {
+        Self.buildSessionManagementKPIReport(from: sessionKPICounters, now: Date())
     }
 
     func rebuildSessionHistoryIndex(limit: Int) async -> Int {
@@ -921,7 +970,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }
         let indexed = sessionHistoryChunks
         let effectiveLimit = max(1, min(200, query.limit))
-        return await Task.detached(priority: .utility) {
+        let results = await Task.detached(priority: .utility) {
             Self.searchSessionHistoryChunks(
                 chunks: indexed,
                 query: SessionHistorySearchQuery(
@@ -935,6 +984,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 now: Date()
             )
         }.value
+        incrementKPICounter(\.historySearchQueryCount)
+        if !results.isEmpty {
+            incrementKPICounter(\.historySearchHitCount)
+        }
+        return results
     }
 
     nonisolated static func selectSessionForOrchestration(
@@ -1005,6 +1059,82 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             repositoryRoot: normalizedRepositoryRoot,
             selectedSession: nil
         )
+    }
+
+    private func updateKPIForUnifiedSnapshot(
+        sessions: [UnifiedCodingSession],
+        dedupCandidateCount: Int
+    ) {
+        sessionKPICounters.repositoryAssignedCount = min(Self.kpiCounterCap, sessions.filter { !$0.isUnassigned }.count)
+        sessionKPICounters.repositoryTotalCount = min(Self.kpiCounterCap, sessions.count)
+        incrementKPICounter(\.dedupCandidateCount, by: dedupCandidateCount)
+        incrementKPICounter(\.dedupCorrectionCount, by: max(0, dedupCandidateCount - sessions.count))
+
+        var distribution: [String: Int] = [:]
+        for session in sessions {
+            distribution[session.activityState.rawValue, default: 0] += 1
+        }
+        sessionKPICounters.activityStateDistribution = distribution
+    }
+
+    private func incrementKPICounter(
+        _ keyPath: WritableKeyPath<SessionManagementKPICounters, Int>,
+        by rawDelta: Int = 1
+    ) {
+        let delta = max(0, rawDelta)
+        guard delta > 0 else { return }
+
+        let current = sessionKPICounters[keyPath: keyPath]
+        let (sum, overflow) = current.addingReportingOverflow(delta)
+        let capped: Int
+        if overflow {
+            capped = Self.kpiCounterCap
+        } else {
+            capped = min(Self.kpiCounterCap, sum)
+        }
+        sessionKPICounters[keyPath: keyPath] = capped
+    }
+
+    nonisolated private static let kpiCounterCap = 1_000_000
+
+    nonisolated static func isSelectionFailure(_ selection: OrchestrationSessionSelection) -> Bool {
+        switch selection.action {
+        case .reuseT0Active, .attachT1:
+            return false
+        case .createT0, .analyzeOnly, .none:
+            return true
+        }
+    }
+
+    nonisolated static func buildSessionManagementKPIReport(
+        from counters: SessionManagementKPICounters,
+        now: Date = Date()
+    ) -> SessionManagementKPIReport {
+        let repositoryRate = ratio(counters.repositoryAssignedCount, counters.repositoryTotalCount)
+        let dedupRate = ratio(counters.dedupCorrectionCount, counters.dedupCandidateCount)
+        let selectionFailureRate = ratio(counters.selectionFailureCount, counters.selectionAttemptCount)
+        let searchHitRate = ratio(counters.historySearchHitCount, counters.historySearchQueryCount)
+        let activityAccuracy: Double?
+        if counters.activityFeedbackSampleCount > 0 {
+            activityAccuracy = ratio(counters.activityFeedbackMatchedCount, counters.activityFeedbackSampleCount)
+        } else {
+            activityAccuracy = nil
+        }
+
+        return SessionManagementKPIReport(
+            generatedAt: now,
+            repositoryAssignmentSuccessRate: repositoryRate,
+            dedupCorrectionRate: dedupRate,
+            activityClassificationAccuracy: activityAccuracy,
+            sessionSelectionFailureRate: selectionFailureRate,
+            historySearchHitRate: searchHitRate,
+            counters: counters
+        )
+    }
+
+    nonisolated private static func ratio(_ numerator: Int, _ denominator: Int) -> Double {
+        guard denominator > 0 else { return 0 }
+        return Double(numerator) / Double(denominator)
     }
 
     nonisolated static func evaluateOrchestrationExecutionGuard(
