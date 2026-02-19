@@ -192,6 +192,39 @@ final class TelegramStreamingTests: XCTestCase {
         }) ?? false)
     }
 
+    func testHandleTelegramMessageStreamingEditsSingleMessage() async {
+        let llmService = MockLLMService()
+        llmService.partialChunksPerSend = [[
+            String(repeating: "A", count: 20),
+            String(repeating: "B", count: 20),
+            String(repeating: "C", count: 20),
+            String(repeating: "D", count: 20),
+        ]]
+        llmService.stubbedResponse = .text("최종 스트리밍 응답")
+
+        let toolService = MockBuiltInToolService()
+        let (viewModel, telegramService, _, _) = makeTelegramTestContext(
+            llmService: llmService,
+            toolService: toolService
+        )
+        telegramService.sendMessageDelayNanos = 200_000_000
+
+        let update = TelegramUpdate(
+            updateId: 4,
+            chatId: 77777,
+            senderId: 102,
+            senderUsername: "streamer",
+            text: "스트리밍으로 답해줘"
+        )
+
+        await viewModel.handleTelegramMessage(update)
+
+        XCTAssertEqual(telegramService.sentMessages.count, 1)
+        XCTAssertFalse(telegramService.editedMessages.isEmpty)
+        XCTAssertTrue(telegramService.editedMessages.allSatisfy { $0.messageId == 1000 })
+        XCTAssertEqual(telegramService.editedMessages.last?.text, "최종 스트리밍 응답")
+    }
+
     // MARK: - Offset persistence
 
     func testOffsetKeyDiffersByToken() {
@@ -482,6 +515,7 @@ final class TelegramStreamingTests: XCTestCase {
         settings.llmProvider = LLMProvider.openai.rawValue
         settings.llmModel = "gpt-4o"
         settings.taskRoutingEnabled = false
+        settings.telegramStreamReplies = true
 
         let contextService = MockContextService()
         let conversationService = MockConversationService()

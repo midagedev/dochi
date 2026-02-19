@@ -15,6 +15,7 @@ final class MockLLMService: LLMServiceProtocol {
     var lastTools: [[String: Any]]?
     var stubbedResponse: LLMResponse = .text("Mock response")
     var stubbedResponses: [LLMResponse] = []
+    var partialChunksPerSend: [[String]] = []
     var stubbedError: Error?
     var cancelCallCount = 0
 
@@ -47,6 +48,12 @@ final class MockLLMService: LLMServiceProtocol {
             timestamp: Date(),
             wasFallback: false
         )
+
+        if !partialChunksPerSend.isEmpty {
+            for chunk in partialChunksPerSend.removeFirst() {
+                onPartial(chunk)
+            }
+        }
 
         if !stubbedResponses.isEmpty {
             return stubbedResponses.removeFirst()
@@ -389,6 +396,7 @@ final class MockTelegramService: TelegramServiceProtocol {
     var sentMediaGroups: [(chatId: Int64, items: [TelegramMediaItem])] = []
     var webhookCalls: [(token: String, url: String)] = []
     var nextMessageId: Int64 = 1000
+    var sendMessageDelayNanos: UInt64 = 0
 
     func startPolling(token: String) { isPolling = true }
     func stopPolling() { isPolling = false }
@@ -413,6 +421,9 @@ final class MockTelegramService: TelegramServiceProtocol {
     }
 
     func sendMessage(chatId: Int64, text: String) async throws -> Int64 {
+        if sendMessageDelayNanos > 0 {
+            try? await Task.sleep(nanoseconds: sendMessageDelayNanos)
+        }
         let msgId = nextMessageId
         nextMessageId += 1
         sentMessages.append((chatId: chatId, text: text))

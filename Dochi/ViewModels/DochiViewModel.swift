@@ -2115,11 +2115,16 @@ final class DochiViewModel {
         do {
             var finalText: String?
             var streamMessageId: Int64?
+            var pendingStreamSnapshot: String?
+            var streamFlushTask: Task<Void, Never>?
             var lastEditLength = 0
             var loopConversation = conversation
             var toolLoopCount = 0
 
             telegramLoop: while toolLoopCount <= Self.maxToolLoopIterations + 1 {
+                // loopText is reset per model turn, so reset stream edit threshold too.
+                lastEditLength = 0
+
                 // For non-streaming mode, send typing indicator before each model request
                 if !useStreaming, let tg = getTelegramService() {
                     try? await tg.sendChatAction(chatId: update.chatId, action: "typing")
@@ -2137,16 +2142,26 @@ final class DochiViewModel {
 
                     let textSnapshot = loopText + " ▍"
                     lastEditLength = currentLength
+                    pendingStreamSnapshot = textSnapshot
 
-                    Task { @MainActor in
-                        do {
-                            if let msgId = streamMessageId {
-                                try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: textSnapshot)
-                            } else {
-                                streamMessageId = try await tg.sendMessage(chatId: update.chatId, text: textSnapshot)
+                    // Serialize streaming updates so one response always maps to one Telegram message.
+                    guard streamFlushTask == nil else { return }
+
+                    streamFlushTask = Task { @MainActor in
+                        defer { streamFlushTask = nil }
+
+                        while let snapshot = pendingStreamSnapshot {
+                            pendingStreamSnapshot = nil
+
+                            do {
+                                if let msgId = streamMessageId {
+                                    try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: snapshot)
+                                } else {
+                                    streamMessageId = try await tg.sendMessage(chatId: update.chatId, text: snapshot)
+                                }
+                            } catch {
+                                Log.telegram.debug("Streaming edit skipped: \(error.localizedDescription)")
                             }
-                        } catch {
-                            Log.telegram.debug("Streaming edit skipped: \(error.localizedDescription)")
                         }
                     }
                 }
@@ -2234,6 +2249,11 @@ final class DochiViewModel {
             guard let finalText, !finalText.isEmpty else {
                 Log.telegram.warning("Failed to produce final Telegram response")
                 return
+            }
+
+            // Ensure latest streamed snapshot is flushed before final cursor-less update.
+            if useStreaming {
+                await streamFlushTask?.value
             }
 
             // Append assistant response to conversation
