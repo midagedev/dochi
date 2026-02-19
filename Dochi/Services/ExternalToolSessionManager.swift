@@ -54,6 +54,13 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
     func discoverLocalCodingSessions(limit: Int) async -> [DiscoveredCodingSession]
     func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession]
 
+    // Orchestrator selection/guard
+    func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection
+    func evaluateOrchestrationExecutionGuard(
+        tier: CodingSessionControllabilityTier,
+        command: String
+    ) -> OrchestrationExecutionDecision
+
     // Session history RAG
     func rebuildSessionHistoryIndex(limit: Int) async -> Int
     func searchSessionHistory(query: SessionHistorySearchQuery) async -> [SessionHistorySearchResult]
@@ -91,6 +98,27 @@ extension ExternalToolSessionManagerProtocol {
 
     func listUnifiedCodingSessions(limit _: Int) async -> [UnifiedCodingSession] {
         []
+    }
+
+    func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {
+        OrchestrationSessionSelection(
+            action: .none,
+            reason: "세션 선택을 지원하지 않습니다.",
+            repositoryRoot: repositoryRoot,
+            selectedSession: nil
+        )
+    }
+
+    func evaluateOrchestrationExecutionGuard(
+        tier: CodingSessionControllabilityTier,
+        command: String
+    ) -> OrchestrationExecutionDecision {
+        _ = (tier, command)
+        return OrchestrationExecutionDecision(
+            kind: .denied,
+            reason: "실행 가드를 지원하지 않습니다.",
+            isDestructiveCommand: false
+        )
     }
 
     func rebuildSessionHistoryIndex(limit _: Int) async -> Int {
@@ -755,6 +783,23 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }.value
     }
 
+    func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {
+        let unified = await listUnifiedCodingSessions(limit: 240)
+        return await Task.detached(priority: .utility) {
+            Self.selectSessionForOrchestration(
+                sessions: unified,
+                repositoryRoot: repositoryRoot
+            )
+        }.value
+    }
+
+    func evaluateOrchestrationExecutionGuard(
+        tier: CodingSessionControllabilityTier,
+        command: String
+    ) -> OrchestrationExecutionDecision {
+        Self.evaluateOrchestrationExecutionGuard(tier: tier, command: command)
+    }
+
     func rebuildSessionHistoryIndex(limit: Int) async -> Int {
         let effectiveLimit = max(10, min(2_000, limit))
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -800,6 +845,138 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 now: Date()
             )
         }.value
+    }
+
+    nonisolated static func selectSessionForOrchestration(
+        sessions: [UnifiedCodingSession],
+        repositoryRoot: String?
+    ) -> OrchestrationSessionSelection {
+        let normalizedRepositoryRoot = repositoryRoot.map {
+            URL(fileURLWithPath: expandedPath($0)).standardizedFileURL.path
+        }
+        let sorted = sessions
+            .sorted(by: isPreferredUnifiedSessionOrder(_:_:))
+            .filter { $0.activityState != .dead }
+
+        let scoped: [UnifiedCodingSession]
+        if let normalizedRepositoryRoot {
+            scoped = sorted.filter { session in
+                guard let root = session.repositoryRoot else { return false }
+                return URL(fileURLWithPath: root).standardizedFileURL.path == normalizedRepositoryRoot
+            }
+        } else {
+            scoped = sorted
+        }
+
+        if let t0Active = scoped.first(where: { $0.controllabilityTier == .t0Full && $0.activityState == .active }) {
+            return OrchestrationSessionSelection(
+                action: .reuseT0Active,
+                reason: "동일 repo의 T0 active 세션을 재사용합니다.",
+                repositoryRoot: normalizedRepositoryRoot ?? t0Active.repositoryRoot,
+                selectedSession: t0Active
+            )
+        }
+
+        if let t1Attach = scoped.first(where: {
+            $0.controllabilityTier == .t1Attach &&
+                ($0.activityState == .active || $0.activityState == .idle)
+        }) {
+            return OrchestrationSessionSelection(
+                action: .attachT1,
+                reason: "T0 active가 없어 T1(active/idle) 세션으로 attach합니다.",
+                repositoryRoot: normalizedRepositoryRoot ?? t1Attach.repositoryRoot,
+                selectedSession: t1Attach
+            )
+        }
+
+        if let normalizedRepositoryRoot {
+            return OrchestrationSessionSelection(
+                action: .createT0,
+                reason: "실행 가능한 세션이 없어 새 T0 세션 생성이 필요합니다.",
+                repositoryRoot: normalizedRepositoryRoot,
+                selectedSession: nil
+            )
+        }
+
+        if let t2Fallback = sorted.first(where: {
+            $0.controllabilityTier == .t2Observe || $0.controllabilityTier == .t3Unknown
+        }) {
+            return OrchestrationSessionSelection(
+                action: .analyzeOnly,
+                reason: "실행 세션이 없어 T2/T3 분석 전용 모드로 폴백합니다.",
+                repositoryRoot: t2Fallback.repositoryRoot,
+                selectedSession: t2Fallback
+            )
+        }
+
+        return OrchestrationSessionSelection(
+            action: .none,
+            reason: "선택 가능한 세션이 없습니다.",
+            repositoryRoot: normalizedRepositoryRoot,
+            selectedSession: nil
+        )
+    }
+
+    nonisolated static func evaluateOrchestrationExecutionGuard(
+        tier: CodingSessionControllabilityTier,
+        command: String
+    ) -> OrchestrationExecutionDecision {
+        let destructive = isDestructiveCommand(command)
+        switch tier {
+        case .t0Full:
+            return OrchestrationExecutionDecision(
+                kind: .allowed,
+                reason: "T0 세션은 자동 실행이 허용됩니다.",
+                isDestructiveCommand: destructive
+            )
+        case .t1Attach:
+            if destructive {
+                return OrchestrationExecutionDecision(
+                    kind: .confirmationRequired,
+                    reason: "T1 세션의 파괴적 명령은 사용자 확인이 필요합니다.",
+                    isDestructiveCommand: true
+                )
+            }
+            return OrchestrationExecutionDecision(
+                kind: .allowed,
+                reason: "T1 세션의 비파괴 명령은 실행 가능합니다.",
+                isDestructiveCommand: false
+            )
+        case .t2Observe, .t3Unknown:
+            return OrchestrationExecutionDecision(
+                kind: .denied,
+                reason: "T2/T3 세션은 실행 금지이며 제안 전용입니다.",
+                isDestructiveCommand: destructive
+            )
+        }
+    }
+
+    nonisolated static func isDestructiveCommand(_ command: String) -> Bool {
+        let normalized = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+
+        let destructiveMarkers = [
+            "rm -rf",
+            "rm -fr",
+            "git reset --hard",
+            "git clean -fd",
+            "git clean -xdf",
+            "git push --force",
+            "git push -f",
+            "docker system prune -a",
+            "drop table",
+            "truncate table",
+            "shutdown -h",
+        ]
+        if destructiveMarkers.contains(where: { normalized.contains($0) }) {
+            return true
+        }
+
+        if normalized.hasPrefix("rm "),
+           normalized.contains(" -rf") || normalized.contains(" -fr") {
+            return true
+        }
+        return false
     }
 
     nonisolated static func buildSessionHistoryChunks(

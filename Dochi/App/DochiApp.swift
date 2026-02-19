@@ -906,6 +906,15 @@ struct DochiApp: App {
         case "bridge.session_history.search":
             return await handleBridgeSessionHistorySearch(params: params, externalToolManager: externalToolManager)
 
+        case "bridge.orchestrator.select_session":
+            return await handleBridgeOrchestratorSelectSession(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.orchestrator.guard_command":
+            return await handleBridgeOrchestratorGuardCommand(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.orchestrator.execute":
+            return await handleBridgeOrchestratorExecute(params: params, externalToolManager: externalToolManager)
+
         case "bridge.repo.list":
             return await handleBridgeRepositoryList(externalToolManager: externalToolManager)
 
@@ -1486,6 +1495,113 @@ struct DochiApp: App {
         ])
     }
 
+    nonisolated private static func handleBridgeOrchestratorSelectSession(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        let repositoryRoot = nonEmptyString(params["repository_root"])
+        let selection = await externalToolManager.selectSessionForOrchestration(repositoryRoot: repositoryRoot)
+        return .ok(serializeOrchestrationSelection(selection))
+    }
+
+    nonisolated private static func handleBridgeOrchestratorGuardCommand(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let tierRaw = nonEmptyString(params["tier"]),
+              let tier = CodingSessionControllabilityTier(rawValue: tierRaw) else {
+            return .failure(code: "invalid_tier", message: "유효한 tier가 필요합니다. (t0_full/t1_attach/t2_observe/t3_unknown)")
+        }
+        guard let command = nonEmptyString(params["command"]) else {
+            return .failure(code: "missing_command", message: "command가 필요합니다.")
+        }
+
+        let decision = await MainActor.run {
+            externalToolManager.evaluateOrchestrationExecutionGuard(
+                tier: tier,
+                command: command
+            )
+        }
+
+        if decision.kind == .denied {
+            return .failure(code: "execution_denied", message: decision.reason)
+        }
+        if decision.kind == .confirmationRequired {
+            return .failure(code: "confirmation_required", message: decision.reason)
+        }
+
+        return .ok([
+            "decision": decision.kind.rawValue,
+            "reason": decision.reason,
+            "is_destructive_command": decision.isDestructiveCommand,
+        ])
+    }
+
+    nonisolated private static func handleBridgeOrchestratorExecute(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let command = nonEmptyString(params["command"]) else {
+            return .failure(code: "missing_command", message: "command가 필요합니다.")
+        }
+        let repositoryRoot = nonEmptyString(params["repository_root"])
+        let confirmed = boolValue(params["confirmed"]) ?? false
+        let selection = await externalToolManager.selectSessionForOrchestration(repositoryRoot: repositoryRoot)
+
+        switch selection.action {
+        case .reuseT0Active, .attachT1:
+            guard let session = selection.selectedSession else {
+                return .failure(code: "session_not_found", message: "선택된 세션을 찾을 수 없습니다.")
+            }
+            let decision = await MainActor.run {
+                externalToolManager.evaluateOrchestrationExecutionGuard(
+                    tier: session.controllabilityTier,
+                    command: command
+                )
+            }
+
+            if decision.kind == .denied {
+                return .failure(code: "execution_denied", message: decision.reason)
+            }
+            if decision.kind == .confirmationRequired, !confirmed {
+                return .failure(code: "confirmation_required", message: decision.reason)
+            }
+
+            guard let runtimeSessionId = session.runtimeSessionId,
+                  let runtimeUUID = UUID(uuidString: runtimeSessionId) else {
+                return .failure(code: "runtime_session_missing", message: "실행 가능한 runtime_session_id를 찾을 수 없습니다.")
+            }
+
+            do {
+                try await externalToolManager.sendCommand(sessionId: runtimeUUID, command: command)
+                return .ok([
+                    "status": "sent",
+                    "command": command,
+                    "selection": serializeOrchestrationSelection(selection),
+                    "guard": [
+                        "decision": decision.kind.rawValue,
+                        "reason": decision.reason,
+                        "is_destructive_command": decision.isDestructiveCommand,
+                    ],
+                ])
+            } catch {
+                return .failure(code: "bridge_send_failed", message: error.localizedDescription)
+            }
+        case .createT0:
+            return .failure(
+                code: "session_creation_required",
+                message: "실행 가능한 세션이 없어 새 T0 세션 생성이 필요합니다."
+            )
+        case .analyzeOnly:
+            return .failure(
+                code: "analyze_only_fallback",
+                message: "현재는 분석 전용(T2/T3) 세션만 존재하여 실행이 차단되었습니다."
+            )
+        case .none:
+            return .failure(code: "session_not_found", message: selection.reason)
+        }
+    }
+
     nonisolated private static func handleBridgeRepositoryList(
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1629,6 +1745,35 @@ struct DochiApp: App {
             "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
             "last_activity": session.lastActivityText ?? NSNull(),
         ]
+    }
+
+    nonisolated private static func serializeOrchestrationSelection(
+        _ selection: OrchestrationSessionSelection
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "action": selection.action.rawValue,
+            "reason": selection.reason,
+            "repository_root": selection.repositoryRoot ?? NSNull(),
+        ]
+        if let selected = selection.selectedSession {
+            payload["selected_session"] = [
+                "source": selected.source,
+                "runtime_type": selected.runtimeType.rawValue,
+                "controllability_tier": selected.controllabilityTier.rawValue,
+                "provider": selected.provider,
+                "native_session_id": selected.nativeSessionId,
+                "runtime_session_id": selected.runtimeSessionId ?? NSNull(),
+                "working_directory": selected.workingDirectory ?? NSNull(),
+                "repository_root": selected.repositoryRoot ?? NSNull(),
+                "activity_state": selected.activityState.rawValue,
+                "activity_score": selected.activityScore,
+                "path": selected.path,
+                "updated_at": isoTimestamp(selected.updatedAt),
+            ] as [String: Any]
+        } else {
+            payload["selected_session"] = NSNull()
+        }
+        return payload
     }
 
     @MainActor

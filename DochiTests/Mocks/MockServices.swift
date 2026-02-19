@@ -1000,6 +1000,8 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var cloneRepositoryCallCount = 0
     var attachRepositoryCallCount = 0
     var removeManagedRepositoryCallCount = 0
+    var selectSessionForOrchestrationCallCount = 0
+    var evaluateOrchestrationExecutionGuardCallCount = 0
     var rebuildSessionHistoryIndexCallCount = 0
     var searchSessionHistoryCallCount = 0
 
@@ -1007,6 +1009,17 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var lastSentCommand: String?
     var mockOutputLines: [String] = ["line1", "line2"]
     var mockGitRepositoryInsights: [GitRepositoryInsight] = []
+    var mockOrchestrationSelection = OrchestrationSessionSelection(
+        action: .none,
+        reason: "mock",
+        repositoryRoot: nil,
+        selectedSession: nil
+    )
+    var mockOrchestrationDecision = OrchestrationExecutionDecision(
+        kind: .allowed,
+        reason: "mock",
+        isDestructiveCommand: false
+    )
     var mockSessionHistoryResults: [SessionHistorySearchResult] = []
 
     func loadProfiles() {
@@ -1157,6 +1170,21 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         repository.isArchived = true
         repository.updatedAt = Date()
         managedRepositories[index] = repository
+    }
+
+    func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {
+        _ = repositoryRoot
+        selectSessionForOrchestrationCallCount += 1
+        return mockOrchestrationSelection
+    }
+
+    func evaluateOrchestrationExecutionGuard(
+        tier: CodingSessionControllabilityTier,
+        command: String
+    ) -> OrchestrationExecutionDecision {
+        _ = (tier, command)
+        evaluateOrchestrationExecutionGuardCallCount += 1
+        return mockOrchestrationDecision
     }
 
     func rebuildSessionHistoryIndex(limit: Int) async -> Int {
