@@ -272,6 +272,22 @@ final class ContextService: ContextServiceProtocol {
         }
     }
 
+    func loadAgentConfigData(workspaceId: UUID, agentName: String) -> Data? {
+        let url = agentURL(workspaceId: workspaceId, agentName: agentName).appendingPathComponent("config.json")
+        return try? Data(contentsOf: url)
+    }
+
+    func saveAgentConfigData(workspaceId: UUID, agentName: String, data: Data) {
+        let dir = agentURL(workspaceId: workspaceId, agentName: agentName)
+        let url = dir.appendingPathComponent("config.json")
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            Log.storage.error("에이전트 config 데이터 저장 실패: \(error.localizedDescription)")
+        }
+    }
+
     func listAgents(workspaceId: UUID) -> [String] {
         let agentsDir = workspaceURL(workspaceId).appendingPathComponent("agents")
         guard let contents = try? FileManager.default.contentsOfDirectory(atPath: agentsDir.path) else { return [] }
