@@ -500,83 +500,76 @@ final class SLOGateTests: XCTestCase {
             metrics.recordHistogram(name: MetricName.totalResponseLatencyMs, labels: [:], value: 2000)
         }
 
-        let testResult = TestGateResult(
-            passed: true,
-            totalTests: 50,
-            passedTests: 50,
-            failedTests: 0,
-            regressionPassed: true
+        let deployGate = DeployGate()
+        let regressionReport = RegressionReport(
+            timestamp: Date(),
+            results: [],
+            categorySummaries: [],
+            overallPassRate: 1.0,
+            totalDurationMs: 0
         )
 
-        let securityChecks = [
-            SecurityCheckItem(name: "API Key 노출 점검", description: "코드에 하드코딩된 API 키 없음", passed: true),
-            SecurityCheckItem(name: "권한 정책 점검", description: "민감 도구 승인 플로우 동작", passed: true),
-        ]
-
-        let result = evaluator.evaluateDeploymentGate(
-            metricsSnapshot: metrics.snapshot(),
-            testResult: testResult,
-            securityChecks: securityChecks
+        let report = deployGate.runAllChecks(
+            metrics: metrics,
+            sloEvaluator: evaluator,
+            unitTestsPassed: true,
+            integrationTestsPassed: true,
+            regressionReport: regressionReport,
+            securityChecksPassed: true
         )
 
-        XCTAssertTrue(result.passed)
-        XCTAssertTrue(result.sloResult.passed)
-        XCTAssertTrue(result.testsPassedResult.passed)
-        XCTAssertTrue(result.securityCheckResult.passed)
+        XCTAssertTrue(report.deployable)
+        XCTAssertEqual(report.passCount, report.totalCount)
     }
 
     func testDeploymentGate_failsOnTestFailure() {
         let evaluator = SLOEvaluator()
         let metrics = RuntimeMetrics()
-
-        let testResult = TestGateResult(
-            passed: false,
-            totalTests: 50,
-            passedTests: 45,
-            failedTests: 5,
-            regressionPassed: false
+        let deployGate = DeployGate()
+        let regressionReport = RegressionReport(
+            timestamp: Date(),
+            results: [],
+            categorySummaries: [],
+            overallPassRate: 1.0,
+            totalDurationMs: 0
         )
 
-        let securityChecks = [
-            SecurityCheckItem(name: "Check", description: "Check", passed: true),
-        ]
-
-        let result = evaluator.evaluateDeploymentGate(
-            metricsSnapshot: metrics.snapshot(),
-            testResult: testResult,
-            securityChecks: securityChecks
+        let report = deployGate.runAllChecks(
+            metrics: metrics,
+            sloEvaluator: evaluator,
+            unitTestsPassed: false,
+            integrationTestsPassed: true,
+            regressionReport: regressionReport,
+            securityChecksPassed: true
         )
 
-        XCTAssertFalse(result.passed)
-        XCTAssertFalse(result.testsPassedResult.passed)
+        XCTAssertFalse(report.deployable)
+        XCTAssertTrue(report.failedChecks.contains { $0.check == .unitTests })
     }
 
     func testDeploymentGate_failsOnSecurityFailure() {
         let evaluator = SLOEvaluator()
         let metrics = RuntimeMetrics()
-
-        let testResult = TestGateResult(
-            passed: true,
-            totalTests: 50,
-            passedTests: 50,
-            failedTests: 0,
-            regressionPassed: true
+        let deployGate = DeployGate()
+        let regressionReport = RegressionReport(
+            timestamp: Date(),
+            results: [],
+            categorySummaries: [],
+            overallPassRate: 1.0,
+            totalDurationMs: 0
         )
 
-        let securityChecks = [
-            SecurityCheckItem(name: "API Key 노출 점검", description: "", passed: true),
-            SecurityCheckItem(name: "권한 정책 점검", description: "", passed: false),
-        ]
-
-        let result = evaluator.evaluateDeploymentGate(
-            metricsSnapshot: metrics.snapshot(),
-            testResult: testResult,
-            securityChecks: securityChecks
+        let report = deployGate.runAllChecks(
+            metrics: metrics,
+            sloEvaluator: evaluator,
+            unitTestsPassed: true,
+            integrationTestsPassed: true,
+            regressionReport: regressionReport,
+            securityChecksPassed: false
         )
 
-        XCTAssertFalse(result.passed)
-        XCTAssertFalse(result.securityCheckResult.passed)
-        XCTAssertEqual(result.securityCheckResult.failedItems.count, 1)
+        XCTAssertFalse(report.deployable)
+        XCTAssertTrue(report.failedChecks.contains { $0.check == .securityChecklist })
     }
 
     func testSLOResult_passRate() {
