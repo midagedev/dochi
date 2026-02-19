@@ -148,7 +148,7 @@ struct ExternalToolDashboardView: View {
                             try await manager.openInTerminal(sessionId: session.id)
                             actionErrorMessage = nil
                         } catch {
-                            actionErrorMessage = "터미널 열기 실패: \(error.localizedDescription)"
+                            actionErrorMessage = error.localizedDescription
                         }
                     }
                 } label: {
@@ -308,7 +308,7 @@ struct ExternalToolDashboardView: View {
                 actionErrorMessage = nil
             } catch {
                 commandInput = previousInput
-                actionErrorMessage = "명령 전송 실패: \(error.localizedDescription)"
+                actionErrorMessage = error.localizedDescription
             }
         }
     }
