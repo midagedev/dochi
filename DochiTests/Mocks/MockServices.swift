@@ -1000,6 +1000,7 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var cloneRepositoryCallCount = 0
     var attachRepositoryCallCount = 0
     var removeManagedRepositoryCallCount = 0
+    var setManualRepositoryBindingCallCount = 0
     var selectSessionForOrchestrationCallCount = 0
     var evaluateOrchestrationExecutionGuardCallCount = 0
     var rebuildSessionHistoryIndexCallCount = 0
@@ -1170,6 +1171,16 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         repository.isArchived = true
         repository.updatedAt = Date()
         managedRepositories[index] = repository
+    }
+
+    func setManualRepositoryBinding(
+        provider: String,
+        nativeSessionId: String,
+        path: String,
+        repositoryRoot: String?
+    ) {
+        _ = (provider, nativeSessionId, path, repositoryRoot)
+        setManualRepositoryBindingCallCount += 1
     }
 
     func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {

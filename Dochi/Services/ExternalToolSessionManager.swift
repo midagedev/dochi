@@ -53,6 +53,12 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
     // Local discovery (file-backed sessions from CLI tools)
     func discoverLocalCodingSessions(limit: Int) async -> [DiscoveredCodingSession]
     func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession]
+    func setManualRepositoryBinding(
+        provider: String,
+        nativeSessionId: String,
+        path: String,
+        repositoryRoot: String?
+    )
 
     // Orchestrator selection/guard
     func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection
@@ -99,6 +105,13 @@ extension ExternalToolSessionManagerProtocol {
     func listUnifiedCodingSessions(limit _: Int) async -> [UnifiedCodingSession] {
         []
     }
+
+    func setManualRepositoryBinding(
+        provider _: String,
+        nativeSessionId _: String,
+        path _: String,
+        repositoryRoot _: String?
+    ) {}
 
     func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {
         OrchestrationSessionSelection(
@@ -183,10 +196,12 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private let settings: AppSettings
     private let profilesDir: URL
     private let repositoriesFile: URL
+    private let manualBindingsFile: URL
     private let sessionHistoryFile: URL
     private var healthMonitorTask: Task<Void, Never>?
     private var localDiscoveryCache: [DiscoveredCodingSession] = []
     private var localDiscoveryCacheDate: Date?
+    private var manualRepositoryBindings: [String: String] = [:]
     private var sessionHistoryChunks: [SessionHistoryChunk] = []
 
     init(settings: AppSettings) {
@@ -196,6 +211,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             .appendingPathComponent("Dochi")
         self.profilesDir = appSupport.appendingPathComponent("external-tools/profiles")
         self.repositoriesFile = appSupport.appendingPathComponent("external-tools/repositories.json")
+        self.manualBindingsFile = appSupport.appendingPathComponent("external-tools/session-manual-bindings.json")
         self.sessionHistoryFile = appSupport.appendingPathComponent("external-tools/session-history-index.json")
 
         try? FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true)
@@ -206,6 +222,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         checkTmuxAvailability()
         loadProfiles()
         loadManagedRepositories()
+        loadManualRepositoryBindings()
         loadSessionHistoryIndex()
         startHealthMonitor()
     }
@@ -315,6 +332,30 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }
     }
 
+    private func loadManualRepositoryBindings() {
+        guard let data = try? Data(contentsOf: manualBindingsFile) else {
+            manualRepositoryBindings = [:]
+            return
+        }
+        let decoder = JSONDecoder()
+        guard let decoded = try? decoder.decode([String: String].self, from: data) else {
+            manualRepositoryBindings = [:]
+            return
+        }
+        manualRepositoryBindings = decoded
+    }
+
+    private func persistManualRepositoryBindings() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        do {
+            let data = try encoder.encode(manualRepositoryBindings)
+            try data.write(to: manualBindingsFile, options: .atomic)
+        } catch {
+            Log.app.error("Failed to persist session manual bindings: \(error.localizedDescription)")
+        }
+    }
+
     private func loadSessionHistoryIndex() {
         guard let data = try? Data(contentsOf: sessionHistoryFile) else {
             sessionHistoryChunks = []
@@ -340,6 +381,26 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         } catch {
             Log.app.error("Failed to persist session history index: \(error.localizedDescription)")
         }
+    }
+
+    func setManualRepositoryBinding(
+        provider: String,
+        nativeSessionId: String,
+        path: String,
+        repositoryRoot: String?
+    ) {
+        let key = Self.sessionBindingKey(
+            provider: provider,
+            nativeSessionId: nativeSessionId,
+            path: path
+        )
+        if let repositoryRoot, !repositoryRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let normalizedRoot = URL(fileURLWithPath: repositoryRoot).standardizedFileURL.path
+            manualRepositoryBindings[key] = normalizedRoot
+        } else {
+            manualRepositoryBindings.removeValue(forKey: key)
+        }
+        persistManualRepositoryBindings()
     }
 
     func initializeRepository(
@@ -770,8 +831,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let managedRoots = managedRepositories
             .filter { !$0.isArchived }
             .map { URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path }
+        let manualBindings = manualRepositoryBindings
 
-        return await Task.detached(priority: .utility) {
+        let merged = await Task.detached(priority: .utility) {
             Self.mergeUnifiedCodingSessions(
                 runtimeSessions: sessionSnapshots,
                 discoveredSessions: discovered,
@@ -780,6 +842,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 now: now,
                 config: .standard
             )
+        }.value
+
+        return await Task.detached(priority: .utility) {
+            let adjusted = Self.applyManualRepositoryBindings(
+                merged,
+                manualBindings: manualBindings
+            )
+            return Self.deduplicateUnifiedCodingSessions(adjusted, limit: effectiveLimit)
         }.value
     }
 
@@ -1706,6 +1776,51 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let runtimeId = session.runtimeSessionId ?? "-"
         let repositoryRoot = session.repositoryRoot ?? "-"
         return "\(session.provider)|\(session.nativeSessionId)|\(runtimeId)|\(repositoryRoot)|\(session.path)|\(session.source)"
+    }
+
+    nonisolated static func sessionBindingKey(
+        provider: String,
+        nativeSessionId: String,
+        path: String
+    ) -> String {
+        let normalizedPath: String
+        if path.contains("://") {
+            normalizedPath = path
+        } else {
+            normalizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        }
+        return "\(provider.lowercased())|\(nativeSessionId)|\(normalizedPath)"
+    }
+
+    nonisolated static func applyManualRepositoryBindings(
+        _ sessions: [UnifiedCodingSession],
+        manualBindings: [String: String]
+    ) -> [UnifiedCodingSession] {
+        guard !manualBindings.isEmpty else { return sessions }
+        return sessions.map { session in
+            let key = sessionBindingKey(
+                provider: session.provider,
+                nativeSessionId: session.nativeSessionId,
+                path: session.path
+            )
+            guard let manualRoot = manualBindings[key] else { return session }
+            return UnifiedCodingSession(
+                source: session.source,
+                runtimeType: session.runtimeType,
+                controllabilityTier: session.controllabilityTier,
+                provider: session.provider,
+                nativeSessionId: session.nativeSessionId,
+                runtimeSessionId: session.runtimeSessionId,
+                workingDirectory: session.workingDirectory,
+                repositoryRoot: manualRoot,
+                path: session.path,
+                updatedAt: session.updatedAt,
+                isActive: session.isActive,
+                activityScore: session.activityScore,
+                activityState: session.activityState,
+                activitySignals: session.activitySignals
+            )
+        }
     }
 
     nonisolated static func activityStateRank(_ state: CodingSessionActivityState) -> Int {
