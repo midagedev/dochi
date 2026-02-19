@@ -554,9 +554,10 @@ enum DochiCLI {
                             let nativeSessionId = item["native_session_id"] as? String ?? "-"
                             let tier = item["controllability_tier"] as? String ?? "-"
                             let runtimeType = item["runtime_type"] as? String ?? "-"
-                            let active = (item["is_active"] as? Bool == true) ? "active" : "inactive"
+                            let state = item["activity_state"] as? String ?? ((item["is_active"] as? Bool == true) ? "active" : "inactive")
+                            let score = item["activity_score"] as? Int ?? 0
                             let repositoryRoot = item["repository_root"] as? String ?? "(unassigned)"
-                            lines.append("- [\(provider)] \(nativeSessionId) \(active) tier=\(tier) runtime=\(runtimeType) repo=\(repositoryRoot)")
+                            lines.append("- [\(provider)] \(nativeSessionId) state=\(state) score=\(score) tier=\(tier) runtime=\(runtimeType) repo=\(repositoryRoot)")
                         }
                         if unified.count > 30 {
                             lines.append("... \(unified.count - 30)개 추가")
