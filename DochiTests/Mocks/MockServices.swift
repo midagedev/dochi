@@ -1002,7 +1002,9 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var removeManagedRepositoryCallCount = 0
     var setManualRepositoryBindingCallCount = 0
     var selectSessionForOrchestrationCallCount = 0
+    var orchestrationGuardPolicyRulesCallCount = 0
     var evaluateOrchestrationExecutionGuardCallCount = 0
+    var sessionHistoryMaskingRulesCallCount = 0
     var rebuildSessionHistoryIndexCallCount = 0
     var searchSessionHistoryCallCount = 0
 
@@ -1018,9 +1020,13 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     )
     var mockOrchestrationDecision = OrchestrationExecutionDecision(
         kind: .allowed,
+        policyCode: .t0AllowAll,
+        commandClass: .nonDestructive,
         reason: "mock",
         isDestructiveCommand: false
     )
+    var mockOrchestrationPolicyRules: [OrchestrationGuardPolicyRule] = []
+    var mockSessionHistoryMaskingRules: [SessionHistoryMaskingRule] = []
     var mockSessionHistoryResults: [SessionHistorySearchResult] = []
 
     func loadProfiles() {
@@ -1189,6 +1195,11 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         return mockOrchestrationSelection
     }
 
+    func orchestrationGuardPolicyRules() -> [OrchestrationGuardPolicyRule] {
+        orchestrationGuardPolicyRulesCallCount += 1
+        return mockOrchestrationPolicyRules
+    }
+
     func evaluateOrchestrationExecutionGuard(
         tier: CodingSessionControllabilityTier,
         command: String
@@ -1196,6 +1207,11 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         _ = (tier, command)
         evaluateOrchestrationExecutionGuardCallCount += 1
         return mockOrchestrationDecision
+    }
+
+    func sessionHistoryMaskingRules() -> [SessionHistoryMaskingRule] {
+        sessionHistoryMaskingRulesCallCount += 1
+        return mockSessionHistoryMaskingRules
     }
 
     func rebuildSessionHistoryIndex(limit: Int) async -> Int {

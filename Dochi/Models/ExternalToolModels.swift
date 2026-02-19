@@ -274,10 +274,56 @@ enum OrchestrationExecutionDecisionKind: String, Codable, Sendable {
     case denied
 }
 
+enum OrchestrationCommandClass: String, Codable, Sendable {
+    case nonDestructive = "non_destructive"
+    case destructive
+}
+
+enum OrchestrationGuardPolicyCode: String, Codable, Sendable {
+    case t0AllowAll = "policy_t0_allow_all"
+    case t1AllowNonDestructive = "policy_t1_allow_non_destructive"
+    case t1ConfirmDestructive = "policy_t1_confirm_destructive"
+    case t2DenyExecution = "policy_t2_deny_execution"
+    case t3DenyExecution = "policy_t3_deny_execution"
+}
+
+struct OrchestrationGuardPolicyRule: Sendable, Equatable {
+    let tier: CodingSessionControllabilityTier
+    let commandClass: OrchestrationCommandClass
+    let decisionKind: OrchestrationExecutionDecisionKind
+    let policyCode: OrchestrationGuardPolicyCode
+    let reason: String
+}
+
 struct OrchestrationExecutionDecision: Sendable, Equatable {
     let kind: OrchestrationExecutionDecisionKind
+    let policyCode: OrchestrationGuardPolicyCode
+    let commandClass: OrchestrationCommandClass
     let reason: String
     let isDestructiveCommand: Bool
+}
+
+struct SessionHistoryMaskingRule: Sendable, Equatable {
+    let code: String
+    let pattern: String
+    let replacement: String
+    let optionsRawValue: UInt
+
+    init(
+        code: String,
+        pattern: String,
+        replacement: String,
+        options: NSRegularExpression.Options = []
+    ) {
+        self.code = code
+        self.pattern = pattern
+        self.replacement = replacement
+        optionsRawValue = options.rawValue
+    }
+
+    var options: NSRegularExpression.Options {
+        NSRegularExpression.Options(rawValue: optionsRawValue)
+    }
 }
 
 enum OrchestrationRunState: String, Codable, Sendable {
