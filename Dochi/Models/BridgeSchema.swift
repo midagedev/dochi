@@ -167,8 +167,10 @@ struct ToolAuditEvent: Sendable {
     let sessionId: String
     let agentId: String?
     let toolName: String
+    let argumentsHash: String
     let riskLevel: String
     let decision: ToolAuditDecision
+    let hookName: String?
     let latencyMs: Int
     let resultCode: Int?
     let timestamp: Date
@@ -181,6 +183,7 @@ enum ToolAuditDecision: String, Sendable {
     case denied        // user denied
     case timeout       // approval timed out
     case policyBlocked // policy rejected
+    case hookBlocked   // PreToolUse hook blocked
 }
 
 // MARK: - Event Envelope

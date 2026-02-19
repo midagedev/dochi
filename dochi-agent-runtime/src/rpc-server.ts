@@ -31,6 +31,16 @@ import {
   requestApproval,
   cancelPendingApprovals,
 } from "./handlers/approval";
+import {
+  runPreToolHooks,
+  recordAudit,
+  argumentsHash,
+  flushSessionAudit,
+  flushAllAudit,
+} from "./handlers/hooks";
+import {
+  TOOL_HOOK_BLOCKED,
+} from "./handlers/types";
 import type {
   SessionOpenParams,
   SessionRunParams,
@@ -211,6 +221,54 @@ async function emitToolDispatchFlow(
       ? "restricted"
       : "safe";
 
+  const startTime = Date.now();
+  const argsHash = argumentsHash(args);
+
+  // 1.5. Run PreToolUse hooks (forbidden pattern check)
+  const preResult = runPreToolHooks(toolName, args);
+  if (preResult.decision === "block") {
+    if (conn.destroyed) return;
+    const reason = preResult.reason ?? "Blocked by hook";
+    recordAudit({
+      toolCallId,
+      sessionId,
+      toolName,
+      argumentsHash: argsHash,
+      riskLevel,
+      decision: "hookBlocked",
+      hookName: preResult.hookName,
+      latencyMs: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
+    });
+    conn.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "bridge.event",
+        params: {
+          eventId: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          sessionId,
+          eventType: "session.tool_result",
+          payload: { toolCallId, content: `Tool '${toolName}' blocked: ${reason}`, success: false },
+        },
+      }) + "\n",
+    );
+    conn.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "bridge.event",
+        params: {
+          eventId: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          sessionId,
+          eventType: "session.completed",
+          payload: { text: `Tool '${toolName}' was blocked by policy: ${reason}` },
+        },
+      }) + "\n",
+    );
+    return;
+  }
+
   // 2. For sensitive/restricted tools, request approval first
   if (riskLevel !== "safe") {
     const approval = await requestApproval(conn, {
@@ -285,7 +343,21 @@ async function emitToolDispatchFlow(
     }) + "\n",
   );
 
-  // 5. Emit session.completed with tool result as final text
+  // 5. Record audit event
+  const decision = riskLevel === "safe" ? "allowed" : "approved";
+  recordAudit({
+    toolCallId,
+    sessionId,
+    toolName,
+    argumentsHash: argsHash,
+    riskLevel,
+    decision: result.success ? decision : "policyBlocked",
+    latencyMs: Date.now() - startTime,
+    resultCode: result.errorCode,
+    timestamp: new Date().toISOString(),
+  });
+
+  // 6. Emit session.completed with tool result as final text
   conn.write(
     JSON.stringify({
       jsonrpc: "2.0",
@@ -364,6 +436,8 @@ export function createRpcServer(socketPath: string): net.Server {
                 `[rpc-server] cancelled ${cancelledTools} tool dispatches, ${cancelledApprovals} approvals for ${sid}`,
               );
             }
+            // Flush audit log for this session
+            flushSessionAudit(sid);
           }
         }
       }

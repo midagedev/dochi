@@ -195,3 +195,29 @@ export const TOOL_NOT_FOUND = -32010;
 export const TOOL_EXECUTION_FAILED = -32011;
 export const TOOL_TIMEOUT = -32012;
 export const TOOL_PERMISSION_DENIED = -32013;
+export const TOOL_HOOK_BLOCKED = -32014;
+
+// Hook types
+
+export type PreHookDecision = "allow" | "block" | "mask";
+
+export interface PreHookResult {
+  decision: PreHookDecision;
+  hookName?: string;
+  reason?: string;
+  maskedArguments?: Record<string, unknown>;
+}
+
+export interface ToolAuditEvent {
+  toolCallId: string;
+  sessionId: string;
+  agentId?: string;
+  toolName: string;
+  argumentsHash: string;
+  riskLevel: string;
+  decision: "allowed" | "approved" | "denied" | "timeout" | "policyBlocked" | "hookBlocked";
+  hookName?: string;
+  latencyMs: number;
+  resultCode?: number;
+  timestamp: string;
+}

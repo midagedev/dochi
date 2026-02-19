@@ -23,8 +23,12 @@ final class ToolDispatchHandler {
     /// Audit log entries for the current session.
     private(set) var auditLog: [ToolAuditEvent] = []
 
-    init(toolService: any BuiltInToolServiceProtocol) {
+    /// Hook pipeline for pre/post tool hooks and session lifecycle.
+    let hookPipeline: HookPipeline
+
+    init(toolService: any BuiltInToolServiceProtocol, hookPipeline: HookPipeline = HookPipeline()) {
         self.toolService = toolService
+        self.hookPipeline = hookPipeline
     }
 
     /// Attach the UDS connection for sending RPCs.
@@ -32,15 +36,22 @@ final class ToolDispatchHandler {
         self.connection = connection
     }
 
-    /// Clear session-scoped approvals (e.g., on session close).
+    /// Clear session-scoped approvals and run session close hooks.
     func clearSessionApprovals(sessionId: String) {
         sessionApprovals.removeValue(forKey: sessionId)
+        hookPipeline.runSessionCloseHooks(sessionId: sessionId, auditLog: auditLog)
+    }
+
+    /// Run stop hooks and flush audit log.
+    func runStopHooks() {
+        hookPipeline.runStopHooks(auditLog: auditLog)
     }
 
     // MARK: - Tool Dispatch
 
     /// Handle a `tool.dispatch` bridge event.
-    /// Checks permission, requests approval if needed, executes the tool, and sends back `tool.result`.
+    /// Runs PreToolUse hooks, checks permission, executes the tool, runs PostToolUse hooks,
+    /// and sends back `tool.result`.
     func handleDispatch(event: BridgeEvent) {
         guard let payload = event.payload,
               case .object(let dict) = payload,
@@ -51,11 +62,11 @@ final class ToolDispatchHandler {
             return
         }
 
-        let arguments: [String: Any]
+        let codableArguments: [String: AnyCodableValue]
         if case .object(let argsDict) = dict["arguments"] {
-            arguments = argsDict.toNativeDict()
+            codableArguments = argsDict
         } else {
-            arguments = [:]
+            codableArguments = [:]
         }
 
         let riskLevel: String
@@ -66,11 +77,45 @@ final class ToolDispatchHandler {
         }
 
         let timeout = Self.timeout(for: riskLevel)
+        let argsHash = HookPipeline.argumentsHash(codableArguments)
 
         Log.runtime.info("Tool dispatch: \(toolName) (\(toolCallId)), risk=\(riskLevel), timeout=\(timeout)s")
 
         Task { @MainActor in
             let startTime = Date()
+
+            // Build hook context
+            let hookContext = ToolHookContext(
+                toolCallId: toolCallId,
+                sessionId: sessionId,
+                agentId: event.agentId,
+                toolName: toolName,
+                arguments: codableArguments,
+                riskLevel: riskLevel
+            )
+
+            // Run PreToolUse hooks (forbidden pattern check, PII masking)
+            let preResult = hookPipeline.runPreHooks(context: hookContext)
+
+            // Determine effective arguments after hooks
+            let effectiveArguments: [String: Any]
+            switch preResult.decision {
+            case .block(let reason):
+                let blockedResult = ToolResult(
+                    toolCallId: toolCallId,
+                    content: "도구 '\(toolName)' 실행이 정책에 의해 차단되었습니다: \(reason)",
+                    isError: true
+                )
+                await sendToolResult(toolCallId: toolCallId, sessionId: sessionId, result: blockedResult, errorCode: BridgeErrorCode.toolPermissionDenied.rawValue)
+                recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, argumentsHash: argsHash, riskLevel: riskLevel, decision: .hookBlocked, hookName: preResult.hookName, startTime: startTime, resultCode: BridgeErrorCode.toolPermissionDenied.rawValue)
+                return
+
+            case .mask(let maskedArgs):
+                effectiveArguments = maskedArgs.toNativeDict()
+
+            case .allow:
+                effectiveArguments = codableArguments.toNativeDict()
+            }
 
             // Permission check for sensitive/restricted tools
             if riskLevel != "safe" {
@@ -79,7 +124,7 @@ final class ToolDispatchHandler {
                     sessionId: sessionId,
                     toolName: toolName,
                     riskLevel: riskLevel,
-                    arguments: arguments
+                    arguments: effectiveArguments
                 )
 
                 if !approved {
@@ -89,22 +134,28 @@ final class ToolDispatchHandler {
                         isError: true
                     )
                     await sendToolResult(toolCallId: toolCallId, sessionId: sessionId, result: deniedResult, errorCode: BridgeErrorCode.toolPermissionDenied.rawValue)
-                    recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, riskLevel: riskLevel, decision: .denied, startTime: startTime, resultCode: BridgeErrorCode.toolPermissionDenied.rawValue)
+                    recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, argumentsHash: argsHash, riskLevel: riskLevel, decision: .denied, hookName: nil, startTime: startTime, resultCode: BridgeErrorCode.toolPermissionDenied.rawValue)
                     return
                 }
             }
 
+            // Execute tool
             let result = await executeWithTimeout(
                 toolName: toolName,
                 toolCallId: toolCallId,
-                arguments: arguments,
+                arguments: effectiveArguments,
                 timeout: timeout
             )
 
             await sendToolResult(toolCallId: toolCallId, sessionId: sessionId, result: result)
 
+            let latencyMs = Int(Date().timeIntervalSince(startTime) * 1000)
+
+            // Run PostToolUse hooks (metrics, memory candidates)
+            let _ = hookPipeline.runPostHooks(context: hookContext, result: result, latencyMs: latencyMs)
+
             let decision: ToolAuditDecision = riskLevel == "safe" ? .allowed : .approved
-            recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, riskLevel: riskLevel, decision: result.isError ? .policyBlocked : decision, startTime: startTime, resultCode: result.isError ? BridgeErrorCode.toolExecutionFailed.rawValue : nil)
+            recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, argumentsHash: argsHash, riskLevel: riskLevel, decision: result.isError ? .policyBlocked : decision, hookName: nil, startTime: startTime, resultCode: result.isError ? BridgeErrorCode.toolExecutionFailed.rawValue : nil)
 
             Log.runtime.info("Tool result sent: \(toolName) (\(toolCallId)), success=\(!result.isError)")
         }
@@ -147,7 +198,7 @@ final class ToolDispatchHandler {
             guard let handler = approvalHandler else {
                 Log.runtime.warning("No approval handler — auto-denying \(toolName)")
                 await sendApprovalResolve(approvalId: approvalId, toolCallId: toolCallId, sessionId: sessionId, approved: false, scope: .once, note: "No approval handler available")
-                recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, riskLevel: riskLevel, decision: .denied, startTime: startTime, resultCode: nil)
+                recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, argumentsHash: "", riskLevel: riskLevel, decision: .denied, hookName: nil, startTime: startTime, resultCode: nil)
                 return
             }
 
@@ -155,7 +206,7 @@ final class ToolDispatchHandler {
             if let approved = sessionApprovals[sessionId], approved.contains(toolName) {
                 Log.runtime.info("Session-scoped approval for \(toolName)")
                 await sendApprovalResolve(approvalId: approvalId, toolCallId: toolCallId, sessionId: sessionId, approved: true, scope: .session, note: nil)
-                recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, riskLevel: riskLevel, decision: .approved, startTime: startTime, resultCode: nil)
+                recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, argumentsHash: "", riskLevel: riskLevel, decision: .approved, hookName: nil, startTime: startTime, resultCode: nil)
                 return
             }
 
@@ -172,7 +223,7 @@ final class ToolDispatchHandler {
             await sendApprovalResolve(approvalId: approvalId, toolCallId: toolCallId, sessionId: sessionId, approved: approved, scope: scope, note: nil)
 
             let decision: ToolAuditDecision = approved ? .approved : .denied
-            recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, riskLevel: riskLevel, decision: decision, startTime: startTime, resultCode: nil)
+            recordAudit(toolCallId: toolCallId, sessionId: sessionId, agentId: event.agentId, toolName: toolName, argumentsHash: "", riskLevel: riskLevel, decision: decision, hookName: nil, startTime: startTime, resultCode: nil)
 
             Log.runtime.info("Approval resolved: \(toolName) → \(approved ? "approved" : "denied") (scope=\(scope.rawValue))")
         }
@@ -331,8 +382,10 @@ final class ToolDispatchHandler {
         sessionId: String,
         agentId: String?,
         toolName: String,
+        argumentsHash: String,
         riskLevel: String,
         decision: ToolAuditDecision,
+        hookName: String?,
         startTime: Date,
         resultCode: Int?
     ) {
@@ -342,8 +395,10 @@ final class ToolDispatchHandler {
             sessionId: sessionId,
             agentId: agentId,
             toolName: toolName,
+            argumentsHash: argumentsHash,
             riskLevel: riskLevel,
             decision: decision,
+            hookName: hookName,
             latencyMs: latencyMs,
             resultCode: resultCode,
             timestamp: Date()
