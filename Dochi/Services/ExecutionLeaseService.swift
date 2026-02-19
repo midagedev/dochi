@@ -7,6 +7,7 @@ enum ExecutionLeaseError: Error, LocalizedError {
     case noDeviceAvailable
     case leaseNotFound(UUID)
     case leaseNotActive(UUID)
+    case leaseExpired(UUID)
     case duplicateLeaseForConversation(String)
     case reassignmentFailed(UUID)
 
@@ -18,6 +19,8 @@ enum ExecutionLeaseError: Error, LocalizedError {
             return "Lease not found: \(id)"
         case .leaseNotActive(let id):
             return "Lease is not active: \(id)"
+        case .leaseExpired(let id):
+            return "Lease has expired: \(id)"
         case .duplicateLeaseForConversation(let conversationId):
             return "Active lease already exists for conversation: \(conversationId)"
         case .reassignmentFailed(let id):
@@ -103,6 +106,9 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
         }
         guard lease.status == .active else {
             throw ExecutionLeaseError.leaseNotActive(leaseId)
+        }
+        guard !lease.isExpired else {
+            throw ExecutionLeaseError.leaseExpired(leaseId)
         }
 
         let now = Date()
@@ -219,10 +225,18 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
 
     func expireStaleLeases() {
         let now = Date()
-        var expiredCount = 0
 
-        for (leaseId, var lease) in leases {
-            guard lease.status == .active, lease.expiresAt < now else { continue }
+        // Phase 1: Collect expired lease IDs to avoid dictionary mutation during iteration
+        let staleLeaseIds = leases
+            .filter { $0.value.status == .active && $0.value.expiresAt < now }
+            .map(\.key)
+
+        guard !staleLeaseIds.isEmpty else { return }
+
+        // Phase 2: Process each stale lease in a separate loop
+        var expiredCount = 0
+        for leaseId in staleLeaseIds {
+            guard var lease = leases[leaseId], lease.status == .active else { continue }
 
             // Try to reassign first
             if let newDevice = selectDevice(
@@ -273,7 +287,7 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
 
     // MARK: - Device Selection
 
-    /// Select the best available device based on capability, affinity, liveness, and user preference.
+    /// Select the best available device based on capability, policy, and liveness.
     private func selectDevice(
         requiredCapabilities: DeviceCapabilities? = nil,
         excludingDeviceId: UUID? = nil
@@ -295,12 +309,54 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
 
         guard !candidates.isEmpty else { return nil }
 
-        // Sort by priority (lower is better) as primary, then by lastSeen (more recent is better)
-        candidates.sort { a, b in
-            if a.priority != b.priority {
+        // Sort candidates according to the current DeviceSelectionPolicy
+        let policy = devicePolicyService.currentPolicy
+
+        switch policy {
+        case .priorityBased:
+            // Lower priority value is better, then most recent lastSeen as tiebreaker
+            candidates.sort { a, b in
+                if a.priority != b.priority {
+                    return a.priority < b.priority
+                }
+                return a.lastSeen > b.lastSeen
+            }
+
+        case .lastActive:
+            // Most recently seen device first, then priority as tiebreaker
+            candidates.sort { a, b in
+                if a.lastSeen != b.lastSeen {
+                    return a.lastSeen > b.lastSeen
+                }
                 return a.priority < b.priority
             }
-            return a.lastSeen > b.lastSeen
+
+        case .manual:
+            // Prefer the device chosen by evaluateResponder (i.e. the manual device)
+            let negotiation = devicePolicyService.evaluateResponder()
+            let manualDeviceId: UUID? = {
+                switch negotiation {
+                case .thisDevice:
+                    return devicePolicyService.currentDevice?.id
+                case .otherDevice(let device):
+                    return device.id
+                case .noDeviceAvailable, .singleDevice:
+                    return nil
+                }
+            }()
+
+            if let manualId = manualDeviceId,
+               let manualDevice = candidates.first(where: { $0.id == manualId }) {
+                // Manual device satisfies capabilities — prefer it
+                return manualDevice
+            }
+            // Fallback: sort by priority if manual device not in candidates
+            candidates.sort { a, b in
+                if a.priority != b.priority {
+                    return a.priority < b.priority
+                }
+                return a.lastSeen > b.lastSeen
+            }
         }
 
         return candidates.first
