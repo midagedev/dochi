@@ -674,7 +674,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let sessionSnapshots: [RuntimeSessionSnapshot] = sessions.compactMap { session in
             let profile = profiles.first(where: { $0.id == session.profileId })
             let providerCommand = profile?.command.trimmingCharacters(in: .whitespacesAndNewlines) ?? "tmux"
-            let provider = URL(fileURLWithPath: providerCommand).lastPathComponent.lowercased()
+            let provider = Self.normalizedProvider(fromCommand: providerCommand)
             let workingDirectory = profile?.workingDirectory
             let updatedAt = session.lastHealthCheckDate ?? session.startedAt ?? .distantPast
             return RuntimeSessionSnapshot(
@@ -1304,6 +1304,13 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         } catch {
             throw ExternalToolError.repositoryOperationFailed(error.localizedDescription)
         }
+    }
+
+    nonisolated private static func normalizedProvider(fromCommand command: String) -> String {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "tmux" }
+        let executable = trimmed.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? trimmed
+        return URL(fileURLWithPath: executable).lastPathComponent.lowercased()
     }
 
     nonisolated private static func expandedPath(_ path: String) -> String {
