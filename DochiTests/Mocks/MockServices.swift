@@ -1334,6 +1334,10 @@ final class MockRuntimeBridgeService: RuntimeBridgeProtocol {
     var configureToolDispatchCallCount = 0
     var lastToolService: (any BuiltInToolServiceProtocol)?
 
+    // Approval handler
+    var setApprovalHandlerCallCount = 0
+    var lastApprovalHandler: ToolApprovalHandler?
+
     // Session stubs
     var stubbedOpenResult: SessionOpenResult?
     var stubbedSessionEvents: [BridgeEvent] = []
@@ -1371,6 +1375,11 @@ final class MockRuntimeBridgeService: RuntimeBridgeProtocol {
     func configureToolDispatch(toolService: any BuiltInToolServiceProtocol) {
         configureToolDispatchCallCount += 1
         lastToolService = toolService
+    }
+
+    func setApprovalHandler(_ handler: ToolApprovalHandler?) {
+        setApprovalHandlerCallCount += 1
+        lastApprovalHandler = handler
     }
 
     func openSession(params: SessionOpenParams) async throws -> SessionOpenResult {
