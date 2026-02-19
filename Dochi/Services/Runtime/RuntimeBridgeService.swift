@@ -30,6 +30,9 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
     private var retryCount = 0
     private var nextRequestId = 1
 
+    /// Active session event stream continuations, keyed by sessionId.
+    private var sessionContinuations: [String: AsyncThrowingStream<BridgeEvent, Error>.Continuation] = [:]
+
     // MARK: - Init
 
     init(
@@ -91,6 +94,12 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
             }
         }
 
+        // Finish all active session streams
+        for (_, continuation) in sessionContinuations {
+            continuation.finish(throwing: RuntimeBridgeError.connectionClosed)
+        }
+        sessionContinuations.removeAll()
+
         connection?.close()
         connection = nil
         process = nil
@@ -115,6 +124,77 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
 
         let data = try JSONEncoder().encode(result)
         return try JSONDecoder().decode(RuntimeHealthResponse.self, from: data)
+    }
+
+    // MARK: - Session Management
+
+    func openSession(params: SessionOpenParams) async throws -> SessionOpenResult {
+        let rpcParams: [String: AnyCodableValue] = [
+            "workspaceId": .string(params.workspaceId),
+            "agentId": .string(params.agentId),
+            "conversationId": .string(params.conversationId),
+            "userId": .string(params.userId),
+            "deviceId": .string(params.deviceId ?? ""),
+            "sdkSessionId": params.sdkSessionId.map { .string($0) } ?? .null,
+        ]
+        return try await sendRpc(method: "session.open", params: rpcParams)
+    }
+
+    func runSession(params: SessionRunParams) -> AsyncThrowingStream<BridgeEvent, Error> {
+        let sessionId = params.sessionId
+        return AsyncThrowingStream { continuation in
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    continuation.finish()
+                    return
+                }
+
+                self.sessionContinuations[sessionId] = continuation
+                continuation.onTermination = { @Sendable _ in
+                    Task { @MainActor [weak self] in
+                        self?.sessionContinuations.removeValue(forKey: sessionId)
+                    }
+                }
+
+                do {
+                    let rpcParams: [String: AnyCodableValue] = [
+                        "sessionId": .string(params.sessionId),
+                        "input": .string(params.input),
+                        "contextSnapshotRef": params.contextSnapshotRef.map { .string($0) } ?? .null,
+                        "permissionMode": params.permissionMode.map { .string($0) } ?? .null,
+                    ]
+                    let _: SessionRunResult = try await self.sendRpc(method: "session.run", params: rpcParams)
+                    // Ack received — events will arrive via UDS notifications
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    func interruptSession(sessionId: String) async throws -> SessionInterruptResult {
+        let rpcParams: [String: AnyCodableValue] = [
+            "sessionId": .string(sessionId),
+        ]
+        let result: SessionInterruptResult = try await sendRpc(method: "session.interrupt", params: rpcParams)
+
+        // Finish any active stream for this session
+        if let continuation = sessionContinuations.removeValue(forKey: sessionId) {
+            continuation.finish()
+        }
+        return result
+    }
+
+    func closeSession(sessionId: String) async throws -> SessionCloseResult {
+        let rpcParams: [String: AnyCodableValue] = [
+            "sessionId": .string(sessionId),
+        ]
+        let result: SessionCloseResult = try await sendRpc(method: "session.close", params: rpcParams)
+
+        if let continuation = sessionContinuations.removeValue(forKey: sessionId) {
+            continuation.finish()
+        }
+        return result
     }
 
     // MARK: - Process Management
@@ -187,6 +267,13 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         let conn = RuntimeUDSConnection(socketPath: socketPath)
         try await conn.connect()
         self.connection = conn
+
+        // Route incoming notifications to session event streams
+        conn.notificationHandler = { [weak self] notification in
+            Task { @MainActor [weak self] in
+                self?.handleNotification(notification)
+            }
+        }
 
         // Send initialize
         let initParams: [String: AnyCodableValue] = [
@@ -300,6 +387,38 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         }
     }
 
+    // MARK: - Notification Handling
+
+    private func handleNotification(_ notification: JsonRpcNotification) {
+        guard notification.method == "bridge.event",
+              let params = notification.params else { return }
+
+        // Decode BridgeEvent from notification params
+        guard let event = decodeBridgeEvent(from: params) else { return }
+        guard let sessionId = event.sessionId,
+              let continuation = sessionContinuations[sessionId] else {
+            Log.runtime.debug("Received event for unknown session: \(event.sessionId ?? "nil")")
+            return
+        }
+
+        continuation.yield(event)
+
+        if event.eventType == .sessionCompleted || event.eventType == .sessionFailed {
+            continuation.finish()
+            sessionContinuations.removeValue(forKey: sessionId)
+        }
+    }
+
+    private func decodeBridgeEvent(from params: [String: AnyCodableValue]) -> BridgeEvent? {
+        do {
+            let data = try JSONEncoder().encode(AnyCodableValue.object(params))
+            return try JSONDecoder().decode(BridgeEvent.self, from: data)
+        } catch {
+            Log.runtime.error("Failed to decode bridge event: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Helpers
 
     func backoffDelay(attempt: Int) -> Double {
@@ -310,6 +429,25 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         let id = nextRequestId
         nextRequestId += 1
         return JsonRpcRequest(id: id, method: method, params: params)
+    }
+
+    /// Generic RPC call: send request, decode result as T.
+    private func sendRpc<T: Decodable>(method: String, params: [String: AnyCodableValue]? = nil) async throws -> T {
+        guard let conn = connection else {
+            throw RuntimeBridgeError.notConnected
+        }
+        let request = makeRequest(method: method, params: params)
+        let response = try await conn.send(request)
+
+        guard let result = response.result else {
+            if let err = response.error {
+                throw RuntimeBridgeError.rpcError(code: err.code, message: err.message)
+            }
+            throw RuntimeBridgeError.invalidResponse
+        }
+
+        let data = try JSONEncoder().encode(result)
+        return try JSONDecoder().decode(T.self, from: data)
     }
 }
 
@@ -328,6 +466,9 @@ final class RuntimeUDSConnection: @unchecked Sendable {
     private var fileHandle: FileHandle?
     private var pendingRequests: [Int: CheckedContinuation<JsonRpcResponse, Error>] = [:]
     private let lock = NSLock()
+
+    /// Called when a JSON-RPC notification (no `id`) arrives from the runtime.
+    var notificationHandler: (@Sendable (JsonRpcNotification) -> Void)?
 
     init(socketPath: String) {
         self.socketPath = socketPath
@@ -412,15 +553,22 @@ final class RuntimeUDSConnection: @unchecked Sendable {
             guard let text = String(data: data, encoding: .utf8) else { return }
             for line in text.components(separatedBy: "\n") {
                 guard !line.isEmpty,
-                      let lineData = line.data(using: .utf8),
-                      let response = try? JSONDecoder().decode(JsonRpcResponse.self, from: lineData)
+                      let lineData = line.data(using: .utf8)
                 else { continue }
 
-                self?.lock.lock()
-                let continuation = self?.pendingRequests.removeValue(forKey: response.id)
-                self?.lock.unlock()
+                // Try decoding as a response (has `id` field)
+                if let response = try? JSONDecoder().decode(JsonRpcResponse.self, from: lineData) {
+                    self?.lock.lock()
+                    let continuation = self?.pendingRequests.removeValue(forKey: response.id)
+                    self?.lock.unlock()
+                    continuation?.resume(returning: response)
+                    continue
+                }
 
-                continuation?.resume(returning: response)
+                // Try decoding as a notification (has `method`, no `id`)
+                if let notification = try? JSONDecoder().decode(JsonRpcNotification.self, from: lineData) {
+                    self?.notificationHandler?(notification)
+                }
             }
         }
     }

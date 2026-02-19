@@ -17,4 +17,19 @@ protocol RuntimeBridgeProtocol {
 
     /// Query the runtime health status.
     func health() async throws -> RuntimeHealthResponse
+
+    // MARK: - Session Management
+
+    /// Open or reuse a session for the given parameters.
+    func openSession(params: SessionOpenParams) async throws -> SessionOpenResult
+
+    /// Start a session run and return a stream of bridge events.
+    /// The stream yields partial text, tool calls, and completes on `session.completed` or `session.failed`.
+    func runSession(params: SessionRunParams) -> AsyncThrowingStream<BridgeEvent, Error>
+
+    /// Interrupt an active session run.
+    func interruptSession(sessionId: String) async throws -> SessionInterruptResult
+
+    /// Close a session.
+    func closeSession(sessionId: String) async throws -> SessionCloseResult
 }

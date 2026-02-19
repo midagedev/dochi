@@ -1,5 +1,6 @@
 import * as net from "net";
 import * as fs from "fs";
+import * as crypto from "crypto";
 import {
   type JsonRpcRequest,
   type JsonRpcResponse,
@@ -78,6 +79,77 @@ function processRequest(request: JsonRpcRequest): JsonRpcResponse {
   }
 }
 
+/**
+ * Emit stub streaming events for session.run (echo mode).
+ * Sends the input text back as partial deltas, then a completed event.
+ */
+function emitSessionRunEvents(conn: net.Socket, params: SessionRunParams): void {
+  const sessionId = params.sessionId;
+  const input = params.input;
+  const words = input.split(/\s+/).filter((w) => w.length > 0);
+
+  if (words.length === 0) {
+    // Empty input: emit completed immediately
+    const notification = {
+      jsonrpc: "2.0",
+      method: "bridge.event",
+      params: {
+        eventId: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        sessionId,
+        eventType: "session.completed",
+        payload: { text: "" },
+      },
+    };
+    conn.write(JSON.stringify(notification) + "\n");
+    return;
+  }
+
+  let accumulated = "";
+  let delay = 0;
+
+  for (const word of words) {
+    delay += 50; // 50ms per word
+    const delta = (accumulated ? " " : "") + word;
+    accumulated += delta;
+    const capturedDelta = delta;
+
+    setTimeout(() => {
+      if (conn.destroyed) return;
+      const notification = {
+        jsonrpc: "2.0",
+        method: "bridge.event",
+        params: {
+          eventId: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          sessionId,
+          eventType: "session.partial",
+          payload: { delta: capturedDelta },
+        },
+      };
+      conn.write(JSON.stringify(notification) + "\n");
+    }, delay);
+  }
+
+  // Completed event after all partials
+  const finalText = accumulated;
+  setTimeout(() => {
+    if (conn.destroyed) return;
+    const notification = {
+      jsonrpc: "2.0",
+      method: "bridge.event",
+      params: {
+        eventId: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        sessionId,
+        eventType: "session.completed",
+        payload: { text: finalText },
+      },
+    };
+    conn.write(JSON.stringify(notification) + "\n");
+  }, delay + 100);
+}
+
 export function createRpcServer(socketPath: string): net.Server {
   // Remove stale socket file
   if (fs.existsSync(socketPath)) {
@@ -113,6 +185,11 @@ export function createRpcServer(socketPath: string): net.Server {
 
         const response = processRequest(request);
         conn.write(JSON.stringify(response) + "\n");
+
+        // After ack for session.run, emit streaming events (stub echo mode)
+        if (request.method === "session.run" && !response.error) {
+          emitSessionRunEvents(conn, request.params as unknown as SessionRunParams);
+        }
       }
     });
 

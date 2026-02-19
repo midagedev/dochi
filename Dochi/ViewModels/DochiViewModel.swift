@@ -222,6 +222,13 @@ final class DochiViewModel {
     let sessionContext: SessionContext
     let metricsCollector: MetricsCollector
 
+    /// Optional runtime bridge for SDK session path.
+    /// When available and in `.ready` state, input is routed through the SDK session.
+    private var runtimeBridge: (any RuntimeBridgeProtocol)?
+
+    /// Active SDK session ID for the current conversation (nil = use legacy LLM path).
+    private(set) var activeSDKSessionId: String?
+
     // MARK: - Internal
 
     private var processingTask: Task<Void, Never>?
@@ -282,7 +289,8 @@ final class DochiViewModel {
         soundService: SoundServiceProtocol,
         settings: AppSettings,
         sessionContext: SessionContext,
-        metricsCollector: MetricsCollector = MetricsCollector()
+        metricsCollector: MetricsCollector = MetricsCollector(),
+        runtimeBridge: (any RuntimeBridgeProtocol)? = nil
     ) {
         self.llmService = llmService
         self.toolService = toolService
@@ -295,6 +303,7 @@ final class DochiViewModel {
         self.settings = settings
         self.sessionContext = sessionContext
         self.metricsCollector = metricsCollector
+        self.runtimeBridge = runtimeBridge
 
         // Wire TTS completion callback
         self.ttsService.onComplete = { [weak self] in
@@ -991,9 +1000,17 @@ final class DochiViewModel {
             appendUserMessage(finalText, imageData: nil)
             transition(to: .processing)
             processingSubState = .streaming
-            llmStreamActive = true
-            processingTask = Task {
-                await processLLMLoop()
+
+            // Route through SDK session if runtime is ready; otherwise use legacy LLM path
+            if isSDKSessionAvailable {
+                processingTask = Task {
+                    await processSDKSession(input: finalText)
+                }
+            } else {
+                llmStreamActive = true
+                processingTask = Task {
+                    await processLLMLoop()
+                }
             }
         } else {
             // Process images off main thread, then send
@@ -1224,6 +1241,7 @@ final class DochiViewModel {
         llmStreamActive = false
         ttsService.stopAndClear()
         sentenceChunker = SentenceChunker()
+        interruptSDKSession()
 
         // Preserve partial streaming text as assistant message
         if !streamingText.isEmpty {
@@ -1237,11 +1255,150 @@ final class DochiViewModel {
         Log.app.info("Request cancelled by user")
     }
 
+    // MARK: - SDK Session Path
+
+    /// Whether the SDK session path is available and should be used.
+    var isSDKSessionAvailable: Bool {
+        runtimeBridge?.runtimeState == .ready
+    }
+
+    /// Configures the runtime bridge for SDK session support.
+    func configureRuntimeBridge(_ bridge: any RuntimeBridgeProtocol) {
+        self.runtimeBridge = bridge
+    }
+
+    /// Process user input through the SDK runtime session.
+    /// Opens a session if needed, sends input via `session.run`, and maps
+    /// streaming events to UI state updates.
+    private func processSDKSession(input: String) async {
+        guard let bridge = runtimeBridge else {
+            Log.runtime.error("SDK session requested but no runtime bridge available")
+            errorMessage = "런타임이 연결되지 않았습니다."
+            transition(to: .idle)
+            return
+        }
+
+        do {
+            // Open or reuse session
+            if activeSDKSessionId == nil {
+                let conversationId = currentConversation?.id.uuidString ?? UUID().uuidString
+                let openResult = try await bridge.openSession(params: SessionOpenParams(
+                    workspaceId: sessionContext.workspaceId.uuidString,
+                    agentId: settings.activeAgentName,
+                    conversationId: conversationId,
+                    userId: sessionContext.currentUserId ?? "anonymous",
+                    deviceId: nil,
+                    sdkSessionId: nil
+                ))
+                activeSDKSessionId = openResult.sessionId
+                Log.runtime.info("SDK session opened: \(openResult.sessionId) (created: \(openResult.created))")
+            }
+
+            guard let sessionId = activeSDKSessionId else { return }
+
+            // Start session run
+            let runParams = SessionRunParams(
+                sessionId: sessionId,
+                input: input,
+                contextSnapshotRef: nil,
+                permissionMode: nil
+            )
+
+            streamingText = ""
+            var accumulatedText = ""
+
+            for try await event in bridge.runSession(params: runParams) {
+                guard !Task.isCancelled else { break }
+
+                switch event.eventType {
+                case .sessionPartial:
+                    processingSubState = .streaming
+                    if let delta = extractPayloadString(event.payload, key: "delta") {
+                        accumulatedText += delta
+                        streamingText = accumulatedText
+                    }
+
+                case .sessionToolCall:
+                    processingSubState = .toolCalling
+                    if let toolName = extractPayloadString(event.payload, key: "toolName") {
+                        currentToolName = toolName
+                    }
+
+                case .sessionToolResult:
+                    // Tool result received — loop continues for more events
+                    processingSubState = .streaming
+                    currentToolName = nil
+
+                case .sessionCompleted:
+                    let finalText = extractPayloadString(event.payload, key: "text") ?? accumulatedText
+                    if !finalText.isEmpty {
+                        appendAssistantMessage(finalText)
+                    }
+                    streamingText = ""
+                    processingSubState = .complete
+                    saveConversation()
+                    Log.runtime.info("SDK session run completed")
+
+                case .sessionFailed:
+                    let reason = extractPayloadString(event.payload, key: "error") ?? "알 수 없는 오류"
+                    errorMessage = "런타임 오류: \(reason)"
+                    streamingText = ""
+                    Log.runtime.error("SDK session run failed: \(reason)")
+
+                default:
+                    Log.runtime.debug("Unhandled event type: \(event.eventType.rawValue)")
+                }
+            }
+        } catch {
+            Log.runtime.error("SDK session error: \(error.localizedDescription)")
+            errorMessage = "런타임 세션 오류: \(error.localizedDescription)"
+        }
+
+        // Clean up
+        if !streamingText.isEmpty {
+            appendAssistantMessage(streamingText)
+            streamingText = ""
+        }
+        processingSubState = nil
+        currentToolName = nil
+        transition(to: .idle)
+    }
+
+    /// Interrupt the active SDK session.
+    func interruptSDKSession() {
+        guard let bridge = runtimeBridge,
+              let sessionId = activeSDKSessionId else { return }
+
+        Task {
+            do {
+                _ = try await bridge.interruptSession(sessionId: sessionId)
+                Log.runtime.info("SDK session interrupted: \(sessionId)")
+            } catch {
+                Log.runtime.error("Failed to interrupt SDK session: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Extract a string value from a BridgeEvent payload.
+    private func extractPayloadString(_ payload: AnyCodableValue?, key: String) -> String? {
+        guard case .object(let dict) = payload,
+              case .string(let value) = dict[key] else { return nil }
+        return value
+    }
+
     func newConversation() {
         recordUserActivity()
 
         // I-2: 이전 대화에 대해 메모리 자동 정리 트리거
         triggerMemoryConsolidation(for: currentConversation)
+
+        // Close SDK session for previous conversation
+        if let bridge = runtimeBridge, let sessionId = activeSDKSessionId {
+            Task {
+                try? await bridge.closeSession(sessionId: sessionId)
+            }
+        }
+        activeSDKSessionId = nil
 
         currentConversation = nil
         streamingText = ""
