@@ -11,6 +11,23 @@ enum ExternalToolStatus: String, Codable, Sendable {
     case unknown
 }
 
+enum ExternalTerminalApp: String, CaseIterable, Codable, Sendable {
+    case auto
+    case terminal
+    case ghostty
+
+    var displayName: String {
+        switch self {
+        case .auto:
+            return "자동 (Ghostty 우선)"
+        case .terminal:
+            return "Terminal.app"
+        case .ghostty:
+            return "Ghostty"
+        }
+    }
+}
+
 struct HealthCheckPatterns: Codable, Sendable, Equatable {
     var idlePattern: String
     var busyPattern: String
