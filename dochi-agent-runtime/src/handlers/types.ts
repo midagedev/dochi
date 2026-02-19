@@ -130,6 +130,29 @@ export interface BridgeEvent {
   payload?: unknown;
 }
 
+// Tool dispatch types
+
+export interface ToolDispatchParams {
+  toolCallId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  sessionId: string;
+  riskLevel: "safe" | "sensitive" | "restricted";
+}
+
+export interface ToolResultParams {
+  toolCallId: string;
+  sessionId: string;
+  success: boolean;
+  content: string;
+  errorCode?: number;
+}
+
+export interface ToolResultAck {
+  received: boolean;
+  toolCallId: string;
+}
+
 // JSON-RPC error codes (standard)
 export const PARSE_ERROR = -32700;
 export const INVALID_REQUEST = -32600;
@@ -142,3 +165,7 @@ export const SESSION_NOT_FOUND = -32001;
 export const SESSION_ALREADY_CLOSED = -32002;
 export const RUNTIME_NOT_READY = -32003;
 export const SESSION_LIMIT_EXCEEDED = -32004;
+export const TOOL_NOT_FOUND = -32010;
+export const TOOL_EXECUTION_FAILED = -32011;
+export const TOOL_TIMEOUT = -32012;
+export const TOOL_PERMISSION_DENIED = -32013;

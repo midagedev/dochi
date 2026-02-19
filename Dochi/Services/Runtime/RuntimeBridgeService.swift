@@ -33,6 +33,9 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
     /// Active session event stream continuations, keyed by sessionId.
     private var sessionContinuations: [String: AsyncThrowingStream<BridgeEvent, Error>.Continuation] = [:]
 
+    /// Handler for tool dispatch requests from the runtime.
+    private(set) var toolDispatchHandler: ToolDispatchHandler?
+
     // MARK: - Init
 
     init(
@@ -124,6 +127,17 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
 
         let data = try JSONEncoder().encode(result)
         return try JSONDecoder().decode(RuntimeHealthResponse.self, from: data)
+    }
+
+    // MARK: - Tool Dispatch
+
+    /// Configure the tool dispatch handler with the app's tool service.
+    func configureToolDispatch(toolService: any BuiltInToolServiceProtocol) {
+        let handler = ToolDispatchHandler(toolService: toolService)
+        if let connection {
+            handler.setConnection(connection)
+        }
+        self.toolDispatchHandler = handler
     }
 
     // MARK: - Session Management
@@ -268,12 +282,15 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         try await conn.connect()
         self.connection = conn
 
-        // Route incoming notifications to session event streams
+        // Route incoming notifications to session event streams and tool dispatch
         conn.notificationHandler = { [weak self] notification in
             Task { @MainActor [weak self] in
                 self?.handleNotification(notification)
             }
         }
+
+        // Wire tool dispatch handler to this connection
+        toolDispatchHandler?.setConnection(conn)
 
         // Send initialize
         let initParams: [String: AnyCodableValue] = [
@@ -395,6 +412,13 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
 
         // Decode BridgeEvent from notification params
         guard let event = decodeBridgeEvent(from: params) else { return }
+
+        // Route tool.dispatch to the dispatch handler (does not go through session stream)
+        if event.eventType == .toolDispatch {
+            toolDispatchHandler?.handleDispatch(event: event)
+            return
+        }
+
         guard let sessionId = event.sessionId,
               let continuation = sessionContinuations[sessionId] else {
             Log.runtime.debug("Received event for unknown session: \(event.sessionId ?? "nil")")
