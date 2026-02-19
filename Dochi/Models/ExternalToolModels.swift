@@ -67,6 +67,35 @@ struct ManagedGitRepository: Identifiable, Codable, Sendable, Equatable {
     }
 }
 
+enum CodingSessionRuntimeType: String, Codable, Sendable {
+    case tmux
+    case process
+    case file
+}
+
+enum CodingSessionControllabilityTier: String, Codable, Sendable {
+    case t0Full = "t0_full"
+    case t1Attach = "t1_attach"
+    case t2Observe = "t2_observe"
+    case t3Unknown = "t3_unknown"
+}
+
+struct UnifiedCodingSession: Sendable, Equatable {
+    let source: String
+    let runtimeType: CodingSessionRuntimeType
+    let controllabilityTier: CodingSessionControllabilityTier
+    let provider: String
+    let nativeSessionId: String
+    let runtimeSessionId: String?
+    let workingDirectory: String?
+    let repositoryRoot: String?
+    let path: String
+    let updatedAt: Date
+    let isActive: Bool
+
+    var isUnassigned: Bool { repositoryRoot == nil }
+}
+
 enum ExternalTerminalApp: String, CaseIterable, Codable, Sendable {
     case auto
     case terminal

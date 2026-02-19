@@ -52,6 +52,7 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
 
     // Local discovery (file-backed sessions from CLI tools)
     func discoverLocalCodingSessions(limit: Int) async -> [DiscoveredCodingSession]
+    func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession]
 }
 
 extension ExternalToolSessionManagerProtocol {
@@ -81,6 +82,10 @@ extension ExternalToolSessionManagerProtocol {
     }
 
     func discoverLocalCodingSessions(limit _: Int) async -> [DiscoveredCodingSession] {
+        []
+    }
+
+    func listUnifiedCodingSessions(limit _: Int) async -> [UnifiedCodingSession] {
         []
     }
 }
@@ -662,6 +667,133 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         return discovered
     }
 
+    func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession] {
+        let effectiveLimit = max(1, min(300, limit))
+        let sessionSnapshots: [RuntimeSessionSnapshot] = sessions.compactMap { session in
+            let profile = profiles.first(where: { $0.id == session.profileId })
+            let provider = profile?.command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "tmux"
+            let workingDirectory = profile?.workingDirectory
+            let updatedAt = session.lastHealthCheckDate ?? session.startedAt ?? .distantPast
+            return RuntimeSessionSnapshot(
+                provider: provider.isEmpty ? "tmux" : provider,
+                nativeSessionId: session.tmuxSessionName,
+                runtimeSessionId: session.id.uuidString,
+                workingDirectory: workingDirectory,
+                path: "tmux://\(session.tmuxSessionName)",
+                updatedAt: updatedAt,
+                isActive: session.status != .dead,
+                runtimeType: .tmux,
+                controllabilityTier: .t0Full,
+                source: "tmux_runtime"
+            )
+        }
+
+        let discovered = await discoverLocalCodingSessions(limit: max(effectiveLimit * 2, 80))
+        let managedRoots = managedRepositories
+            .filter { !$0.isArchived }
+            .map { URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path }
+
+        return await Task.detached(priority: .utility) {
+            Self.mergeUnifiedCodingSessions(
+                runtimeSessions: sessionSnapshots,
+                discoveredSessions: discovered,
+                managedRepositoryRoots: managedRoots,
+                limit: effectiveLimit
+            )
+        }.value
+    }
+
+    nonisolated static func mergeUnifiedCodingSessions(
+        runtimeSessions: [RuntimeSessionSnapshot],
+        discoveredSessions: [DiscoveredCodingSession],
+        managedRepositoryRoots: [String],
+        limit: Int
+    ) -> [UnifiedCodingSession] {
+        var merged: [UnifiedCodingSession] = runtimeSessions.map { runtime in
+            let repositoryRoot = repositoryRoot(
+                for: runtime.workingDirectory,
+                managedRepositoryRoots: managedRepositoryRoots
+            )
+            return UnifiedCodingSession(
+                source: runtime.source,
+                runtimeType: runtime.runtimeType,
+                controllabilityTier: runtime.controllabilityTier,
+                provider: runtime.provider,
+                nativeSessionId: runtime.nativeSessionId,
+                runtimeSessionId: runtime.runtimeSessionId,
+                workingDirectory: runtime.workingDirectory,
+                repositoryRoot: repositoryRoot,
+                path: runtime.path,
+                updatedAt: runtime.updatedAt,
+                isActive: runtime.isActive
+            )
+        }
+
+        merged.append(contentsOf: discoveredSessions.map { discovered in
+            let repositoryRoot = repositoryRoot(
+                for: discovered.workingDirectory,
+                managedRepositoryRoots: managedRepositoryRoots
+            )
+            return UnifiedCodingSession(
+                source: discovered.source.rawValue,
+                runtimeType: .file,
+                controllabilityTier: .t2Observe,
+                provider: discovered.provider,
+                nativeSessionId: discovered.sessionId,
+                runtimeSessionId: nil,
+                workingDirectory: discovered.workingDirectory,
+                repositoryRoot: repositoryRoot,
+                path: discovered.path,
+                updatedAt: discovered.updatedAt,
+                isActive: discovered.isActive
+            )
+        })
+
+        return deduplicateUnifiedCodingSessions(merged, limit: limit)
+    }
+
+    nonisolated static func deduplicateUnifiedCodingSessions(
+        _ sessions: [UnifiedCodingSession],
+        limit: Int
+    ) -> [UnifiedCodingSession] {
+        var dedup: [String: UnifiedCodingSession] = [:]
+        for session in sessions.sorted(by: { $0.updatedAt > $1.updatedAt }) {
+            let repositoryKey = session.repositoryRoot ?? "unassigned"
+            let key = "\(session.provider)|\(session.nativeSessionId)|\(repositoryKey)"
+            if dedup[key] == nil {
+                dedup[key] = session
+            }
+        }
+        let effectiveLimit = max(1, min(300, limit))
+        return Array(dedup.values)
+            .sorted(by: { lhs, rhs in
+                if lhs.isActive != rhs.isActive {
+                    return lhs.isActive
+                }
+                return lhs.updatedAt > rhs.updatedAt
+            })
+            .prefix(effectiveLimit)
+            .map { $0 }
+    }
+
+    nonisolated static func repositoryRoot(
+        for workingDirectory: String?,
+        managedRepositoryRoots: [String]
+    ) -> String? {
+        guard let workingDirectory, !workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let normalized = URL(fileURLWithPath: expandedPath(workingDirectory)).standardizedFileURL.path
+        let sortedRoots = managedRepositoryRoots
+            .map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+            .sorted(by: { $0.count > $1.count })
+
+        for root in sortedRoots where normalized == root || normalized.hasPrefix(root + "/") {
+            return root
+        }
+        return resolveGitTopLevel(path: normalized)
+    }
+
     nonisolated static func discoverLocalCodingSessions(
         codexSessionsRoot: URL,
         claudeProjectsRoot: URL,
@@ -687,6 +819,19 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     }
 
     // MARK: - Helpers
+
+    struct RuntimeSessionSnapshot: Sendable {
+        let provider: String
+        let nativeSessionId: String
+        let runtimeSessionId: String?
+        let workingDirectory: String?
+        let path: String
+        let updatedAt: Date
+        let isActive: Bool
+        let runtimeType: CodingSessionRuntimeType
+        let controllabilityTier: CodingSessionControllabilityTier
+        let source: String
+    }
 
     func tmuxSessionName(for profile: ExternalToolProfile) -> String {
         let prefix = settings.externalToolSessionPrefix
