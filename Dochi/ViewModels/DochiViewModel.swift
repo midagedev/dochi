@@ -1395,7 +1395,11 @@ final class DochiViewModel {
         // Close SDK session for previous conversation
         if let bridge = runtimeBridge, let sessionId = activeSDKSessionId {
             Task {
-                try? await bridge.closeSession(sessionId: sessionId)
+                do {
+                    _ = try await bridge.closeSession(sessionId: sessionId)
+                } catch {
+                    Log.runtime.warning("Failed to close SDK session \(sessionId): \(error.localizedDescription)")
+                }
             }
         }
         activeSDKSessionId = nil
