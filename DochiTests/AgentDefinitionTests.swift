@@ -354,6 +354,53 @@ final class AgentDefinitionTests: XCTestCase {
     }
 
     @MainActor
+    func testValidatorChecksSubagentUnknownToolGroups() {
+        let validator = AgentDefinitionValidator(knownToolGroups: ["calendar", "memory", "reminders"])
+        let definition = AgentDefinition(
+            name: "test",
+            subagents: [
+                SubagentDefinition(id: "planner", toolGroups: ["calendar", "nonexistent"]),
+                SubagentDefinition(id: "reviewer", toolGroups: ["unknown_group"])
+            ]
+        )
+        let errors = validator.validate(definition)
+        XCTAssertTrue(errors.contains(.subagentUnknownToolGroup(subagentId: "planner", group: "nonexistent")))
+        XCTAssertTrue(errors.contains(.subagentUnknownToolGroup(subagentId: "reviewer", group: "unknown_group")))
+    }
+
+    @MainActor
+    func testValidatorAcceptsSubagentKnownToolGroups() {
+        let validator = AgentDefinitionValidator(knownToolGroups: ["calendar", "memory", "reminders"])
+        let definition = AgentDefinition(
+            name: "test",
+            subagents: [
+                SubagentDefinition(id: "planner", toolGroups: ["calendar", "memory"])
+            ]
+        )
+        let errors = validator.validate(definition)
+        XCTAssertFalse(errors.contains(where: {
+            if case .subagentUnknownToolGroup = $0 { return true }
+            return false
+        }))
+    }
+
+    @MainActor
+    func testValidatorSkipsSubagentToolGroupsWhenNoKnownGroups() {
+        let validator = AgentDefinitionValidator() // knownToolGroups = [] (기본값)
+        let definition = AgentDefinition(
+            name: "test",
+            subagents: [
+                SubagentDefinition(id: "planner", toolGroups: ["anything"])
+            ]
+        )
+        let errors = validator.validate(definition)
+        XCTAssertFalse(errors.contains(where: {
+            if case .subagentUnknownToolGroup = $0 { return true }
+            return false
+        }))
+    }
+
+    @MainActor
     func testIsValidConvenience() {
         let validator = AgentDefinitionValidator()
         let valid = AgentDefinition(name: "도치")

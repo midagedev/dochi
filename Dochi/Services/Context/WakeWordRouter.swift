@@ -85,6 +85,7 @@ final class WakeWordRouter {
         }
 
         // 매칭 없음: 현재 에이전트 유지
+        Log.app.debug("wakeWord 라우팅: 매칭 없음 — input='\(trimmedInput)', agents=\(allAgents.count)개 검색")
         return RoutingDecision(
             workspaceId: currentWorkspaceId,
             agentName: currentAgentName,

@@ -61,6 +61,15 @@ final class AgentDefinitionValidator {
             if let profile = subagent.permissionProfile {
                 errors.append(contentsOf: validatePermissionProfile(profile))
             }
+            // subagent toolGroups 존재 확인
+            if !knownToolGroups.isEmpty {
+                for group in subagent.toolGroups {
+                    let normalized = group.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if !knownToolGroups.contains(normalized) {
+                        errors.append(.subagentUnknownToolGroup(subagentId: subagent.id, group: normalized))
+                    }
+                }
+            }
         }
 
         // 6. version 유효성
@@ -123,6 +132,7 @@ enum AgentValidationError: LocalizedError, Equatable, Sendable {
     case invalidNameFormat(String)
     case unknownToolGroup(String)
     case subagentEmptyId
+    case subagentUnknownToolGroup(subagentId: String, group: String)
     case invalidVersion(Int)
     case emptyWakeWord
     case noMemoryAccess
@@ -136,6 +146,7 @@ enum AgentValidationError: LocalizedError, Equatable, Sendable {
         case .invalidNameFormat(let name): return "에이전트 이름 형식이 유효하지 않습니다: '\(name)'"
         case .unknownToolGroup(let group): return "등록되지 않은 toolGroup: '\(group)'"
         case .subagentEmptyId: return "서브에이전트 ID가 비어있습니다."
+        case .subagentUnknownToolGroup(let subagentId, let group): return "서브에이전트 '\(subagentId)'의 등록되지 않은 toolGroup: '\(group)'"
         case .invalidVersion(let v): return "유효하지 않은 버전: \(v) (1 이상이어야 합니다)"
         case .emptyWakeWord: return "wakeWord가 비어있습니다."
         case .noMemoryAccess: return "모든 메모리 접근이 비활성화되어 있습니다."
