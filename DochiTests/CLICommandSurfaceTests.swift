@@ -126,6 +126,16 @@ final class CLICommandSurfaceTests: XCTestCase {
         )
     }
 
+    func testParseDevBridgeRepoRemoveWithUnknownOptionThrows() {
+        XCTAssertThrowsError(try CLICommandParser.parse([
+            "dev", "bridge", "repo", "remove",
+            "11111111-2222-3333-4444-555555555555",
+            "--dry-run",
+        ])) { error in
+            XCTAssertTrue(error.localizedDescription.contains("알 수 없는 옵션"))
+        }
+    }
+
     func testParseDevChatStream() throws {
         let invocation = try CLICommandParser.parse(["dev", "chat", "stream", "실시간", "테스트"])
         XCTAssertEqual(invocation.command, .dev(.chatStream(prompt: "실시간 테스트")))

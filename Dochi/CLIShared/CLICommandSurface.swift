@@ -472,7 +472,17 @@ enum CLICommandParser {
                     guard let repositoryId = repoArgs.first else {
                         throw CLIParseError.invalidUsage("dev bridge repo remove <repository_id> [--delete-directory] 형식이 필요합니다.")
                     }
-                    let deleteDirectory = repoArgs.dropFirst().contains("--delete-directory")
+                    var deleteDirectory = false
+                    var index = 1
+                    while index < repoArgs.count {
+                        switch repoArgs[index] {
+                        case "--delete-directory":
+                            deleteDirectory = true
+                            index += 1
+                        default:
+                            throw CLIParseError.invalidUsage("dev bridge repo remove의 알 수 없는 옵션입니다: \(repoArgs[index])")
+                        }
+                    }
                     return .dev(.bridgeRepoRemove(repositoryId: repositoryId, deleteDirectory: deleteDirectory))
                 default:
                     throw CLIParseError.invalidUsage("dev bridge repo 하위 명령은 list/init/clone/attach/remove만 지원합니다.")
