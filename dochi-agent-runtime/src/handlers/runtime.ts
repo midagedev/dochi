@@ -6,6 +6,7 @@ import {
   type ShutdownResult,
 } from "./types";
 import { getActiveSessionCount } from "./session";
+import { flushAllAudit } from "./hooks";
 
 const startTime = Date.now();
 let lastError: string | null = null;
@@ -33,6 +34,8 @@ export function handleHealth(): HealthResult {
 
 export function handleShutdown(): ShutdownResult {
   console.error("[runtime] shutdown requested");
+  // Flush all audit log entries before exit
+  flushAllAudit();
   // Schedule process exit after response is sent
   setTimeout(() => process.exit(0), 100);
   return { success: true };

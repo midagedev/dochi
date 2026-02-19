@@ -77,6 +77,9 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         healthPollTask?.cancel()
         healthPollTask = nil
 
+        // Run stop hooks (audit log flush, resource cleanup)
+        toolDispatchHandler?.runStopHooks()
+
         // Try graceful shutdown via RPC
         if let conn = connection {
             do {
