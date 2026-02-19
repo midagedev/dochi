@@ -26,6 +26,11 @@ struct RepositoryDashboardSummary: Identifiable, Sendable, Equatable {
 }
 
 enum SessionExplorerViewStateBuilder {
+    private static func normalizedRepositoryPath(_ path: String?) -> String? {
+        guard let path else { return nil }
+        return URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
     static func repositorySummaries(from sessions: [UnifiedCodingSession]) -> [RepositoryDashboardSummary] {
         let grouped = Dictionary(grouping: sessions, by: { $0.repositoryRoot })
         return grouped.map { repositoryRoot, groupedSessions in
@@ -61,9 +66,11 @@ enum SessionExplorerViewStateBuilder {
         filter: SessionExplorerFilter,
         sort: SessionExplorerSortOption
     ) -> [UnifiedCodingSession] {
+        let normalizedFilterRoot = normalizedRepositoryPath(filter.repositoryRoot)
         let filtered = sessions.filter { session in
-            if let repositoryRoot = filter.repositoryRoot {
-                if session.repositoryRoot != repositoryRoot {
+            if let normalizedFilterRoot {
+                let normalizedSessionRoot = normalizedRepositoryPath(session.repositoryRoot)
+                if normalizedSessionRoot != normalizedFilterRoot {
                     return false
                 }
             }

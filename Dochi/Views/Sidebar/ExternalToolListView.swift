@@ -63,8 +63,8 @@ struct ExternalToolListView: View {
     }
 
     private var repositoryFilterOptions: [String] {
-        var options = Set(managedRepositories.map(\.rootPath))
-        options.formUnion(unifiedSessions.compactMap(\.repositoryRoot))
+        var options = Set(managedRepositories.map { normalizedRepositoryPath($0.rootPath) })
+        options.formUnion(unifiedSessions.compactMap(\.repositoryRoot).map { normalizedRepositoryPath($0) })
         return options.sorted()
     }
 
@@ -588,22 +588,33 @@ struct ExternalToolListView: View {
         guard !isRefreshingUnified else { return }
         isRefreshingUnified = true
         unifiedSessions = await manager.listUnifiedCodingSessions(limit: 180)
+        if let repositoryRoot = explorerFilter.repositoryRoot {
+            explorerFilter.repositoryRoot = normalizedRepositoryPath(repositoryRoot)
+        }
         isRefreshingUnified = false
     }
 
     @MainActor
     private func applyManualMapping(session: UnifiedCodingSession, repositoryRoot: String) {
+        let normalizedRepositoryRoot = normalizedRepositoryPath(repositoryRoot)
         manager.setManualRepositoryBinding(
             provider: session.provider,
             nativeSessionId: session.nativeSessionId,
             path: session.path,
-            repositoryRoot: repositoryRoot
+            repositoryRoot: normalizedRepositoryRoot
         )
-        let repoName = URL(fileURLWithPath: repositoryRoot).lastPathComponent
+        if let filterRoot = explorerFilter.repositoryRoot {
+            explorerFilter.repositoryRoot = normalizedRepositoryPath(filterRoot)
+        }
+        let repoName = URL(fileURLWithPath: normalizedRepositoryRoot).lastPathComponent
         mappingNotice = "[\(session.nativeSessionId)] 세션을 \(repoName) 레포로 연결했습니다."
         Task {
             await refreshUnifiedSessions()
         }
+    }
+
+    private func normalizedRepositoryPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
     private func activityColor(_ state: CodingSessionActivityState) -> Color {

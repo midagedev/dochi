@@ -80,6 +80,34 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(filtered.first?.nativeSessionId, "t0-active")
     }
 
+    func testFilteredSessionsNormalizesRepositoryRootComparison() {
+        let sessions = [
+            makeSession(
+                provider: "codex",
+                nativeId: "normalized",
+                repo: "/tmp/repo-a/../repo-a",
+                tier: .t0Full,
+                state: .active,
+                score: 40
+            ),
+        ]
+
+        let filtered = SessionExplorerViewStateBuilder.filteredSessions(
+            sessions: sessions,
+            filter: SessionExplorerFilter(
+                repositoryRoot: "/tmp/repo-a",
+                provider: nil,
+                tier: nil,
+                activeOnly: false,
+                unassignedOnly: false
+            ),
+            sort: .activity
+        )
+
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertEqual(filtered.first?.nativeSessionId, "normalized")
+    }
+
     func testApplyManualRepositoryBindingsOverridesUnassignedSession() {
         let session = makeSession(
             provider: "claude",
@@ -138,4 +166,3 @@ final class SessionExplorerViewModelTests: XCTestCase {
         )
     }
 }
-
