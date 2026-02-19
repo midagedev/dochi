@@ -80,6 +80,46 @@ struct RetryEntry: Codable, Identifiable, Sendable {
     static let maxAttempts = 5
 }
 
+// MARK: - ConflictEntry
+
+/// 충돌이 감지된 메모리 후보. 승인 대기 큐에 보관된다.
+struct ConflictEntry: Sendable, Identifiable {
+    let id: UUID
+    let candidateId: String
+    let content: String
+    let conflictingContent: String
+    let targetLayer: MemoryTargetLayer
+    let workspaceId: String
+    let agentId: String?
+    let userId: String?
+    let similarity: Double
+    let detectedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        candidateId: String,
+        content: String,
+        conflictingContent: String,
+        targetLayer: MemoryTargetLayer,
+        workspaceId: String,
+        agentId: String? = nil,
+        userId: String? = nil,
+        similarity: Double,
+        detectedAt: Date = Date()
+    ) {
+        self.id = id
+        self.candidateId = candidateId
+        self.content = content
+        self.conflictingContent = conflictingContent
+        self.targetLayer = targetLayer
+        self.workspaceId = workspaceId
+        self.agentId = agentId
+        self.userId = userId
+        self.similarity = similarity
+        self.detectedAt = detectedAt
+    }
+}
+
 // MARK: - MemoryPipelineResult
 
 /// 파이프라인 실행 결과

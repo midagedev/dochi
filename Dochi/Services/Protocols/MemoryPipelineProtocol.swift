@@ -2,14 +2,15 @@ import Foundation
 
 // MARK: - MemoryPipelineProtocol
 
-/// Processes memory candidates through classification, deduplication, and storage.
+/// Processes memory candidates through classification, deduplication, approval, and storage.
 ///
 /// Pipeline stages (spec 05, section 5):
 /// 1. Extract candidate from conversation/tool result
 /// 2. Classify into target layer (personal/workspace/agent/drop)
-/// 3. Check for duplicates against existing memory
-/// 4. Store via ContextService
-/// 5. Emit audit event
+/// 3. Check for duplicates/conflicts against existing memory
+/// 4. Apply approval policy (auto/requireApproval)
+/// 5. Store via ContextService
+/// 6. Emit audit event
 @MainActor
 protocol MemoryPipelineProtocol {
     /// Submit a single candidate for async processing (classification + storage).
