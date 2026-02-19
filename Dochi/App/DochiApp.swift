@@ -906,6 +906,12 @@ struct DochiApp: App {
         case "bridge.session_history.search":
             return await handleBridgeSessionHistorySearch(params: params, externalToolManager: externalToolManager)
 
+        case "bridge.metrics.session_kpi":
+            return await handleBridgeSessionMetrics(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.metrics.activity_feedback":
+            return await handleBridgeActivityFeedback(params: params, externalToolManager: externalToolManager)
+
         case "bridge.orchestrator.select_session":
             return await handleBridgeOrchestratorSelectSession(params: params, externalToolManager: externalToolManager)
 
@@ -1498,6 +1504,63 @@ struct DochiApp: App {
         ])
     }
 
+    nonisolated private static func handleBridgeSessionMetrics(
+        params _: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        let report = await MainActor.run {
+            externalToolManager.sessionManagementKPIReport()
+        }
+
+        return .ok([
+            "generated_at": isoTimestamp(report.generatedAt),
+            "metrics": [
+                "repository_assignment_success_rate": report.repositoryAssignmentSuccessRate,
+                "dedup_correction_rate": report.dedupCorrectionRate,
+                "activity_classification_accuracy": report.activityClassificationAccuracy ?? NSNull(),
+                "session_selection_failure_rate": report.sessionSelectionFailureRate,
+                "history_search_hit_rate": report.historySearchHitRate,
+            ] as [String: Any],
+            "counters": [
+                "repository_assigned_count": report.counters.repositoryAssignedCount,
+                "repository_total_count": report.counters.repositoryTotalCount,
+                "dedup_candidate_count": report.counters.dedupCandidateCount,
+                "dedup_correction_count": report.counters.dedupCorrectionCount,
+                "selection_attempt_count": report.counters.selectionAttemptCount,
+                "selection_failure_count": report.counters.selectionFailureCount,
+                "history_search_query_count": report.counters.historySearchQueryCount,
+                "history_search_hit_count": report.counters.historySearchHitCount,
+                "activity_feedback_sample_count": report.counters.activityFeedbackSampleCount,
+                "activity_feedback_matched_count": report.counters.activityFeedbackMatchedCount,
+                "activity_state_distribution": report.counters.activityStateDistribution,
+            ] as [String: Any],
+            "summary": formatSessionManagementKPISummary(report),
+        ])
+    }
+
+    nonisolated private static func handleBridgeActivityFeedback(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let expectedRaw = nonEmptyString(params["expected_state"]),
+              let expected = CodingSessionActivityState(rawValue: expectedRaw) else {
+            return .failure(code: "invalid_expected_state", message: "expected_state가 유효하지 않습니다. (active/idle/stale/dead)")
+        }
+        guard let observedRaw = nonEmptyString(params["observed_state"]),
+              let observed = CodingSessionActivityState(rawValue: observedRaw) else {
+            return .failure(code: "invalid_observed_state", message: "observed_state가 유효하지 않습니다. (active/idle/stale/dead)")
+        }
+
+        await MainActor.run {
+            externalToolManager.recordActivityClassificationFeedback(expected: expected, observed: observed)
+        }
+        return .ok([
+            "status": "recorded",
+            "expected_state": expected.rawValue,
+            "observed_state": observed.rawValue,
+        ])
+    }
+
     nonisolated private static func handleBridgeOrchestratorSelectSession(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
@@ -1811,6 +1874,33 @@ struct DochiApp: App {
             payload["selected_session"] = NSNull()
         }
         return payload
+    }
+
+    nonisolated private static func formatSessionManagementKPISummary(
+        _ report: SessionManagementKPIReport
+    ) -> String {
+        let activityAccuracy: String
+        if let accuracy = report.activityClassificationAccuracy {
+            activityAccuracy = percentageString(accuracy)
+        } else {
+            activityAccuracy = "n/a"
+        }
+        let lines = [
+            "session_management_kpi",
+            "generated_at=\(isoTimestamp(report.generatedAt))",
+            "repo_assignment_success=\(percentageString(report.repositoryAssignmentSuccessRate)) (\(report.counters.repositoryAssignedCount)/\(report.counters.repositoryTotalCount))",
+            "dedup_correction_ratio=\(percentageString(report.dedupCorrectionRate)) (\(report.counters.dedupCorrectionCount)/\(report.counters.dedupCandidateCount))",
+            "activity_classification_accuracy=\(activityAccuracy) (\(report.counters.activityFeedbackMatchedCount)/\(report.counters.activityFeedbackSampleCount))",
+            "selection_failure_rate=\(percentageString(report.sessionSelectionFailureRate)) (\(report.counters.selectionFailureCount)/\(report.counters.selectionAttemptCount))",
+            "history_search_hit_rate=\(percentageString(report.historySearchHitRate)) (\(report.counters.historySearchHitCount)/\(report.counters.historySearchQueryCount))",
+            "activity_state_distribution=\(report.counters.activityStateDistribution)",
+        ]
+        return lines.joined(separator: "\n")
+    }
+
+    nonisolated private static func percentageString(_ value: Double) -> String {
+        let percent = (value * 100).rounded()
+        return "\(Int(percent))%"
     }
 
     @MainActor

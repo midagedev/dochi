@@ -326,6 +326,30 @@ struct SessionHistoryMaskingRule: Sendable, Equatable {
     }
 }
 
+struct SessionManagementKPICounters: Sendable, Equatable {
+    var repositoryAssignedCount: Int = 0
+    var repositoryTotalCount: Int = 0
+    var dedupCandidateCount: Int = 0
+    var dedupCorrectionCount: Int = 0
+    var selectionAttemptCount: Int = 0
+    var selectionFailureCount: Int = 0
+    var historySearchQueryCount: Int = 0
+    var historySearchHitCount: Int = 0
+    var activityFeedbackSampleCount: Int = 0
+    var activityFeedbackMatchedCount: Int = 0
+    var activityStateDistribution: [String: Int] = [:]
+}
+
+struct SessionManagementKPIReport: Sendable, Equatable {
+    let generatedAt: Date
+    let repositoryAssignmentSuccessRate: Double
+    let dedupCorrectionRate: Double
+    let activityClassificationAccuracy: Double?
+    let sessionSelectionFailureRate: Double
+    let historySearchHitRate: Double
+    let counters: SessionManagementKPICounters
+}
+
 enum OrchestrationRunState: String, Codable, Sendable {
     case planned
     case resolvingSession = "resolving_session"
