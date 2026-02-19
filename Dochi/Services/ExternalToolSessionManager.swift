@@ -1025,7 +1025,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     }
 
     nonisolated static func orchestrationGuardPolicyMatrix() -> [OrchestrationGuardPolicyRule] {
-        [
+        orchestrationGuardPolicyMatrixStorage
+    }
+
+    nonisolated private static let orchestrationGuardPolicyMatrixStorage: [OrchestrationGuardPolicyRule] = [
             OrchestrationGuardPolicyRule(
                 tier: .t0Full,
                 commandClass: .nonDestructive,
@@ -1083,7 +1086,6 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 reason: "T3 세션은 실행 금지이며 제안 전용입니다."
             ),
         ]
-    }
 
     nonisolated static func orchestrationCommandClass(_ command: String) -> OrchestrationCommandClass {
         isDestructiveCommand(command) ? .destructive : .nonDestructive
@@ -1401,7 +1403,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     }
 
     nonisolated static func sessionHistoryMaskingPolicyRules() -> [SessionHistoryMaskingRule] {
-        [
+        sessionHistoryMaskingPolicyRulesStorage
+    }
+
+    nonisolated private static let sessionHistoryMaskingPolicyRulesStorage: [SessionHistoryMaskingRule] = [
             SessionHistoryMaskingRule(
                 code: "openai_api_key",
                 pattern: "sk-[A-Za-z0-9]{16,}",
@@ -1439,7 +1444,6 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 options: [.dotMatchesLineSeparators]
             ),
         ]
-    }
 
     nonisolated private static func chunkSessionHistoryEvents(
         events: [SessionHistoryEvent],
