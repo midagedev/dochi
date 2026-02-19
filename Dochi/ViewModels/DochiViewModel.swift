@@ -108,6 +108,7 @@ final class DochiViewModel {
     var pendingToolConfirmation: ToolConfirmation?
     var userProfiles: [UserProfile] = []
     var currentUserName: String = "(사용자 없음)"
+    var selectedCapabilityLabel: String?
 
     // MARK: - Tool Execution Tracking (UX-7)
     var toolExecutions: [ToolExecution] = []
@@ -2285,6 +2286,7 @@ final class DochiViewModel {
 
     private func telegramSafeToolSchemas() -> [[String: Any]] {
         let safeSchemas = toolService.availableToolSchemas(for: ["safe"])
+        selectedCapabilityLabel = toolService.selectedCapabilityLabel
         return safeSchemas.filter { schema in
             guard let function = schema["function"] as? [String: Any],
                   let name = function["name"] as? String else {
@@ -2464,6 +2466,7 @@ final class DochiViewModel {
         // Get available tool schemas
         let agentPermissions = currentAgentPermissions()
         let tools = toolService.availableToolSchemas(for: agentPermissions)
+        selectedCapabilityLabel = toolService.selectedCapabilityLabel
 
         // Reset sentence chunker for TTS streaming
         sentenceChunker = SentenceChunker()

@@ -942,6 +942,11 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(appGuideEnabled, forKey: "appGuideEnabled") }
     }
 
+    /// Capability router v2 경로 사용 여부 (점진 전환용 플래그)
+    var capabilityRouterV2Enabled: Bool = UserDefaults.standard.object(forKey: "capabilityRouterV2Enabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(capabilityRouterV2Enabled, forKey: "capabilityRouterV2Enabled") }
+    }
+
     /// 인앱 힌트 표시 여부 (hintsGloballyDisabled의 반전)
     var hintsEnabled: Bool {
         get { !UserDefaults.standard.bool(forKey: "hintsGloballyDisabled") }

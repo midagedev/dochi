@@ -5,6 +5,8 @@ import os
 final class BuiltInToolService: BuiltInToolServiceProtocol {
     private let registry = ToolRegistry()
     private let sessionContext: SessionContext
+    private let settings: AppSettings
+    private let capabilityRouter = CapabilityRouter()
     var confirmationHandler: ToolConfirmationHandler? {
         didSet {
             // Forward to ShellCommandTool for its own confirm-level handling
@@ -19,6 +21,7 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     }
 
     private let mcpService: MCPServiceProtocol
+    private(set) var selectedCapabilityLabel: String?
 
     init(
         contextService: ContextServiceProtocol,
@@ -32,6 +35,7 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         delegationManager: DelegationManager? = nil
     ) {
         self.sessionContext = sessionContext
+        self.settings = settings
         self.mcpService = mcpService
 
         // Registry meta-tools (baseline, safe)
@@ -281,9 +285,23 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]] {
         var schemas: [[String: Any]] = []
+        selectedCapabilityLabel = nil
 
         // Built-in tools
-        let tools = registry.availableTools(for: permissions)
+        let availableTools = registry.availableTools(for: permissions)
+        let tools: [any BuiltInToolProtocol]
+        if settings.capabilityRouterV2Enabled {
+            let filtered = capabilityRouter.filter(
+                tools: availableTools,
+                enabledToolNames: registry.enabledToolNames,
+                permissions: permissions
+            )
+            tools = filtered.filteredTools
+            selectedCapabilityLabel = filtered.selectedLabel
+        } else {
+            tools = availableTools
+        }
+
         for tool in tools {
             // OpenAI requires tool names to match ^[a-zA-Z0-9_-]+$
             let sanitizedName = Self.sanitizeToolName(tool.name)
