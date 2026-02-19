@@ -5,7 +5,7 @@ enum Log {
     static let subsystem = "com.dochi.app"
 
     static let allCategories: [String] = [
-        "App", "LLM", "STT", "TTS", "MCP", "Tool", "Storage", "Cloud", "Telegram", "Avatar"
+        "App", "LLM", "STT", "TTS", "MCP", "Tool", "Storage", "Cloud", "Telegram", "Avatar", "Runtime"
     ]
 
     static let app = Logger(subsystem: subsystem, category: "App")
@@ -18,4 +18,5 @@ enum Log {
     static let cloud = Logger(subsystem: subsystem, category: "Cloud")
     static let telegram = Logger(subsystem: subsystem, category: "Telegram")
     static let avatar = Logger(subsystem: subsystem, category: "Avatar")
+    static let runtime = Logger(subsystem: subsystem, category: "Runtime")
 }

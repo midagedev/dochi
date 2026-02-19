@@ -277,12 +277,12 @@ final class MockBuiltInToolService: BuiltInToolServiceProtocol {
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]] {
         lastPreferredToolGroups = nil
-        stubbedSchemas
+        return stubbedSchemas
     }
 
     func availableToolSchemas(for permissions: [String], preferredToolGroups: [String]) -> [[String: Any]] {
         lastPreferredToolGroups = preferredToolGroups
-        stubbedSchemas
+        return stubbedSchemas
     }
 
     func execute(name: String, arguments: [String: Any]) async -> ToolResult {
@@ -1315,5 +1315,40 @@ final class MockTelegramProactiveRelay: TelegramProactiveRelayProtocol {
         sendSuggestionCallCount += 1
         lastSuggestion = suggestion
         todayTelegramNotificationCount += 1
+    }
+}
+
+// MARK: - MockRuntimeBridgeService (#281)
+
+@MainActor
+final class MockRuntimeBridgeService: RuntimeBridgeProtocol {
+    var runtimeState: RuntimeState = .notStarted
+    var stubbedHealthResponse: RuntimeHealthResponse?
+    var stubbedError: Error?
+
+    var startCallCount = 0
+    var stopCallCount = 0
+    var healthCallCount = 0
+
+    func startRuntime() async throws {
+        startCallCount += 1
+        if let error = stubbedError { throw error }
+        runtimeState = .ready
+    }
+
+    func stopRuntime() async {
+        stopCallCount += 1
+        runtimeState = .notStarted
+    }
+
+    func health() async throws -> RuntimeHealthResponse {
+        healthCallCount += 1
+        if let error = stubbedError { throw error }
+        return stubbedHealthResponse ?? RuntimeHealthResponse(
+            alive: true,
+            uptimeMs: 1000,
+            activeSessions: 0,
+            lastError: nil
+        )
     }
 }

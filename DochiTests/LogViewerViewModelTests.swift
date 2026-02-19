@@ -161,9 +161,10 @@ final class LogViewerViewModelTests: XCTestCase {
     // MARK: - All Categories
 
     func testAllCategoriesNotEmpty() {
-        XCTAssertEqual(Log.allCategories.count, 10)
+        XCTAssertEqual(Log.allCategories.count, 11)
         XCTAssertTrue(Log.allCategories.contains("App"))
         XCTAssertTrue(Log.allCategories.contains("LLM"))
         XCTAssertTrue(Log.allCategories.contains("Avatar"))
+        XCTAssertTrue(Log.allCategories.contains("Runtime"))
     }
 }
