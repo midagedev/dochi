@@ -123,6 +123,33 @@ xcodebuild test -project Dochi.xcodeproj -scheme Dochi -destination 'platform=ma
 - `project.yml` auto-includes all files under `Dochi/` path — no need to add new files manually
 - **기능 구현 = 코드 + 테스트**: 모든 기능은 단위 테스트와 쌍으로 작성. 빌드 후 `xcodebuild test` 통과 필수
 
+## Swift Code Quality Rules
+
+### Concurrency (Swift 6.0, strict targeted)
+- `@MainActor`는 진짜 UI 관련 코드에만 사용. "일단 붙이기" 금지 — 왜 main-actor isolation이 맞는지 근거 필요
+- 구조적 동시성 우선: `TaskGroup`/child task > 비구조적 `Task {}`. `Task.detached`는 CPU-heavy 작업(ONNX 등)에만 명확한 이유와 함께 사용
+- `@preconcurrency`, `@unchecked Sendable`, `nonisolated(unsafe)` 사용 시: 안전 불변조건(safety invariant) 주석 필수 + 제거 계획 TODO 추가
+- isolation 경계를 넘기 전에 먼저 식별: `@MainActor`, custom actor, `nonisolated` 중 어디에 속하는지 확인
+- suspension point 최소화 — actor-isolated 구간을 짧게 유지하여 context switch 줄이기
+- `async` 컨텍스트에서 semaphore/lock으로 블로킹 금지 — deadlock 위험
+- `Task.isCancelled` 검사: 장시간 실행 작업에서 반드시 cancellation 처리
+
+### API Design (Apple Swift API Design Guidelines)
+- **사용 시점의 명확성**(clarity at point of use) 최우선. 간결성보다 명확성
+- 역할로 이름 짓기, 타입 반복 금지: `var greeting: String` (O) / `var greetingString` (X)
+- 부작용 기준 네이밍: 부작용 없으면 명사구(`x.distance(to:)`), 부작용 있으면 명령형 동사(`x.sort()`)
+- mutating/nonmutating 쌍: 동사 → `sort()` / `sorted()`, 명사 → `union()` / `formUnion()`
+- Bool 프로퍼티/메서드는 단언문으로 읽히게: `isEmpty`, `intersects(line2)`
+- Factory 메서드는 `make` 접두사: `makeIterator()`
+- 약어 금지, 기술 용어는 정확히 사용
+
+### Code Style
+- 타입/프로토콜: `UpperCamelCase`, 그 외: `lowerCamelCase`
+- 약어 대소문자 통일: `utf8Bytes`, `ASCII` (혼합 금지)
+- 기본값 있는 파라미터는 파라미터 목록 뒤쪽에 배치
+- O(1)이 아닌 computed property는 복잡도 문서화
+- free function은 `self`가 없거나 제약 없는 제네릭일 때만
+
 ## External Dependencies
 
 - `microsoft/onnxruntime-swift-package-manager` v1.20.0 (TTS ONNX)
