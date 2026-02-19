@@ -1477,3 +1477,77 @@ final class MockRuntimeBridgeService: RuntimeBridgeProtocol {
         )
     }
 }
+
+// MARK: - MockMemoryPipelineService (#288)
+
+@MainActor
+final class MockMemoryPipelineService: MemoryPipelineProtocol {
+    var auditLog: [MemoryAuditEvent] = []
+    var currentProjections: [MemoryTargetLayer: MemoryProjection] = [:]
+    var submittedCandidates: [MemoryCandidate] = []
+    var processedCandidates: [MemoryCandidate] = []
+    var submitCallCount = 0
+    var processCallCount = 0
+    var processConversationEndCallCount = 0
+    var processToolResultCallCount = 0
+    var regenerateProjectionsCallCount = 0
+    var stubbedClassification: MemoryClassification?
+    var stubbedError: Error?
+    var stubbedPipelineResult: MemoryPipelineResult = .empty
+    var retryQueueCount = 0
+
+    func submitCandidate(_ candidate: MemoryCandidate) async {
+        submitCallCount += 1
+        submittedCandidates.append(candidate)
+    }
+
+    func classifyCandidate(_ candidate: MemoryCandidate) -> MemoryClassification {
+        if let stubbed = stubbedClassification { return stubbed }
+        return MemoryClassification(
+            candidateId: candidate.id,
+            targetLayer: .workspace,
+            confidence: 0.5,
+            reason: "mock classification"
+        )
+    }
+
+    func processAndStore(_ candidate: MemoryCandidate) async throws {
+        processCallCount += 1
+        processedCandidates.append(candidate)
+        if let error = stubbedError { throw error }
+    }
+
+    func pendingCount() -> Int {
+        retryQueueCount
+    }
+
+    func processConversationEnd(
+        messages: [Message],
+        sessionId: String,
+        sessionContext: SessionContext,
+        settings: AppSettings
+    ) async -> MemoryPipelineResult {
+        processConversationEndCallCount += 1
+        return stubbedPipelineResult
+    }
+
+    func processToolResult(
+        toolName: String,
+        result: String,
+        sessionId: String,
+        sessionContext: SessionContext,
+        settings: AppSettings
+    ) async -> MemoryPipelineResult {
+        processToolResultCallCount += 1
+        return stubbedPipelineResult
+    }
+
+    func regenerateProjections(
+        workspaceId: UUID,
+        agentName: String,
+        userId: String?
+    ) -> [MemoryTargetLayer: MemoryProjection] {
+        regenerateProjectionsCallCount += 1
+        return currentProjections
+    }
+}

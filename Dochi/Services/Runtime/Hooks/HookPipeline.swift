@@ -73,6 +73,21 @@ final class HookPipeline {
         }
     }
 
+    // MARK: - Memory Pipeline Integration
+
+    /// Attach a memory pipeline to the MemoryCandidateHook for structured processing.
+    func attachMemoryPipeline(_ pipeline: any MemoryPipelineProtocol, workspaceId: String) {
+        for hook in postHooks {
+            if let memoryHook = hook as? MemoryCandidateHook {
+                memoryHook.memoryPipeline = pipeline
+                memoryHook.currentWorkspaceId = workspaceId
+                Log.runtime.info("Memory pipeline attached to MemoryCandidateHook for workspace \(workspaceId)")
+                return
+            }
+        }
+        Log.runtime.warning("MemoryCandidateHook not found in post hooks — memory pipeline not attached")
+    }
+
     // MARK: - Utility
 
     /// Compute SHA-256 hash of tool arguments for audit logging.
@@ -201,9 +216,19 @@ final class MetricsRecordingHook: PostToolUseHook {
 // MARK: - MemoryCandidateHook
 
 /// PostToolUse hook that extracts memory-worthy content from tool results.
+///
+/// When a `memoryPipeline` is attached, extracted candidates are forwarded
+/// for classification and storage. Otherwise, candidates are only returned
+/// in the `PostHookOutput` for upstream consumers.
 @MainActor
 final class MemoryCandidateHook: PostToolUseHook {
     let name = "MemoryCandidate"
+
+    /// Optional pipeline for structured memory processing.
+    var memoryPipeline: (any MemoryPipelineProtocol)?
+
+    /// The workspace ID for the current session (set by runtime before use).
+    var currentWorkspaceId: String?
 
     /// Tools whose results may contain memory-worthy information.
     private let memoryToolNames: Set<String> = [
@@ -220,9 +245,25 @@ final class MemoryCandidateHook: PostToolUseHook {
 
         // Extract first meaningful line as summary
         let summary = String(result.content.prefix(200))
+        let candidateContent = "\(context.toolName): \(summary)"
+
+        // Forward to memory pipeline if available
+        if let pipeline = memoryPipeline, let workspaceId = currentWorkspaceId {
+            let candidate = MemoryCandidate(
+                content: candidateContent,
+                source: .toolResult,
+                sessionId: context.sessionId,
+                workspaceId: workspaceId,
+                agentId: context.agentId
+            )
+            Task { @MainActor in
+                await pipeline.submitCandidate(candidate)
+            }
+        }
+
         return PostHookOutput(
             resultSummary: summary,
-            memoryCandidates: ["\(context.toolName): \(summary)"]
+            memoryCandidates: [candidateContent]
         )
     }
 }
