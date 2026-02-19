@@ -79,6 +79,7 @@ final class MockContextService: ContextServiceProtocol {
     var agentPersonas: [String: String] = [:]
     var agentMemories: [String: String] = [:]
     var agentConfigs: [String: AgentConfig] = [:]
+    var agentConfigDataStore: [String: Data] = [:]
     var agents: [UUID: [String]] = [:]
     var migrateCallCount = 0
     var workspaceMemorySnapshots: [UUID: String] = [:]
@@ -169,6 +170,12 @@ final class MockContextService: ContextServiceProtocol {
     }
     func saveAgentConfig(workspaceId: UUID, config: AgentConfig) {
         agentConfigs[agentKey(workspaceId, config.name)] = config
+    }
+    func loadAgentConfigData(workspaceId: UUID, agentName: String) -> Data? {
+        agentConfigDataStore[agentKey(workspaceId, agentName)]
+    }
+    func saveAgentConfigData(workspaceId: UUID, agentName: String, data: Data) {
+        agentConfigDataStore[agentKey(workspaceId, agentName)] = data
     }
     func listAgents(workspaceId: UUID) -> [String] {
         agents[workspaceId] ?? []

@@ -42,6 +42,8 @@ protocol ContextServiceProtocol {
     // Agent config
     func loadAgentConfig(workspaceId: UUID, agentName: String) -> AgentConfig?
     func saveAgentConfig(workspaceId: UUID, config: AgentConfig)
+    func loadAgentConfigData(workspaceId: UUID, agentName: String) -> Data?
+    func saveAgentConfigData(workspaceId: UUID, agentName: String, data: Data)
     func listAgents(workspaceId: UUID) -> [String]
     func createAgent(workspaceId: UUID, name: String, wakeWord: String?, description: String?)
 
@@ -90,4 +92,8 @@ extension ContextServiceProtocol {
     func saveProjectMemory(workspaceId: UUID, projectId: String, content: String) {}
 
     func appendProjectMemory(workspaceId: UUID, projectId: String, content: String) {}
+
+    func loadAgentConfigData(workspaceId: UUID, agentName: String) -> Data? { nil }
+
+    func saveAgentConfigData(workspaceId: UUID, agentName: String, data: Data) {}
 }
