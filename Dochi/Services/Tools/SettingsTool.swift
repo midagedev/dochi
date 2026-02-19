@@ -19,10 +19,11 @@ private enum SettingKey: String, CaseIterable {
     case interactionMode
     case fallbackLLMProvider
     case fallbackLLMModel
+    case capabilityRouterV2Enabled
 
     var typeHint: String {
         switch self {
-        case .wakeWordEnabled, .contextAutoCompress:
+        case .wakeWordEnabled, .contextAutoCompress, .capabilityRouterV2Enabled:
             return "Bool"
         case .chatFontSize, .ttsSpeed, .sttSilenceTimeout:
             return "Double"
@@ -117,6 +118,7 @@ final class SettingsListTool: BuiltInToolProtocol {
         case .interactionMode: return settings.interactionMode
         case .fallbackLLMProvider: return settings.fallbackLLMProvider.isEmpty ? "(미설정)" : settings.fallbackLLMProvider
         case .fallbackLLMModel: return settings.fallbackLLMModel.isEmpty ? "(미설정)" : settings.fallbackLLMModel
+        case .capabilityRouterV2Enabled: return String(settings.capabilityRouterV2Enabled)
         }
     }
 }
@@ -192,6 +194,7 @@ final class SettingsGetTool: BuiltInToolProtocol {
         case .interactionMode: return settings.interactionMode
         case .fallbackLLMProvider: return settings.fallbackLLMProvider.isEmpty ? "(미설정)" : settings.fallbackLLMProvider
         case .fallbackLLMModel: return settings.fallbackLLMModel.isEmpty ? "(미설정)" : settings.fallbackLLMModel
+        case .capabilityRouterV2Enabled: return String(settings.capabilityRouterV2Enabled)
         }
     }
 }
@@ -276,6 +279,11 @@ final class SettingsSetTool: BuiltInToolProtocol {
                 return invalidTypeResult(key: key, expected: "Bool (true/false)")
             }
             settings.contextAutoCompress = parsed
+        case .capabilityRouterV2Enabled:
+            guard let parsed = parseBool(rawValue) else {
+                return invalidTypeResult(key: key, expected: "Bool (true/false)")
+            }
+            settings.capabilityRouterV2Enabled = parsed
 
         // Double settings with validation
         case .chatFontSize:
