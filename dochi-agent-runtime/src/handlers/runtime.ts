@@ -5,6 +5,7 @@ import {
   type HealthResult,
   type ShutdownResult,
 } from "./types";
+import { getActiveSessionCount } from "./session";
 
 const startTime = Date.now();
 let lastError: string | null = null;
@@ -25,7 +26,7 @@ export function handleHealth(): HealthResult {
   return {
     alive: true,
     uptimeMs: Date.now() - startTime,
-    activeSessions: 0,
+    activeSessions: getActiveSessionCount(),
     lastError,
   };
 }

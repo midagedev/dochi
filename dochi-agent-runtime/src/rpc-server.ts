@@ -13,6 +13,19 @@ import {
   handleShutdown,
   setLastError,
 } from "./handlers/runtime";
+import {
+  handleSessionOpen,
+  handleSessionRun,
+  handleSessionInterrupt,
+  handleSessionClose,
+  handleSessionList,
+} from "./handlers/session";
+import type {
+  SessionOpenParams,
+  SessionRunParams,
+  SessionInterruptParams,
+  SessionCloseParams,
+} from "./handlers/types";
 
 type Handler = (params?: Record<string, unknown>) => unknown;
 
@@ -21,6 +34,11 @@ const handlers: Record<string, Handler> = {
     handleInitialize(params as { runtimeVersion: string; configProfile: string }),
   "runtime.health": () => handleHealth(),
   "runtime.shutdown": () => handleShutdown(),
+  "session.open": (params) => handleSessionOpen(params as unknown as SessionOpenParams),
+  "session.run": (params) => handleSessionRun(params as unknown as SessionRunParams),
+  "session.interrupt": (params) => handleSessionInterrupt(params as unknown as SessionInterruptParams),
+  "session.close": (params) => handleSessionClose(params as unknown as SessionCloseParams),
+  "session.list": () => handleSessionList(),
 };
 
 function processRequest(request: JsonRpcRequest): JsonRpcResponse {
@@ -40,6 +58,16 @@ function processRequest(request: JsonRpcRequest): JsonRpcResponse {
     const result = handler(request.params);
     return { jsonrpc: "2.0", id: request.id, result };
   } catch (err) {
+    // Support structured error objects { code, message } from handlers
+    if (typeof err === "object" && err !== null && "code" in err && "message" in err) {
+      const structured = err as { code: number; message: string };
+      setLastError(structured.message);
+      return {
+        jsonrpc: "2.0",
+        id: request.id,
+        error: { code: structured.code, message: structured.message },
+      };
+    }
     const message = err instanceof Error ? err.message : String(err);
     setLastError(message);
     return {
