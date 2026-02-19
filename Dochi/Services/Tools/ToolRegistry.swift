@@ -31,6 +31,23 @@ final class ToolRegistry {
         }
     }
 
+    /// Returns tool names that belong to one of the requested logical groups.
+    /// Group names are normalized (trimmed, lowercased) before matching.
+    func toolNames(inGroups groups: [String]) -> [String] {
+        let normalized = Set(groups.map(ToolGroupResolver.normalizeGroupName).filter { !$0.isEmpty })
+        guard !normalized.isEmpty else { return [] }
+
+        return allTools.keys
+            .filter { normalized.contains(ToolGroupResolver.group(forToolName: $0)) }
+            .sorted()
+    }
+
+    /// Returns all currently known logical group names.
+    var allToolGroups: [String] {
+        let groups = allTools.keys.map { ToolGroupResolver.group(forToolName: $0) }
+        return Array(Set(groups)).sorted()
+    }
+
     func enable(names: [String]) {
         for name in names {
             if allTools[name] != nil {
@@ -127,7 +144,18 @@ struct ToolInfo: Identifiable, Sendable {
     let parameters: [ToolParamInfo]
 
     var group: String {
-        let base = String(name.split(separator: ".").first ?? Substring(name))
+        ToolGroupResolver.group(forToolName: name)
+    }
+}
+
+enum ToolGroupResolver {
+    static func normalizeGroupName(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    static func group(forToolName name: String) -> String {
+        let base = String(name.split(separator: ".").first ?? Substring(name)).lowercased()
+
         // 레거시 도구명을 논리적 그룹으로 정규화
         switch base {
         case "create_reminder", "list_reminders", "complete_reminder": return "reminders"

@@ -270,11 +270,18 @@ final class MockBuiltInToolService: BuiltInToolServiceProtocol {
     var lastArguments: [String: Any]?
     var enabledNames: [String] = []
     var resetCallCount = 0
+    var lastPreferredToolGroups: [String]?
 
     var nonBaselineToolSummaries: [(name: String, description: String, category: ToolCategory)] = []
     var allToolInfos: [ToolInfo] = []
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]] {
+        lastPreferredToolGroups = nil
+        stubbedSchemas
+    }
+
+    func availableToolSchemas(for permissions: [String], preferredToolGroups: [String]) -> [[String: Any]] {
+        lastPreferredToolGroups = preferredToolGroups
         stubbedSchemas
     }
 

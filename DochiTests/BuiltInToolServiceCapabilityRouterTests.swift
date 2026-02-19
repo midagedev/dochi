@@ -71,6 +71,19 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
         XCTAssertEqual(service.selectedCapabilityLabel, "Chat Core + Coding Read")
     }
 
+    func testPreferredToolGroupsPrioritizeSchemaOrder() {
+        let service = makeService(routerEnabled: true)
+        service.enableTools(names: ["open_url"])
+
+        let schemas = service.availableToolSchemas(
+            for: ["safe"],
+            preferredToolGroups: ["url"]
+        )
+        let names = orderedSchemaNames(from: schemas)
+
+        XCTAssertEqual(names.first, "open_url")
+    }
+
     // MARK: - Helpers
 
     private func makeService(routerEnabled: Bool) -> BuiltInToolService {
@@ -99,5 +112,12 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
             names.insert(name)
         }
         return names
+    }
+
+    private func orderedSchemaNames(from schemas: [[String: Any]]) -> [String] {
+        schemas.compactMap { schema in
+            guard let function = schema["function"] as? [String: Any] else { return nil }
+            return function["name"] as? String
+        }
     }
 }

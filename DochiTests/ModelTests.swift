@@ -139,6 +139,14 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(config2.effectiveShellPermissions.allowedCommands, ["safe"])
     }
 
+    func testAgentConfigEffectivePreferredToolGroups() {
+        let config = AgentConfig(
+            name: "coder",
+            preferredToolGroups: [" Coding ", "git", "coding", ""]
+        )
+        XCTAssertEqual(config.effectivePreferredToolGroups, ["coding", "git"])
+    }
+
     func testAgentConfigShellPermissionsCodable() throws {
         let custom = ShellPermissionConfig(
             blockedCommands: ["sudo "],
@@ -166,6 +174,16 @@ final class ModelTests: XCTestCase {
         XCTAssertNil(decoded.shellPermissions)
         // effectiveShellPermissions should return default
         XCTAssertFalse(decoded.effectiveShellPermissions.blockedCommands.isEmpty)
+    }
+
+    func testAgentConfigPreferredToolGroupsCodable() throws {
+        let config = AgentConfig(name: "coder", preferredToolGroups: ["coding", "external_tool"])
+
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(AgentConfig.self, from: data)
+
+        XCTAssertEqual(decoded.preferredToolGroups ?? [], ["coding", "external_tool"])
+        XCTAssertEqual(decoded.effectivePreferredToolGroups, ["coding", "external_tool"])
     }
 
     // MARK: - ShellPermissionConfig

@@ -48,7 +48,7 @@ final class ToolsListTool: BuiltInToolProtocol {
 final class ToolsEnableTool: BuiltInToolProtocol {
     let name = "tools.enable"
     let category: ToolCategory = .safe
-    let description = "도구를 이름으로 활성화합니다."
+    let description = "도구를 이름(names) 또는 그룹(groups)으로 활성화합니다."
     let isBaseline = true
 
     private let registry: ToolRegistry
@@ -65,18 +65,30 @@ final class ToolsEnableTool: BuiltInToolProtocol {
                     "type": "array",
                     "items": ["type": "string"],
                     "description": "활성화할 도구 이름 목록"
-                ]
+                ],
+                "groups": [
+                    "type": "array",
+                    "items": ["type": "string"],
+                    "description": "활성화할 도구 그룹 목록 (예: coding, git, external_tool, dochi)"
+                ],
             ],
-            "required": ["names"]
         ]
     }
 
     func execute(arguments: [String: Any]) async -> ToolResult {
-        guard let names = arguments["names"] as? [String], !names.isEmpty else {
-            return ToolResult(toolCallId: "", content: "오류: names는 필수입니다 (문자열 배열).", isError: true)
+        let names = arguments["names"] as? [String] ?? []
+        let groups = parseGroups(from: arguments["groups"])
+
+        guard !names.isEmpty || !groups.isEmpty else {
+            return ToolResult(
+                toolCallId: "",
+                content: "오류: names 또는 groups 중 하나 이상이 필요합니다.",
+                isError: true
+            )
         }
 
-        let normalizedNames = normalizeRequestedNames(names)
+        let namesFromGroups = registry.toolNames(inGroups: groups)
+        let normalizedNames = normalizeRequestedNames(names + namesFromGroups)
         let previouslyEnabled = registry.enabledToolNames
         registry.enable(names: normalizedNames)
 
@@ -96,10 +108,39 @@ final class ToolsEnableTool: BuiltInToolProtocol {
         if !invalid.isEmpty {
             lines.append("찾을 수 없는 도구: \(invalid.joined(separator: ", "))")
         }
+        if !groups.isEmpty {
+            let knownGroups = Set(registry.allToolGroups)
+            let unknownGroups = groups.filter { !knownGroups.contains($0) }
+            if !unknownGroups.isEmpty {
+                lines.append("찾을 수 없는 그룹: \(unknownGroups.joined(separator: ", "))")
+            }
+        }
         if lines.isEmpty {
             lines.append("활성화 가능한 도구가 없습니다.")
         }
         return ToolResult(toolCallId: "", content: lines.joined(separator: "\n"))
+    }
+
+    private func parseGroups(from rawGroups: Any?) -> [String] {
+        let values: [String]
+        if let groups = rawGroups as? [String] {
+            values = groups
+        } else if let one = rawGroups as? String {
+            values = [one]
+        } else {
+            values = []
+        }
+
+        var result: [String] = []
+        var seen: Set<String> = []
+        for raw in values {
+            let group = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !group.isEmpty else { continue }
+            if seen.insert(group).inserted {
+                result.append(group)
+            }
+        }
+        return result
     }
 
     private func normalizeRequestedNames(_ names: [String]) -> [String] {
