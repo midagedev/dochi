@@ -543,7 +543,25 @@ enum DochiCLI {
                         return "- \(profile): \(status) (\(id))"
                     }
 
-                    if let discovered = result["discovered_sessions"] as? [[String: Any]], !discovered.isEmpty {
+                    if let unified = result["unified_sessions"] as? [[String: Any]], !unified.isEmpty {
+                        if !lines.isEmpty {
+                            lines.append("")
+                        }
+                        let unassignedCount = result["unassigned_count"] as? Int ?? 0
+                        lines.append("통합 세션 \(unified.count)개 (unassigned: \(unassignedCount))")
+                        for item in unified.prefix(30) {
+                            let provider = item["provider"] as? String ?? "unknown"
+                            let nativeSessionId = item["native_session_id"] as? String ?? "-"
+                            let tier = item["controllability_tier"] as? String ?? "-"
+                            let runtimeType = item["runtime_type"] as? String ?? "-"
+                            let active = (item["is_active"] as? Bool == true) ? "active" : "inactive"
+                            let repositoryRoot = item["repository_root"] as? String ?? "(unassigned)"
+                            lines.append("- [\(provider)] \(nativeSessionId) \(active) tier=\(tier) runtime=\(runtimeType) repo=\(repositoryRoot)")
+                        }
+                        if unified.count > 30 {
+                            lines.append("... \(unified.count - 30)개 추가")
+                        }
+                    } else if let discovered = result["discovered_sessions"] as? [[String: Any]], !discovered.isEmpty {
                         if !lines.isEmpty {
                             lines.append("")
                         }

@@ -1287,12 +1287,33 @@ struct DochiApp: App {
                 "is_active": session.isActive,
             ]
         }
+        let unifiedSessions = await externalToolManager.listUnifiedCodingSessions(limit: 120)
+        let unifiedPayload: [[String: Any]] = unifiedSessions.map { session in
+            [
+                "source": session.source,
+                "runtime_type": session.runtimeType.rawValue,
+                "controllability_tier": session.controllabilityTier.rawValue,
+                "provider": session.provider,
+                "native_session_id": session.nativeSessionId,
+                "runtime_session_id": session.runtimeSessionId ?? NSNull(),
+                "working_directory": session.workingDirectory ?? NSNull(),
+                "repository_root": session.repositoryRoot ?? NSNull(),
+                "path": session.path,
+                "updated_at": isoTimestamp(session.updatedAt),
+                "is_active": session.isActive,
+                "is_unassigned": session.isUnassigned,
+            ]
+        }
+        let unassignedCount = unifiedSessions.filter(\.isUnassigned).count
 
         return .ok([
             "count": sessions.count,
             "sessions": sessions,
             "discovered_count": discoveredPayload.count,
             "discovered_sessions": discoveredPayload,
+            "unified_count": unifiedPayload.count,
+            "unified_sessions": unifiedPayload,
+            "unassigned_count": unassignedCount,
         ])
     }
 

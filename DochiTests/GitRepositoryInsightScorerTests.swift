@@ -126,4 +126,105 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: "\(clonedPath)/.git"))
         XCTAssertEqual(ExternalToolSessionManager.resolveGitTopLevel(path: clonedPath), clonedPath)
     }
+
+    func testRepositoryRootBindingUsesManagedRootsFirst() {
+        let root = "/tmp/work/repo-a"
+        let nested = "/tmp/work/repo-a/Sources/App"
+        let resolved = ExternalToolSessionManager.repositoryRoot(
+            for: nested,
+            managedRepositoryRoots: [root]
+        )
+        XCTAssertEqual(resolved, root)
+    }
+
+    func testUnifiedSessionDedupUsesProviderNativeIdAndRepo() {
+        let now = Date()
+        let old = now.addingTimeInterval(-60)
+        let first = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "codex",
+            nativeSessionId: "sess-1",
+            runtimeSessionId: nil,
+            workingDirectory: "/tmp/repo",
+            repositoryRoot: "/tmp/repo",
+            path: "/tmp/a.jsonl",
+            updatedAt: old,
+            isActive: false
+        )
+        let newerDuplicate = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "codex",
+            nativeSessionId: "sess-1",
+            runtimeSessionId: nil,
+            workingDirectory: "/tmp/repo",
+            repositoryRoot: "/tmp/repo",
+            path: "/tmp/b.jsonl",
+            updatedAt: now,
+            isActive: true
+        )
+        let differentRepo = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "codex",
+            nativeSessionId: "sess-1",
+            runtimeSessionId: nil,
+            workingDirectory: "/tmp/repo2",
+            repositoryRoot: "/tmp/repo2",
+            path: "/tmp/c.jsonl",
+            updatedAt: now,
+            isActive: true
+        )
+
+        let deduped = ExternalToolSessionManager.deduplicateUnifiedCodingSessions(
+            [first, newerDuplicate, differentRepo],
+            limit: 10
+        )
+
+        XCTAssertEqual(deduped.count, 2)
+        XCTAssertTrue(deduped.contains(where: { $0.path == "/tmp/b.jsonl" }))
+        XCTAssertTrue(deduped.contains(where: { $0.path == "/tmp/c.jsonl" }))
+    }
+
+    func testUnifiedSessionOrderingIsDeterministicWhenTimestampsTie() {
+        let tiedTime = Date(timeIntervalSince1970: 1_700_000_000)
+        let later = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "zeta",
+            nativeSessionId: "sess-9",
+            runtimeSessionId: nil,
+            workingDirectory: "/tmp/repo-z",
+            repositoryRoot: "/tmp/repo-z",
+            path: "/tmp/z.jsonl",
+            updatedAt: tiedTime,
+            isActive: true
+        )
+        let earlier = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "alpha",
+            nativeSessionId: "sess-1",
+            runtimeSessionId: nil,
+            workingDirectory: "/tmp/repo-a",
+            repositoryRoot: "/tmp/repo-a",
+            path: "/tmp/a.jsonl",
+            updatedAt: tiedTime,
+            isActive: true
+        )
+
+        let deduped = ExternalToolSessionManager.deduplicateUnifiedCodingSessions(
+            [later, earlier],
+            limit: 10
+        )
+
+        XCTAssertEqual(deduped.map(\.provider), ["alpha", "zeta"])
+        XCTAssertEqual(deduped.map(\.nativeSessionId), ["sess-1", "sess-9"])
+    }
 }

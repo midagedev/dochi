@@ -223,13 +223,24 @@ final class DochiBridgeStatusTool: BuiltInToolProtocol {
             return ToolResult(toolCallId: "", content: "[\(profileName)] status=\(session.status.rawValue), session_id=\(session.id.uuidString)")
         }
 
-        guard !manager.sessions.isEmpty else {
-            return ToolResult(toolCallId: "", content: "실행 중인 브리지 세션이 없습니다.")
-        }
-
-        let lines = manager.sessions.map { session -> String in
+        var lines = manager.sessions.map { session -> String in
             let profileName = manager.profiles.first(where: { $0.id == session.profileId })?.name ?? "?"
             return "- \(profileName): \(session.status.rawValue) (session_id: \(session.id.uuidString))"
+        }
+
+        let unified = await manager.listUnifiedCodingSessions(limit: 60)
+        if !unified.isEmpty {
+            if !lines.isEmpty { lines.append("") }
+            let unassignedCount = unified.filter(\.isUnassigned).count
+            lines.append("통합 세션 \(unified.count)개 (unassigned: \(unassignedCount))")
+            for item in unified {
+                let active = item.isActive ? "active" : "inactive"
+                lines.append("- [\(item.provider)] \(item.nativeSessionId) \(active) tier=\(item.controllabilityTier.rawValue) runtime=\(item.runtimeType.rawValue) repo=\(item.repositoryRoot ?? "(unassigned)")")
+            }
+        }
+
+        guard !lines.isEmpty else {
+            return ToolResult(toolCallId: "", content: "브리지/파일 기반 세션이 없습니다.")
         }
         return ToolResult(toolCallId: "", content: lines.joined(separator: "\n"))
     }
