@@ -3,7 +3,7 @@ import os
 
 // MARK: - MemoryPipelineService
 
-/// 메모리 파이프라인: 추출 → 분류 → 중복검사 → 저장 → 프로젝션 생성
+/// 메모리 파이프라인: 추출 → 분류 → 중복검사 → 승인 정책 → 저장 → 프로젝션 생성
 /// MemoryPipelineProtocol 구현체.
 @MainActor
 @Observable
@@ -22,12 +22,16 @@ final class MemoryPipelineService: MemoryPipelineProtocol {
 
     private(set) var currentProjections: [MemoryTargetLayer: MemoryProjection] = [:]
     private(set) var auditLog: [MemoryAuditEvent] = []
+    private(set) var conflictQueue: [ConflictEntry] = []
+    private(set) var approvalPolicy: MemoryApprovalPolicy = .auto
     private static let maxAuditEntries = 200
+    static let maxConflictQueueSize = 100
 
     // MARK: - Init
 
-    init(contextService: ContextServiceProtocol) {
+    init(contextService: ContextServiceProtocol, approvalPolicy: MemoryApprovalPolicy = .auto) {
         self.contextService = contextService
+        self.approvalPolicy = approvalPolicy
         self.extractor = MemoryCandidateExtractor()
         self.classifier = LayerClassifier()
         self.deduplicator = MemoryDeduplicator()
@@ -37,6 +41,7 @@ final class MemoryPipelineService: MemoryPipelineProtocol {
 
     // MARK: - MemoryPipelineProtocol
 
+    /// C3 Fix: classifyCandidate 1회 호출, catch 블록에서 retryQueue.enqueue 추가
     func submitCandidate(_ candidate: MemoryCandidate) async {
         let classification = classifyCandidate(candidate)
 
@@ -49,9 +54,21 @@ final class MemoryPipelineService: MemoryPipelineProtocol {
         }
 
         do {
-            try await processAndStore(candidate)
+            try await processAndStoreInternal(candidate, precomputedClassification: classification)
         } catch {
             Log.storage.warning("후보 처리 실패, 재시도 큐 추가: \(error.localizedDescription)")
+            retryQueue.enqueue(
+                content: candidate.content,
+                targetLayer: classification.targetLayer,
+                workspaceId: candidate.workspaceId,
+                agentName: candidate.agentId ?? "",
+                userId: candidate.userId,
+                error: error.localizedDescription
+            )
+            recordAudit(candidateId: candidate.id, targetLayer: classification.targetLayer,
+                       action: .retryQueued, workspaceId: candidate.workspaceId,
+                       agentId: candidate.agentId, userId: candidate.userId,
+                       reason: "처리 실패, 재시도 큐 추가: \(error.localizedDescription)")
         }
     }
 
@@ -60,7 +77,12 @@ final class MemoryPipelineService: MemoryPipelineProtocol {
     }
 
     func processAndStore(_ candidate: MemoryCandidate) async throws {
-        let classification = classifyCandidate(candidate)
+        try await processAndStoreInternal(candidate, precomputedClassification: nil)
+    }
+
+    /// 선택적으로 사전 계산된 classification을 받아 이중 분류 방지
+    private func processAndStoreInternal(_ candidate: MemoryCandidate, precomputedClassification: MemoryClassification? = nil) async throws {
+        let classification = precomputedClassification ?? classifyCandidate(candidate)
 
         guard classification.targetLayer != .drop else {
             recordAudit(candidateId: candidate.id, targetLayer: .drop,
@@ -90,6 +112,24 @@ final class MemoryPipelineService: MemoryPipelineProtocol {
                        reason: "유사도 \(String(format: "%.2f", dedupResult.similarity))")
             return
         }
+
+        // C2 Fix: 충돌 감지 시 감사 로그 기록 및 conflict 큐 보관
+        if dedupResult.isConflict {
+            Log.storage.info("충돌 감지: \(candidate.content.prefix(50))... vs \(dedupResult.conflictingContent?.prefix(50) ?? "?")")
+            recordAudit(candidateId: candidate.id, targetLayer: classification.targetLayer,
+                       action: .conflictDetected, workspaceId: candidate.workspaceId,
+                       agentId: candidate.agentId, userId: candidate.userId,
+                       reason: "충돌 유사도 \(String(format: "%.2f", dedupResult.similarity)), 기존: \(dedupResult.conflictingContent?.prefix(30) ?? "?")")
+            enqueueConflict(candidate: candidate, dedupResult: dedupResult)
+            return
+        }
+
+        // C1 Fix: 승인 정책 적용
+        let approved = applyApprovalPolicy(
+            candidate: candidate,
+            classification: classification
+        )
+        guard approved else { return }
 
         // 저장
         let success = storeContent(
@@ -124,6 +164,61 @@ final class MemoryPipelineService: MemoryPipelineProtocol {
     func pendingCount() -> Int {
         retryQueue.pendingCount
     }
+
+    // MARK: - Approval Policy (C1)
+
+    /// 승인 정책을 적용한다. auto면 즉시 승인, requireApproval이면 대기 상태로 전환.
+    /// - Returns: `true`이면 저장 진행, `false`이면 대기 상태로 전환됨
+    private func applyApprovalPolicy(
+        candidate: MemoryCandidate,
+        classification: MemoryClassification
+    ) -> Bool {
+        switch approvalPolicy {
+        case .auto:
+            Log.storage.debug("승인 정책: auto — 자동 승인 (\(candidate.id))")
+            recordAudit(candidateId: candidate.id, targetLayer: classification.targetLayer,
+                       action: .autoApproved, workspaceId: candidate.workspaceId,
+                       agentId: candidate.agentId, userId: candidate.userId,
+                       reason: "자동 승인 정책 적용")
+            return true
+        case .requireApproval:
+            Log.storage.info("승인 정책: requireApproval — 승인 대기 (\(candidate.id))")
+            recordAudit(candidateId: candidate.id, targetLayer: classification.targetLayer,
+                       action: .pendingApproval, workspaceId: candidate.workspaceId,
+                       agentId: candidate.agentId, userId: candidate.userId,
+                       reason: "사용자 승인 필요")
+            return false
+        }
+    }
+
+    // MARK: - Conflict Queue (C2)
+
+    /// 충돌 후보를 conflict 큐에 보관한다.
+    private func enqueueConflict(candidate: MemoryCandidate, dedupResult: DeduplicationResult) {
+        let entry = ConflictEntry(
+            candidateId: candidate.id,
+            content: candidate.content,
+            conflictingContent: dedupResult.conflictingContent ?? "",
+            targetLayer: dedupResult.classification.targetLayer,
+            workspaceId: candidate.workspaceId,
+            agentId: candidate.agentId,
+            userId: candidate.userId,
+            similarity: dedupResult.similarity
+        )
+        conflictQueue.append(entry)
+
+        if conflictQueue.count > Self.maxConflictQueueSize {
+            let removed = conflictQueue.removeFirst()
+            Log.storage.warning("충돌 큐 초과, 오래된 항목 제거: \(removed.candidateId)")
+            recordAudit(candidateId: removed.candidateId, targetLayer: removed.targetLayer,
+                       action: .conflictDropped, workspaceId: removed.workspaceId,
+                       agentId: removed.agentId, userId: removed.userId,
+                       reason: "충돌 큐 용량 초과로 폐기")
+        }
+    }
+
+    /// 충돌 큐에 대기 중인 항목 수
+    var conflictCount: Int { conflictQueue.count }
 
     // MARK: - Batch Processing
 
@@ -228,11 +323,54 @@ final class MemoryPipelineService: MemoryPipelineProtocol {
         let conflicts = deduped.filter(\.isConflict)
         let toStore = deduped.filter { !$0.isDuplicate && !$0.isConflict }
 
-        // 저장
+        // C2 Fix: 충돌 후보 감사 로그 기록 및 conflict 큐 보관
+        for result in conflicts {
+            let matchingCandidate = activeCandidates.first { $0.id == result.classification.candidateId }
+            Log.storage.info("배치 충돌 감지: \(result.originalContent.prefix(50))")
+            recordAudit(candidateId: result.classification.candidateId,
+                       targetLayer: result.classification.targetLayer,
+                       action: .conflictDetected, workspaceId: sessionContext.workspaceId.uuidString,
+                       agentId: settings.activeAgentName, userId: sessionContext.currentUserId,
+                       reason: "충돌 유사도 \(String(format: "%.2f", result.similarity)), 기존: \(result.conflictingContent?.prefix(30) ?? "?")")
+            let conflictEntry = ConflictEntry(
+                candidateId: result.classification.candidateId,
+                content: result.originalContent,
+                conflictingContent: result.conflictingContent ?? "",
+                targetLayer: result.classification.targetLayer,
+                workspaceId: sessionContext.workspaceId.uuidString,
+                agentId: matchingCandidate?.agentId ?? settings.activeAgentName,
+                userId: matchingCandidate?.userId ?? sessionContext.currentUserId,
+                similarity: result.similarity
+            )
+            conflictQueue.append(conflictEntry)
+        }
+
+        // C1 Fix: 승인 정책 적용 + 저장
         var stored = 0
         var retryQueued = 0
 
         for result in toStore {
+            // 승인 정책 확인
+            let approved: Bool
+            switch approvalPolicy {
+            case .auto:
+                recordAudit(candidateId: result.classification.candidateId,
+                           targetLayer: result.classification.targetLayer,
+                           action: .autoApproved, workspaceId: sessionContext.workspaceId.uuidString,
+                           agentId: settings.activeAgentName, userId: sessionContext.currentUserId,
+                           reason: "자동 승인 정책 적용")
+                approved = true
+            case .requireApproval:
+                recordAudit(candidateId: result.classification.candidateId,
+                           targetLayer: result.classification.targetLayer,
+                           action: .pendingApproval, workspaceId: sessionContext.workspaceId.uuidString,
+                           agentId: settings.activeAgentName, userId: sessionContext.currentUserId,
+                           reason: "사용자 승인 필요")
+                approved = false
+            }
+
+            guard approved else { continue }
+
             let success = storeContent(
                 content: result.originalContent,
                 targetLayer: result.classification.targetLayer,
@@ -285,7 +423,7 @@ final class MemoryPipelineService: MemoryPipelineProtocol {
                        reason: "유사도 \(String(format: "%.2f", result.similarity))")
         }
 
-        Log.storage.info("메모리 파이프라인 완료: \(stored)건 저장, \(duplicates.count)건 중복")
+        Log.storage.info("메모리 파이프라인 완료: \(stored)건 저장, \(duplicates.count)건 중복, \(conflicts.count)건 충돌")
 
         return MemoryPipelineResult(
             candidatesExtracted: candidates.count,
