@@ -1765,3 +1765,191 @@ final class MockSessionResumeService: SessionResumeServiceProtocol {
         return "\(workspaceId.uuidString):\(agentId):\(conversationId)"
     }
 }
+
+// MARK: - MockTraceContextManager (#292)
+
+@MainActor
+final class MockTraceContextManager: TraceContextProtocol {
+    var traces: [TraceContext] = []
+    var spanStore: [UUID: [TraceSpan]] = [:]
+
+    var startTraceCallCount = 0
+    var startSpanCallCount = 0
+    var endSpanCallCount = 0
+
+    func startTrace(name: String, metadata: [String: String]) -> TraceContext {
+        startTraceCallCount += 1
+        let traceId = UUID()
+        let rootSpanId = UUID()
+        let rootSpan = TraceSpan(id: rootSpanId, traceId: traceId, name: name, attributes: metadata)
+        let context = TraceContext(id: traceId, name: name, metadata: metadata, rootSpanId: rootSpanId)
+        traces.append(context)
+        spanStore[traceId] = [rootSpan]
+        return context
+    }
+
+    func startSpan(name: String, traceId: UUID, parentSpanId: UUID?, attributes: [String: String]) -> TraceSpan {
+        startSpanCallCount += 1
+        let span = TraceSpan(traceId: traceId, parentSpanId: parentSpanId, name: name, attributes: attributes)
+        spanStore[traceId, default: []].append(span)
+        return span
+    }
+
+    func endSpan(_ span: TraceSpan, status: TraceSpanStatus) {
+        endSpanCallCount += 1
+        guard var spans = spanStore[span.traceId],
+              let index = spans.firstIndex(where: { $0.id == span.id }) else { return }
+        spans[index].endTime = Date()
+        spans[index].status = status
+        spanStore[span.traceId] = spans
+    }
+
+    func spans(for traceId: UUID) -> [TraceSpan] {
+        spanStore[traceId] ?? []
+    }
+
+    var activeTraces: [TraceContext] {
+        traces.filter(\.isActive)
+    }
+
+    var allTraces: [TraceContext] {
+        traces
+    }
+}
+
+// MARK: - MockRuntimeMetrics (#292)
+
+@MainActor
+final class MockRuntimeMetrics: RuntimeMetricsProtocol {
+    var counterValues: [String: Double] = [:]
+    var gaugeValues: [String: Double] = [:]
+    var histogramValues: [String: [Double]] = [:]
+
+    var incrementCallCount = 0
+    var recordHistogramCallCount = 0
+    var setGaugeCallCount = 0
+    var snapshotCallCount = 0
+    var resetCallCount = 0
+
+    func incrementCounter(name: String, labels: [String: String], delta: Double) {
+        incrementCallCount += 1
+        let key = labels.isEmpty ? name : "\(name)|\(labels.sorted(by: { $0.key < $1.key }).map { "\($0.key)=\($0.value)" }.joined(separator: ","))"
+        counterValues[key, default: 0.0] += delta
+    }
+
+    func recordHistogram(name: String, labels: [String: String], value: Double) {
+        recordHistogramCallCount += 1
+        let key = labels.isEmpty ? name : "\(name)|\(labels.sorted(by: { $0.key < $1.key }).map { "\($0.key)=\($0.value)" }.joined(separator: ","))"
+        histogramValues[key, default: []].append(value)
+    }
+
+    func setGauge(name: String, labels: [String: String], value: Double) {
+        setGaugeCallCount += 1
+        let key = labels.isEmpty ? name : "\(name)|\(labels.sorted(by: { $0.key < $1.key }).map { "\($0.key)=\($0.value)" }.joined(separator: ","))"
+        gaugeValues[key] = value
+    }
+
+    func snapshot() -> MetricsSnapshot {
+        snapshotCallCount += 1
+        return MetricsSnapshot(timestamp: Date(), counters: counterValues, gauges: gaugeValues, histograms: [:])
+    }
+
+    func reset() {
+        resetCallCount += 1
+        counterValues.removeAll()
+        gaugeValues.removeAll()
+        histogramValues.removeAll()
+    }
+}
+
+// MARK: - MockStructuredEventLogger (#292)
+
+@MainActor
+final class MockStructuredEventLogger: StructuredEventLoggerProtocol {
+    var loggedEvents: [StructuredEvent] = []
+    var logCallCount = 0
+    var exportCallCount = 0
+
+    func log(event: StructuredEvent) {
+        logCallCount += 1
+        loggedEvents.append(event)
+    }
+
+    func events(for traceId: UUID) -> [StructuredEvent] {
+        loggedEvents.filter { $0.traceId == traceId }
+    }
+
+    func events(for sessionId: String) -> [StructuredEvent] {
+        loggedEvents.filter { $0.sessionId == sessionId }
+    }
+
+    var allEvents: [StructuredEvent] { loggedEvents }
+
+    func exportJSON(to url: URL) throws {
+        exportCallCount += 1
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(loggedEvents)
+        try data.write(to: url)
+    }
+}
+
+// MARK: - MockSLOEvaluator (#292)
+
+@MainActor
+final class MockSLOEvaluator: SLOEvaluatorProtocol {
+    var definitions: [SLODefinition] = SLOEvaluator.defaultDefinitions()
+    var stubbedResult: SLOResult?
+    var evaluateCallCount = 0
+
+    func evaluate(snapshot: MetricsSnapshot) -> SLOResult {
+        evaluateCallCount += 1
+        if let stubbed = stubbedResult { return stubbed }
+        return SLOResult(passed: true, timestamp: Date(), items: [])
+    }
+
+    static func defaultDefinitions() -> [SLODefinition] {
+        SLOEvaluator.defaultDefinitions()
+    }
+}
+
+// MARK: - MockRegressionEvaluator (#292)
+
+@MainActor
+final class MockRegressionEvaluator: RegressionEvaluatorProtocol {
+    var scenarios: [RegressionScenario] = []
+    var lastReport: RegressionReport?
+    var registerCallCount = 0
+    var runAllCallCount = 0
+    var runCategoryCallCount = 0
+    var stubbedReport: RegressionReport?
+
+    func registerScenario(_ scenario: RegressionScenario) {
+        registerCallCount += 1
+        scenarios.append(scenario)
+    }
+
+    func runAll() async -> RegressionReport {
+        runAllCallCount += 1
+        let report = stubbedReport ?? RegressionReport(
+            results: [],
+            categorySummaries: [],
+            overallPassRate: 1.0,
+            totalDurationMs: 0
+        )
+        lastReport = report
+        return report
+    }
+
+    func run(category: RegressionCategory) async -> RegressionReport {
+        runCategoryCallCount += 1
+        let report = stubbedReport ?? RegressionReport(
+            results: [],
+            categorySummaries: [],
+            overallPassRate: 1.0,
+            totalDurationMs: 0
+        )
+        lastReport = report
+        return report
+    }
+}
