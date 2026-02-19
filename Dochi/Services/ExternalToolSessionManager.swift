@@ -53,6 +53,10 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
     // Local discovery (file-backed sessions from CLI tools)
     func discoverLocalCodingSessions(limit: Int) async -> [DiscoveredCodingSession]
     func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession]
+
+    // Session history RAG
+    func rebuildSessionHistoryIndex(limit: Int) async -> Int
+    func searchSessionHistory(query: SessionHistorySearchQuery) async -> [SessionHistorySearchResult]
 }
 
 extension ExternalToolSessionManagerProtocol {
@@ -86,6 +90,14 @@ extension ExternalToolSessionManagerProtocol {
     }
 
     func listUnifiedCodingSessions(limit _: Int) async -> [UnifiedCodingSession] {
+        []
+    }
+
+    func rebuildSessionHistoryIndex(limit _: Int) async -> Int {
+        0
+    }
+
+    func searchSessionHistory(query _: SessionHistorySearchQuery) async -> [SessionHistorySearchResult] {
         []
     }
 }
@@ -143,9 +155,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private let settings: AppSettings
     private let profilesDir: URL
     private let repositoriesFile: URL
+    private let sessionHistoryFile: URL
     private var healthMonitorTask: Task<Void, Never>?
     private var localDiscoveryCache: [DiscoveredCodingSession] = []
     private var localDiscoveryCacheDate: Date?
+    private var sessionHistoryChunks: [SessionHistoryChunk] = []
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -154,6 +168,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             .appendingPathComponent("Dochi")
         self.profilesDir = appSupport.appendingPathComponent("external-tools/profiles")
         self.repositoriesFile = appSupport.appendingPathComponent("external-tools/repositories.json")
+        self.sessionHistoryFile = appSupport.appendingPathComponent("external-tools/session-history-index.json")
 
         try? FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(
@@ -163,6 +178,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         checkTmuxAvailability()
         loadProfiles()
         loadManagedRepositories()
+        loadSessionHistoryIndex()
         startHealthMonitor()
     }
 
@@ -268,6 +284,33 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             try data.write(to: repositoriesFile, options: .atomic)
         } catch {
             Log.app.error("Failed to persist managed repositories: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadSessionHistoryIndex() {
+        guard let data = try? Data(contentsOf: sessionHistoryFile) else {
+            sessionHistoryChunks = []
+            return
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let decoded = try? decoder.decode([SessionHistoryChunk].self, from: data) else {
+            sessionHistoryChunks = []
+            return
+        }
+        sessionHistoryChunks = decoded.sorted(by: { $0.endAt > $1.endAt })
+    }
+
+    private func persistSessionHistoryIndex() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let data = try encoder.encode(sessionHistoryChunks)
+            try data.write(to: sessionHistoryFile, options: .atomic)
+        } catch {
+            Log.app.error("Failed to persist session history index: \(error.localizedDescription)")
         }
     }
 
@@ -710,6 +753,653 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 config: .standard
             )
         }.value
+    }
+
+    func rebuildSessionHistoryIndex(limit: Int) async -> Int {
+        let effectiveLimit = max(10, min(2_000, limit))
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let codexRoot = home.appendingPathComponent(".codex/sessions", isDirectory: true)
+        let claudeRoot = home.appendingPathComponent(".claude/projects", isDirectory: true)
+        let managedRoots = managedRepositories
+            .filter { !$0.isArchived }
+            .map { URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path }
+
+        let chunks = await Task.detached(priority: .utility) {
+            Self.buildSessionHistoryChunks(
+                codexSessionsRoot: codexRoot,
+                claudeProjectsRoot: claudeRoot,
+                managedRepositoryRoots: managedRoots,
+                limit: effectiveLimit,
+                now: Date()
+            )
+        }.value
+
+        sessionHistoryChunks = chunks
+        persistSessionHistoryIndex()
+        return chunks.count
+    }
+
+    func searchSessionHistory(query: SessionHistorySearchQuery) async -> [SessionHistorySearchResult] {
+        let chunks = sessionHistoryChunks
+        if chunks.isEmpty {
+            _ = await rebuildSessionHistoryIndex(limit: max(200, query.limit * 10))
+        }
+        let indexed = sessionHistoryChunks
+        let effectiveLimit = max(1, min(200, query.limit))
+        return await Task.detached(priority: .utility) {
+            Self.searchSessionHistoryChunks(
+                chunks: indexed,
+                query: SessionHistorySearchQuery(
+                    query: query.query,
+                    repositoryRoot: query.repositoryRoot,
+                    branch: query.branch,
+                    since: query.since,
+                    until: query.until,
+                    limit: effectiveLimit
+                ),
+                now: Date()
+            )
+        }.value
+    }
+
+    nonisolated static func buildSessionHistoryChunks(
+        codexSessionsRoot: URL,
+        claudeProjectsRoot: URL,
+        managedRepositoryRoots: [String],
+        limit: Int,
+        now: Date = Date()
+    ) -> [SessionHistoryChunk] {
+        let events = buildSessionHistoryEvents(
+            codexSessionsRoot: codexSessionsRoot,
+            claudeProjectsRoot: claudeProjectsRoot,
+            managedRepositoryRoots: managedRepositoryRoots,
+            limit: max(limit * 16, 200),
+            now: now
+        )
+        return chunkSessionHistoryEvents(events: events, limit: limit)
+    }
+
+    nonisolated static func buildSessionHistoryEvents(
+        codexSessionsRoot: URL,
+        claudeProjectsRoot: URL,
+        managedRepositoryRoots: [String],
+        limit: Int,
+        now: Date = Date()
+    ) -> [SessionHistoryEvent] {
+        let effectiveLimit = max(10, min(10_000, limit))
+        let codexFiles = discoverCodexSessionFiles(
+            root: codexSessionsRoot,
+            limit: max(100, effectiveLimit / 2),
+            now: now
+        )
+        let claudeFiles = discoverClaudeProjectFiles(
+            root: claudeProjectsRoot,
+            limit: max(120, effectiveLimit / 2),
+            now: now
+        )
+        let discovered = (codexFiles + claudeFiles)
+            .sorted(by: { $0.updatedAt > $1.updatedAt })
+            .prefix(max(50, effectiveLimit / 4))
+
+        var branchCache: [String: String?] = [:]
+        var events: [SessionHistoryEvent] = []
+        events.reserveCapacity(effectiveLimit)
+
+        for session in discovered {
+            guard session.path.hasSuffix(".jsonl") else { continue }
+            let sourceURL = URL(fileURLWithPath: session.path)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
+
+            let repositoryRoot = repositoryRoot(
+                for: session.workingDirectory,
+                managedRepositoryRoots: managedRepositoryRoots
+            )
+            let branch: String?
+            if let repositoryRoot {
+                if let cached = branchCache[repositoryRoot] {
+                    branch = cached
+                } else {
+                    let resolved = gitOutput(repoPath: repositoryRoot, args: ["rev-parse", "--abbrev-ref", "HEAD"])
+                    branchCache[repositoryRoot] = resolved
+                    branch = resolved
+                }
+            } else {
+                branch = nil
+            }
+
+            let lines = readSessionHistoryLines(from: sourceURL, maxLines: 320, maxBytes: 2_000_000)
+            guard !lines.isEmpty else { continue }
+
+            let baseTimestamp = session.updatedAt
+            for (index, line) in lines.enumerated() {
+                let fallbackTimestamp = baseTimestamp.addingTimeInterval(TimeInterval(-(lines.count - index)))
+                guard let event = normalizeSessionHistoryLine(
+                    provider: session.provider,
+                    sessionId: session.sessionId,
+                    sourcePath: session.path,
+                    workingDirectory: session.workingDirectory,
+                    repositoryRoot: repositoryRoot,
+                    branch: branch,
+                    rawLine: line,
+                    fallbackTimestamp: fallbackTimestamp,
+                    lineNumber: index
+                ) else {
+                    continue
+                }
+                events.append(event)
+                if events.count >= effectiveLimit {
+                    break
+                }
+            }
+            if events.count >= effectiveLimit {
+                break
+            }
+        }
+
+        return events
+            .sorted(by: { $0.timestamp > $1.timestamp })
+            .prefix(effectiveLimit)
+            .map { $0 }
+    }
+
+    nonisolated static func normalizeSessionHistoryLine(
+        provider: String,
+        sessionId: String,
+        sourcePath: String,
+        workingDirectory: String?,
+        repositoryRoot: String?,
+        branch: String?,
+        rawLine: String,
+        fallbackTimestamp: Date,
+        lineNumber: Int
+    ) -> SessionHistoryEvent? {
+        let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let parsedJSON = parseJSONLine(trimmed)
+        let eventType = extractEventType(from: parsedJSON) ?? "log_line"
+        let contentRaw = extractContentText(from: parsedJSON) ?? trimmed
+        let maskedContent = maskSensitiveContent(contentRaw)
+        let timestamp = extractTimestamp(from: parsedJSON) ?? fallbackTimestamp
+
+        let eventId = [
+            provider,
+            sessionId,
+            sourcePath,
+            "\(lineNumber)",
+            "\(Int(timestamp.timeIntervalSince1970))",
+        ].joined(separator: "|")
+
+        return SessionHistoryEvent(
+            id: eventId,
+            provider: provider,
+            sessionId: sessionId,
+            repositoryRoot: repositoryRoot,
+            workingDirectory: workingDirectory,
+            branch: branch,
+            eventType: eventType,
+            content: maskedContent,
+            timestamp: timestamp,
+            sourcePath: sourcePath
+        )
+    }
+
+    nonisolated static func searchSessionHistoryChunks(
+        chunks: [SessionHistoryChunk],
+        query: SessionHistorySearchQuery,
+        now: Date = Date()
+    ) -> [SessionHistorySearchResult] {
+        let effectiveLimit = max(1, min(200, query.limit))
+        let normalizedRepoFilter = query.repositoryRoot.map { URL(fileURLWithPath: expandedPath($0)).standardizedFileURL.path }
+        let normalizedQuery = query.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let queryTokens = tokenSet(normalizedQuery)
+        let queryEmbedding = pseudoEmbedding(text: normalizedQuery.isEmpty ? "history" : normalizedQuery)
+
+        var scored: [(chunk: SessionHistoryChunk, score: Double)] = []
+        scored.reserveCapacity(chunks.count)
+
+        for chunk in chunks {
+            if let since = query.since, chunk.endAt < since { continue }
+            if let until = query.until, chunk.startAt > until { continue }
+
+            let baseSimilarity = vectorCosineSimilarity(queryEmbedding, chunk.embedding)
+            let chunkTokens = tokenSet(chunk.content + " " + chunk.tags.joined(separator: " "))
+            let lexicalScore = lexicalOverlap(queryTokens, chunkTokens)
+            let containsExactQuery = !normalizedQuery.isEmpty && chunk.content.localizedCaseInsensitiveContains(normalizedQuery)
+
+            var score = (baseSimilarity * 0.56) + (lexicalScore * 0.24)
+
+            if let repoFilter = normalizedRepoFilter {
+                if let repoRoot = chunk.repositoryRoot,
+                   URL(fileURLWithPath: repoRoot).standardizedFileURL.path == repoFilter {
+                    score += 0.32
+                } else {
+                    score -= 0.08
+                }
+            }
+
+            if let branch = query.branch, !branch.isEmpty {
+                if chunk.branch?.localizedCaseInsensitiveCompare(branch) == .orderedSame {
+                    score += 0.12
+                } else {
+                    score -= 0.03
+                }
+            }
+
+            if containsExactQuery {
+                score += 0.08
+            }
+
+            let age = max(0, now.timeIntervalSince(chunk.endAt))
+            if age <= 7 * 24 * 60 * 60 {
+                score += 0.10
+            } else if age <= 30 * 24 * 60 * 60 {
+                score += 0.04
+            }
+
+            if !normalizedQuery.isEmpty, score < 0.06 {
+                continue
+            }
+
+            scored.append((chunk: chunk, score: score))
+        }
+
+        return scored
+            .sorted(by: { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.chunk.endAt > rhs.chunk.endAt
+            })
+            .prefix(effectiveLimit)
+            .map { ranked in
+                SessionHistorySearchResult(
+                    id: ranked.chunk.id,
+                    provider: ranked.chunk.provider,
+                    sessionId: ranked.chunk.sessionId,
+                    repositoryRoot: ranked.chunk.repositoryRoot,
+                    branch: ranked.chunk.branch,
+                    sourcePath: ranked.chunk.sourcePath,
+                    score: ranked.score,
+                    maskedSnippet: snippetForChunk(
+                        content: ranked.chunk.content,
+                        queryTokens: queryTokens
+                    ),
+                    startAt: ranked.chunk.startAt,
+                    endAt: ranked.chunk.endAt,
+                    tags: ranked.chunk.tags
+                )
+            }
+    }
+
+    nonisolated static func maskSensitiveContent(_ text: String) -> String {
+        var masked = text
+        let patterns: [(String, String, NSRegularExpression.Options)] = [
+            ("sk-[A-Za-z0-9]{16,}", "[REDACTED_OPENAI_KEY]", []),
+            ("gh[pousr]_[A-Za-z0-9]{20,}", "[REDACTED_GITHUB_TOKEN]", []),
+            ("xox[baprs]-[A-Za-z0-9-]{10,}", "[REDACTED_SLACK_TOKEN]", []),
+            ("AKIA[0-9A-Z]{16}", "[REDACTED_AWS_ACCESS_KEY]", []),
+            ("(?i)(api[_-]?key|token|secret|password|passwd|authorization)\\s*[:=]\\s*[\"']?[^\\s\"']{6,}[\"']?", "$1=[REDACTED]", []),
+            ("-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----", "[REDACTED_PRIVATE_KEY]", [.dotMatchesLineSeparators]),
+        ]
+
+        for (pattern, replacement, options) in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+                continue
+            }
+            let range = NSRange(masked.startIndex..<masked.endIndex, in: masked)
+            masked = regex.stringByReplacingMatches(
+                in: masked,
+                options: [],
+                range: range,
+                withTemplate: replacement
+            )
+        }
+        return masked
+    }
+
+    nonisolated private static func chunkSessionHistoryEvents(
+        events: [SessionHistoryEvent],
+        limit: Int
+    ) -> [SessionHistoryChunk] {
+        let effectiveLimit = max(1, min(2_000, limit))
+        var grouped: [String: [SessionHistoryEvent]] = [:]
+        for event in events {
+            let key = "\(event.provider)|\(event.sessionId)|\(event.sourcePath)"
+            grouped[key, default: []].append(event)
+        }
+
+        var chunks: [SessionHistoryChunk] = []
+        chunks.reserveCapacity(effectiveLimit)
+
+        for group in grouped.values {
+            let sortedEvents = group.sorted(by: { $0.timestamp < $1.timestamp })
+            let strideSize = 6
+            var index = 0
+            while index < sortedEvents.count {
+                let endIndex = min(index + strideSize, sortedEvents.count)
+                let slice = Array(sortedEvents[index..<endIndex])
+                guard let first = slice.first, let last = slice.last else {
+                    index = endIndex
+                    continue
+                }
+
+                let body = slice.map { event in
+                    "[\(Int(event.timestamp.timeIntervalSince1970))] \(event.eventType): \(event.content)"
+                }.joined(separator: "\n")
+                let tags = eventTags(for: slice, content: body)
+                let maskedBody = maskSensitiveContent(body)
+                let chunk = SessionHistoryChunk(
+                    id: UUID(),
+                    provider: first.provider,
+                    sessionId: first.sessionId,
+                    repositoryRoot: first.repositoryRoot,
+                    workingDirectory: first.workingDirectory,
+                    branch: first.branch,
+                    sourcePath: first.sourcePath,
+                    startAt: first.timestamp,
+                    endAt: last.timestamp,
+                    tags: tags,
+                    content: maskedBody,
+                    embedding: pseudoEmbedding(text: maskedBody + " " + tags.joined(separator: " "))
+                )
+                chunks.append(chunk)
+                index = endIndex
+            }
+        }
+
+        return chunks
+            .sorted(by: { $0.endAt > $1.endAt })
+            .prefix(effectiveLimit)
+            .map { $0 }
+    }
+
+    nonisolated private static func readSessionHistoryLines(
+        from fileURL: URL,
+        maxLines: Int,
+        maxBytes: Int
+    ) -> [String] {
+        guard let data = try? Data(contentsOf: fileURL, options: [.mappedIfSafe]), !data.isEmpty else {
+            return []
+        }
+
+        let capped: Data
+        if data.count > maxBytes {
+            capped = data.suffix(maxBytes)
+        } else {
+            capped = data
+        }
+
+        guard let text = String(data: capped, encoding: .utf8) else {
+            return []
+        }
+        var lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if lines.count > maxLines {
+            lines = Array(lines.suffix(maxLines))
+        }
+        return lines
+    }
+
+    nonisolated private static func parseJSONLine(_ line: String) -> [String: Any]? {
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object
+    }
+
+    nonisolated private static func extractEventType(from object: [String: Any]?) -> String? {
+        guard let object else { return nil }
+        let candidates = [
+            object["event_type"],
+            object["type"],
+            object["role"],
+            (object["payload"] as? [String: Any])?["type"],
+            (object["event"] as? [String: Any])?["type"],
+        ]
+        for value in candidates {
+            if let type = value as? String,
+               !type.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return type.lowercased()
+            }
+        }
+        return nil
+    }
+
+    nonisolated private static func extractTimestamp(from object: [String: Any]?) -> Date? {
+        guard let object else { return nil }
+        let candidates: [Any?] = [
+            object["timestamp"],
+            object["time"],
+            object["created_at"],
+            object["createdAt"],
+            object["ts"],
+            object["date"],
+            (object["payload"] as? [String: Any])?["timestamp"],
+        ]
+        for candidate in candidates {
+            if let date = parseDateValue(candidate) {
+                return date
+            }
+        }
+        return nil
+    }
+
+    nonisolated private static func parseDateValue(_ value: Any?) -> Date? {
+        switch value {
+        case let date as Date:
+            return date
+        case let number as NSNumber:
+            let timestamp = number.doubleValue
+            if timestamp > 1_000_000_000_000 {
+                return Date(timeIntervalSince1970: timestamp / 1_000)
+            }
+            if timestamp > 0 {
+                return Date(timeIntervalSince1970: timestamp)
+            }
+            return nil
+        case let string as String:
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return nil }
+            if let numeric = Double(trimmed) {
+                if numeric > 1_000_000_000_000 {
+                    return Date(timeIntervalSince1970: numeric / 1_000)
+                }
+                if numeric > 0 {
+                    return Date(timeIntervalSince1970: numeric)
+                }
+            }
+            if let iso = ISO8601DateFormatter().date(from: trimmed) {
+                return iso
+            }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            return formatter.date(from: trimmed)
+        default:
+            return nil
+        }
+    }
+
+    nonisolated private static func extractContentText(from object: [String: Any]?) -> String? {
+        guard let object else { return nil }
+
+        let directKeys = [
+            "content",
+            "text",
+            "message",
+            "output",
+            "command",
+            "summary",
+            "error",
+            "diff",
+        ]
+        for key in directKeys {
+            if let value = object[key],
+               let content = flattenText(value),
+               !content.isEmpty {
+                return content
+            }
+        }
+
+        if let payload = object["payload"],
+           let content = flattenText(payload),
+           !content.isEmpty {
+            return content
+        }
+        if let event = object["event"],
+           let content = flattenText(event),
+           !content.isEmpty {
+            return content
+        }
+        return nil
+    }
+
+    nonisolated private static func flattenText(_ value: Any, depth: Int = 0) -> String? {
+        guard depth <= 4 else { return nil }
+
+        switch value {
+        case let string as String:
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        case let number as NSNumber:
+            return number.stringValue
+        case let array as [Any]:
+            let joined = array
+                .compactMap { flattenText($0, depth: depth + 1) }
+                .joined(separator: "\n")
+            return joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : joined
+        case let dictionary as [String: Any]:
+            let priorityKeys = ["content", "text", "message", "output", "summary", "error", "command", "input"]
+            var collected: [String] = []
+            for key in priorityKeys {
+                if let nested = dictionary[key],
+                   let flattened = flattenText(nested, depth: depth + 1) {
+                    collected.append(flattened)
+                }
+            }
+            if collected.isEmpty {
+                for nested in dictionary.values {
+                    if let flattened = flattenText(nested, depth: depth + 1) {
+                        collected.append(flattened)
+                    }
+                }
+            }
+            let unique = Array(NSOrderedSet(array: collected)) as? [String] ?? collected
+            let joined = unique.joined(separator: "\n")
+            return joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : joined
+        default:
+            return nil
+        }
+    }
+
+    nonisolated private static func eventTags(
+        for events: [SessionHistoryEvent],
+        content: String
+    ) -> [String] {
+        let lowered = content.lowercased()
+        var tags = Set(events.map(\.eventType))
+        let keywordTags: [(String, String)] = [
+            ("error", "error"),
+            ("failed", "error"),
+            ("exception", "error"),
+            ("traceback", "error"),
+            ("build", "build"),
+            ("test", "test"),
+            ("commit", "git"),
+            ("merge", "git"),
+            ("rebase", "git"),
+            ("refactor", "refactor"),
+            ("fix", "fix"),
+            ("lint", "lint"),
+        ]
+        for (keyword, tag) in keywordTags where lowered.contains(keyword) {
+            tags.insert(tag)
+        }
+        return tags.sorted()
+    }
+
+    nonisolated private static func tokenSet(_ text: String) -> Set<String> {
+        let lowered = text.lowercased()
+        let separators = CharacterSet.alphanumerics.inverted
+        let tokens = lowered
+            .components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count >= 2 }
+        return Set(tokens)
+    }
+
+    nonisolated private static func lexicalOverlap(
+        _ query: Set<String>,
+        _ chunk: Set<String>
+    ) -> Double {
+        guard !query.isEmpty, !chunk.isEmpty else { return 0 }
+        let overlap = query.intersection(chunk).count
+        return Double(overlap) / Double(query.count)
+    }
+
+    nonisolated private static func snippetForChunk(
+        content: String,
+        queryTokens: Set<String>
+    ) -> String {
+        let masked = maskSensitiveContent(content)
+        let maxLength = 260
+        guard !queryTokens.isEmpty else {
+            return masked.count <= maxLength ? masked : String(masked.prefix(maxLength)) + "…"
+        }
+
+        let lower = masked.lowercased()
+        var selectedRange: Range<String.Index>?
+        for token in queryTokens where token.count >= 2 {
+            if let found = lower.range(of: token) {
+                selectedRange = found
+                break
+            }
+        }
+        guard let selectedRange else {
+            return masked.count <= maxLength ? masked : String(masked.prefix(maxLength)) + "…"
+        }
+
+        let start = masked.index(selectedRange.lowerBound, offsetBy: -90, limitedBy: masked.startIndex) ?? masked.startIndex
+        let end = masked.index(selectedRange.upperBound, offsetBy: 160, limitedBy: masked.endIndex) ?? masked.endIndex
+        var snippet = String(masked[start..<end])
+        if start > masked.startIndex { snippet = "…" + snippet }
+        if end < masked.endIndex { snippet += "…" }
+        return snippet
+    }
+
+    nonisolated private static func pseudoEmbedding(text: String, dimensions: Int = 64) -> [Float] {
+        guard dimensions > 0 else { return [] }
+        var vector = Array(repeating: Float(0), count: dimensions)
+        for token in tokenSet(text) {
+            var hash = UInt64(1469598103934665603)
+            for scalar in token.unicodeScalars {
+                hash ^= UInt64(scalar.value)
+                hash = hash &* 1099511628211
+            }
+            let index = Int(hash % UInt64(dimensions))
+            vector[index] += 1
+        }
+        let norm = sqrt(vector.reduce(Float(0)) { $0 + ($1 * $1) })
+        guard norm > 0 else { return vector }
+        return vector.map { $0 / norm }
+    }
+
+    nonisolated private static func vectorCosineSimilarity(_ lhs: [Float], _ rhs: [Float]) -> Double {
+        guard !lhs.isEmpty, lhs.count == rhs.count else { return 0 }
+        var dot: Float = 0
+        var leftNorm: Float = 0
+        var rightNorm: Float = 0
+        for index in lhs.indices {
+            dot += lhs[index] * rhs[index]
+            leftNorm += lhs[index] * lhs[index]
+            rightNorm += rhs[index] * rhs[index]
+        }
+        let denom = sqrt(leftNorm) * sqrt(rightNorm)
+        guard denom > 0 else { return 0 }
+        return Double(dot / denom)
     }
 
     nonisolated static func mergeUnifiedCodingSessions(

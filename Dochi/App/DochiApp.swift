@@ -900,6 +900,12 @@ struct DochiApp: App {
         case "bridge.roots":
             return await handleBridgeRoots(params: params, externalToolManager: externalToolManager)
 
+        case "bridge.session_history.reindex":
+            return await handleBridgeSessionHistoryReindex(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.session_history.search":
+            return await handleBridgeSessionHistorySearch(params: params, externalToolManager: externalToolManager)
+
         case "bridge.repo.list":
             return await handleBridgeRepositoryList(externalToolManager: externalToolManager)
 
@@ -1420,6 +1426,66 @@ struct DochiApp: App {
         ])
     }
 
+    nonisolated private static func handleBridgeSessionHistoryReindex(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        let limit = max(10, min(2_000, params["limit"] as? Int ?? 500))
+        let chunkCount = await externalToolManager.rebuildSessionHistoryIndex(limit: limit)
+        return .ok([
+            "status": "reindexed",
+            "limit": limit,
+            "chunk_count": chunkCount,
+        ])
+    }
+
+    nonisolated private static func handleBridgeSessionHistorySearch(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        guard let query = nonEmptyString(params["query"]) else {
+            return .failure(code: "missing_query", message: "query가 필요합니다.")
+        }
+
+        let limit = max(1, min(200, params["limit"] as? Int ?? 20))
+        let repositoryRoot = nonEmptyString(params["repository_root"])
+        let branch = nonEmptyString(params["branch"])
+        let since = parseISO8601Timestamp(nonEmptyString(params["since"]))
+        let until = parseISO8601Timestamp(nonEmptyString(params["until"]))
+
+        let results = await externalToolManager.searchSessionHistory(
+            query: SessionHistorySearchQuery(
+                query: query,
+                repositoryRoot: repositoryRoot,
+                branch: branch,
+                since: since,
+                until: until,
+                limit: limit
+            )
+        )
+
+        let payload: [[String: Any]] = results.map { item in
+            [
+                "id": item.id.uuidString,
+                "provider": item.provider,
+                "session_id": item.sessionId,
+                "repository_root": item.repositoryRoot ?? NSNull(),
+                "branch": item.branch ?? NSNull(),
+                "source_path": item.sourcePath,
+                "score": item.score,
+                "snippet": item.maskedSnippet,
+                "start_at": isoTimestamp(item.startAt),
+                "end_at": isoTimestamp(item.endAt),
+                "tags": item.tags,
+            ]
+        }
+
+        return .ok([
+            "count": payload.count,
+            "results": payload,
+        ])
+    }
+
     nonisolated private static func handleBridgeRepositoryList(
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1617,6 +1683,18 @@ struct DochiApp: App {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
+    }
+
+    nonisolated private static func parseISO8601Timestamp(_ value: String?) -> Date? {
+        guard let value, !value.isEmpty else { return nil }
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let parsed = withFractional.date(from: value) {
+            return parsed
+        }
+        let basic = ISO8601DateFormatter()
+        basic.formatOptions = [.withInternetDateTime]
+        return basic.date(from: value)
     }
 
     @MainActor

@@ -186,6 +186,73 @@ struct UnifiedCodingSession: Sendable, Equatable {
     }
 }
 
+struct SessionHistoryEvent: Codable, Sendable, Equatable {
+    let id: String
+    let provider: String
+    let sessionId: String
+    let repositoryRoot: String?
+    let workingDirectory: String?
+    let branch: String?
+    let eventType: String
+    let content: String
+    let timestamp: Date
+    let sourcePath: String
+}
+
+struct SessionHistoryChunk: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    let provider: String
+    let sessionId: String
+    let repositoryRoot: String?
+    let workingDirectory: String?
+    let branch: String?
+    let sourcePath: String
+    let startAt: Date
+    let endAt: Date
+    let tags: [String]
+    let content: String
+    let embedding: [Float]
+}
+
+struct SessionHistorySearchQuery: Sendable, Equatable {
+    let query: String
+    let repositoryRoot: String?
+    let branch: String?
+    let since: Date?
+    let until: Date?
+    let limit: Int
+
+    init(
+        query: String,
+        repositoryRoot: String? = nil,
+        branch: String? = nil,
+        since: Date? = nil,
+        until: Date? = nil,
+        limit: Int = 20
+    ) {
+        self.query = query
+        self.repositoryRoot = repositoryRoot
+        self.branch = branch
+        self.since = since
+        self.until = until
+        self.limit = limit
+    }
+}
+
+struct SessionHistorySearchResult: Identifiable, Sendable, Equatable {
+    let id: UUID
+    let provider: String
+    let sessionId: String
+    let repositoryRoot: String?
+    let branch: String?
+    let sourcePath: String
+    let score: Double
+    let maskedSnippet: String
+    let startAt: Date
+    let endAt: Date
+    let tags: [String]
+}
+
 enum ExternalTerminalApp: String, CaseIterable, Codable, Sendable {
     case auto
     case terminal
