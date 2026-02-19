@@ -113,50 +113,9 @@ struct SecurityCheckItem: Codable, Sendable, Identifiable {
     }
 }
 
-// MARK: - Deployment Gate
-
-/// 배포 게이트 통합 판정 결과.
-struct DeploymentGateResult: Codable, Sendable {
-    let passed: Bool
-    let timestamp: Date
-    let sloResult: SLOResult
-    let testsPassedResult: TestGateResult
-    let securityCheckResult: SecurityCheckResult
-
-    var summary: String {
-        let status = passed ? "PASS" : "FAIL"
-        let sloStatus = sloResult.passed ? "pass" : "fail"
-        let testStatus = testsPassedResult.passed ? "pass" : "fail"
-        let secStatus = securityCheckResult.passed ? "pass" : "fail"
-        return "[\(status)] SLO: \(sloStatus), Tests: \(testStatus), Security: \(secStatus)"
-    }
-}
-
-/// 테스트 게이트 결과.
-struct TestGateResult: Codable, Sendable {
-    let passed: Bool
-    let totalTests: Int
-    let passedTests: Int
-    let failedTests: Int
-    let regressionPassed: Bool
-
-    var passRate: Double {
-        guard totalTests > 0 else { return 0.0 }
-        return Double(passedTests) / Double(totalTests)
-    }
-}
-
-/// 보안 점검 결과.
-struct SecurityCheckResult: Codable, Sendable {
-    let passed: Bool
-    let items: [SecurityCheckItem]
-
-    var failedItems: [SecurityCheckItem] { items.filter { !$0.passed } }
-}
-
 // MARK: - SLOEvaluator
 
-/// SLO 평가 및 배포 게이트 통합 판정.
+/// SLO 평가. 배포 게이트 판정은 DeployGate가 담당한다.
 @MainActor
 @Observable
 final class SLOEvaluator: SLOEvaluatorProtocol {
@@ -233,36 +192,6 @@ final class SLOEvaluator: SLOEvaluatorProtocol {
                 thresholdValue: 0.99
             ),
         ]
-    }
-
-    // MARK: - Deployment Gate
-
-    /// 배포 게이트 통합 판정.
-    func evaluateDeploymentGate(
-        metricsSnapshot: MetricsSnapshot,
-        testResult: TestGateResult,
-        securityChecks: [SecurityCheckItem]
-    ) -> DeploymentGateResult {
-        let sloResult = evaluate(snapshot: metricsSnapshot)
-
-        let securityPassed = securityChecks.allSatisfy(\.passed)
-        let securityResult = SecurityCheckResult(
-            passed: securityPassed,
-            items: securityChecks
-        )
-
-        let allPassed = sloResult.passed && testResult.passed && securityResult.passed
-
-        let result = DeploymentGateResult(
-            passed: allPassed,
-            timestamp: Date(),
-            sloResult: sloResult,
-            testsPassedResult: testResult,
-            securityCheckResult: securityResult
-        )
-
-        Log.app.info("Deployment gate: \(result.summary)")
-        return result
     }
 
     // MARK: - Private

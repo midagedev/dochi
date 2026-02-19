@@ -50,7 +50,7 @@ struct DeployGateReport: Sendable, Codable {
 // MARK: - DeployGate
 
 /// 배포 게이트 — 모든 체크 항목 통과 여부를 평가하여 배포 가능 여부 판정.
-/// SLOEvaluator.evaluateDeploymentGate와 별도로, 체크 항목별 개별 평가를 제공한다.
+/// 체크 항목별 개별 평가를 제공하며 SLO 판정은 SLOEvaluator에 위임한다.
 @MainActor
 final class DeployGate {
 

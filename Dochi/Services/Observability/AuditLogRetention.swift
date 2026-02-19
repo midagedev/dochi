@@ -97,7 +97,7 @@ final class DiagnosticLogManager {
             entries.removeFirst(entries.count - Self.maxEntries)
         }
 
-        Log.runtime.debug("Diagnostic [\(level.rawValue, privacy: .public)] session=\(sessionId, privacy: .public): \(message, privacy: .public)")
+        Log.runtime.debug("Diagnostic [\(level.rawValue, privacy: .public)] session=\(sessionId, privacy: .public): \(message, privacy: .private)")
     }
 
     // MARK: - Query
