@@ -118,6 +118,9 @@ enum DochiCLI {
         case .conversation(let action):
             return handleConversation(action)
 
+        case .log(let action):
+            return handleLog(action)
+
         case .config(let action):
             return handleConfig(action)
 
@@ -297,42 +300,391 @@ enum DochiCLI {
         }
     }
 
-    // MARK: - Conversation
+    // MARK: - Conversation / Log (Local observability)
+
+    private struct LocalConversationMessage {
+        let role: String
+        let timestamp: String
+        let content: String
+    }
+
+    private struct LocalConversationRecord {
+        let id: String
+        let title: String
+        let source: String
+        let updatedAt: String
+        let messages: [LocalConversationMessage]
+    }
+
+    private struct LocalLogEntry {
+        let timestamp: String
+        let category: String
+        let level: String
+        let message: String
+        let raw: String
+    }
 
     private static func handleConversation(_ action: CLIConversationAction) -> CLIResult {
+        let convDir = CLIConfig.contextDirectory.appendingPathComponent("conversations")
+        let jsonFiles = listConversationFiles(in: convDir)
+
         switch action {
         case .list(let limit):
-            let convDir = CLIConfig.contextDirectory.appendingPathComponent("conversations")
-            guard let files = try? FileManager.default.contentsOfDirectory(
-                at: convDir,
-                includingPropertiesForKeys: [.contentModificationDateKey],
-                options: .skipsHiddenFiles
-            ) else {
-                return CLIResult(exitCode: .success, command: "conversation.list", message: "대화가 없습니다.")
-            }
-
-            let jsonFiles = files.filter { $0.pathExtension == "json" }
-                .sorted {
-                    let d1 = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                    let d2 = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                    return d1 > d2
-                }
-
             guard !jsonFiles.isEmpty else {
                 return CLIResult(exitCode: .success, command: "conversation.list", message: "대화가 없습니다.")
             }
 
-            var lines: [String] = ["최근 대화 (최대 \(limit)개)"]
+            var lines: [String] = ["최근 대화 (최대 \(limit)개 / 전체 \(jsonFiles.count)개)"]
+            var conversationIDs: [String] = []
             for (index, file) in jsonFiles.prefix(limit).enumerated() {
-                lines.append("\(index + 1). \(file.deletingPathExtension().lastPathComponent)")
+                if let record = try? loadConversationRecord(from: file) {
+                    conversationIDs.append(record.id)
+                    lines.append("\(index + 1). \(record.title) (\(record.id)) | messages: \(record.messages.count) | updated: \(record.updatedAt)")
+                } else {
+                    let fallbackID = file.deletingPathExtension().lastPathComponent
+                    conversationIDs.append(fallbackID)
+                    lines.append("\(index + 1). \(fallbackID)")
+                }
             }
 
             return CLIResult(
                 exitCode: .success,
                 command: "conversation.list",
                 message: lines.joined(separator: "\n"),
-                data: ["count": jsonFiles.count]
+                data: [
+                    "count": jsonFiles.count,
+                    "conversation_ids": conversationIDs,
+                ]
             )
+
+        case .show(let id, let limit):
+            guard !jsonFiles.isEmpty else {
+                return CLIResult(exitCode: .configError, command: "conversation.show", message: "대화 파일이 없습니다: \(convDir.path)")
+            }
+
+            let requestedID = id.lowercased().replacingOccurrences(of: ".json", with: "")
+            if let exact = jsonFiles.first(where: { $0.deletingPathExtension().lastPathComponent.lowercased() == requestedID }) {
+                do {
+                    let record = try loadConversationRecord(from: exact)
+                    let rendered = renderConversation(record, limit: limit)
+                    return CLIResult(exitCode: .success, command: "conversation.show", message: rendered.message, data: rendered.data)
+                } catch {
+                    return CLIResult(exitCode: .runtimeError, command: "conversation.show", message: "대화 파싱 실패: \(error.localizedDescription)")
+                }
+            }
+
+            let partialMatches = jsonFiles.filter { file in
+                file.deletingPathExtension().lastPathComponent.lowercased().hasPrefix(requestedID)
+            }
+            if partialMatches.count > 1 {
+                let candidates = partialMatches.map { $0.deletingPathExtension().lastPathComponent }.prefix(10)
+                return CLIResult(
+                    exitCode: .invalidUsage,
+                    command: "conversation.show",
+                    message: "ID prefix가 모호합니다. 더 길게 입력하세요: \(candidates.joined(separator: ", "))"
+                )
+            }
+            guard let matched = partialMatches.first else {
+                return CLIResult(exitCode: .configError, command: "conversation.show", message: "대화를 찾지 못했습니다: \(id)")
+            }
+
+            do {
+                let record = try loadConversationRecord(from: matched)
+                let rendered = renderConversation(record, limit: limit)
+                return CLIResult(exitCode: .success, command: "conversation.show", message: rendered.message, data: rendered.data)
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "conversation.show", message: "대화 파싱 실패: \(error.localizedDescription)")
+            }
+
+        case .tail(let limit):
+            guard let latest = jsonFiles.first else {
+                return CLIResult(exitCode: .success, command: "conversation.tail", message: "대화가 없습니다.")
+            }
+            do {
+                let record = try loadConversationRecord(from: latest)
+                let rendered = renderConversation(record, limit: limit)
+                return CLIResult(exitCode: .success, command: "conversation.tail", message: rendered.message, data: rendered.data)
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "conversation.tail", message: "대화 파싱 실패: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func handleLog(_ action: CLILogAction) -> CLIResult {
+        switch action {
+        case .recent(let minutes, let limit, let category, let level, let contains):
+            if let level, normalizedRequestedLogLevel(level) == nil {
+                return CLIResult(
+                    exitCode: .invalidUsage,
+                    command: "log.recent",
+                    message: "지원하지 않는 로그 레벨입니다: \(level). (debug|info|notice|error|fault)"
+                )
+            }
+
+            do {
+                let entries = try loadLocalDochiLogs(
+                    minutes: minutes,
+                    limit: limit,
+                    category: category,
+                    level: normalizedRequestedLogLevel(level),
+                    contains: contains
+                )
+                guard !entries.isEmpty else {
+                    return CLIResult(exitCode: .success, command: "log.recent", message: "조건에 맞는 로그가 없습니다.")
+                }
+
+                let lines = entries.map { entry in
+                    "[\(entry.timestamp)] [\(entry.category)] [\(entry.level)] \(entry.message)"
+                }
+                let payload = entries.map { entry -> [String: Any] in
+                    [
+                        "timestamp": entry.timestamp,
+                        "category": entry.category,
+                        "level": entry.level,
+                        "message": entry.message,
+                    ]
+                }
+
+                return CLIResult(
+                    exitCode: .success,
+                    command: "log.recent",
+                    message: lines.joined(separator: "\n"),
+                    data: [
+                        "count": entries.count,
+                        "entries": payload,
+                    ]
+                )
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "log.recent", message: "로그 조회 실패: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func listConversationFiles(in directory: URL) -> [URL] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: .skipsHiddenFiles
+        ) else {
+            return []
+        }
+
+        return files
+            .filter { $0.pathExtension == "json" }
+            .sorted {
+                let d1 = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let d2 = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return d1 > d2
+            }
+    }
+
+    private static func loadConversationRecord(from file: URL) throws -> LocalConversationRecord {
+        let data = try Data(contentsOf: file)
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CLIParseError.invalidUsage("대화 JSON 형식이 올바르지 않습니다.")
+        }
+
+        let id = file.deletingPathExtension().lastPathComponent
+        let title = (root["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? (root["title"] as? String ?? id)
+            : id
+        let source = root["source"] as? String ?? "local"
+        let updatedAt = root["updatedAt"] as? String ?? "-"
+        let rawMessages = root["messages"] as? [[String: Any]] ?? []
+
+        let messages = rawMessages.map { item -> LocalConversationMessage in
+            let role = item["role"] as? String ?? "unknown"
+            let timestamp = item["timestamp"] as? String ?? "-"
+            let content = stringifyJSONValue(item["content"])
+            return LocalConversationMessage(role: role, timestamp: timestamp, content: content)
+        }
+
+        return LocalConversationRecord(
+            id: id,
+            title: title,
+            source: source,
+            updatedAt: updatedAt,
+            messages: messages
+        )
+    }
+
+    private static func renderConversation(_ record: LocalConversationRecord, limit: Int) -> (message: String, data: [String: Any]) {
+        let clippedLimit = max(1, limit)
+        let shown = Array(record.messages.suffix(clippedLimit))
+        let startIndex = max(0, record.messages.count - shown.count)
+
+        var lines: [String] = [
+            "대화: \(record.title)",
+            "id: \(record.id)",
+            "source: \(record.source)",
+            "updated: \(record.updatedAt)",
+            "messages: \(record.messages.count) (최근 \(shown.count)개 표시)",
+        ]
+
+        for (offset, message) in shown.enumerated() {
+            let absoluteIndex = startIndex + offset + 1
+            lines.append("")
+            lines.append("\(absoluteIndex). [\(message.timestamp)] \(message.role)")
+
+            let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                lines.append("   (empty)")
+                continue
+            }
+
+            let clipped = clipMessageContent(trimmed, maxLength: 2000)
+            for line in clipped.components(separatedBy: .newlines) {
+                lines.append("   \(line)")
+            }
+        }
+
+        let payloadMessages = shown.map { message -> [String: Any] in
+            [
+                "role": message.role,
+                "timestamp": message.timestamp,
+                "content": message.content,
+            ]
+        }
+
+        return (
+            lines.joined(separator: "\n"),
+            [
+                "conversation_id": record.id,
+                "title": record.title,
+                "source": record.source,
+                "updated_at": record.updatedAt,
+                "total_messages": record.messages.count,
+                "shown_messages": payloadMessages,
+            ]
+        )
+    }
+
+    private static func stringifyJSONValue(_ value: Any?) -> String {
+        guard let value else { return "" }
+        if let string = value as? String { return string }
+        if let json = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+           let string = String(data: json, encoding: .utf8) {
+            return string
+        }
+        return String(describing: value)
+    }
+
+    private static func clipMessageContent(_ text: String, maxLength: Int) -> String {
+        guard text.count > maxLength else { return text }
+        let prefix = text.prefix(maxLength)
+        return "\(prefix)\n...(truncated)"
+    }
+
+    private static func normalizedRequestedLogLevel(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "debug", "info", "notice", "error", "fault":
+            return normalized
+        default:
+            return nil
+        }
+    }
+
+    private static func loadLocalDochiLogs(
+        minutes: Int,
+        limit: Int,
+        category: String?,
+        level: String?,
+        contains: String?
+    ) throws -> [LocalLogEntry] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+        process.arguments = [
+            "show",
+            "--style", "compact",
+            "--last", "\(max(1, minutes))m",
+            "--predicate", "subsystem == \"com.dochi.app\"",
+            "--debug",
+            "--info",
+        ]
+
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: outData, encoding: .utf8) ?? ""
+        let stderr = String(data: errData, encoding: .utf8) ?? ""
+
+        guard process.terminationStatus == 0 else {
+            let reason = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw CLIParseError.invalidUsage("`log show` 실행 실패 (\(process.terminationStatus)): \(reason)")
+        }
+
+        var entries: [LocalLogEntry] = []
+        for rawLine in output.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, !line.hasPrefix("Timestamp") else { continue }
+            guard let entry = parseLocalLogLine(line) else { continue }
+
+            if let category, !category.isEmpty, entry.category.caseInsensitiveCompare(category) != .orderedSame {
+                continue
+            }
+            if let level, entry.level != level {
+                continue
+            }
+            if let contains, !contains.isEmpty, !entry.raw.localizedCaseInsensitiveContains(contains) {
+                continue
+            }
+
+            entries.append(entry)
+        }
+
+        let clippedLimit = max(1, limit)
+        if entries.count <= clippedLimit {
+            return entries
+        }
+        return Array(entries.suffix(clippedLimit))
+    }
+
+    private static func parseLocalLogLine(_ line: String) -> LocalLogEntry? {
+        guard let subsystemRange = line.range(of: "[com.dochi.app:") else { return nil }
+        guard let categoryEnd = line[subsystemRange.upperBound...].firstIndex(of: "]") else { return nil }
+
+        let category = String(line[subsystemRange.upperBound..<categoryEnd])
+        let messageStart = line.index(after: categoryEnd)
+        let message = String(line[messageStart...]).trimmingCharacters(in: .whitespaces)
+
+        let prefix = String(line[..<subsystemRange.lowerBound])
+        let tokens = prefix.split(whereSeparator: { $0.isWhitespace })
+        let timestamp: String
+        if tokens.count >= 2 {
+            timestamp = "\(tokens[0]) \(tokens[1])"
+        } else {
+            timestamp = "-"
+        }
+        let typeToken = tokens.count >= 3 ? String(tokens[2]) : "-"
+        let level = normalizeLogLevel(typeToken)
+
+        return LocalLogEntry(
+            timestamp: timestamp,
+            category: category,
+            level: level,
+            message: message,
+            raw: line
+        )
+    }
+
+    private static func normalizeLogLevel(_ token: String) -> String {
+        guard let first = token.uppercased().first else { return "unknown" }
+        switch first {
+        case "D": return "debug"
+        case "I": return "info"
+        case "N": return "notice"
+        case "E": return "error"
+        case "F": return "fault"
+        default: return "unknown"
         }
     }
 
@@ -1076,6 +1428,9 @@ enum DochiCLI {
           dochi ask <질문> [--json]
           dochi chat
           dochi conversation list [--limit N]
+          dochi conversation show <conversation_id|prefix> [--limit N]
+          dochi conversation tail [--limit N]
+          dochi log recent [--minutes N] [--limit N] [--category C] [--level L] [--contains K]
           dochi context show [system|memory]
           dochi context edit [system|memory]
           dochi config show

@@ -32,6 +32,61 @@ final class CLICommandSurfaceTests: XCTestCase {
         XCTAssertEqual(invocation.command, .conversation(.list(limit: 25)))
     }
 
+    func testParseConversationShowWithLimit() throws {
+        let invocation = try CLICommandParser.parse([
+            "conversation", "show", "35BBCC9A-EB8F-43E1-9069-D774E46E714D", "--limit", "12",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .conversation(.show(id: "35BBCC9A-EB8F-43E1-9069-D774E46E714D", limit: 12))
+        )
+    }
+
+    func testParseConversationTailWithLimit() throws {
+        let invocation = try CLICommandParser.parse(["conversation", "tail", "--limit", "18"])
+        XCTAssertEqual(invocation.command, .conversation(.tail(limit: 18)))
+    }
+
+    func testParseConversationListWithoutExplicitSubcommand() throws {
+        let invocation = try CLICommandParser.parse(["conversation", "--limit", "7"])
+        XCTAssertEqual(invocation.command, .conversation(.list(limit: 7)))
+    }
+
+    func testParseLogRecentWithFilters() throws {
+        let invocation = try CLICommandParser.parse([
+            "log", "recent",
+            "--minutes", "20",
+            "--limit", "100",
+            "--category", "Tool",
+            "--level", "error",
+            "--contains", "session",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .log(.recent(
+                minutes: 20,
+                limit: 100,
+                category: "Tool",
+                level: "error",
+                contains: "session"
+            ))
+        )
+    }
+
+    func testParseLogRecentWithoutExplicitSubcommand() throws {
+        let invocation = try CLICommandParser.parse(["log", "--minutes", "5", "--limit", "30"])
+        XCTAssertEqual(
+            invocation.command,
+            .log(.recent(minutes: 5, limit: 30, category: nil, level: nil, contains: nil))
+        )
+    }
+
+    func testParseConversationShowWithoutIDThrows() {
+        XCTAssertThrowsError(try CLICommandParser.parse(["conversation", "show", "--limit", "10"])) { error in
+            XCTAssertTrue(error.localizedDescription.contains("conversation show"))
+        }
+    }
+
     func testParseDevBridgeSend() throws {
         let invocation = try CLICommandParser.parse(["dev", "bridge", "send", "abc-123", "run", "tests"])
         XCTAssertEqual(invocation.command, .dev(.bridgeSend(sessionId: "abc-123", command: "run tests")))

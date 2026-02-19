@@ -23,6 +23,8 @@ enum CLIContextAction: Equatable, Sendable {
 
 enum CLIConversationAction: Equatable, Sendable {
     case list(limit: Int)
+    case show(id: String, limit: Int)
+    case tail(limit: Int)
 }
 
 enum CLIConfigAction: Equatable, Sendable {
@@ -33,6 +35,10 @@ enum CLIConfigAction: Equatable, Sendable {
 
 enum CLISessionAction: Equatable, Sendable {
     case list
+}
+
+enum CLILogAction: Equatable, Sendable {
+    case recent(minutes: Int, limit: Int, category: String?, level: String?, contains: String?)
 }
 
 enum CLIDevAction: Equatable, Sendable {
@@ -59,6 +65,7 @@ enum CLICommand: Equatable, Sendable {
     case chat
     case context(CLIContextAction)
     case conversation(CLIConversationAction)
+    case log(CLILogAction)
     case config(CLIConfigAction)
     case session(CLISessionAction)
     case dev(CLIDevAction)
@@ -165,6 +172,9 @@ enum CLICommandParser {
         case "conversation", "conversations":
             command = try parseConversation(tail)
 
+        case "log":
+            command = try parseLog(tail)
+
         case "config":
             command = try parseConfig(tail)
 
@@ -197,17 +207,116 @@ enum CLICommandParser {
     }
 
     private static func parseConversation(_ args: [String]) throws -> CLICommand {
-        let sub = args.first ?? "list"
-        guard sub == "list" else {
-            throw CLIParseError.invalidUsage("conversation 하위 명령은 list만 지원합니다.")
+        let sub: String
+        let rest: [String]
+        if let first = args.first, !first.hasPrefix("--") {
+            sub = first
+            rest = Array(args.dropFirst())
+        } else {
+            sub = "list"
+            rest = args
         }
 
-        var limit = 10
-        if args.count >= 3, args[1] == "--limit", let parsed = Int(args[2]) {
-            limit = max(1, parsed)
+        switch sub {
+        case "list":
+            let limit = try parseSingleIntOption(rest, option: "--limit", defaultValue: 10, usage: "conversation list --limit <N>")
+            return .conversation(.list(limit: limit))
+
+        case "show":
+            guard let id = rest.first, !id.hasPrefix("--") else {
+                throw CLIParseError.invalidUsage("conversation show <conversation_id> [--limit N] 형식이 필요합니다.")
+            }
+            let optionArgs = Array(rest.dropFirst())
+            let limit = try parseSingleIntOption(optionArgs, option: "--limit", defaultValue: 20, usage: "conversation show <conversation_id> [--limit N]")
+            return .conversation(.show(id: id, limit: limit))
+
+        case "tail", "latest":
+            let limit = try parseSingleIntOption(rest, option: "--limit", defaultValue: 20, usage: "conversation tail [--limit N]")
+            return .conversation(.tail(limit: limit))
+
+        default:
+            throw CLIParseError.invalidUsage("conversation 하위 명령은 list/show/tail만 지원합니다.")
+        }
+    }
+
+    private static func parseLog(_ args: [String]) throws -> CLICommand {
+        let sub: String
+        let rest: [String]
+        if let first = args.first, !first.hasPrefix("--") {
+            sub = first
+            rest = Array(args.dropFirst())
+        } else {
+            sub = "recent"
+            rest = args
+        }
+        guard sub == "recent" else {
+            throw CLIParseError.invalidUsage("log 하위 명령은 recent만 지원합니다.")
         }
 
-        return .conversation(.list(limit: limit))
+        var minutes = 15
+        var limit = 200
+        var category: String?
+        var level: String?
+        var contains: String?
+
+        var index = 0
+        while index < rest.count {
+            switch rest[index] {
+            case "--minutes":
+                guard index + 1 < rest.count, let parsed = Int(rest[index + 1]) else {
+                    throw CLIParseError.invalidUsage("log recent --minutes <N> 형식이 필요합니다.")
+                }
+                minutes = max(1, parsed)
+                index += 2
+            case "--limit":
+                guard index + 1 < rest.count, let parsed = Int(rest[index + 1]) else {
+                    throw CLIParseError.invalidUsage("log recent --limit <N> 형식이 필요합니다.")
+                }
+                limit = max(1, parsed)
+                index += 2
+            case "--category":
+                guard index + 1 < rest.count else {
+                    throw CLIParseError.invalidUsage("log recent --category <name> 형식이 필요합니다.")
+                }
+                category = rest[index + 1]
+                index += 2
+            case "--level":
+                guard index + 1 < rest.count else {
+                    throw CLIParseError.invalidUsage("log recent --level <name> 형식이 필요합니다.")
+                }
+                level = rest[index + 1]
+                index += 2
+            case "--contains":
+                guard index + 1 < rest.count else {
+                    throw CLIParseError.invalidUsage("log recent --contains <keyword> 형식이 필요합니다.")
+                }
+                contains = rest[index + 1]
+                index += 2
+            default:
+                throw CLIParseError.invalidUsage("알 수 없는 옵션입니다: \(rest[index])")
+            }
+        }
+
+        return .log(.recent(
+            minutes: minutes,
+            limit: limit,
+            category: category,
+            level: level,
+            contains: contains
+        ))
+    }
+
+    private static func parseSingleIntOption(
+        _ args: [String],
+        option: String,
+        defaultValue: Int,
+        usage: String
+    ) throws -> Int {
+        guard !args.isEmpty else { return defaultValue }
+        guard args.count == 2, args[0] == option, let parsed = Int(args[1]) else {
+            throw CLIParseError.invalidUsage("\(usage) 형식이 필요합니다.")
+        }
+        return max(1, parsed)
     }
 
     private static func parseConfig(_ args: [String]) throws -> CLICommand {
