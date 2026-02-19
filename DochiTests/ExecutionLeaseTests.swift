@@ -181,6 +181,30 @@ final class SessionRoutingRecordModelTests: XCTestCase {
         XCTAssertEqual(decoded.reason, original.reason)
     }
 
+    func testCodableRoundtripWithNilToDeviceId() throws {
+        let original = SessionRoutingRecord(
+            leaseId: UUID(),
+            workspaceId: UUID(),
+            agentId: "agent-1",
+            conversationId: "conv-1",
+            fromDeviceId: UUID(),
+            toDeviceId: nil,
+            reason: .released
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(original)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(SessionRoutingRecord.self, from: data)
+
+        XCTAssertEqual(decoded.id, original.id)
+        XCTAssertNil(decoded.toDeviceId, "toDeviceId should be nil for release records")
+        XCTAssertEqual(decoded.reason, original.reason)
+    }
+
     func testLeaseRoutingReasonAllCases() {
         XCTAssertEqual(LeaseRoutingReason.allCases.count, 5)
         XCTAssertTrue(LeaseRoutingReason.allCases.contains(.initialAssignment))
@@ -564,84 +588,112 @@ final class ExecutionLeaseServiceTests: XCTestCase {
 
     // MARK: - Expire Stale Tests
 
-    func testExpireStaleLeases() async throws {
-        // Create a lease that's already expired
-        let wsId = UUID()
+    func testExpireStaleLeases_noExpiredLeases_doesNothing() async throws {
+        // Acquire a fresh lease — expiresAt is 60s in the future
         let lease = try await service.acquireLease(
-            workspaceId: wsId,
+            workspaceId: UUID(),
             agentId: "a",
             conversationId: "conv-stale",
             requiredCapabilities: nil
         )
 
-        // Manually expire it by setting expiresAt in the past
-        // We need to access the internal state — use a trick: renew then expire
-        // Actually, let's create the service with a very short TTL scenario
-        // The simplest approach: directly test via the public API
-
-        // Make the device that holds the lease go offline
-        // and mark expiresAt as past by creating a lease with past expiry
-        // Since we can't directly modify internal state, let's test the flow differently:
-
-        // We have desktop (priority 0) holding the lease.
-        // Make desktop go offline so reassignment can happen.
-        mockDevicePolicy.registeredDevices[0] = DeviceInfo(
-            id: desktopId,
-            name: "Mac Studio",
-            deviceType: .desktop,
-            platform: .macos,
-            lastSeen: Date().addingTimeInterval(-300), // offline
-            isCurrentDevice: false,
-            priority: 0
-        )
-        mockDevicePolicy.registeredDevices[1] = DeviceInfo(
-            id: mobileId,
-            name: "iPhone",
-            deviceType: .mobile,
-            platform: .ios,
-            lastSeen: Date(),
-            isCurrentDevice: true,
-            priority: 1
-        )
-        mockDevicePolicy.currentDevice = mockDevicePolicy.registeredDevices[1]
-
-        // The lease expires at createdAt + 60s, still in the future.
-        // We need the lease to actually be stale. Let's use a new approach:
-        // Create a custom service that we can test properly.
-        // Instead, we verify the concept by checking reassign handles stale correctly.
-
-        // For a proper expire test, we check a lease whose expiresAt is in the past:
-        // Let's just test via the reassign path — the expire function tries to reassign.
-        // Since we can't easily control expiresAt from public API, let's verify
-        // that expireStaleLeases does nothing when no leases are expired:
         service.expireStaleLeases()
 
-        // The lease should still be active (expiresAt is in the future)
+        // Lease should still be active (expiresAt is in the future)
         let active = service.activeLease(for: "conv-stale")
         XCTAssertNotNil(active)
         XCTAssertEqual(active?.leaseId, lease.leaseId)
     }
 
-    func testExpireStaleLeaseWithPastExpiry() async throws {
-        // Use a dedicated service for this test to control timing better
-        let localService = ExecutionLeaseService(devicePolicyService: mockDevicePolicy)
-
-        // Acquire lease — it will have default 60s TTL
-        let lease = try await localService.acquireLease(
+    func testExpireStaleLeases_expiredLease_reassignedToAlternativeDevice() {
+        // Inject a lease with past expiry via DEBUG helper
+        let expiredLease = ExecutionLease(
             workspaceId: UUID(),
             agentId: "a",
-            conversationId: "conv-expire",
-            requiredCapabilities: nil
+            conversationId: "conv-expire-reassign",
+            assignedDeviceId: desktopId,
+            expiresAt: Date().addingTimeInterval(-10) // already expired
         )
-        XCTAssertEqual(lease.assignedDeviceId, desktopId)
+        service.injectLease(expiredLease)
 
-        // Verify the lease is active before expiry
-        let active = localService.activeLease(for: "conv-expire")
-        XCTAssertNotNil(active)
+        // Before expire: activeLease returns nil because isExpired check
+        XCTAssertNil(service.activeLease(for: "conv-expire-reassign"))
 
-        // The activeLease check includes isExpired, so a lease with past expiresAt
-        // won't be returned even without calling expireStaleLeases.
-        // This is correct behavior: activeLease filters out logically expired leases.
+        // Run expire — should reassign to another device (mobile or CLI)
+        service.expireStaleLeases()
+
+        // A new active lease should exist for the same conversation
+        let active = service.activeLease(for: "conv-expire-reassign")
+        XCTAssertNotNil(active, "Expired lease should be reassigned to an alternative device")
+        XCTAssertNotEqual(active?.leaseId, expiredLease.leaseId, "Should be a new lease")
+        XCTAssertNotEqual(active?.assignedDeviceId, desktopId, "Should be on a different device")
+
+        // Routing history should contain the reassignment record
+        let history = service.routingHistory(for: "conv-expire-reassign")
+        XCTAssertTrue(history.contains(where: { $0.reason == .reassignmentExpired }))
+    }
+
+    func testExpireStaleLeases_expiredLease_noAlternative_markedExpired() {
+        // Only one device available
+        mockDevicePolicy.registeredDevices = [
+            DeviceInfo(
+                id: desktopId,
+                name: "Mac",
+                deviceType: .desktop,
+                platform: .macos,
+                lastSeen: Date(),
+                isCurrentDevice: true,
+                priority: 0
+            ),
+        ]
+        mockDevicePolicy.currentDevice = mockDevicePolicy.registeredDevices[0]
+
+        // Inject an expired lease on the only device
+        let expiredLease = ExecutionLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-expire-only",
+            assignedDeviceId: desktopId,
+            expiresAt: Date().addingTimeInterval(-10)
+        )
+        service.injectLease(expiredLease)
+
+        service.expireStaleLeases()
+
+        // No alternative device -> lease should be fully expired, not reassigned
+        let active = service.activeLease(for: "conv-expire-only")
+        XCTAssertNil(active, "Expired lease with no alternative should remain nil")
+    }
+
+    func testExpireStaleLeases_multipleExpired_allProcessed() {
+        // Inject two expired leases on different devices
+        let lease1 = ExecutionLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-multi-1",
+            assignedDeviceId: desktopId,
+            expiresAt: Date().addingTimeInterval(-10)
+        )
+        let lease2 = ExecutionLease(
+            workspaceId: UUID(),
+            agentId: "b",
+            conversationId: "conv-multi-2",
+            assignedDeviceId: mobileId,
+            expiresAt: Date().addingTimeInterval(-5)
+        )
+        service.injectLease(lease1)
+        service.injectLease(lease2)
+
+        service.expireStaleLeases()
+
+        // Both should have been processed (reassigned or expired)
+        let active1 = service.activeLease(for: "conv-multi-1")
+        XCTAssertNotNil(active1, "First expired lease should be reassigned")
+        XCTAssertNotEqual(active1?.assignedDeviceId, desktopId)
+
+        let active2 = service.activeLease(for: "conv-multi-2")
+        XCTAssertNotNil(active2, "Second expired lease should be reassigned")
+        XCTAssertNotEqual(active2?.assignedDeviceId, mobileId)
     }
 
     // MARK: - Active Lease Query Tests
@@ -768,6 +820,10 @@ final class ExecutionLeaseServiceTests: XCTestCase {
         XCTAssertNotNil(notActive.errorDescription)
         XCTAssertTrue(notActive.errorDescription!.contains("not active"))
 
+        let expired = ExecutionLeaseError.leaseExpired(UUID())
+        XCTAssertNotNil(expired.errorDescription)
+        XCTAssertTrue(expired.errorDescription!.contains("expired"))
+
         let duplicate = ExecutionLeaseError.duplicateLeaseForConversation("conv-1")
         XCTAssertNotNil(duplicate.errorDescription)
         XCTAssertTrue(duplicate.errorDescription!.contains("conv-1"))
@@ -832,6 +888,263 @@ final class ExecutionLeaseServiceTests: XCTestCase {
         )
         XCTAssertNotEqual(lease1.leaseId, lease2.leaseId)
         XCTAssertEqual(lease2.status, .active)
+    }
+
+    // MARK: - C2: Renew Expired Lease Tests
+
+    func testRenewExpiredLeaseThrowsLeaseExpired() {
+        // Inject a lease with past expiry directly into the service
+        let expiredLease = ExecutionLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-expired-renew",
+            assignedDeviceId: desktopId,
+            expiresAt: Date().addingTimeInterval(-10)
+        )
+        service.injectLease(expiredLease)
+
+        // Lease has status .active but TTL has passed
+        XCTAssertEqual(expiredLease.status, .active)
+        XCTAssertTrue(expiredLease.isExpired)
+
+        do {
+            _ = try service.renewLease(leaseId: expiredLease.leaseId)
+            XCTFail("Expected leaseExpired error")
+        } catch let error as ExecutionLeaseError {
+            if case .leaseExpired(let id) = error {
+                XCTAssertEqual(id, expiredLease.leaseId)
+            } else {
+                XCTFail("Expected .leaseExpired, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    func testRenewNonExpiredLeaseSucceeds() async throws {
+        let lease = try await service.acquireLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-non-expired",
+            requiredCapabilities: nil
+        )
+
+        // Fresh lease with future expiry should succeed
+        XCTAssertFalse(lease.isExpired)
+        let renewed = try service.renewLease(leaseId: lease.leaseId)
+        XCTAssertEqual(renewed.status, .active)
+        XCTAssertNotNil(renewed.renewedAt)
+    }
+
+    func testLeaseExpiredErrorDescription() {
+        let id = UUID()
+        let error = ExecutionLeaseError.leaseExpired(id)
+        XCTAssertNotNil(error.errorDescription)
+        XCTAssertTrue(error.errorDescription!.contains("expired"))
+        XCTAssertTrue(error.errorDescription!.contains(id.uuidString))
+    }
+
+    // MARK: - C3: Device Selection Policy Tests
+
+    func testDeviceSelectionPriorityBasedPolicy() async throws {
+        mockDevicePolicy.currentPolicy = .priorityBased
+
+        let lease = try await service.acquireLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-priority-policy",
+            requiredCapabilities: nil
+        )
+
+        // Desktop has priority 0 (highest)
+        XCTAssertEqual(lease.assignedDeviceId, desktopId)
+    }
+
+    func testDeviceSelectionLastActivePolicy() async throws {
+        mockDevicePolicy.currentPolicy = .lastActive
+
+        // Make mobile the most recently seen device
+        let now = Date()
+        mockDevicePolicy.registeredDevices[0] = DeviceInfo(
+            id: desktopId,
+            name: "Mac Studio",
+            deviceType: .desktop,
+            platform: .macos,
+            lastSeen: now.addingTimeInterval(-60),
+            isCurrentDevice: true,
+            priority: 0
+        )
+        mockDevicePolicy.registeredDevices[1] = DeviceInfo(
+            id: mobileId,
+            name: "iPhone",
+            deviceType: .mobile,
+            platform: .ios,
+            lastSeen: now,
+            isCurrentDevice: false,
+            priority: 1
+        )
+        mockDevicePolicy.registeredDevices[2] = DeviceInfo(
+            id: cliId,
+            name: "CLI Agent",
+            deviceType: .cli,
+            platform: .cli,
+            lastSeen: now.addingTimeInterval(-120),
+            isCurrentDevice: false,
+            priority: 2
+        )
+
+        let lease = try await service.acquireLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-last-active",
+            requiredCapabilities: nil
+        )
+
+        // Mobile has the most recent lastSeen
+        XCTAssertEqual(lease.assignedDeviceId, mobileId)
+    }
+
+    func testDeviceSelectionManualPolicy() async throws {
+        mockDevicePolicy.currentPolicy = .manual
+        mockDevicePolicy.setManualDevice(id: cliId)
+
+        let lease = try await service.acquireLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-manual",
+            requiredCapabilities: nil
+        )
+
+        // Manual policy should prefer the manually set device (CLI)
+        XCTAssertEqual(lease.assignedDeviceId, cliId)
+    }
+
+    func testDeviceSelectionManualPolicyFallsBackWhenManualDeviceDoesNotSatisfyCapabilities() async throws {
+        mockDevicePolicy.currentPolicy = .manual
+        mockDevicePolicy.setManualDevice(id: cliId)
+
+        // CLI doesn't support voice
+        let voiceRequired = DeviceCapabilities(
+            supportsVoice: true,
+            supportsTTS: false,
+            supportsNotifications: false,
+            supportsTools: false
+        )
+
+        let lease = try await service.acquireLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-manual-fallback",
+            requiredCapabilities: voiceRequired
+        )
+
+        // CLI can't satisfy voice — should fallback to desktop
+        XCTAssertEqual(lease.assignedDeviceId, desktopId)
+    }
+
+    // MARK: - Agent Affinity Tests
+
+    func testAgentAffinityBreaksTieBetweenSamePriorityDevices() async throws {
+        // Set up two devices with same priority
+        let deviceA = UUID()
+        let deviceB = UUID()
+        let now = Date()
+        mockDevicePolicy.registeredDevices = [
+            DeviceInfo(
+                id: deviceA,
+                name: "Device A",
+                deviceType: .desktop,
+                platform: .macos,
+                lastSeen: now,
+                isCurrentDevice: true,
+                priority: 0
+            ),
+            DeviceInfo(
+                id: deviceB,
+                name: "Device B",
+                deviceType: .desktop,
+                platform: .macos,
+                lastSeen: now,
+                isCurrentDevice: false,
+                priority: 0
+            ),
+        ]
+        mockDevicePolicy.currentDevice = mockDevicePolicy.registeredDevices[0]
+
+        // First acquire goes to device A (or B — either is fine, but with same lastSeen and priority
+        // the sort is stable so first in array wins).
+        let lease1 = try await service.acquireLease(
+            workspaceId: UUID(),
+            agentId: "special-agent",
+            conversationId: "conv-aff-1",
+            requiredCapabilities: nil
+        )
+        try service.releaseLease(leaseId: lease1.leaseId)
+        let firstDevice = lease1.assignedDeviceId
+
+        // Now routing history has an affinity record for "special-agent" → firstDevice.
+        // The second acquire for the same agent should prefer firstDevice due to affinity.
+        let lease2 = try await service.acquireLease(
+            workspaceId: UUID(),
+            agentId: "special-agent",
+            conversationId: "conv-aff-2",
+            requiredCapabilities: nil
+        )
+        XCTAssertEqual(lease2.assignedDeviceId, firstDevice,
+                        "Same agent should have affinity to the device it previously ran on")
+    }
+
+    // MARK: - Release Routing Record Tests
+
+    func testReleaseRoutingRecordHasNilToDeviceId() async throws {
+        let lease = try await service.acquireLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-release-record",
+            requiredCapabilities: nil
+        )
+
+        try service.releaseLease(leaseId: lease.leaseId)
+
+        let history = service.routingHistory(for: "conv-release-record")
+        let releaseRecord = history.first(where: { $0.reason == .released })
+        XCTAssertNotNil(releaseRecord)
+        XCTAssertNil(releaseRecord?.toDeviceId, "Release record should have nil toDeviceId")
+        XCTAssertEqual(releaseRecord?.fromDeviceId, lease.assignedDeviceId)
+    }
+
+    func testDeviceSelectionLastActivePolicyTiebreaker() async throws {
+        mockDevicePolicy.currentPolicy = .lastActive
+
+        let sameTime = Date()
+        mockDevicePolicy.registeredDevices[0] = DeviceInfo(
+            id: desktopId,
+            name: "Mac Studio",
+            deviceType: .desktop,
+            platform: .macos,
+            lastSeen: sameTime,
+            isCurrentDevice: true,
+            priority: 0
+        )
+        mockDevicePolicy.registeredDevices[1] = DeviceInfo(
+            id: mobileId,
+            name: "iPhone",
+            deviceType: .mobile,
+            platform: .ios,
+            lastSeen: sameTime,
+            isCurrentDevice: false,
+            priority: 1
+        )
+
+        let lease = try await service.acquireLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-tie",
+            requiredCapabilities: nil
+        )
+
+        // Same lastSeen — tiebreak by priority (desktop = 0 wins)
+        XCTAssertEqual(lease.assignedDeviceId, desktopId)
     }
 }
 
@@ -921,6 +1234,26 @@ final class MockExecutionLeaseServiceTests: XCTestCase {
         let history = mock.routingHistory(for: "conv-1")
         XCTAssertEqual(history.count, 1)
         XCTAssertEqual(history[0].reason, .initialAssignment)
+    }
+
+    func testActiveLeaseReturnsNilForExpiredLease() async throws {
+        let mock = MockExecutionLeaseService()
+
+        let lease = try await mock.acquireLease(
+            workspaceId: UUID(),
+            agentId: "a",
+            conversationId: "conv-mock-expire",
+            requiredCapabilities: nil
+        )
+
+        // Manually set lease to have past expiry (simulating time passing)
+        var expiredLease = lease
+        expiredLease.expiresAt = Date().addingTimeInterval(-10)
+        mock.leases[lease.leaseId] = expiredLease
+
+        // Mock should check isExpired just like the real service
+        let active = mock.activeLease(for: "conv-mock-expire")
+        XCTAssertNil(active, "Mock should return nil for expired leases (isExpired parity with real service)")
     }
 
     func testStubbedError() async {

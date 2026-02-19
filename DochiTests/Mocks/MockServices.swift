@@ -1675,7 +1675,8 @@ final class MockExecutionLeaseService: ExecutionLeaseServiceProtocol {
     func activeLease(for conversationId: String) -> ExecutionLease? {
         guard let leaseId = conversationLeaseMap[conversationId],
               let lease = leases[leaseId],
-              lease.status == .active else {
+              lease.status == .active,
+              !lease.isExpired else {
             return nil
         }
         return lease

@@ -1,5 +1,8 @@
 import Foundation
 
+/// @MainActor required: lease state (active leases, routing records) is read/written
+/// by ViewModel and HeartbeatService on the main actor. Isolating to MainActor prevents
+/// data races on the in-memory stores without additional locking.
 @MainActor
 protocol ExecutionLeaseServiceProtocol {
     /// Acquire a new lease for a conversation execution.

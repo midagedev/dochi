@@ -50,6 +50,16 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
         self.devicePolicyService = devicePolicyService
     }
 
+    #if DEBUG
+    /// Inject a lease directly for testing purposes only.
+    func injectLease(_ lease: ExecutionLease) {
+        leases[lease.leaseId] = lease
+        if lease.status == .active {
+            conversationLeaseMap[lease.conversationId] = lease.leaseId
+        }
+    }
+    #endif
+
     // MARK: - Acquire
 
     func acquireLease(
@@ -67,8 +77,8 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
             throw ExecutionLeaseError.duplicateLeaseForConversation(conversationId)
         }
 
-        // Select best device
-        guard let selectedDevice = selectDevice(requiredCapabilities: requiredCapabilities) else {
+        // Select best device (includes agent affinity scoring)
+        guard let selectedDevice = selectDevice(requiredCapabilities: requiredCapabilities, agentId: agentId) else {
             Log.app.error("No device available for lease — workspace=\(workspaceId), agent=\(agentId)")
             throw ExecutionLeaseError.noDeviceAvailable
         }
@@ -140,7 +150,7 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
             agentId: lease.agentId,
             conversationId: lease.conversationId,
             fromDeviceId: lease.assignedDeviceId,
-            toDeviceId: lease.assignedDeviceId,
+            toDeviceId: nil,
             reason: .released
         )
         routingRecords.append(record)
@@ -161,7 +171,8 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
         // Find an alternative device (exclude the currently assigned one)
         guard let newDevice = selectDevice(
             requiredCapabilities: nil,
-            excludingDeviceId: oldLease.assignedDeviceId
+            excludingDeviceId: oldLease.assignedDeviceId,
+            agentId: oldLease.agentId
         ) else {
             // No alternative — mark as failed
             oldLease.status = .failed
@@ -241,7 +252,8 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
             // Try to reassign first
             if let newDevice = selectDevice(
                 requiredCapabilities: nil,
-                excludingDeviceId: lease.assignedDeviceId
+                excludingDeviceId: lease.assignedDeviceId,
+                agentId: lease.agentId
             ) {
                 let previousDeviceId = lease.assignedDeviceId
                 lease.status = .reassigned
@@ -287,11 +299,18 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
 
     // MARK: - Device Selection
 
-    /// Select the best available device based on capability, policy, and liveness.
+    /// Select the best available device based on the 4-stage strategy:
+    /// 1. Capability filtering  2. Agent affinity  3. Liveness  4. Load (policy-based)
+    ///
+    /// Agent affinity gives a bonus to the device that most recently executed the
+    /// given agent. When two candidates are otherwise tied, the device with more
+    /// recent affinity wins.
     private func selectDevice(
         requiredCapabilities: DeviceCapabilities? = nil,
-        excludingDeviceId: UUID? = nil
+        excludingDeviceId: UUID? = nil,
+        agentId: String? = nil
     ) -> DeviceInfo? {
+        // Stage 1: Capability filtering
         var candidates = devicePolicyService.registeredDevices
             .filter { $0.isOnline || $0.isCurrentDevice }
 
@@ -300,7 +319,6 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
             candidates.removeAll { $0.id == excludeId }
         }
 
-        // Filter by required capabilities
         if let required = requiredCapabilities {
             candidates = candidates.filter { device in
                 capabilitiesSatisfied(device: device.capabilities, required: required)
@@ -309,24 +327,51 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
 
         guard !candidates.isEmpty else { return nil }
 
-        // Sort candidates according to the current DeviceSelectionPolicy
+        // Stage 2: Compute agent affinity scores from routing history
+        let affinityMap = buildAffinityMap(agentId: agentId)
+
+        // Stage 3 + 4: Sort by policy, breaking ties with affinity
         let policy = devicePolicyService.currentPolicy
 
         switch policy {
         case .priorityBased:
-            // Lower priority value is better, then most recent lastSeen as tiebreaker
+            // Lower priority value is better → affinity bonus → most recent lastSeen
             candidates.sort { a, b in
+                let aAffinity = affinityMap[a.id]
+                let bAffinity = affinityMap[b.id]
+                let aHasAffinity = aAffinity != nil
+                let bHasAffinity = bAffinity != nil
+
                 if a.priority != b.priority {
                     return a.priority < b.priority
+                }
+                // Same priority: prefer device with agent affinity
+                if aHasAffinity != bHasAffinity {
+                    return aHasAffinity
+                }
+                // Both have affinity: prefer more recent
+                if let aDate = aAffinity, let bDate = bAffinity, aDate != bDate {
+                    return aDate > bDate
                 }
                 return a.lastSeen > b.lastSeen
             }
 
         case .lastActive:
-            // Most recently seen device first, then priority as tiebreaker
+            // Most recently seen device first → affinity → priority
             candidates.sort { a, b in
+                let aAffinity = affinityMap[a.id]
+                let bAffinity = affinityMap[b.id]
+                let aHasAffinity = aAffinity != nil
+                let bHasAffinity = bAffinity != nil
+
                 if a.lastSeen != b.lastSeen {
                     return a.lastSeen > b.lastSeen
+                }
+                if aHasAffinity != bHasAffinity {
+                    return aHasAffinity
+                }
+                if let aDate = aAffinity, let bDate = bAffinity, aDate != bDate {
+                    return aDate > bDate
                 }
                 return a.priority < b.priority
             }
@@ -350,16 +395,47 @@ final class ExecutionLeaseService: ExecutionLeaseServiceProtocol {
                 // Manual device satisfies capabilities — prefer it
                 return manualDevice
             }
-            // Fallback: sort by priority if manual device not in candidates
+            // Fallback: sort by priority + affinity if manual device not in candidates
             candidates.sort { a, b in
+                let aAffinity = affinityMap[a.id]
+                let bAffinity = affinityMap[b.id]
+                let aHasAffinity = aAffinity != nil
+                let bHasAffinity = bAffinity != nil
+
                 if a.priority != b.priority {
                     return a.priority < b.priority
+                }
+                if aHasAffinity != bHasAffinity {
+                    return aHasAffinity
+                }
+                if let aDate = aAffinity, let bDate = bAffinity, aDate != bDate {
+                    return aDate > bDate
                 }
                 return a.lastSeen > b.lastSeen
             }
         }
 
         return candidates.first
+    }
+
+    /// Build a map of deviceId → most recent routing timestamp for the given agent.
+    /// Used to compute agent affinity: a device that recently ran the same agent
+    /// is preferred (tiebreaker) in device selection.
+    private func buildAffinityMap(agentId: String?) -> [UUID: Date] {
+        guard let agentId, !agentId.isEmpty else { return [:] }
+
+        var map: [UUID: Date] = [:]
+        for record in routingRecords where record.agentId == agentId {
+            guard let deviceId = record.toDeviceId else { continue }
+            if let existing = map[deviceId] {
+                if record.timestamp > existing {
+                    map[deviceId] = record.timestamp
+                }
+            } else {
+                map[deviceId] = record.timestamp
+            }
+        }
+        return map
     }
 
     /// Check if a device's capabilities satisfy the required capabilities.

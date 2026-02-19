@@ -19,7 +19,9 @@ struct SessionRoutingRecord: Codable, Sendable, Identifiable, Equatable {
     let agentId: String
     let conversationId: String
     let fromDeviceId: UUID?
-    let toDeviceId: UUID
+    /// Target device for this routing event.
+    /// `nil` when the lease is released (no destination device).
+    let toDeviceId: UUID?
     let reason: LeaseRoutingReason
     let timestamp: Date
 
@@ -30,7 +32,7 @@ struct SessionRoutingRecord: Codable, Sendable, Identifiable, Equatable {
         agentId: String,
         conversationId: String,
         fromDeviceId: UUID? = nil,
-        toDeviceId: UUID,
+        toDeviceId: UUID? = nil,
         reason: LeaseRoutingReason,
         timestamp: Date = Date()
     ) {
