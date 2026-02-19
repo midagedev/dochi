@@ -757,7 +757,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         limit: Int
     ) -> [UnifiedCodingSession] {
         var dedup: [String: UnifiedCodingSession] = [:]
-        for session in sessions.sorted(by: { $0.updatedAt > $1.updatedAt }) {
+        for session in sessions.sorted(by: isPreferredUnifiedSessionOrder(_:_:)) {
             let repositoryKey = session.repositoryRoot ?? "unassigned"
             let key = "\(session.provider)|\(session.nativeSessionId)|\(repositoryKey)"
             if dedup[key] == nil {
@@ -770,10 +770,32 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 if lhs.isActive != rhs.isActive {
                     return lhs.isActive
                 }
-                return lhs.updatedAt > rhs.updatedAt
+                if lhs.updatedAt != rhs.updatedAt {
+                    return lhs.updatedAt > rhs.updatedAt
+                }
+                return sessionStableKey(lhs) < sessionStableKey(rhs)
             })
             .prefix(effectiveLimit)
             .map { $0 }
+    }
+
+    nonisolated static func isPreferredUnifiedSessionOrder(
+        _ lhs: UnifiedCodingSession,
+        _ rhs: UnifiedCodingSession
+    ) -> Bool {
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        if lhs.isActive != rhs.isActive {
+            return lhs.isActive
+        }
+        return sessionStableKey(lhs) < sessionStableKey(rhs)
+    }
+
+    nonisolated static func sessionStableKey(_ session: UnifiedCodingSession) -> String {
+        let runtimeId = session.runtimeSessionId ?? "-"
+        let repositoryRoot = session.repositoryRoot ?? "-"
+        return "\(session.provider)|\(session.nativeSessionId)|\(runtimeId)|\(repositoryRoot)|\(session.path)|\(session.source)"
     }
 
     nonisolated static func repositoryRoot(
