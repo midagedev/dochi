@@ -180,6 +180,9 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         // Wait for runtime.ready event on stdout
         try await waitForReady(stdoutPipe: stdoutPipe)
 
+        // Restrict socket file access to current user only (spec §7 보안 경계)
+        chmod(socketPath, 0o600)
+
         // Connect via UDS
         let conn = RuntimeUDSConnection(socketPath: socketPath)
         try await conn.connect()
@@ -313,6 +316,13 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
 // MARK: - UDS Connection
 
 /// Manages a Unix Domain Socket connection for JSON-RPC communication.
+///
+/// Safety invariant for `@unchecked Sendable`:
+/// All mutable state (`fileHandle`, `pendingRequests`) is guarded by `lock` (NSLock).
+/// `socketPath` is immutable after init. Callers must ensure `send`/`close` are not
+/// interleaved without external coordination (currently guaranteed by `@MainActor` on
+/// `RuntimeBridgeService`).
+/// TODO: Phase 1 — replace with actor to eliminate manual locking.
 final class RuntimeUDSConnection: @unchecked Sendable {
     private let socketPath: String
     private var fileHandle: FileHandle?
