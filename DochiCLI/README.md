@@ -40,6 +40,10 @@ dochi doctor
 dochi ask "오늘 할 일 정리해줘"
 dochi chat
 dochi conversation list --limit 20
+dochi conversation show 35BBCC9A-EB8F-43E1-9069-D774E46E714D --limit 15
+dochi conversation tail --limit 20
+dochi log recent --minutes 30 --limit 200
+dochi log recent --minutes 60 --category Tool --level error --contains "session"
 dochi context show system
 dochi context edit memory
 dochi config show
@@ -82,15 +86,32 @@ dochi doctor
 dochi ask "회의록 요약해줘" --json
 ```
 
-## 5) 로컬 파일 경로
+## 5) 대화/로그 점검 표준 루틴 (운영 기본)
+
+앞으로 "도치가 이상하게 답했다 / 세션 조회가 꼬였다" 같은 이슈는 아래 순서로 먼저 수집합니다.
+
+```bash
+dochi conversation list --limit 10
+dochi conversation tail --limit 30
+dochi log recent --minutes 20 --limit 300
+dochi log recent --minutes 60 --category Tool --level error
+```
+
+권장 규칙:
+- 최신 대화 본문 확인은 `conversation tail` 또는 `conversation show`를 우선 사용
+- 앱 상태/도구 오류 확인은 `log recent`를 우선 사용
+- 필요하면 이후에만 `dochi dev log tail`로 실시간 추적
+
+## 6) 로컬 파일 경로
 
 - CLI 설정 파일: `~/Library/Application Support/Dochi/cli_config.json`
 - 로컬 소켓: `~/Library/Application Support/Dochi/run/dochi.sock`
 - 로컬 API 토큰: `~/Library/Application Support/Dochi/run/control-plane.token`
+- 대화 파일: `~/Library/Application Support/Dochi/conversations/*.json`
 
 앱 연결 모드에서는 CLI가 `control-plane.token`을 자동으로 읽어 `auth_token`을 요청에 포함합니다.
 
-## 6) `dochi doctor`로 상태 점검
+## 7) `dochi doctor`로 상태 점검
 
 `doctor`는 아래 항목을 점검합니다.
 
@@ -105,7 +126,7 @@ dochi ask "회의록 요약해줘" --json
 
 앱 연결 모드에서 문제를 만났다면 `dochi doctor` 출력부터 확인하세요.
 
-## 7) 자주 발생하는 문제
+## 8) 자주 발생하는 문제
 
 ### "Dochi 앱이 실행 중이 아닙니다" / "Control Plane 연결 실패"
 
@@ -128,7 +149,7 @@ dochi config set model claude-sonnet-4-5-20250929
 dochi --mode standalone --allow-standalone ask "테스트"
 ```
 
-## 8) 종료 코드
+## 9) 종료 코드
 
 - `0`: 성공
 - `1`: 런타임 오류
@@ -137,7 +158,7 @@ dochi --mode standalone --allow-standalone ask "테스트"
 - `4`: 앱 연결 오류
 - `5`: 인증 오류
 
-## 9) 비-UI 기능 검증 표준 절차 (Host 모드)
+## 10) 비-UI 기능 검증 표준 절차 (Host 모드)
 
 비-UI 기능 검증 기본 원칙:
 - 제품 검증은 `--mode app`(또는 `auto`)로 수행
