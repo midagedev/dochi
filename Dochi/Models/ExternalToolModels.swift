@@ -253,6 +253,42 @@ struct SessionHistorySearchResult: Identifiable, Sendable, Equatable {
     let tags: [String]
 }
 
+enum OrchestrationSessionSelectionAction: String, Codable, Sendable {
+    case reuseT0Active = "reuse_t0_active"
+    case attachT1 = "attach_t1"
+    case createT0 = "create_t0"
+    case analyzeOnly = "analyze_only"
+    case none = "none"
+}
+
+struct OrchestrationSessionSelection: Sendable, Equatable {
+    let action: OrchestrationSessionSelectionAction
+    let reason: String
+    let repositoryRoot: String?
+    let selectedSession: UnifiedCodingSession?
+}
+
+enum OrchestrationExecutionDecisionKind: String, Codable, Sendable {
+    case allowed
+    case confirmationRequired = "confirmation_required"
+    case denied
+}
+
+struct OrchestrationExecutionDecision: Sendable, Equatable {
+    let kind: OrchestrationExecutionDecisionKind
+    let reason: String
+    let isDestructiveCommand: Bool
+}
+
+enum OrchestrationRunState: String, Codable, Sendable {
+    case planned
+    case resolvingSession = "resolving_session"
+    case executing
+    case verifying
+    case completed
+    case failed
+}
+
 enum ExternalTerminalApp: String, CaseIterable, Codable, Sendable {
     case auto
     case terminal
