@@ -35,18 +35,16 @@ final class SessionMappingService {
 
     // MARK: - CRUD
 
-    /// Look up an existing active mapping by composite key.
+    /// Look up an existing active mapping by composite key (deviceId excluded for cross-device resume).
     func findActive(
         workspaceId: String,
         agentId: String,
-        conversationId: String,
-        deviceId: String
+        conversationId: String
     ) -> SessionMapping? {
         let key = SessionLookupKey(
             workspaceId: workspaceId,
             agentId: agentId,
-            conversationId: conversationId,
-            deviceId: deviceId
+            conversationId: conversationId
         )
         guard let idx = lookupIndex[key],
               idx < store.mappings.count,
@@ -75,6 +73,19 @@ final class SessionMappingService {
         store.mappings[idx].status = status
         store.mappings[idx].lastActiveAt = Date()
         rebuildIndex()
+        save()
+    }
+
+    /// Update the device ID for a session mapping (cross-device resume).
+    ///
+    /// Called when a session is resumed from a different device so the mapping
+    /// reflects the current device for audit and future lookups.
+    func updateDeviceId(sessionId: String, newDeviceId: String) {
+        guard let idx = store.mappings.firstIndex(where: { $0.sessionId == sessionId }) else {
+            return
+        }
+        store.mappings[idx].deviceId = newDeviceId
+        store.mappings[idx].lastActiveAt = Date()
         save()
     }
 

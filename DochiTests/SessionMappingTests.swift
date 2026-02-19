@@ -64,7 +64,27 @@ final class SessionMappingTests: XCTestCase {
         XCTAssertEqual(key.workspaceId, "ws-1")
         XCTAssertEqual(key.agentId, "a-1")
         XCTAssertEqual(key.conversationId, "c-1")
-        XCTAssertEqual(key.deviceId, "d-1")
+    }
+
+    func testLookupKeyExcludesDeviceId() {
+        // Two mappings with different deviceIds should have the same lookupKey
+        let mapping1 = SessionMapping(
+            sessionId: "s-1", sdkSessionId: "sdk-1",
+            workspaceId: "ws-1", agentId: "a-1",
+            conversationId: "c-1", userId: "u-1",
+            deviceId: "device-A",
+            status: .active,
+            createdAt: Date(), lastActiveAt: Date()
+        )
+        let mapping2 = SessionMapping(
+            sessionId: "s-2", sdkSessionId: "sdk-2",
+            workspaceId: "ws-1", agentId: "a-1",
+            conversationId: "c-1", userId: "u-1",
+            deviceId: "device-B",
+            status: .active,
+            createdAt: Date(), lastActiveAt: Date()
+        )
+        XCTAssertEqual(mapping1.lookupKey, mapping2.lookupKey)
     }
 
     func testSessionMappingStatusValues() {
@@ -74,9 +94,9 @@ final class SessionMappingTests: XCTestCase {
     }
 
     func testLookupKeyHashEquality() {
-        let key1 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c", deviceId: "d")
-        let key2 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c", deviceId: "d")
-        let key3 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c", deviceId: "other")
+        let key1 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c")
+        let key2 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "c")
+        let key3 = SessionLookupKey(workspaceId: "ws", agentId: "a", conversationId: "other")
 
         XCTAssertEqual(key1, key2)
         XCTAssertEqual(key1.hashValue, key2.hashValue)
@@ -121,7 +141,7 @@ final class SessionMappingTests: XCTestCase {
 
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1"
+            conversationId: "c-1"
         )
         XCTAssertNotNil(found)
         XCTAssertEqual(found?.sessionId, "s-1")
@@ -145,7 +165,7 @@ final class SessionMappingTests: XCTestCase {
 
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1"
+            conversationId: "c-1"
         )
         XCTAssertNil(found)
     }
@@ -233,7 +253,7 @@ final class SessionMappingTests: XCTestCase {
         // Same composite key should find the existing active session
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1"
+            conversationId: "c-1"
         )
         XCTAssertNotNil(found)
         XCTAssertEqual(found?.sessionId, "s-1")
@@ -247,7 +267,7 @@ final class SessionMappingTests: XCTestCase {
         // Different conversation ID
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "other-conv", deviceId: "d-1"
+            conversationId: "other-conv"
         )
         XCTAssertNil(found)
     }
@@ -261,9 +281,49 @@ final class SessionMappingTests: XCTestCase {
         // Same key but session is closed — should not reuse
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
-            conversationId: "c-1", deviceId: "d-1"
+            conversationId: "c-1"
         )
         XCTAssertNil(found)
+    }
+
+    // MARK: - Update Device ID (C1 fix)
+
+    @MainActor
+    func testUpdateDeviceId() {
+        let service = SessionMappingService(baseURL: tempDir)
+        let original = makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", deviceId: "device-A")
+        service.insert(original)
+
+        service.updateDeviceId(sessionId: "s-1", newDeviceId: "device-B")
+
+        let updated = service.findBySessionId("s-1")
+        XCTAssertNotNil(updated)
+        XCTAssertEqual(updated?.deviceId, "device-B")
+        XCTAssertGreaterThanOrEqual(updated!.lastActiveAt, original.lastActiveAt)
+    }
+
+    @MainActor
+    func testUpdateDeviceIdPersists() {
+        let service1 = SessionMappingService(baseURL: tempDir)
+        service1.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", deviceId: "device-A"))
+        service1.updateDeviceId(sessionId: "s-1", newDeviceId: "device-B")
+
+        // Reload from disk
+        let service2 = SessionMappingService(baseURL: tempDir)
+        let mapping = service2.findBySessionId("s-1")
+        XCTAssertEqual(mapping?.deviceId, "device-B")
+    }
+
+    @MainActor
+    func testUpdateDeviceIdForNonexistentSessionDoesNothing() {
+        let service = SessionMappingService(baseURL: tempDir)
+        service.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", deviceId: "device-A"))
+
+        // Update nonexistent session — should be a no-op
+        service.updateDeviceId(sessionId: "nonexistent", newDeviceId: "device-B")
+
+        let mapping = service.findBySessionId("s-1")
+        XCTAssertEqual(mapping?.deviceId, "device-A")
     }
 
     // MARK: - Prune
