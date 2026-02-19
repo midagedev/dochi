@@ -20,6 +20,7 @@ protocol BuiltInToolServiceProtocol {
     var allToolInfos: [ToolInfo] { get }
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]]
+    func availableToolSchemas(for permissions: [String], preferredToolGroups: [String]) -> [[String: Any]]
     func execute(name: String, arguments: [String: Any]) async -> ToolResult
     func enableTools(names: [String])
     func enableToolsTTL(minutes: Int)
@@ -31,6 +32,10 @@ protocol BuiltInToolServiceProtocol {
 
 extension BuiltInToolServiceProtocol {
     var selectedCapabilityLabel: String? { nil }
+
+    func availableToolSchemas(for permissions: [String], preferredToolGroups _: [String]) -> [[String: Any]] {
+        availableToolSchemas(for: permissions)
+    }
 
     func toolInfo(named name: String) -> ToolInfo? {
         allToolInfos.first { $0.name == name }

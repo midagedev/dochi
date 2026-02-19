@@ -99,7 +99,8 @@ final class AgentManagementTests: XCTestCase {
             wakeWord: "테스트야",
             description: "테스트용 봇",
             defaultModel: "gpt-4o",
-            permissions: ["safe", "sensitive"]
+            permissions: ["safe", "sensitive"],
+            preferredToolGroups: ["coding", "git"]
         )
 
         contextService.saveAgentConfig(workspaceId: wsId, config: config)
@@ -111,6 +112,7 @@ final class AgentManagementTests: XCTestCase {
         XCTAssertEqual(loaded?.description, "테스트용 봇")
         XCTAssertEqual(loaded?.defaultModel, "gpt-4o")
         XCTAssertEqual(loaded?.effectivePermissions, ["safe", "sensitive"])
+        XCTAssertEqual(loaded?.effectivePreferredToolGroups, ["coding", "git"])
     }
 
     func testAgentConfigPermissionsUpdate() {
@@ -126,5 +128,25 @@ final class AgentManagementTests: XCTestCase {
 
         let loaded = contextService.loadAgentConfig(workspaceId: wsId, agentName: "봇")
         XCTAssertEqual(loaded?.effectivePermissions, ["safe"])
+    }
+
+    func testSendMessagePassesPreferredToolGroupsToToolService() async {
+        let wsId = sessionContext.workspaceId
+        let agentName = settings.activeAgentName
+        contextService.saveAgentConfig(
+            workspaceId: wsId,
+            config: AgentConfig(
+                name: agentName,
+                permissions: ["safe"],
+                preferredToolGroups: ["coding", "git"]
+            )
+        )
+        toolService.stubbedSchemas = []
+
+        viewModel.inputText = "테스트 메시지"
+        viewModel.sendMessage()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(toolService.lastPreferredToolGroups ?? [], ["coding", "git"])
     }
 }

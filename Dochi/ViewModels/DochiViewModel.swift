@@ -231,11 +231,18 @@ final class DochiViewModel {
     private var sentenceChunker = SentenceChunker()
     private var llmStreamActive = false
     private static let maxToolLoopIterations = 10
+    private static let maxSameToolSignatureCalls = 2
+    private static let maxToolControlCallsPerTurn = 1
     private static let maxRecentMessages = 30
     private static let sessionEndingTimeout: TimeInterval = 10
     private static let toolConfirmationTimeout: TimeInterval = 30
     private static let compressionModel = "gpt-4o-mini"
     private static let compressionSummaryPrompt = "다음 메모리를 핵심 사실만 보존하여 50% 이하로 요약하세요. 라인 단위(`- ...`) 형식 유지."
+    private static let toolControlNames: Set<String> = [
+        "tools.enable",
+        "tools.enable_ttl",
+        "tools.reset",
+    ]
 
     // MARK: - Computed
 
@@ -2224,7 +2231,7 @@ final class DochiViewModel {
                         let normalizedName = Self.desanitizeToolNameForLLM(call.name)
                         let blockedForTelegram =
                             normalizedName.hasPrefix("mcp_")
-                            || Self.remoteToolControlNames.contains(normalizedName)
+                            || Self.toolControlNames.contains(normalizedName)
                             || (toolInfoForLLMName(call.name)?.category != .safe)
 
                         let result: ToolResult
@@ -2289,12 +2296,6 @@ final class DochiViewModel {
         }
     }
 
-    private static let remoteToolControlNames: Set<String> = [
-        "tools.enable",
-        "tools.enable_ttl",
-        "tools.reset"
-    ]
-
     private static func desanitizeToolNameForLLM(_ name: String) -> String {
         name.replacingOccurrences(of: "-_-", with: ".")
     }
@@ -2314,7 +2315,7 @@ final class DochiViewModel {
             }
 
             if name.hasPrefix("mcp_") { return false }
-            if Self.remoteToolControlNames.contains(Self.desanitizeToolNameForLLM(name)) { return false }
+            if Self.toolControlNames.contains(Self.desanitizeToolNameForLLM(name)) { return false }
             return true
         }
     }
@@ -2445,6 +2446,9 @@ final class DochiViewModel {
 
         // Compose context (after potential compression)
         var systemPrompt = composeSystemPrompt()
+        if let toolUsageHint = buildRecentToolUsageHint(from: conversation) {
+            systemPrompt += "\n\n\(toolUsageHint)"
+        }
 
         // RAG: Search for relevant documents and inject context (I-1)
         ragLastContextInfo = nil
@@ -2485,7 +2489,11 @@ final class DochiViewModel {
 
         // Get available tool schemas
         let agentPermissions = currentAgentPermissions()
-        let tools = toolService.availableToolSchemas(for: agentPermissions)
+        let preferredToolGroups = currentAgentPreferredToolGroups()
+        let tools = toolService.availableToolSchemas(
+            for: agentPermissions,
+            preferredToolGroups: preferredToolGroups
+        )
         selectedCapabilityLabel = toolService.selectedCapabilityLabel
 
         // Reset sentence chunker for TTS streaming
@@ -2495,6 +2503,8 @@ final class DochiViewModel {
         toolExecutions = []
 
         var toolLoopCount = 0
+        var toolSignatureCounts: [String: Int] = [:]
+        var toolControlCallCount = 0
 
         while toolLoopCount <= Self.maxToolLoopIterations + 1 {
             guard !Task.isCancelled else { return }
@@ -2594,14 +2604,26 @@ final class DochiViewModel {
                 processingSubState = .toolCalling
                 for codableCall in toolCalls {
                     guard !Task.isCancelled else { return }
-                    currentToolName = codableCall.name
-                    Log.tool.info("Executing tool: \(codableCall.name) (loop \(toolLoopCount))")
 
                     let call = ToolCall(
                         id: codableCall.id,
                         name: codableCall.name,
                         arguments: codableCall.arguments
                     )
+
+                    if let guardError = evaluateToolLoopGuard(
+                        call: call,
+                        toolSignatureCounts: &toolSignatureCounts,
+                        toolControlCallCount: &toolControlCallCount
+                    ) {
+                        appendToolResultMessage(guardError)
+                        processingSubState = .toolError
+                        Log.tool.warning("Blocked repetitive tool call: \(call.name)")
+                        continue
+                    }
+
+                    currentToolName = codableCall.name
+                    Log.tool.info("Executing tool: \(codableCall.name) (loop \(toolLoopCount))")
 
                     // UX-7: Create live ToolExecution for UI tracking
                     let info = toolService.toolInfo(named: call.name)
@@ -2936,6 +2958,79 @@ final class DochiViewModel {
         }
     }
 
+    private func buildRecentToolUsageHint(from conversation: Conversation) -> String? {
+        var recentNames: [String] = []
+        var seen: Set<String> = []
+
+        for message in conversation.messages.reversed() {
+            guard let toolCalls = message.toolCalls, !toolCalls.isEmpty else { continue }
+            for call in toolCalls.reversed() {
+                let normalizedName = Self.desanitizeToolNameForLLM(call.name)
+                guard seen.insert(normalizedName).inserted else { continue }
+                recentNames.append(normalizedName)
+                if recentNames.count >= 5 {
+                    break
+                }
+            }
+            if recentNames.count >= 5 {
+                break
+            }
+        }
+
+        guard !recentNames.isEmpty else { return nil }
+        let ordered = recentNames.reversed().joined(separator: ", ")
+        return """
+        ## 최근 도구 사용 힌트
+        - 최근 사용 도구: \(ordered)
+        - 같은 도구를 같은 인자로 반복 호출하지 마세요.
+        - 코딩 세션 현황 질의에서는 `coding.sessions`, `external_tool.status`, `dochi.bridge_status`를 우선 사용하세요.
+        """
+    }
+
+    private func evaluateToolLoopGuard(
+        call: ToolCall,
+        toolSignatureCounts: inout [String: Int],
+        toolControlCallCount: inout Int
+    ) -> ToolResult? {
+        let normalizedName = Self.desanitizeToolNameForLLM(call.name)
+        let signature = Self.toolCallSignature(name: normalizedName, arguments: call.arguments)
+        let signatureCount = (toolSignatureCounts[signature] ?? 0) + 1
+        toolSignatureCounts[signature] = signatureCount
+
+        if signatureCount > Self.maxSameToolSignatureCalls {
+            return ToolResult(
+                toolCallId: call.id,
+                content: "반복 호출 차단: 동일 도구/인자 호출이 \(Self.maxSameToolSignatureCalls)회를 초과했습니다. 다른 도구를 사용하거나 최종 응답을 생성하세요.",
+                isError: true
+            )
+        }
+
+        if Self.toolControlNames.contains(normalizedName) {
+            toolControlCallCount += 1
+            if toolControlCallCount > Self.maxToolControlCallsPerTurn {
+                return ToolResult(
+                    toolCallId: call.id,
+                    content: "제어 도구 호출 차단: tools.enable/tools.enable_ttl/tools.reset는 한 턴에 최대 \(Self.maxToolControlCallsPerTurn)회만 호출할 수 있습니다.",
+                    isError: true
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private static func toolCallSignature(name: String, arguments: [String: Any]) -> String {
+        let payload: String
+        if JSONSerialization.isValidJSONObject(arguments),
+           let data = try? JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys]),
+           let json = String(data: data, encoding: .utf8) {
+            payload = json
+        } else {
+            payload = String(describing: arguments)
+        }
+        return "\(name)|\(payload)"
+    }
+
     // MARK: - Context Composition
 
     private func composeSystemPrompt() -> String {
@@ -3161,12 +3256,18 @@ final class DochiViewModel {
     // MARK: - Agent Permissions
 
     private func currentAgentPermissions() -> [String] {
-        let agentName = settings.activeAgentName
-        let wsId = sessionContext.workspaceId
-        if let config = contextService.loadAgentConfig(workspaceId: wsId, agentName: agentName) {
-            return config.effectivePermissions
-        }
-        return ["safe"]
+        currentAgentConfig()?.effectivePermissions ?? ["safe"]
+    }
+
+    private func currentAgentPreferredToolGroups() -> [String] {
+        currentAgentConfig()?.effectivePreferredToolGroups ?? []
+    }
+
+    private func currentAgentConfig() -> AgentConfig? {
+        contextService.loadAgentConfig(
+            workspaceId: sessionContext.workspaceId,
+            agentName: settings.activeAgentName
+        )
     }
 
     // MARK: - Conversation Management

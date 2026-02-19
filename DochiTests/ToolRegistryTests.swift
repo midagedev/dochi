@@ -203,6 +203,18 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertTrue(registry.enabledToolNames.contains("tool.c"))
     }
 
+    func testToolNamesInGroupsNormalizesLegacyGroups() {
+        registry.register(StubTool(name: "set_timer", category: .safe, isBaseline: true))
+        registry.register(StubTool(name: "dochi.bridge_status", category: .safe, isBaseline: false))
+        registry.register(StubTool(name: "external_tool.status", category: .safe, isBaseline: false))
+
+        let names = registry.toolNames(inGroups: [" TIMER ", "dochi", "external_tool"])
+        XCTAssertEqual(
+            Set(names),
+            Set(["set_timer", "dochi.bridge_status", "external_tool.status"])
+        )
+    }
+
     // MARK: - ToolsEnableTool
 
     func testToolsEnableToolActivatesNewTools() async {
@@ -260,5 +272,42 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertTrue(result.content.contains("도구 활성화 완료"))
         XCTAssertTrue(result.content.contains("dochi.bridge_open"))
         XCTAssertTrue(registry.enabledToolNames.contains("dochi.bridge_open"))
+    }
+
+    func testToolsEnableToolActivatesByGroups() async {
+        registry.register(StubTool(name: "dochi.bridge_status"))
+        registry.register(StubTool(name: "dochi.bridge_read"))
+        registry.register(StubTool(name: "external_tool.status"))
+        let tool = ToolsEnableTool(registry: registry)
+
+        let result = await tool.execute(arguments: [
+            "groups": ["dochi", "external_tool"]
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(registry.enabledToolNames.contains("dochi.bridge_status"))
+        XCTAssertTrue(registry.enabledToolNames.contains("dochi.bridge_read"))
+        XCTAssertTrue(registry.enabledToolNames.contains("external_tool.status"))
+    }
+
+    func testToolsEnableToolUnknownGroupReturnsHint() async {
+        registry.register(StubTool(name: "dochi.bridge_status"))
+        let tool = ToolsEnableTool(registry: registry)
+
+        let result = await tool.execute(arguments: [
+            "groups": ["unknown_group"]
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.content.contains("찾을 수 없는 그룹"))
+        XCTAssertFalse(registry.enabledToolNames.contains("dochi.bridge_status"))
+    }
+
+    func testToolsEnableToolRequiresNamesOrGroups() async {
+        let tool = ToolsEnableTool(registry: registry)
+        let result = await tool.execute(arguments: [:])
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("names 또는 groups"))
     }
 }

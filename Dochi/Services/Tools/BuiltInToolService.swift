@@ -284,6 +284,10 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     }
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]] {
+        availableToolSchemas(for: permissions, preferredToolGroups: [])
+    }
+
+    func availableToolSchemas(for permissions: [String], preferredToolGroups: [String]) -> [[String: Any]] {
         var schemas: [[String: Any]] = []
         selectedCapabilityLabel = nil
 
@@ -302,7 +306,8 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
             tools = availableTools
         }
 
-        for tool in tools {
+        let orderedTools = orderedToolsByPreference(tools, preferredToolGroups: preferredToolGroups)
+        for tool in orderedTools {
             // OpenAI requires tool names to match ^[a-zA-Z0-9_-]+$
             let sanitizedName = Self.sanitizeToolName(tool.name)
             schemas.append([
@@ -330,6 +335,31 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         }
 
         return schemas
+    }
+
+    private func orderedToolsByPreference(
+        _ tools: [any BuiltInToolProtocol],
+        preferredToolGroups: [String]
+    ) -> [any BuiltInToolProtocol] {
+        var orderedGroups: [String] = []
+        var seen: Set<String> = []
+        for raw in preferredToolGroups {
+            let normalized = ToolGroupResolver.normalizeGroupName(raw)
+            guard !normalized.isEmpty else { continue }
+            if seen.insert(normalized).inserted {
+                orderedGroups.append(normalized)
+            }
+        }
+        guard !orderedGroups.isEmpty else { return tools.sorted { $0.name < $1.name } }
+
+        let priorities = Dictionary(uniqueKeysWithValues: orderedGroups.enumerated().map { ($0.element, $0.offset) })
+
+        return tools.sorted { lhs, rhs in
+            let lhsPriority = priorities[ToolGroupResolver.group(forToolName: lhs.name)] ?? Int.max
+            let rhsPriority = priorities[ToolGroupResolver.group(forToolName: rhs.name)] ?? Int.max
+            if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
+            return lhs.name < rhs.name
+        }
     }
 
     func execute(name: String, arguments: [String: Any]) async -> ToolResult {

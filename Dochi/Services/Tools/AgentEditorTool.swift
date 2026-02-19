@@ -584,7 +584,8 @@ final class AgentConfigGetTool: BuiltInToolProtocol {
                 "호출어: \(config.wakeWord ?? "(없음)")",
                 "설명: \(config.description ?? "(없음)")",
                 "기본 모델: \(config.defaultModel ?? "(없음)")",
-                "권한: \(config.effectivePermissions.joined(separator: ", "))"
+                "권한: \(config.effectivePermissions.joined(separator: ", "))",
+                "선호 도구 그룹: \(config.effectivePreferredToolGroups.isEmpty ? "(없음)" : config.effectivePreferredToolGroups.joined(separator: ", "))"
             ]
 
             Log.tool.info("Loaded config for agent: \(agentName)")
@@ -623,6 +624,11 @@ final class AgentConfigUpdateTool: BuiltInToolProtocol {
                     "items": ["type": "string", "enum": ["safe", "sensitive", "restricted"]],
                     "description": "에이전트 권한 목록"
                 ],
+                "preferred_tool_groups": [
+                    "type": "array",
+                    "items": ["type": "string"],
+                    "description": "선호 도구 그룹 목록 (예: coding, git, calendar, external_tool)"
+                ],
                 "name": ["type": "string", "description": "에이전트 이름 (미지정 시 활성 에이전트)"]
             ]
         ]
@@ -632,9 +638,14 @@ final class AgentConfigUpdateTool: BuiltInToolProtocol {
         let newWakeWord = arguments["wake_word"] as? String
         let newDescription = arguments["description"] as? String
         let newPermissions = arguments["permissions"] as? [String]
+        let newPreferredToolGroups = arguments["preferred_tool_groups"] as? [String]
 
-        if newWakeWord == nil && newDescription == nil && newPermissions == nil {
-            return ToolResult(toolCallId: "", content: "오류: 수정할 필드가 없습니다. wake_word, description, 또는 permissions를 지정해주세요.", isError: true)
+        if newWakeWord == nil && newDescription == nil && newPermissions == nil && newPreferredToolGroups == nil {
+            return ToolResult(
+                toolCallId: "",
+                content: "오류: 수정할 필드가 없습니다. wake_word, description, permissions, preferred_tool_groups 중 하나를 지정해주세요.",
+                isError: true
+            )
         }
 
         switch resolveAgentName(arguments: arguments, settings: settings, contextService: contextService, sessionContext: sessionContext) {
@@ -660,6 +671,20 @@ final class AgentConfigUpdateTool: BuiltInToolProtocol {
                 let validated = permissions.filter { validValues.contains($0) }
                 config.permissions = validated
                 changes.append("권한: \(validated.joined(separator: ", "))")
+            }
+            if let preferredToolGroups = newPreferredToolGroups {
+                var normalized: [String] = []
+                var seen: Set<String> = []
+                for raw in preferredToolGroups {
+                    let group = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    guard !group.isEmpty else { continue }
+                    if seen.insert(group).inserted {
+                        normalized.append(group)
+                    }
+                }
+                config.preferredToolGroups = normalized.isEmpty ? nil : normalized
+                let label = normalized.isEmpty ? "(없음)" : normalized.joined(separator: ", ")
+                changes.append("선호 도구 그룹: \(label)")
             }
 
             contextService.saveAgentConfig(workspaceId: sessionContext.workspaceId, config: config)
