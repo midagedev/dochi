@@ -1338,6 +1338,14 @@ final class MockRuntimeBridgeService: RuntimeBridgeProtocol {
     var setApprovalHandlerCallCount = 0
     var lastApprovalHandler: ToolApprovalHandler?
 
+    // Context snapshot
+    var configureContextSnapshotCallCount = 0
+    var buildContextSnapshotCallCount = 0
+    var resolveContextSnapshotCallCount = 0
+    var lastContextService: (any ContextServiceProtocol)?
+    var storedSnapshots: [String: ContextSnapshot] = [:]
+    var stubbedSnapshotRef: String?
+
     // Session stubs
     var stubbedOpenResult: SessionOpenResult?
     var stubbedSessionEvents: [BridgeEvent] = []
@@ -1380,6 +1388,48 @@ final class MockRuntimeBridgeService: RuntimeBridgeProtocol {
     func setApprovalHandler(_ handler: ToolApprovalHandler?) {
         setApprovalHandlerCallCount += 1
         lastApprovalHandler = handler
+    }
+
+    func configureContextSnapshot(contextService: any ContextServiceProtocol) {
+        configureContextSnapshotCallCount += 1
+        lastContextService = contextService
+    }
+
+    func buildContextSnapshot(
+        workspaceId: UUID,
+        agentId: String,
+        userId: String?,
+        channelMetadata: String?,
+        tokenBudget: Int
+    ) -> String? {
+        buildContextSnapshotCallCount += 1
+        if let ref = stubbedSnapshotRef {
+            return ref
+        }
+        // Build a real snapshot using stored context service if configured
+        let ref = "mock-snapshot-\(UUID().uuidString.prefix(8))"
+        let snapshot = ContextSnapshot(
+            id: ref,
+            workspaceId: workspaceId.uuidString,
+            agentId: agentId,
+            userId: userId ?? "",
+            layers: ContextLayers(
+                systemLayer: ContextLayer(name: .system, content: ""),
+                workspaceLayer: ContextLayer(name: .workspace, content: ""),
+                agentLayer: ContextLayer(name: .agent, content: ""),
+                personalLayer: ContextLayer(name: .personal, content: "")
+            ),
+            tokenEstimate: 0,
+            createdAt: Date(),
+            sourceRevision: "mock"
+        )
+        storedSnapshots[ref] = snapshot
+        return ref
+    }
+
+    func resolveContextSnapshot(ref: String) -> ContextSnapshot? {
+        resolveContextSnapshotCallCount += 1
+        return storedSnapshots[ref]
     }
 
     func openSession(params: SessionOpenParams) async throws -> SessionOpenResult {

@@ -39,6 +39,10 @@ import {
   flushAllAudit,
 } from "./handlers/hooks";
 import {
+  handleContextPush,
+  handleContextResolve,
+} from "./handlers/context";
+import {
   TOOL_HOOK_BLOCKED,
 } from "./handlers/types";
 import type {
@@ -48,6 +52,8 @@ import type {
   SessionCloseParams,
   ToolResultParams,
   ApprovalResolveParams,
+  ContextPushParams,
+  ContextResolveParams,
 } from "./handlers/types";
 
 type Handler = (params?: Record<string, unknown>) => unknown;
@@ -64,6 +70,8 @@ const handlers: Record<string, Handler> = {
   "session.list": () => handleSessionList(),
   "tool.result": (params) => handleToolResult(params as unknown as ToolResultParams),
   "approval.resolve": (params) => handleApprovalResolve(params as unknown as ApprovalResolveParams),
+  "context.push": (params) => handleContextPush(params as unknown as ContextPushParams),
+  "context.resolve": (params) => handleContextResolve(params as unknown as ContextResolveParams),
 };
 
 function processRequest(request: JsonRpcRequest): JsonRpcResponse {
