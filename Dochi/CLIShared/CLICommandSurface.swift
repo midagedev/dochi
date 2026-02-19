@@ -45,6 +45,11 @@ enum CLIDevAction: Equatable, Sendable {
     case bridgeStatus(sessionId: String?)
     case bridgeSend(sessionId: String, command: String)
     case bridgeRead(sessionId: String, lines: Int)
+    case bridgeRepoList
+    case bridgeRepoInit(path: String, defaultBranch: String, createReadme: Bool, createGitignore: Bool)
+    case bridgeRepoClone(remoteURL: String, destinationPath: String, branch: String?)
+    case bridgeRepoAttach(path: String)
+    case bridgeRepoRemove(repositoryId: String, deleteDirectory: Bool)
 }
 
 enum CLICommand: Equatable, Sendable {
@@ -395,8 +400,85 @@ enum CLICommandParser {
                 }
                 let lines = rest.count >= 2 ? (Int(rest[1]) ?? 80) : 80
                 return .dev(.bridgeRead(sessionId: rest[0], lines: max(1, lines)))
+            case "repo":
+                let repoSub = rest.first ?? "list"
+                let repoArgs = Array(rest.dropFirst())
+                switch repoSub {
+                case "list":
+                    return .dev(.bridgeRepoList)
+                case "init":
+                    guard let path = repoArgs.first, !path.hasPrefix("--") else {
+                        throw CLIParseError.invalidUsage("dev bridge repo init <path> [--branch B] [--readme] [--gitignore] 형식이 필요합니다.")
+                    }
+                    var defaultBranch = "main"
+                    var createReadme = false
+                    var createGitignore = false
+                    var index = 1
+                    while index < repoArgs.count {
+                        switch repoArgs[index] {
+                        case "--branch":
+                            guard index + 1 < repoArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge repo init --branch <name> 형식이 필요합니다.")
+                            }
+                            defaultBranch = repoArgs[index + 1]
+                            index += 2
+                        case "--readme":
+                            createReadme = true
+                            index += 1
+                        case "--gitignore":
+                            createGitignore = true
+                            index += 1
+                        default:
+                            throw CLIParseError.invalidUsage("dev bridge repo init의 알 수 없는 옵션입니다: \(repoArgs[index])")
+                        }
+                    }
+                    return .dev(.bridgeRepoInit(
+                        path: path,
+                        defaultBranch: defaultBranch,
+                        createReadme: createReadme,
+                        createGitignore: createGitignore
+                    ))
+                case "clone":
+                    guard repoArgs.count >= 2 else {
+                        throw CLIParseError.invalidUsage("dev bridge repo clone <remote_url> <destination_path> [--branch B] 형식이 필요합니다.")
+                    }
+                    let remoteURL = repoArgs[0]
+                    let destinationPath = repoArgs[1]
+                    var branch: String?
+                    var index = 2
+                    while index < repoArgs.count {
+                        switch repoArgs[index] {
+                        case "--branch":
+                            guard index + 1 < repoArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge repo clone --branch <name> 형식이 필요합니다.")
+                            }
+                            branch = repoArgs[index + 1]
+                            index += 2
+                        default:
+                            throw CLIParseError.invalidUsage("dev bridge repo clone의 알 수 없는 옵션입니다: \(repoArgs[index])")
+                        }
+                    }
+                    return .dev(.bridgeRepoClone(
+                        remoteURL: remoteURL,
+                        destinationPath: destinationPath,
+                        branch: branch
+                    ))
+                case "attach":
+                    guard let path = repoArgs.first else {
+                        throw CLIParseError.invalidUsage("dev bridge repo attach <path> 형식이 필요합니다.")
+                    }
+                    return .dev(.bridgeRepoAttach(path: path))
+                case "remove":
+                    guard let repositoryId = repoArgs.first else {
+                        throw CLIParseError.invalidUsage("dev bridge repo remove <repository_id> [--delete-directory] 형식이 필요합니다.")
+                    }
+                    let deleteDirectory = repoArgs.dropFirst().contains("--delete-directory")
+                    return .dev(.bridgeRepoRemove(repositoryId: repositoryId, deleteDirectory: deleteDirectory))
+                default:
+                    throw CLIParseError.invalidUsage("dev bridge repo 하위 명령은 list/init/clone/attach/remove만 지원합니다.")
+                }
             default:
-                throw CLIParseError.invalidUsage("dev bridge 하위 명령은 open/roots/status/send/read만 지원합니다.")
+                throw CLIParseError.invalidUsage("dev bridge 하위 명령은 open/roots/status/send/read/repo만 지원합니다.")
             }
 
         default:

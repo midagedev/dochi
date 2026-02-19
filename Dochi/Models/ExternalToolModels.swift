@@ -11,6 +11,62 @@ enum ExternalToolStatus: String, Codable, Sendable {
     case unknown
 }
 
+enum DiscoveredCodingSessionSource: String, Codable, Sendable {
+    case codexSessionFile = "codex_session_file"
+    case claudeProjectFile = "claude_project_file"
+    case claudeTaskDirectory = "claude_task_directory"
+}
+
+struct DiscoveredCodingSession: Sendable, Equatable {
+    let source: DiscoveredCodingSessionSource
+    let provider: String
+    let sessionId: String
+    let workingDirectory: String?
+    let path: String
+    let updatedAt: Date
+    let isActive: Bool
+}
+
+enum ManagedGitRepositorySource: String, Codable, Sendable {
+    case initialized = "initialized"
+    case cloned = "cloned"
+    case attached = "attached"
+}
+
+struct ManagedGitRepository: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var name: String
+    var rootPath: String
+    var source: ManagedGitRepositorySource
+    var originURL: String?
+    var defaultBranch: String?
+    var isArchived: Bool
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        rootPath: String,
+        source: ManagedGitRepositorySource,
+        originURL: String?,
+        defaultBranch: String?,
+        isArchived: Bool = false,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.rootPath = rootPath
+        self.source = source
+        self.originURL = originURL
+        self.defaultBranch = defaultBranch
+        self.isArchived = isArchived
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 struct HealthCheckPatterns: Codable, Sendable, Equatable {
     var idlePattern: String
     var busyPattern: String
