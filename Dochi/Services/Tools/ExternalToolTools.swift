@@ -171,8 +171,7 @@ final class ExternalToolStatusTool: BuiltInToolProtocol {
             let unassignedCount = unified.filter(\.isUnassigned).count
             lines.append("통합 세션 \(unified.count)개 (unassigned: \(unassignedCount))")
             for item in unified {
-                let active = item.isActive ? "active" : "inactive"
-                lines.append("- [\(item.provider)] \(item.nativeSessionId) \(active) tier=\(item.controllabilityTier.rawValue) runtime=\(item.runtimeType.rawValue) repo=\(item.repositoryRoot ?? "(unassigned)")")
+                lines.append("- [\(item.provider)] \(item.nativeSessionId) state=\(item.activityState.rawValue) score=\(item.activityScore) tier=\(item.controllabilityTier.rawValue) runtime=\(item.runtimeType.rawValue) repo=\(item.repositoryRoot ?? "(unassigned)")")
             }
         }
 

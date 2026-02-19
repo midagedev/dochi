@@ -190,6 +190,79 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertTrue(deduped.contains(where: { $0.path == "/tmp/c.jsonl" }))
     }
 
+    func testActivityScoringCombinesFiveSignalsAndClassifiesActive() {
+        let result = ExternalToolSessionManager.scoreUnifiedSessionActivity(
+            input: ExternalToolSessionManager.UnifiedSessionActivityInput(
+                runtimeAlive: true,
+                recentOutputAge: 20,
+                recentCommandAge: 30,
+                fileMtimeAge: 40,
+                hasErrorPattern: false
+            ),
+            config: .standard
+        )
+
+        XCTAssertEqual(result.state, .active)
+        XCTAssertGreaterThanOrEqual(result.score, CodingSessionActivityScoringConfig.standard.activeThreshold)
+        XCTAssertGreaterThan(result.signals.runtimeAliveScore, 0)
+        XCTAssertGreaterThan(result.signals.recentOutputScore, 0)
+        XCTAssertGreaterThan(result.signals.recentCommandScore, 0)
+        XCTAssertGreaterThan(result.signals.fileFreshnessScore, 0)
+        XCTAssertEqual(result.signals.errorPenaltyScore, 0)
+    }
+
+    func testActivityScoringAppliesErrorPenaltyAndCanDropState() {
+        let baseInput = ExternalToolSessionManager.UnifiedSessionActivityInput(
+            runtimeAlive: true,
+            recentOutputAge: 45,
+            recentCommandAge: 80,
+            fileMtimeAge: 90,
+            hasErrorPattern: false
+        )
+        let withoutError = ExternalToolSessionManager.scoreUnifiedSessionActivity(input: baseInput, config: .standard)
+        let withError = ExternalToolSessionManager.scoreUnifiedSessionActivity(
+            input: ExternalToolSessionManager.UnifiedSessionActivityInput(
+                runtimeAlive: true,
+                recentOutputAge: 45,
+                recentCommandAge: 80,
+                fileMtimeAge: 90,
+                hasErrorPattern: true
+            ),
+            config: .standard
+        )
+
+        XCTAssertGreaterThan(withoutError.score, withError.score)
+        XCTAssertGreaterThan(withError.signals.errorPenaltyScore, 0)
+        XCTAssertTrue(withError.state == .idle || withError.state == .stale || withError.state == .dead)
+    }
+
+    func testActivityScoringClassifiesStaleAndDead() {
+        let stale = ExternalToolSessionManager.scoreUnifiedSessionActivity(
+            input: ExternalToolSessionManager.UnifiedSessionActivityInput(
+                runtimeAlive: false,
+                recentOutputAge: 3_600,
+                recentCommandAge: nil,
+                fileMtimeAge: 3_600,
+                hasErrorPattern: false
+            ),
+            config: .standard
+        )
+        let dead = ExternalToolSessionManager.scoreUnifiedSessionActivity(
+            input: ExternalToolSessionManager.UnifiedSessionActivityInput(
+                runtimeAlive: false,
+                recentOutputAge: 200_000,
+                recentCommandAge: nil,
+                fileMtimeAge: 200_000,
+                hasErrorPattern: true
+            ),
+            config: .standard
+        )
+
+        XCTAssertEqual(stale.state, .stale)
+        XCTAssertEqual(dead.state, .dead)
+        XCTAssertLessThan(dead.score, stale.score)
+    }
+
     func testUnifiedSessionOrderingIsDeterministicWhenTimestampsTie() {
         let tiedTime = Date(timeIntervalSince1970: 1_700_000_000)
         let later = UnifiedCodingSession(

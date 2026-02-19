@@ -546,6 +546,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         } else {
             session.status = .busy
             session.lastActivityText = String(command.prefix(80))
+            session.lastCommandDate = Date()
             Log.app.info("Sent command to \(session.tmuxSessionName): \(command.prefix(50))")
         }
     }
@@ -669,9 +670,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession] {
         let effectiveLimit = max(1, min(300, limit))
+        let now = Date()
         let sessionSnapshots: [RuntimeSessionSnapshot] = sessions.compactMap { session in
             let profile = profiles.first(where: { $0.id == session.profileId })
-            let provider = profile?.command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "tmux"
+            let providerCommand = profile?.command.trimmingCharacters(in: .whitespacesAndNewlines) ?? "tmux"
+            let provider = Self.normalizedProvider(fromCommand: providerCommand)
             let workingDirectory = profile?.workingDirectory
             let updatedAt = session.lastHealthCheckDate ?? session.startedAt ?? .distantPast
             return RuntimeSessionSnapshot(
@@ -682,6 +685,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 path: "tmux://\(session.tmuxSessionName)",
                 updatedAt: updatedAt,
                 isActive: session.status != .dead,
+                status: session.status,
+                lastOutputAt: session.lastOutput.isEmpty ? nil : session.lastHealthCheckDate,
+                lastCommandAt: session.lastCommandDate,
+                hasErrorPattern: session.status == .error || Self.containsErrorSignal(session.lastOutput),
                 runtimeType: .tmux,
                 controllabilityTier: .t0Full,
                 source: "tmux_runtime"
@@ -698,7 +705,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 runtimeSessions: sessionSnapshots,
                 discoveredSessions: discovered,
                 managedRepositoryRoots: managedRoots,
-                limit: effectiveLimit
+                limit: effectiveLimit,
+                now: now,
+                config: .standard
             )
         }.value
     }
@@ -707,12 +716,24 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         runtimeSessions: [RuntimeSessionSnapshot],
         discoveredSessions: [DiscoveredCodingSession],
         managedRepositoryRoots: [String],
-        limit: Int
+        limit: Int,
+        now: Date = Date(),
+        config: CodingSessionActivityScoringConfig = .standard
     ) -> [UnifiedCodingSession] {
         var merged: [UnifiedCodingSession] = runtimeSessions.map { runtime in
             let repositoryRoot = repositoryRoot(
                 for: runtime.workingDirectory,
                 managedRepositoryRoots: managedRepositoryRoots
+            )
+            let activity = scoreUnifiedSessionActivity(
+                input: UnifiedSessionActivityInput(
+                    runtimeAlive: runtime.status != .dead,
+                    recentOutputAge: ageSince(runtime.lastOutputAt, now: now),
+                    recentCommandAge: ageSince(runtime.lastCommandAt, now: now),
+                    fileMtimeAge: ageSince(runtime.updatedAt, now: now),
+                    hasErrorPattern: runtime.hasErrorPattern
+                ),
+                config: config
             )
             return UnifiedCodingSession(
                 source: runtime.source,
@@ -725,7 +746,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 repositoryRoot: repositoryRoot,
                 path: runtime.path,
                 updatedAt: runtime.updatedAt,
-                isActive: runtime.isActive
+                isActive: activity.state == .active || activity.state == .idle,
+                activityScore: activity.score,
+                activityState: activity.state,
+                activitySignals: activity.signals
             )
         }
 
@@ -733,6 +757,16 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             let repositoryRoot = repositoryRoot(
                 for: discovered.workingDirectory,
                 managedRepositoryRoots: managedRepositoryRoots
+            )
+            let activity = scoreUnifiedSessionActivity(
+                input: UnifiedSessionActivityInput(
+                    runtimeAlive: discovered.isActive,
+                    recentOutputAge: discovered.isActive ? ageSince(discovered.updatedAt, now: now) : nil,
+                    recentCommandAge: nil,
+                    fileMtimeAge: ageSince(discovered.updatedAt, now: now),
+                    hasErrorPattern: false
+                ),
+                config: config
             )
             return UnifiedCodingSession(
                 source: discovered.source.rawValue,
@@ -745,7 +779,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 repositoryRoot: repositoryRoot,
                 path: discovered.path,
                 updatedAt: discovered.updatedAt,
-                isActive: discovered.isActive
+                isActive: activity.state == .active || activity.state == .idle,
+                activityScore: activity.score,
+                activityState: activity.state,
+                activitySignals: activity.signals
             )
         })
 
@@ -767,8 +804,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let effectiveLimit = max(1, min(300, limit))
         return Array(dedup.values)
             .sorted(by: { lhs, rhs in
-                if lhs.isActive != rhs.isActive {
-                    return lhs.isActive
+                if lhs.activityState != rhs.activityState {
+                    return activityStateRank(lhs.activityState) < activityStateRank(rhs.activityState)
+                }
+                if lhs.activityScore != rhs.activityScore {
+                    return lhs.activityScore > rhs.activityScore
                 }
                 if lhs.updatedAt != rhs.updatedAt {
                     return lhs.updatedAt > rhs.updatedAt
@@ -783,11 +823,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         _ lhs: UnifiedCodingSession,
         _ rhs: UnifiedCodingSession
     ) -> Bool {
+        if lhs.activityScore != rhs.activityScore {
+            return lhs.activityScore > rhs.activityScore
+        }
         if lhs.updatedAt != rhs.updatedAt {
             return lhs.updatedAt > rhs.updatedAt
         }
-        if lhs.isActive != rhs.isActive {
-            return lhs.isActive
+        if lhs.activityState != rhs.activityState {
+            return activityStateRank(lhs.activityState) < activityStateRank(rhs.activityState)
         }
         return sessionStableKey(lhs) < sessionStableKey(rhs)
     }
@@ -796,6 +839,111 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let runtimeId = session.runtimeSessionId ?? "-"
         let repositoryRoot = session.repositoryRoot ?? "-"
         return "\(session.provider)|\(session.nativeSessionId)|\(runtimeId)|\(repositoryRoot)|\(session.path)|\(session.source)"
+    }
+
+    nonisolated static func activityStateRank(_ state: CodingSessionActivityState) -> Int {
+        switch state {
+        case .active:
+            return 0
+        case .idle:
+            return 1
+        case .stale:
+            return 2
+        case .dead:
+            return 3
+        }
+    }
+
+    struct UnifiedSessionActivityInput: Sendable, Equatable {
+        let runtimeAlive: Bool
+        let recentOutputAge: TimeInterval?
+        let recentCommandAge: TimeInterval?
+        let fileMtimeAge: TimeInterval?
+        let hasErrorPattern: Bool
+    }
+
+    struct UnifiedSessionActivityScoreResult: Sendable, Equatable {
+        let score: Int
+        let state: CodingSessionActivityState
+        let signals: CodingSessionActivitySignals
+    }
+
+    nonisolated static func scoreUnifiedSessionActivity(
+        input: UnifiedSessionActivityInput,
+        config: CodingSessionActivityScoringConfig = .standard
+    ) -> UnifiedSessionActivityScoreResult {
+        let runtimeAliveScore = input.runtimeAlive ? config.runtimeAliveWeight : 0
+        let recentOutputScore = decayScore(
+            age: input.recentOutputAge,
+            hotWindow: config.outputHotWindow,
+            staleWindow: config.staleWindow,
+            maxWeight: config.recentOutputWeight
+        )
+        let recentCommandScore = decayScore(
+            age: input.recentCommandAge,
+            hotWindow: config.commandHotWindow,
+            staleWindow: config.staleWindow,
+            maxWeight: config.recentCommandWeight
+        )
+        let fileFreshnessScore = decayScore(
+            age: input.fileMtimeAge,
+            hotWindow: config.fileHotWindow,
+            staleWindow: config.deadWindow,
+            maxWeight: config.fileFreshnessWeight
+        )
+        let errorPenaltyScore = input.hasErrorPattern ? config.errorPenaltyWeight : 0
+
+        let rawScore = runtimeAliveScore + recentOutputScore + recentCommandScore + fileFreshnessScore - errorPenaltyScore
+        let normalizedScore = min(100, max(0, rawScore))
+
+        let state: CodingSessionActivityState
+        if normalizedScore >= config.activeThreshold {
+            state = .active
+        } else if normalizedScore >= config.idleThreshold {
+            state = .idle
+        } else if normalizedScore >= config.staleThreshold {
+            state = .stale
+        } else {
+            state = .dead
+        }
+
+        let signals = CodingSessionActivitySignals(
+            runtimeAliveScore: runtimeAliveScore,
+            recentOutputScore: recentOutputScore,
+            recentCommandScore: recentCommandScore,
+            fileFreshnessScore: fileFreshnessScore,
+            errorPenaltyScore: errorPenaltyScore
+        )
+        return UnifiedSessionActivityScoreResult(
+            score: normalizedScore,
+            state: state,
+            signals: signals
+        )
+    }
+
+    nonisolated static func decayScore(
+        age: TimeInterval?,
+        hotWindow: TimeInterval,
+        staleWindow: TimeInterval,
+        maxWeight: Int
+    ) -> Int {
+        guard let age else { return 0 }
+        if age <= hotWindow { return maxWeight }
+        if age >= staleWindow { return 0 }
+        guard staleWindow > hotWindow else { return 0 }
+        let ratio = (staleWindow - age) / (staleWindow - hotWindow)
+        return max(0, min(maxWeight, Int((Double(maxWeight) * ratio).rounded())))
+    }
+
+    nonisolated static func ageSince(_ timestamp: Date?, now: Date) -> TimeInterval? {
+        guard let timestamp else { return nil }
+        return max(0, now.timeIntervalSince(timestamp))
+    }
+
+    nonisolated static func containsErrorSignal(_ lines: [String]) -> Bool {
+        let markers = ["error", "failed", "traceback", "exception"]
+        let sample = lines.suffix(20).joined(separator: "\n").lowercased()
+        return markers.contains(where: { sample.contains($0) })
     }
 
     nonisolated static func repositoryRoot(
@@ -850,6 +998,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let path: String
         let updatedAt: Date
         let isActive: Bool
+        let status: ExternalToolStatus
+        let lastOutputAt: Date?
+        let lastCommandAt: Date?
+        let hasErrorPattern: Bool
         let runtimeType: CodingSessionRuntimeType
         let controllabilityTier: CodingSessionControllabilityTier
         let source: String
@@ -1152,6 +1304,13 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         } catch {
             throw ExternalToolError.repositoryOperationFailed(error.localizedDescription)
         }
+    }
+
+    nonisolated private static func normalizedProvider(fromCommand command: String) -> String {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "tmux" }
+        let executable = trimmed.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? trimmed
+        return URL(fileURLWithPath: executable).lastPathComponent.lowercased()
     }
 
     nonisolated private static func expandedPath(_ path: String) -> String {

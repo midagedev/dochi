@@ -80,6 +80,55 @@ enum CodingSessionControllabilityTier: String, Codable, Sendable {
     case t3Unknown = "t3_unknown"
 }
 
+enum CodingSessionActivityState: String, Codable, Sendable {
+    case active
+    case idle
+    case stale
+    case dead
+}
+
+struct CodingSessionActivitySignals: Codable, Sendable, Equatable {
+    let runtimeAliveScore: Int
+    let recentOutputScore: Int
+    let recentCommandScore: Int
+    let fileFreshnessScore: Int
+    let errorPenaltyScore: Int
+}
+
+struct CodingSessionActivityScoringConfig: Sendable, Equatable {
+    let runtimeAliveWeight: Int
+    let recentOutputWeight: Int
+    let recentCommandWeight: Int
+    let fileFreshnessWeight: Int
+    let errorPenaltyWeight: Int
+
+    let outputHotWindow: TimeInterval
+    let commandHotWindow: TimeInterval
+    let fileHotWindow: TimeInterval
+    let staleWindow: TimeInterval
+    let deadWindow: TimeInterval
+
+    let activeThreshold: Int
+    let idleThreshold: Int
+    let staleThreshold: Int
+
+    static let standard = CodingSessionActivityScoringConfig(
+        runtimeAliveWeight: 32,
+        recentOutputWeight: 23,
+        recentCommandWeight: 20,
+        fileFreshnessWeight: 15,
+        errorPenaltyWeight: 24,
+        outputHotWindow: 2 * 60,
+        commandHotWindow: 3 * 60,
+        fileHotWindow: 10 * 60,
+        staleWindow: 2 * 60 * 60,
+        deadWindow: 24 * 60 * 60,
+        activeThreshold: 70,
+        idleThreshold: 42,
+        staleThreshold: 20
+    )
+}
+
 struct UnifiedCodingSession: Sendable, Equatable {
     let source: String
     let runtimeType: CodingSessionRuntimeType
@@ -92,8 +141,49 @@ struct UnifiedCodingSession: Sendable, Equatable {
     let path: String
     let updatedAt: Date
     let isActive: Bool
+    let activityScore: Int
+    let activityState: CodingSessionActivityState
+    let activitySignals: CodingSessionActivitySignals
 
     var isUnassigned: Bool { repositoryRoot == nil }
+
+    init(
+        source: String,
+        runtimeType: CodingSessionRuntimeType,
+        controllabilityTier: CodingSessionControllabilityTier,
+        provider: String,
+        nativeSessionId: String,
+        runtimeSessionId: String?,
+        workingDirectory: String?,
+        repositoryRoot: String?,
+        path: String,
+        updatedAt: Date,
+        isActive: Bool,
+        activityScore: Int = 0,
+        activityState: CodingSessionActivityState = .stale,
+        activitySignals: CodingSessionActivitySignals = CodingSessionActivitySignals(
+            runtimeAliveScore: 0,
+            recentOutputScore: 0,
+            recentCommandScore: 0,
+            fileFreshnessScore: 0,
+            errorPenaltyScore: 0
+        )
+    ) {
+        self.source = source
+        self.runtimeType = runtimeType
+        self.controllabilityTier = controllabilityTier
+        self.provider = provider
+        self.nativeSessionId = nativeSessionId
+        self.runtimeSessionId = runtimeSessionId
+        self.workingDirectory = workingDirectory
+        self.repositoryRoot = repositoryRoot
+        self.path = path
+        self.updatedAt = updatedAt
+        self.isActive = isActive
+        self.activityScore = activityScore
+        self.activityState = activityState
+        self.activitySignals = activitySignals
+    }
 }
 
 enum ExternalTerminalApp: String, CaseIterable, Codable, Sendable {
@@ -238,6 +328,7 @@ final class ExternalToolSession: Identifiable, @unchecked Sendable {
     var lastHealthCheckDate: Date?
     var startedAt: Date?
     var lastActivityText: String?
+    var lastCommandDate: Date?
 
     init(
         id: UUID = UUID(),
