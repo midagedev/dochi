@@ -903,9 +903,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 repositoryRoot: repositoryRoot
             )
         }.value
-        sessionKPICounters.selectionAttemptCount += 1
+        incrementKPICounter(\.selectionAttemptCount)
         if Self.isSelectionFailure(selection) {
-            sessionKPICounters.selectionFailureCount += 1
+            incrementKPICounter(\.selectionFailureCount)
         }
         return selection
     }
@@ -929,9 +929,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         expected: CodingSessionActivityState,
         observed: CodingSessionActivityState
     ) {
-        sessionKPICounters.activityFeedbackSampleCount += 1
+        incrementKPICounter(\.activityFeedbackSampleCount)
         if expected == observed {
-            sessionKPICounters.activityFeedbackMatchedCount += 1
+            incrementKPICounter(\.activityFeedbackMatchedCount)
         }
     }
 
@@ -984,9 +984,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 now: Date()
             )
         }.value
-        sessionKPICounters.historySearchQueryCount += 1
+        incrementKPICounter(\.historySearchQueryCount)
         if !results.isEmpty {
-            sessionKPICounters.historySearchHitCount += 1
+            incrementKPICounter(\.historySearchHitCount)
         }
         return results
     }
@@ -1065,10 +1065,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         sessions: [UnifiedCodingSession],
         dedupCandidateCount: Int
     ) {
-        sessionKPICounters.repositoryAssignedCount = sessions.filter { !$0.isUnassigned }.count
-        sessionKPICounters.repositoryTotalCount = sessions.count
-        sessionKPICounters.dedupCandidateCount += max(0, dedupCandidateCount)
-        sessionKPICounters.dedupCorrectionCount += max(0, dedupCandidateCount - sessions.count)
+        sessionKPICounters.repositoryAssignedCount = min(Self.kpiCounterCap, sessions.filter { !$0.isUnassigned }.count)
+        sessionKPICounters.repositoryTotalCount = min(Self.kpiCounterCap, sessions.count)
+        incrementKPICounter(\.dedupCandidateCount, by: dedupCandidateCount)
+        incrementKPICounter(\.dedupCorrectionCount, by: max(0, dedupCandidateCount - sessions.count))
 
         var distribution: [String: Int] = [:]
         for session in sessions {
@@ -1076,6 +1076,26 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }
         sessionKPICounters.activityStateDistribution = distribution
     }
+
+    private func incrementKPICounter(
+        _ keyPath: WritableKeyPath<SessionManagementKPICounters, Int>,
+        by rawDelta: Int = 1
+    ) {
+        let delta = max(0, rawDelta)
+        guard delta > 0 else { return }
+
+        let current = sessionKPICounters[keyPath: keyPath]
+        let (sum, overflow) = current.addingReportingOverflow(delta)
+        let capped: Int
+        if overflow {
+            capped = Self.kpiCounterCap
+        } else {
+            capped = min(Self.kpiCounterCap, sum)
+        }
+        sessionKPICounters[keyPath: keyPath] = capped
+    }
+
+    nonisolated private static let kpiCounterCap = 1_000_000
 
     nonisolated static func isSelectionFailure(_ selection: OrchestrationSessionSelection) -> Bool {
         switch selection.action {
