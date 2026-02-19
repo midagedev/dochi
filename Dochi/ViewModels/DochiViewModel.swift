@@ -1268,6 +1268,7 @@ final class DochiViewModel {
     func configureRuntimeBridge(_ bridge: any RuntimeBridgeProtocol) {
         self.runtimeBridge = bridge
         bridge.configureToolDispatch(toolService: toolService)
+        bridge.configureContextSnapshot(contextService: contextService)
         bridge.setApprovalHandler { [weak self] params in
             guard let self else { return (approved: false, scope: .once) }
             return await self.requestSDKToolApproval(params: params)
@@ -1303,11 +1304,20 @@ final class DochiViewModel {
 
             guard let sessionId = activeSDKSessionId else { return }
 
+            // Build context snapshot before session run
+            let snapshotRef = bridge.buildContextSnapshot(
+                workspaceId: sessionContext.workspaceId,
+                agentId: settings.activeAgentName,
+                userId: sessionContext.currentUserId,
+                channelMetadata: nil,
+                tokenBudget: ContextSnapshotBuilder.defaultTokenBudget
+            )
+
             // Start session run
             let runParams = SessionRunParams(
                 sessionId: sessionId,
                 input: input,
-                contextSnapshotRef: nil,
+                contextSnapshotRef: snapshotRef,
                 permissionMode: nil
             )
 

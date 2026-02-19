@@ -36,6 +36,10 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
     /// Handler for tool dispatch requests from the runtime.
     private(set) var toolDispatchHandler: ToolDispatchHandler?
 
+    /// Context snapshot builder and store.
+    private var snapshotBuilder: ContextSnapshotBuilder?
+    private let snapshotStore = ContextSnapshotStore()
+
     // MARK: - Init
 
     init(
@@ -148,6 +152,50 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         toolDispatchHandler?.approvalHandler = handler
     }
 
+    // MARK: - Context Snapshot
+
+    func configureContextSnapshot(contextService: any ContextServiceProtocol) {
+        self.snapshotBuilder = ContextSnapshotBuilder(contextService: contextService)
+    }
+
+    func buildContextSnapshot(
+        workspaceId: UUID,
+        agentId: String,
+        userId: String?,
+        channelMetadata: String?,
+        tokenBudget: Int = ContextSnapshotBuilder.defaultTokenBudget
+    ) -> String? {
+        guard let builder = snapshotBuilder else {
+            Log.runtime.warning("Cannot build snapshot: builder not configured")
+            return nil
+        }
+
+        let snapshot = builder.build(
+            workspaceId: workspaceId,
+            agentId: agentId,
+            userId: userId,
+            channelMetadata: channelMetadata,
+            tokenBudget: tokenBudget
+        )
+
+        // Validate boundaries
+        let violations = ContextSnapshotBuilder.validateBoundaries(
+            snapshot: snapshot,
+            expectedWorkspaceId: workspaceId.uuidString,
+            expectedUserId: userId
+        )
+        if !violations.isEmpty {
+            Log.runtime.error("Snapshot boundary violations: \(violations.joined(separator: "; "))")
+            return nil
+        }
+
+        return snapshotStore.store(snapshot)
+    }
+
+    func resolveContextSnapshot(ref: String) -> ContextSnapshot? {
+        snapshotStore.resolve(ref)
+    }
+
     // MARK: - Session Management
 
     func openSession(params: SessionOpenParams) async throws -> SessionOpenResult {
@@ -179,6 +227,12 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
                 }
 
                 do {
+                    // Push context snapshot to runtime before session.run
+                    if let ref = params.contextSnapshotRef,
+                       let snapshot = self.snapshotStore.resolve(ref) {
+                        try await self.pushContextSnapshot(snapshot: snapshot, ref: ref)
+                    }
+
                     let rpcParams: [String: AnyCodableValue] = [
                         "sessionId": .string(params.sessionId),
                         "input": .string(params.input),
@@ -454,6 +508,24 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
             Log.runtime.error("Failed to decode bridge event: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    // MARK: - Context Push
+
+    /// Push a context snapshot to the runtime via `context.push` RPC.
+    private func pushContextSnapshot(snapshot: ContextSnapshot, ref: String) async throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let snapshotData = try encoder.encode(snapshot)
+        let snapshotValue = try JSONDecoder().decode(AnyCodableValue.self, from: snapshotData)
+
+        let pushParams: [String: AnyCodableValue] = [
+            "snapshotRef": .string(ref),
+            "snapshot": snapshotValue,
+        ]
+
+        let _: AnyCodableValue = try await sendRpc(method: "context.push", params: pushParams)
+        Log.runtime.info("Context snapshot pushed to runtime: \(ref)")
     }
 
     // MARK: - Helpers

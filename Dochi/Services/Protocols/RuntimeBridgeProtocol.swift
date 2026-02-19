@@ -27,6 +27,24 @@ protocol RuntimeBridgeProtocol {
     /// Called when the runtime dispatches a tool that requires user approval.
     func setApprovalHandler(_ handler: ToolApprovalHandler?)
 
+    // MARK: - Context Snapshot
+
+    /// Configure the context snapshot builder with a context service.
+    func configureContextSnapshot(contextService: any ContextServiceProtocol)
+
+    /// Build and store a context snapshot for the given session parameters.
+    /// Returns the snapshotRef string to pass in `session.run`.
+    func buildContextSnapshot(
+        workspaceId: UUID,
+        agentId: String,
+        userId: String?,
+        channelMetadata: String?,
+        tokenBudget: Int
+    ) -> String?
+
+    /// Resolve a snapshot by its ref (for `context.resolve` RPC).
+    func resolveContextSnapshot(ref: String) -> ContextSnapshot?
+
     // MARK: - Session Management
 
     /// Open or reuse a session for the given parameters.

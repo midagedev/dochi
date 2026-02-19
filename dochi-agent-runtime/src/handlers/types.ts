@@ -197,6 +197,31 @@ export const TOOL_TIMEOUT = -32012;
 export const TOOL_PERMISSION_DENIED = -32013;
 export const TOOL_HOOK_BLOCKED = -32014;
 
+// Context snapshot types
+
+export interface ContextPushParams {
+  snapshotRef: string;
+  snapshot: {
+    id: string;
+    workspaceId: string;
+    agentId: string;
+    userId: string;
+    layers: {
+      systemLayer: { name: string; content: string; truncated: boolean; originalCharCount: number };
+      workspaceLayer: { name: string; content: string; truncated: boolean; originalCharCount: number };
+      agentLayer: { name: string; content: string; truncated: boolean; originalCharCount: number };
+      personalLayer: { name: string; content: string; truncated: boolean; originalCharCount: number };
+    };
+    tokenEstimate: number;
+    createdAt: string;
+    sourceRevision: string;
+  };
+}
+
+export interface ContextResolveParams {
+  snapshotRef: string;
+}
+
 // Hook types
 
 export type PreHookDecision = "allow" | "block" | "mask";
