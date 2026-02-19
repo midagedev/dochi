@@ -126,6 +126,63 @@ enum ToolTimeoutPolicy {
     static let restricted: TimeInterval = 120
 }
 
+// MARK: - Approval RPC Types
+
+/// Parameters for `approval.request` (runtime → app notification).
+struct ApprovalRequestParams: Codable, Sendable {
+    let approvalId: String
+    let toolCallId: String
+    let sessionId: String
+    let toolName: String
+    let riskLevel: String     // "sensitive", "restricted"
+    let reason: String        // Why the tool is being called
+    let argumentsSummary: String  // Human-readable arguments summary
+}
+
+/// Parameters for `approval.resolve` (app → runtime RPC).
+struct ApprovalResolveParams: Codable, Sendable {
+    let approvalId: String
+    let toolCallId: String
+    let sessionId: String
+    let approved: Bool
+    let scope: ApprovalScope
+    let note: String?
+}
+
+/// Scope of an approval decision.
+enum ApprovalScope: String, Codable, Sendable {
+    case once = "once"
+    case session = "session"
+}
+
+/// Result from `approval.resolve` ack.
+struct ApprovalResolveAck: Codable, Sendable {
+    let received: Bool
+    let approvalId: String
+}
+
+/// Audit event for tool execution decisions.
+struct ToolAuditEvent: Sendable {
+    let toolCallId: String
+    let sessionId: String
+    let agentId: String?
+    let toolName: String
+    let riskLevel: String
+    let decision: ToolAuditDecision
+    let latencyMs: Int
+    let resultCode: Int?
+    let timestamp: Date
+}
+
+/// Decision recorded in audit log.
+enum ToolAuditDecision: String, Sendable {
+    case allowed       // safe tool, auto-approved
+    case approved      // user approved sensitive/restricted tool
+    case denied        // user denied
+    case timeout       // approval timed out
+    case policyBlocked // policy rejected
+}
+
 // MARK: - Event Envelope
 
 /// Common envelope for all runtime events (spec §5).

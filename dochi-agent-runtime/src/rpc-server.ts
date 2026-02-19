@@ -26,12 +26,18 @@ import {
   dispatchToolToApp,
   cancelPendingDispatches,
 } from "./handlers/tool";
+import {
+  handleApprovalResolve,
+  requestApproval,
+  cancelPendingApprovals,
+} from "./handlers/approval";
 import type {
   SessionOpenParams,
   SessionRunParams,
   SessionInterruptParams,
   SessionCloseParams,
   ToolResultParams,
+  ApprovalResolveParams,
 } from "./handlers/types";
 
 type Handler = (params?: Record<string, unknown>) => unknown;
@@ -47,6 +53,7 @@ const handlers: Record<string, Handler> = {
   "session.close": (params) => handleSessionClose(params as unknown as SessionCloseParams),
   "session.list": () => handleSessionList(),
   "tool.result": (params) => handleToolResult(params as unknown as ToolResultParams),
+  "approval.resolve": (params) => handleApprovalResolve(params as unknown as ApprovalResolveParams),
 };
 
 function processRequest(request: JsonRpcRequest): JsonRpcResponse {
@@ -197,18 +204,69 @@ async function emitToolDispatchFlow(
     }) + "\n",
   );
 
-  // 2. Dispatch tool to app and wait for result
+  // Determine risk level from tool name (stub: tools containing "sensitive" or "restricted")
+  const riskLevel = toolName.includes("sensitive")
+    ? "sensitive"
+    : toolName.includes("restricted")
+      ? "restricted"
+      : "safe";
+
+  // 2. For sensitive/restricted tools, request approval first
+  if (riskLevel !== "safe") {
+    const approval = await requestApproval(conn, {
+      toolCallId,
+      sessionId,
+      toolName,
+      riskLevel,
+      reason: `Echo mode: executing ${toolName}`,
+      argumentsSummary: argsStr || "(no arguments)",
+    });
+
+    if (!approval.approved) {
+      // Denied: emit tool_result with permission denied and complete
+      if (conn.destroyed) return;
+      conn.write(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "bridge.event",
+          params: {
+            eventId: crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+            sessionId,
+            eventType: "session.tool_result",
+            payload: { toolCallId, content: `Tool '${toolName}' denied by user`, success: false },
+          },
+        }) + "\n",
+      );
+      conn.write(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "bridge.event",
+          params: {
+            eventId: crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+            sessionId,
+            eventType: "session.completed",
+            payload: { text: `Tool '${toolName}' was denied.` },
+          },
+        }) + "\n",
+      );
+      return;
+    }
+  }
+
+  // 3. Dispatch tool to app and wait for result
   const result = await dispatchToolToApp(conn, {
     toolCallId,
     toolName,
     arguments: args,
     sessionId,
-    riskLevel: "safe",
+    riskLevel: riskLevel as "safe" | "sensitive" | "restricted",
   });
 
   if (conn.destroyed) return;
 
-  // 3. Emit session.tool_result event
+  // 4. Emit session.tool_result event
   conn.write(
     JSON.stringify({
       jsonrpc: "2.0",
@@ -227,7 +285,7 @@ async function emitToolDispatchFlow(
     }) + "\n",
   );
 
-  // 4. Emit session.completed with tool result as final text
+  // 5. Emit session.completed with tool result as final text
   conn.write(
     JSON.stringify({
       jsonrpc: "2.0",
@@ -299,9 +357,12 @@ export function createRpcServer(socketPath: string): net.Server {
         ) {
           const sid = (request.params as { sessionId?: string }).sessionId;
           if (sid) {
-            const cancelled = cancelPendingDispatches(sid);
-            if (cancelled > 0) {
-              console.error(`[rpc-server] cancelled ${cancelled} pending tool dispatches for ${sid}`);
+            const cancelledTools = cancelPendingDispatches(sid);
+            const cancelledApprovals = cancelPendingApprovals(sid);
+            if (cancelledTools + cancelledApprovals > 0) {
+              console.error(
+                `[rpc-server] cancelled ${cancelledTools} tool dispatches, ${cancelledApprovals} approvals for ${sid}`,
+              );
             }
           }
         }

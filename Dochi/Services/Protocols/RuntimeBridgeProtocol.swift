@@ -23,6 +23,10 @@ protocol RuntimeBridgeProtocol {
     /// Configure tool dispatch with the app's built-in tool service.
     func configureToolDispatch(toolService: any BuiltInToolServiceProtocol)
 
+    /// Set the approval handler for sensitive/restricted tool execution.
+    /// Called when the runtime dispatches a tool that requires user approval.
+    func setApprovalHandler(_ handler: ToolApprovalHandler?)
+
     // MARK: - Session Management
 
     /// Open or reuse a session for the given parameters.

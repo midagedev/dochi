@@ -153,6 +153,32 @@ export interface ToolResultAck {
   toolCallId: string;
 }
 
+// Approval types
+
+export interface ApprovalRequestParams {
+  approvalId: string;
+  toolCallId: string;
+  sessionId: string;
+  toolName: string;
+  riskLevel: "sensitive" | "restricted";
+  reason: string;
+  argumentsSummary: string;
+}
+
+export interface ApprovalResolveParams {
+  approvalId: string;
+  toolCallId: string;
+  sessionId: string;
+  approved: boolean;
+  scope: "once" | "session";
+  note?: string;
+}
+
+export interface ApprovalResolveAck {
+  received: boolean;
+  approvalId: string;
+}
+
 // JSON-RPC error codes (standard)
 export const PARSE_ERROR = -32700;
 export const INVALID_REQUEST = -32600;

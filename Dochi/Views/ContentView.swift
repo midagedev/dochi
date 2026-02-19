@@ -289,6 +289,10 @@ struct ContentView: View {
                 viewModel.respondToToolConfirmation(approved: false)
                 return .handled
             }
+            if viewModel.pendingSDKApproval != nil {
+                viewModel.respondToSDKApproval(approved: false)
+                return .handled
+            }
             if selectedSection == .chat, viewModel.interactionState == .processing {
                 viewModel.cancelRequest()
                 return .handled
@@ -299,6 +303,10 @@ struct ContentView: View {
         .onKeyPress(.return) {
             if viewModel.pendingToolConfirmation != nil {
                 viewModel.respondToToolConfirmation(approved: true)
+                return .handled
+            }
+            if viewModel.pendingSDKApproval != nil {
+                viewModel.respondToSDKApproval(approved: true, scope: .once)
                 return .handled
             }
             return .ignored
@@ -469,13 +477,23 @@ struct ContentView: View {
                 )
             }
 
-            // Tool confirmation banner
+            // Tool confirmation banner (local tool path)
             if let confirmation = viewModel.pendingToolConfirmation {
                 ToolConfirmationBannerView(
                     toolName: confirmation.toolName,
                     toolDescription: confirmation.toolDescription,
                     onApprove: { viewModel.respondToToolConfirmation(approved: true) },
                     onDeny: { viewModel.respondToToolConfirmation(approved: false) }
+                )
+            }
+
+            // SDK tool approval banner (runtime bridge path)
+            if let approval = viewModel.pendingSDKApproval {
+                SDKToolApprovalBannerView(
+                    params: approval.params,
+                    onApproveOnce: { viewModel.respondToSDKApproval(approved: true, scope: .once) },
+                    onApproveSession: { viewModel.respondToSDKApproval(approved: true, scope: .session) },
+                    onDeny: { viewModel.respondToSDKApproval(approved: false) }
                 )
             }
 
@@ -1535,6 +1553,162 @@ struct ToolConfirmationBannerView: View {
             try? await Task.sleep(for: .seconds(2))
 
             // Notify ViewModel to auto-deny (also cancels ViewModel's timeout task)
+            onDeny()
+        }
+    }
+}
+
+// MARK: - SDK Tool Approval Banner
+
+struct SDKToolApprovalBannerView: View {
+    let params: ApprovalRequestParams
+    let onApproveOnce: () -> Void
+    let onApproveSession: () -> Void
+    let onDeny: () -> Void
+    let timeoutSeconds: TimeInterval
+
+    @State private var remainingSeconds: Int
+    @State private var timerActive = true
+    @State private var showTimeoutMessage = false
+
+    init(params: ApprovalRequestParams, onApproveOnce: @escaping () -> Void, onApproveSession: @escaping () -> Void, onDeny: @escaping () -> Void, timeoutSeconds: TimeInterval = 30) {
+        self.params = params
+        self.onApproveOnce = onApproveOnce
+        self.onApproveSession = onApproveSession
+        self.onDeny = onDeny
+        self.timeoutSeconds = timeoutSeconds
+        self._remainingSeconds = State(initialValue: Int(timeoutSeconds))
+    }
+
+    private var isUrgent: Bool { remainingSeconds <= 10 }
+    private var progress: Double { Double(remainingSeconds) / timeoutSeconds }
+    private var riskColor: Color { params.riskLevel == "restricted" ? .red : .orange }
+
+    var body: some View {
+        if showTimeoutMessage {
+            timeoutMessageView
+        } else {
+            bannerContent
+        }
+    }
+
+    private var bannerContent: some View {
+        HStack(spacing: 8) {
+            Image(systemName: params.riskLevel == "restricted" ? "shield.slash" : "shield.lefthalf.filled")
+                .foregroundStyle(riskColor)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(params.toolName)
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(params.riskLevel)
+                        .font(.system(size: 9, weight: .bold))
+                        .textCase(.uppercase)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(riskColor.opacity(0.2))
+                        .clipShape(Capsule())
+                        .foregroundStyle(riskColor)
+                }
+                if !params.reason.isEmpty {
+                    Text(params.reason)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            // Countdown timer badge
+            ZStack {
+                Circle()
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 2)
+                    .frame(width: 28, height: 28)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(isUrgent ? Color.red : riskColor, lineWidth: 2)
+                    .frame(width: 28, height: 28)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 1), value: remainingSeconds)
+                Text("\(remainingSeconds)")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(isUrgent ? .red : .secondary)
+            }
+
+            Button {
+                timerActive = false
+                onDeny()
+            } label: {
+                Text("거부")
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered)
+
+            Button {
+                timerActive = false
+                onApproveSession()
+            } label: {
+                Text("세션 허용")
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered)
+            .tint(.green)
+
+            Button {
+                timerActive = false
+                onApproveOnce()
+            } label: {
+                Text("허용")
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(isUrgent ? Color.red.opacity(0.12) : riskColor.opacity(0.08))
+        .animation(.easeInOut(duration: 0.3), value: isUrgent)
+        .onAppear {
+            startCountdown()
+        }
+    }
+
+    private var timeoutMessageView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "clock.badge.xmark")
+                .foregroundStyle(.red)
+            Text("시간 초과로 자동 거부됨")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.red)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.08))
+        .transition(.opacity)
+    }
+
+    private func startCountdown() {
+        Task { @MainActor in
+            while timerActive && remainingSeconds > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                guard timerActive else { return }
+                remainingSeconds -= 1
+            }
+
+            guard timerActive else { return }
+            timerActive = false
+
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showTimeoutMessage = true
+            }
+
+            try? await Task.sleep(for: .seconds(2))
             onDeny()
         }
     }

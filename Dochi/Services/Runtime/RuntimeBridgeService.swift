@@ -140,6 +140,11 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         self.toolDispatchHandler = handler
     }
 
+    /// Set the approval handler for sensitive/restricted tool execution.
+    func setApprovalHandler(_ handler: ToolApprovalHandler?) {
+        toolDispatchHandler?.approvalHandler = handler
+    }
+
     // MARK: - Session Management
 
     func openSession(params: SessionOpenParams) async throws -> SessionOpenResult {
@@ -208,6 +213,7 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         if let continuation = sessionContinuations.removeValue(forKey: sessionId) {
             continuation.finish()
         }
+        toolDispatchHandler?.clearSessionApprovals(sessionId: sessionId)
         return result
     }
 
@@ -413,9 +419,13 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
         // Decode BridgeEvent from notification params
         guard let event = decodeBridgeEvent(from: params) else { return }
 
-        // Route tool.dispatch to the dispatch handler (does not go through session stream)
+        // Route tool.dispatch and approval.required to the dispatch handler
         if event.eventType == .toolDispatch {
             toolDispatchHandler?.handleDispatch(event: event)
+            return
+        }
+        if event.eventType == .approvalRequired {
+            toolDispatchHandler?.handleApprovalRequest(event: event)
             return
         }
 

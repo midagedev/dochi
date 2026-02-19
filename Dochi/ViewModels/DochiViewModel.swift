@@ -106,6 +106,7 @@ final class DochiViewModel {
     var currentToolName: String?
     var partialTranscript: String = ""
     var pendingToolConfirmation: ToolConfirmation?
+    var pendingSDKApproval: SDKToolApproval?
     var userProfiles: [UserProfile] = []
     var currentUserName: String = "(사용자 없음)"
     var selectedCapabilityLabel: String?
@@ -234,6 +235,7 @@ final class DochiViewModel {
     private var processingTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var confirmationTimeoutTask: Task<Void, Never>?
+    private var sdkApprovalTimeoutTask: Task<Void, Never>?
     private var localServerMonitorTask: Task<Void, Never>?
     private var sentenceChunker = SentenceChunker()
     private var llmStreamActive = false
@@ -1266,6 +1268,10 @@ final class DochiViewModel {
     func configureRuntimeBridge(_ bridge: any RuntimeBridgeProtocol) {
         self.runtimeBridge = bridge
         bridge.configureToolDispatch(toolService: toolService)
+        bridge.setApprovalHandler { [weak self] params in
+            guard let self else { return (approved: false, scope: .once) }
+            return await self.requestSDKToolApproval(params: params)
+        }
     }
 
     /// Process user input through the SDK runtime session.
@@ -1950,6 +1956,39 @@ final class DochiViewModel {
         pendingToolConfirmation = nil
         confirmation.continuation.resume(returning: approved)
         Log.tool.info("Tool confirmation \(approved ? "approved" : "denied"): \(confirmation.toolName)")
+    }
+
+    // MARK: - SDK Tool Approval
+
+    /// Show approval UI for a runtime-dispatched sensitive/restricted tool
+    /// and wait for user decision with scope selection.
+    private func requestSDKToolApproval(params: ApprovalRequestParams) async -> (approved: Bool, scope: ApprovalScope) {
+        return await withCheckedContinuation { continuation in
+            self.pendingSDKApproval = SDKToolApproval(
+                params: params,
+                continuation: continuation
+            )
+
+            self.sdkApprovalTimeoutTask?.cancel()
+            self.sdkApprovalTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.toolConfirmationTimeout + 5))
+                guard !Task.isCancelled else { return }
+                if self?.pendingSDKApproval?.params.toolName == params.toolName {
+                    Log.runtime.warning("SDK tool approval safety-net timeout: \(params.toolName)")
+                    self?.respondToSDKApproval(approved: false)
+                }
+            }
+        }
+    }
+
+    /// Called by UI when user responds to an SDK tool approval request.
+    func respondToSDKApproval(approved: Bool, scope: ApprovalScope = .once) {
+        guard let approval = pendingSDKApproval else { return }
+        sdkApprovalTimeoutTask?.cancel()
+        sdkApprovalTimeoutTask = nil
+        pendingSDKApproval = nil
+        approval.continuation.resume(returning: (approved: approved, scope: scope))
+        Log.runtime.info("SDK tool approval \(approved ? "approved(\(scope.rawValue))" : "denied"): \(approval.params.toolName)")
     }
 
     /// End the voice session manually.
