@@ -89,7 +89,7 @@ final class DochiViewModelToolGuardTests: XCTestCase {
         let sessionContext = SessionContext(workspaceId: wsId)
 
         let keychainService = MockKeychainService()
-        keychainService.store["openai_api_key"] = "sk-test"
+        keychainService.store["openai"] = "sk-test"
 
         return DochiViewModel(
             llmService: llmService,

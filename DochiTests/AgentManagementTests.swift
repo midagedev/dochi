@@ -18,7 +18,7 @@ final class AgentManagementTests: XCTestCase {
         sessionContext = SessionContext(workspaceId: wsId)
 
         let keychainService = MockKeychainService()
-        keychainService.store["openai_api_key"] = "sk-test"
+        keychainService.store["openai"] = "sk-test"
 
         viewModel = DochiViewModel(
             llmService: MockLLMService(),
