@@ -7,6 +7,7 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     private let sessionContext: SessionContext
     private let settings: AppSettings
     private let capabilityRouter = CapabilityRouter()
+    private let routingPolicy = ToolRoutingPolicy()
     var confirmationHandler: ToolConfirmationHandler? {
         didSet {
             // Forward to ShellCommandTool for its own confirm-level handling
@@ -272,7 +273,24 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     // MARK: - Tool Info (for UI)
 
     var allToolInfos: [ToolInfo] {
-        registry.allToolInfos
+        let builtinInfos = registry.allToolInfos
+        let mcpInfos = mcpService.listTools().map { tool in
+            let routedName = routingPolicy.mcpToolName(for: tool)
+            let risk = routingPolicy.classifyMCPRisk(
+                serverName: tool.serverName,
+                toolName: tool.name,
+                description: tool.description
+            )
+            return ToolInfo(
+                name: routedName,
+                description: "[MCP:\(tool.serverName)] \(tool.description)",
+                category: risk,
+                isBaseline: false,
+                isEnabled: true,
+                parameters: []
+            )
+        }
+        return (builtinInfos + mcpInfos).sorted { $0.name < $1.name }
     }
 
     // MARK: - BuiltInToolServiceProtocol
@@ -361,14 +379,17 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     }
 
     func execute(name: String, arguments: [String: Any]) async -> ToolResult {
-        // Route MCP tool calls
-        if name.hasPrefix("mcp_") {
-            return await executeMCPTool(name: name, arguments: arguments)
-        }
-
         // Desanitize: LLM returns sanitized name (dots replaced), restore original
         let resolvedName = Self.desanitizeToolName(name)
-        guard let tool = registry.tool(named: resolvedName) else {
+        let mcpTools = mcpService.listTools()
+        let builtInTool = registry.tool(named: resolvedName)
+
+        guard let route = routingPolicy.resolve(
+            requestedName: name,
+            resolvedName: resolvedName,
+            builtInTool: builtInTool,
+            mcpTools: mcpTools
+        ) else {
             Log.tool.warning("Tool not found: \(name)")
             return ToolResult(
                 toolCallId: "",
@@ -377,41 +398,45 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
             )
         }
 
-        // Sensitive/restricted tools require user confirmation
-        // ShellCommandTool handles its own permission flow (allowed/confirm/blocked/default)
-        // TerminalRunTool handles its own confirm flow via terminalLLMConfirmAlways (C-4)
-        let skipConfirmation = resolvedName == "shell.execute" || resolvedName == "terminal.run"
-        if !skipConfirmation && (tool.category == .sensitive || tool.category == .restricted) {
-            guard let handler = confirmationHandler else {
-                Log.tool.warning("Tool \(name) blocked: confirmation handler unavailable")
-                return ToolResult(
-                    toolCallId: "",
-                    content: "도구 '\(name)' 실행을 위한 사용자 확인 채널을 사용할 수 없습니다.",
-                    isError: true
-                )
-            }
+        switch route {
+        case .builtIn(let tool, let reason):
+            logRoutingDecision(
+                requestedName: name,
+                source: .builtIn,
+                resolvedName: tool.name,
+                risk: tool.category,
+                reason: reason
+            )
+            return await executeBuiltInTool(
+                requestedName: name,
+                tool: tool,
+                arguments: arguments
+            )
 
-            let approved = await handler(tool.name, tool.description)
-            if !approved {
-                Log.tool.info("Tool \(name) denied by user")
-                return ToolResult(
-                    toolCallId: "",
-                    content: "도구 '\(name)' 실행이 사용자에 의해 거부되었습니다.",
-                    isError: true
-                )
-            }
+        case .mcp(
+            let requestedName,
+            let originalName,
+            let serverName,
+            let description,
+            let risk,
+            let reason
+        ):
+            logRoutingDecision(
+                requestedName: requestedName,
+                source: .mcp,
+                resolvedName: originalName,
+                risk: risk,
+                reason: reason
+            )
+            return await executeMCPTool(
+                requestedName: requestedName,
+                originalName: originalName,
+                serverName: serverName,
+                description: description,
+                risk: risk,
+                arguments: arguments
+            )
         }
-
-        Log.tool.info("Executing tool: \(name)")
-        let result = await tool.execute(arguments: arguments)
-
-        if result.isError {
-            Log.tool.warning("Tool \(name) returned error: \(result.content)")
-        } else {
-            Log.tool.debug("Tool \(name) completed successfully")
-        }
-
-        return result
     }
 
     func enableTools(names: [String]) {
@@ -426,8 +451,6 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         registry.reset()
     }
 
-    // MARK: - MCP Tool Routing
-
     // MARK: - Tool Name Sanitization
 
     /// Replace dots with underscores for OpenAI compatibility (^[a-zA-Z0-9_-]+$)
@@ -440,26 +463,86 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         name.replacingOccurrences(of: "-_-", with: ".")
     }
 
-    // MARK: - MCP Tool Routing
+    private enum ApprovalOutcome {
+        case approved
+        case deniedByUser
+        case unavailable
+    }
 
-    private func executeMCPTool(name: String, arguments: [String: Any]) async -> ToolResult {
-        // Parse mcp_{serverName}_{toolName} — find the original tool name
-        let mcpTools = mcpService.listTools()
-        var matchedToolName: String?
+    private func executeBuiltInTool(
+        requestedName: String,
+        tool: any BuiltInToolProtocol,
+        arguments: [String: Any]
+    ) async -> ToolResult {
+        let approval = await requestApprovalIfNeeded(
+            requestedToolName: requestedName,
+            toolNameForPrompt: tool.name,
+            toolDescription: tool.description,
+            category: tool.category,
+            skipConfirmation: tool.name == "shell.execute" || tool.name == "terminal.run"
+        )
+        switch approval {
+        case .approved:
+            break
 
-        for mcpTool in mcpTools {
-            let expectedName = "mcp_\(mcpTool.serverName)_\(mcpTool.name)"
-            if expectedName == name {
-                matchedToolName = mcpTool.name
-                break
-            }
-        }
-
-        guard let originalName = matchedToolName else {
-            Log.tool.warning("MCP tool not found: \(name)")
+        case .deniedByUser:
             return ToolResult(
                 toolCallId: "",
-                content: "오류: MCP 도구 '\(name)'을(를) 찾을 수 없습니다.",
+                content: "도구 '\(requestedName)' 실행이 사용자에 의해 거부되었습니다.",
+                isError: true
+            )
+
+        case .unavailable:
+            return ToolResult(
+                toolCallId: "",
+                content: "도구 '\(requestedName)' 실행을 위한 사용자 확인 채널을 사용할 수 없습니다.",
+                isError: true
+            )
+        }
+
+        Log.tool.info("Executing tool: \(requestedName)")
+        let result = await tool.execute(arguments: arguments)
+
+        if result.isError {
+            Log.tool.warning("Tool \(requestedName) returned error: \(result.content)")
+        } else {
+            Log.tool.debug("Tool \(requestedName) completed successfully")
+        }
+
+        return result
+    }
+
+    private func executeMCPTool(
+        requestedName: String,
+        originalName: String,
+        serverName: String,
+        description: String,
+        risk: ToolCategory,
+        arguments: [String: Any]
+    ) async -> ToolResult {
+        let promptName = "[MCP:\(serverName)] \(originalName)"
+        let approval = await requestApprovalIfNeeded(
+            requestedToolName: requestedName,
+            toolNameForPrompt: promptName,
+            toolDescription: description,
+            category: risk,
+            skipConfirmation: false
+        )
+        switch approval {
+        case .approved:
+            break
+
+        case .deniedByUser:
+            return ToolResult(
+                toolCallId: "",
+                content: "도구 '\(requestedName)' 실행이 사용자에 의해 거부되었습니다.",
+                isError: true
+            )
+
+        case .unavailable:
+            return ToolResult(
+                toolCallId: "",
+                content: "도구 '\(requestedName)' 실행을 위한 사용자 확인 채널을 사용할 수 없습니다.",
                 isError: true
             )
         }
@@ -472,13 +555,48 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
                 isError: result.isError
             )
         } catch {
-            Log.tool.error("MCP tool execution failed: \(name) — \(error.localizedDescription)")
+            Log.tool.error("MCP tool execution failed: \(requestedName) — \(error.localizedDescription)")
             return ToolResult(
                 toolCallId: "",
-                content: mcpFallbackMessage(for: name, error: error),
+                content: mcpFallbackMessage(for: requestedName, error: error),
                 isError: true
             )
         }
+    }
+
+    private func requestApprovalIfNeeded(
+        requestedToolName: String,
+        toolNameForPrompt: String,
+        toolDescription: String,
+        category: ToolCategory,
+        skipConfirmation: Bool
+    ) async -> ApprovalOutcome {
+        guard !skipConfirmation else { return .approved }
+        guard category == .sensitive || category == .restricted else { return .approved }
+
+        guard let handler = confirmationHandler else {
+            Log.tool.warning("Tool \(requestedToolName) blocked: confirmation handler unavailable")
+            return .unavailable
+        }
+
+        let approved = await handler(toolNameForPrompt, toolDescription)
+        if !approved {
+            Log.tool.info("Tool \(requestedToolName) denied by user")
+            return .deniedByUser
+        }
+        return .approved
+    }
+
+    private func logRoutingDecision(
+        requestedName: String,
+        source: ToolRouteSource,
+        resolvedName: String,
+        risk: ToolCategory,
+        reason: String
+    ) {
+        Log.tool.info(
+            "Routing decision: requested=\(requestedName), source=\(source.rawValue), resolved=\(resolvedName), risk=\(risk.rawValue), reason=\(reason)"
+        )
     }
 
     private func mcpFallbackMessage(for toolName: String, error: Error) -> String {

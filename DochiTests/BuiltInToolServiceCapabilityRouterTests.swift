@@ -6,6 +6,7 @@ private final class MockMCPServiceForCapabilityTests: MCPServiceProtocol {
     var tools: [MCPToolInfo] = []
     var callToolError: Error?
     var callToolResult = MCPToolResult(content: "ok", isError: false)
+    var callToolCallCount = 0
 
     func addServer(config: MCPServerConfig) {}
     func removeServer(id: UUID) {}
@@ -16,6 +17,7 @@ private final class MockMCPServiceForCapabilityTests: MCPServiceProtocol {
     func getServer(id: UUID) -> MCPServerConfig? { nil }
     func listTools() -> [MCPToolInfo] { tools }
     func callTool(name: String, arguments: [String: Any]) async throws -> MCPToolResult {
+        callToolCallCount += 1
         if let callToolError {
             throw callToolError
         }
@@ -104,6 +106,7 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
         mcpService.callToolError = MCPServiceError.notConnected
 
         let service = makeService(routerEnabled: false, mcpService: mcpService)
+        service.confirmationHandler = { _, _ in true }
         let result = await service.execute(
             name: "mcp_coding-shell_shell_execute",
             arguments: ["command": "pwd"]
@@ -112,6 +115,74 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
         XCTAssertTrue(result.isError)
         XCTAssertTrue(result.content.contains("MCP 서버가 현재 비가용 상태입니다"))
         XCTAssertTrue(result.content.contains("terminal.run"))
+    }
+
+    func testRestrictedMCPToolRequiresApproval() async {
+        let mcpService = MockMCPServiceForCapabilityTests()
+        mcpService.tools = [
+            MCPToolInfo(
+                serverName: "coding-shell",
+                name: "shell_execute",
+                description: "execute shell command",
+                inputSchema: [:]
+            ),
+        ]
+
+        let service = makeService(routerEnabled: false, mcpService: mcpService)
+        let result = await service.execute(
+            name: "mcp_coding-shell_shell_execute",
+            arguments: ["command": "pwd"]
+        )
+
+        XCTAssertTrue(result.isError)
+        XCTAssertEqual(mcpService.callToolCallCount, 0, "Restricted MCP tool must not execute without approval")
+    }
+
+    func testSafeMCPToolExecutesWithoutApproval() async {
+        let mcpService = MockMCPServiceForCapabilityTests()
+        mcpService.tools = [
+            MCPToolInfo(
+                serverName: "coding-git",
+                name: "git_status",
+                description: "read current git status",
+                inputSchema: [:]
+            ),
+        ]
+
+        let service = makeService(routerEnabled: false, mcpService: mcpService)
+        let result = await service.execute(
+            name: "mcp_coding-git_git_status",
+            arguments: [:]
+        )
+
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(mcpService.callToolCallCount, 1)
+    }
+
+    func testAllToolInfosIncludesMCPRiskClassification() {
+        let mcpService = MockMCPServiceForCapabilityTests()
+        mcpService.tools = [
+            MCPToolInfo(
+                serverName: "coding-shell",
+                name: "shell_execute",
+                description: "execute shell command",
+                inputSchema: [:]
+            ),
+            MCPToolInfo(
+                serverName: "coding-git",
+                name: "git_status",
+                description: "read repository status",
+                inputSchema: [:]
+            ),
+        ]
+
+        let service = makeService(routerEnabled: false, mcpService: mcpService)
+        let infos = service.allToolInfos
+
+        let shellInfo = infos.first { $0.name == "mcp_coding-shell_shell_execute" }
+        let gitInfo = infos.first { $0.name == "mcp_coding-git_git_status" }
+        XCTAssertEqual(shellInfo?.category, .restricted)
+        XCTAssertEqual(gitInfo?.category, .safe)
     }
 
     // MARK: - Helpers
