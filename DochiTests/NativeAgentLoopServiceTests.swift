@@ -12,14 +12,21 @@ final class NativeAgentLoopServiceTests: XCTestCase {
             provider: .openai,
             events: [.partial("openai"), .done(text: "openai")]
         )
+        let zaiAdapter = StaticNativeLLMProviderAdapter(
+            provider: .zai,
+            events: [.partial("zai"), .done(text: "zai")]
+        )
 
-        let service = NativeAgentLoopService(adapters: [anthropicAdapter, openAIAdapter])
+        let service = NativeAgentLoopService(adapters: [anthropicAdapter, openAIAdapter, zaiAdapter])
 
         let anthropicEvents = try await collectEvents(from: service.run(request: makeRequest(provider: .anthropic)))
         XCTAssertEqual(anthropicEvents.first?.text, "anthropic")
 
         let openAIEvents = try await collectEvents(from: service.run(request: makeRequest(provider: .openai)))
         XCTAssertEqual(openAIEvents.first?.text, "openai")
+
+        let zaiEvents = try await collectEvents(from: service.run(request: makeRequest(provider: .zai)))
+        XCTAssertEqual(zaiEvents.first?.text, "zai")
     }
 
     func testNativeAgentLoopServiceReturnsUnsupportedProviderError() async {
