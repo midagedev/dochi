@@ -203,6 +203,87 @@ struct ZAINativeLLMProviderAdapter: NativeLLMProviderAdapter {
     }
 }
 
+struct OllamaNativeLLMProviderAdapter: NativeLLMProviderAdapter {
+    let provider: LLMProvider = .ollama
+
+    private let openAICompatibleAdapter: OpenAINativeLLMProviderAdapter
+
+    init(httpClient: any NativeLLMHTTPClient = URLSessionNativeLLMHTTPClient()) {
+        self.openAICompatibleAdapter = OpenAINativeLLMProviderAdapter(httpClient: httpClient)
+    }
+
+    func stream(request: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
+        guard request.provider == .ollama else {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: NativeLLMError(
+                    code: .unsupportedProvider,
+                    message: "Ollama adapter cannot handle provider: \(request.provider.rawValue)",
+                    statusCode: nil,
+                    retryAfterSeconds: nil
+                ))
+            }
+        }
+
+        let bridgedRequest = NativeLLMRequest(
+            provider: .openai,
+            model: request.model,
+            apiKey: normalizedLocalAPIKey(request.apiKey, fallback: "ollama-local"),
+            systemPrompt: request.systemPrompt,
+            messages: request.messages,
+            tools: request.tools,
+            maxTokens: request.maxTokens,
+            temperature: request.temperature,
+            endpointURL: request.endpointURL ?? LLMProvider.ollama.apiURL,
+            timeoutSeconds: request.timeoutSeconds,
+            anthropicVersion: request.anthropicVersion
+        )
+        return openAICompatibleAdapter.stream(request: bridgedRequest)
+    }
+}
+
+struct LMStudioNativeLLMProviderAdapter: NativeLLMProviderAdapter {
+    let provider: LLMProvider = .lmStudio
+
+    private let openAICompatibleAdapter: OpenAINativeLLMProviderAdapter
+
+    init(httpClient: any NativeLLMHTTPClient = URLSessionNativeLLMHTTPClient()) {
+        self.openAICompatibleAdapter = OpenAINativeLLMProviderAdapter(httpClient: httpClient)
+    }
+
+    func stream(request: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
+        guard request.provider == .lmStudio else {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: NativeLLMError(
+                    code: .unsupportedProvider,
+                    message: "LM Studio adapter cannot handle provider: \(request.provider.rawValue)",
+                    statusCode: nil,
+                    retryAfterSeconds: nil
+                ))
+            }
+        }
+
+        let bridgedRequest = NativeLLMRequest(
+            provider: .openai,
+            model: request.model,
+            apiKey: normalizedLocalAPIKey(request.apiKey, fallback: "lmstudio-local"),
+            systemPrompt: request.systemPrompt,
+            messages: request.messages,
+            tools: request.tools,
+            maxTokens: request.maxTokens,
+            temperature: request.temperature,
+            endpointURL: request.endpointURL ?? LLMProvider.lmStudio.apiURL,
+            timeoutSeconds: request.timeoutSeconds,
+            anthropicVersion: request.anthropicVersion
+        )
+        return openAICompatibleAdapter.stream(request: bridgedRequest)
+    }
+}
+
+private func normalizedLocalAPIKey(_ apiKey: String?, fallback: String) -> String {
+    let trimmed = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return trimmed.isEmpty ? fallback : trimmed
+}
+
 private extension OpenAINativeLLMProviderAdapter {
     struct OpenAIRequestPayload: Encodable {
         let model: String

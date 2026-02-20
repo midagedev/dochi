@@ -4,6 +4,14 @@ import Foundation
 
 /// Utility for fetching available models from a running Ollama instance.
 enum OllamaModelFetcher {
+    struct OpenAIModelListResponse: Decodable {
+        let data: [OpenAIModel]
+    }
+
+    struct OpenAIModel: Decodable {
+        let id: String
+    }
+
     struct ModelListResponse: Decodable {
         let models: [ModelInfo]
     }
@@ -47,46 +55,46 @@ enum OllamaModelFetcher {
         "hermes",
     ]
 
-    /// Fetch available models from Ollama API.
-    static func fetchModels(baseURL: URL = URL(string: "http://localhost:11434")!) async -> [String] {
-        let url = baseURL.appendingPathComponent("api/tags")
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
+    private static let retryDelaysNanoseconds: [UInt64] = [
+        0,
+        250_000_000,
+        750_000_000,
+    ]
 
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            let response = try JSONDecoder().decode(ModelListResponse.self, from: data)
-            return response.models.map(\.name)
-        } catch {
-            Log.llm.debug("Ollama model fetch failed: \(error.localizedDescription)")
+    /// Fetch available models from Ollama API (`/v1/models` first, `/api/tags` fallback).
+    static func fetchModels(baseURL: URL = URL(string: "http://localhost:11434")!) async -> [String] {
+        if let openAIModels = await fetchOpenAICompatibleModels(baseURL: baseURL),
+           !openAIModels.isEmpty {
+            return openAIModels
+        }
+
+        guard let tagsResponse = await fetchTagList(baseURL: baseURL) else {
             return []
         }
+        return tagsResponse.models.map(\.name)
     }
 
-    /// Fetch available models with detailed metadata from Ollama API.
+    /// Fetch available models with metadata. Discovery uses `/v1/models` and enriches via `/api/tags`.
     static func fetchModelInfos(baseURL: URL = URL(string: "http://localhost:11434")!) async -> [LocalModelInfo] {
-        let url = baseURL.appendingPathComponent("api/tags")
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
+        let discoveredModelNames = await fetchModels(baseURL: baseURL)
+        let tagsResponse = await fetchTagList(baseURL: baseURL)
+        let tagsByName = Dictionary(uniqueKeysWithValues: (tagsResponse?.models ?? []).map { ($0.name, $0) })
 
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            let response = try JSONDecoder().decode(ModelListResponse.self, from: data)
-            return response.models.map { model in
-                let family = model.details?.family
-                let supportsTools = detectToolSupport(modelName: model.name, family: family)
-                return LocalModelInfo(
-                    name: model.name,
-                    size: model.size ?? 0,
-                    parameterSize: model.details?.parameterSize,
-                    quantization: model.details?.quantizationLevel,
-                    family: family,
-                    supportsTools: supportsTools
-                )
-            }
-        } catch {
-            Log.llm.debug("Ollama model info fetch failed: \(error.localizedDescription)")
-            return []
+        let orderedNames = discoveredModelNames.isEmpty
+            ? (tagsResponse?.models.map(\.name) ?? [])
+            : discoveredModelNames
+
+        return orderedNames.map { modelName in
+            let metadata = tagsByName[modelName]
+            let family = metadata?.details?.family
+            return LocalModelInfo(
+                name: modelName,
+                size: metadata?.size ?? 0,
+                parameterSize: metadata?.details?.parameterSize,
+                quantization: metadata?.details?.quantizationLevel,
+                family: family,
+                supportsTools: detectToolSupport(modelName: modelName, family: family)
+            )
         }
     }
 
@@ -102,18 +110,120 @@ enum OllamaModelFetcher {
         return toolSupportedPatterns.contains { lowerName.contains($0) }
     }
 
-    /// Check if Ollama is running.
+    /// Check if Ollama is running (with short retry/backoff).
     static func isAvailable(baseURL: URL = URL(string: "http://localhost:11434")!) async -> Bool {
-        let url = baseURL.appendingPathComponent("api/tags")
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 3
+        let modelsReachable = await isEndpointReachable(
+            url: openAIModelsURL(baseURL: baseURL),
+            timeout: 3
+        )
+        if modelsReachable {
+            return true
+        }
+        return await isEndpointReachable(
+            url: ollamaTagsURL(baseURL: baseURL),
+            timeout: 3
+        )
+    }
 
+    private static func fetchOpenAICompatibleModels(baseURL: URL) async -> [String]? {
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            return (response as? HTTPURLResponse)?.statusCode == 200
+            let data = try await requestDataWithRetry(
+                url: openAIModelsURL(baseURL: baseURL),
+                timeout: 5
+            )
+            let response = try JSONDecoder().decode(OpenAIModelListResponse.self, from: data)
+            return response.data.map(\.id)
+        } catch {
+            Log.llm.debug("Ollama /v1/models fetch failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func fetchTagList(baseURL: URL) async -> ModelListResponse? {
+        do {
+            let data = try await requestDataWithRetry(
+                url: ollamaTagsURL(baseURL: baseURL),
+                timeout: 5
+            )
+            return try JSONDecoder().decode(ModelListResponse.self, from: data)
+        } catch {
+            Log.llm.debug("Ollama /api/tags fetch failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func requestDataWithRetry(url: URL, timeout: TimeInterval) async throws -> Data {
+        var lastError: Error?
+
+        for (index, delay) in retryDelaysNanoseconds.enumerated() {
+            if delay > 0 {
+                try await Task.sleep(nanoseconds: delay)
+            }
+
+            var request = URLRequest(url: url)
+            request.timeoutInterval = timeout
+
+            do {
+                let (data, rawResponse) = try await URLSession.shared.data(for: request)
+                guard let response = rawResponse as? HTTPURLResponse,
+                      (200...299).contains(response.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                return data
+            } catch {
+                lastError = error
+                if index == retryDelaysNanoseconds.count - 1 {
+                    throw error
+                }
+            }
+        }
+
+        throw lastError ?? URLError(.unknown)
+    }
+
+    private static func isEndpointReachable(url: URL, timeout: TimeInterval) async -> Bool {
+        do {
+            _ = try await requestDataWithRetry(url: url, timeout: timeout)
+            return true
         } catch {
             return false
         }
+    }
+
+    private static func openAIModelsURL(baseURL: URL) -> URL {
+        let normalized = normalizedBaseURL(baseURL)
+        return normalized
+            .appendingPathComponent("v1")
+            .appendingPathComponent("models")
+    }
+
+    private static func ollamaTagsURL(baseURL: URL) -> URL {
+        let normalized = normalizedBaseURL(baseURL)
+        return normalized
+            .appendingPathComponent("api")
+            .appendingPathComponent("tags")
+    }
+
+    private static func normalizedBaseURL(_ baseURL: URL) -> URL {
+        let trimmedPath = baseURL.path
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
+
+        if trimmedPath.hasSuffix("v1/chat/completions") {
+            return baseURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+        }
+        if trimmedPath.hasSuffix("v1/models") || trimmedPath.hasSuffix("api/tags") {
+            return baseURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+        }
+        if trimmedPath.hasSuffix("v1") || trimmedPath.hasSuffix("api") {
+            return baseURL.deletingLastPathComponent()
+        }
+        return baseURL
     }
 }
 
@@ -134,14 +244,19 @@ enum LMStudioModelFetcher {
         }
     }
 
+    private static let retryDelaysNanoseconds: [UInt64] = [
+        0,
+        250_000_000,
+        750_000_000,
+    ]
+
     /// Fetch available models from LM Studio's OpenAI-compatible API.
     static func fetchModels(baseURL: URL = URL(string: "http://localhost:1234")!) async -> [String] {
-        let url = baseURL.appendingPathComponent("v1/models")
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
-
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let data = try await requestDataWithRetry(
+                url: modelsURL(baseURL: baseURL),
+                timeout: 5
+            )
             let response = try JSONDecoder().decode(ModelListResponse.self, from: data)
             return response.data.map(\.id)
         } catch {
@@ -165,17 +280,75 @@ enum LMStudioModelFetcher {
         }
     }
 
-    /// Check if LM Studio is running.
+    /// Check if LM Studio is running (with short retry/backoff).
     static func isAvailable(baseURL: URL = URL(string: "http://localhost:1234")!) async -> Bool {
-        let url = baseURL.appendingPathComponent("v1/models")
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 3
+        await isEndpointReachable(url: modelsURL(baseURL: baseURL), timeout: 3)
+    }
 
+    private static func requestDataWithRetry(url: URL, timeout: TimeInterval) async throws -> Data {
+        var lastError: Error?
+
+        for (index, delay) in retryDelaysNanoseconds.enumerated() {
+            if delay > 0 {
+                try await Task.sleep(nanoseconds: delay)
+            }
+
+            var request = URLRequest(url: url)
+            request.timeoutInterval = timeout
+
+            do {
+                let (data, rawResponse) = try await URLSession.shared.data(for: request)
+                guard let response = rawResponse as? HTTPURLResponse,
+                      (200...299).contains(response.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                return data
+            } catch {
+                lastError = error
+                if index == retryDelaysNanoseconds.count - 1 {
+                    throw error
+                }
+            }
+        }
+
+        throw lastError ?? URLError(.unknown)
+    }
+
+    private static func isEndpointReachable(url: URL, timeout: TimeInterval) async -> Bool {
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            return (response as? HTTPURLResponse)?.statusCode == 200
+            _ = try await requestDataWithRetry(url: url, timeout: timeout)
+            return true
         } catch {
             return false
         }
+    }
+
+    private static func modelsURL(baseURL: URL) -> URL {
+        let normalized = normalizedBaseURL(baseURL)
+        return normalized
+            .appendingPathComponent("v1")
+            .appendingPathComponent("models")
+    }
+
+    private static func normalizedBaseURL(_ baseURL: URL) -> URL {
+        let trimmedPath = baseURL.path
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
+
+        if trimmedPath.hasSuffix("v1/chat/completions") {
+            return baseURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+        }
+        if trimmedPath.hasSuffix("v1/models") {
+            return baseURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+        }
+        if trimmedPath.hasSuffix("v1") {
+            return baseURL.deletingLastPathComponent()
+        }
+        return baseURL
     }
 }
