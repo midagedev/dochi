@@ -2,6 +2,24 @@ import Foundation
 
 protocol NativeLLMHTTPClient: Sendable {
     func send(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse)
+    func sendStreaming(_ request: URLRequest) async throws -> (lineStream: AsyncThrowingStream<String, Error>, response: HTTPURLResponse)
+}
+
+extension NativeLLMHTTPClient {
+    func sendStreaming(_ request: URLRequest) async throws -> (lineStream: AsyncThrowingStream<String, Error>, response: HTTPURLResponse) {
+        let (data, response) = try await send(request)
+        let payload = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        let lines = payload.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        return (
+            lineStream: AsyncThrowingStream { continuation in
+                for line in lines {
+                    continuation.yield(line)
+                }
+                continuation.finish()
+            },
+            response: response
+        )
+    }
 }
 
 struct URLSessionNativeLLMHTTPClient: NativeLLMHTTPClient {
@@ -23,6 +41,38 @@ struct URLSessionNativeLLMHTTPClient: NativeLLMHTTPClient {
         }
         return (data, response)
     }
+
+    func sendStreaming(_ request: URLRequest) async throws -> (lineStream: AsyncThrowingStream<String, Error>, response: HTTPURLResponse) {
+        let (bytes, rawResponse) = try await session.bytes(for: request)
+        guard let response = rawResponse as? HTTPURLResponse else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "Invalid HTTP response from Anthropic",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        let lineStream = AsyncThrowingStream<String, Error> { continuation in
+            let task = Task {
+                do {
+                    for try await line in bytes.lines {
+                        try Task.checkCancellation()
+                        continuation.yield(line.replacingOccurrences(of: "\r", with: ""))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+
+        return (lineStream: lineStream, response: response)
+    }
 }
 
 struct AnthropicNativeLLMProviderAdapter: NativeLLMProviderAdapter {
@@ -39,9 +89,10 @@ struct AnthropicNativeLLMProviderAdapter: NativeLLMProviderAdapter {
             let task = Task {
                 do {
                     let urlRequest = try Self.makeURLRequest(from: request)
-                    let (data, response) = try await httpClient.send(urlRequest)
+                    let (lineStream, response) = try await httpClient.sendStreaming(urlRequest)
 
                     guard (200...299).contains(response.statusCode) else {
+                        let data = try await Self.collectStreamBodyData(lineStream)
                         let mappedError = Self.mapHTTPError(
                             statusCode: response.statusCode,
                             data: data,
@@ -51,15 +102,51 @@ struct AnthropicNativeLLMProviderAdapter: NativeLLMProviderAdapter {
                         throw mappedError
                     }
 
-                    let events = try Self.parseStreamEvents(from: data)
+                    var accumulator = Self.SSEEventAccumulator()
+                    var toolBuffers: [Int: Self.ToolUseBuffer] = [:]
                     var emittedDone = false
-                    for event in events {
-                        continuation.yield(event)
-                        if event.kind == .done {
-                            emittedDone = true
+
+                    for try await rawLine in lineStream {
+                        try Task.checkCancellation()
+                        if let event = accumulator.append(line: rawLine.replacingOccurrences(of: "\r", with: "")) {
+                            let mapped = try Self.mapSSEEvent(event, toolBuffers: &toolBuffers)
+                            for mappedEvent in mapped {
+                                continuation.yield(mappedEvent)
+                                if mappedEvent.kind == .done {
+                                    emittedDone = true
+                                }
+                                if mappedEvent.kind == .error, let error = mappedEvent.error {
+                                    throw error
+                                }
+                            }
+                            if emittedDone {
+                                break
+                            }
                         }
-                        if event.kind == .error, let error = event.error {
-                            throw error
+                    }
+
+                    if !emittedDone, let pending = accumulator.flush() {
+                        let mapped = try Self.mapSSEEvent(pending, toolBuffers: &toolBuffers)
+                        for mappedEvent in mapped {
+                            continuation.yield(mappedEvent)
+                            if mappedEvent.kind == .done {
+                                emittedDone = true
+                            }
+                            if mappedEvent.kind == .error, let error = mappedEvent.error {
+                                throw error
+                            }
+                        }
+                    }
+
+                    if !toolBuffers.isEmpty {
+                        for index in toolBuffers.keys.sorted() {
+                            if let tool = toolBuffers[index] {
+                                continuation.yield(.toolUse(
+                                    toolCallId: tool.toolCallId,
+                                    toolName: tool.toolName,
+                                    toolInputJSON: tool.inputJSON
+                                ))
+                            }
                         }
                     }
 
@@ -1277,6 +1364,16 @@ private extension AnthropicNativeLLMProviderAdapter {
             return value
         }
         return .object([:])
+    }
+
+    static func collectStreamBodyData(
+        _ lineStream: AsyncThrowingStream<String, Error>
+    ) async throws -> Data {
+        var lines: [String] = []
+        for try await line in lineStream {
+            lines.append(line)
+        }
+        return Data(lines.joined(separator: "\n").utf8)
     }
 
     static func mapHTTPError(
