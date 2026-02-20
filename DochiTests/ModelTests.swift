@@ -412,6 +412,21 @@ final class ModelTests: XCTestCase {
         XCTAssertFalse(unsupported.supportsToolCalling)
     }
 
+    func testProviderCapabilityMatrixLocalToolHeuristicUsesFamilyHint() {
+        XCTAssertTrue(
+            ProviderCapabilityMatrix.supportsLocalToolCalling(
+                model: "corp-model-v1",
+                familyHint: "mistral"
+            )
+        )
+        XCTAssertFalse(
+            ProviderCapabilityMatrix.supportsLocalToolCalling(
+                model: "corp-model-v1",
+                familyHint: "unknown-family"
+            )
+        )
+    }
+
     // MARK: - LLMProvider.onboardingDefaultModel
 
     func testOnboardingDefaultModelCloudProvidersUseModelListFirstEntry() {
