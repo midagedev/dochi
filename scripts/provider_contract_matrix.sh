@@ -9,6 +9,16 @@ TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT_DIR="${1:-$ROOT_DIR/.artifacts/provider-contract-matrix/$TIMESTAMP}"
 mkdir -p "$ARTIFACT_DIR"
 
+if [[ ! -f "$ROOT_DIR/Dochi.xcodeproj/project.pbxproj" ]]; then
+  if command -v xcodegen >/dev/null 2>&1; then
+    echo "[provider-contract] Generating Dochi.xcodeproj via xcodegen"
+    xcodegen generate
+  else
+    echo "[provider-contract] ERROR: Dochi.xcodeproj missing and xcodegen is not installed."
+    exit 1
+  fi
+fi
+
 JSON_REPORT="$ARTIFACT_DIR/provider-contract-matrix-report.json"
 MARKDOWN_REPORT="$ARTIFACT_DIR/provider-contract-matrix-report.md"
 
@@ -43,7 +53,11 @@ for entry in "${PROVIDER_MATRIX[@]}"; do
     overall_passed=false
   fi
 
-  summary_line="$(rg "Executed [0-9]+ test" "$log_file" | tail -n 1 || true)"
+  if command -v rg >/dev/null 2>&1; then
+    summary_line="$(rg "Executed [0-9]+ test" "$log_file" | tail -n 1 || true)"
+  else
+    summary_line="$(grep -E "Executed [0-9]+ test" "$log_file" | tail -n 1 || true)"
+  fi
   if [[ -z "$summary_line" ]]; then
     summary_line="No XCTest summary found"
   fi

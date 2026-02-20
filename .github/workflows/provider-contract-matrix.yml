@@ -24,6 +24,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
       - name: Run Provider Contract Matrix
         run: bash scripts/provider_contract_matrix.sh "$GITHUB_WORKSPACE/.artifacts/provider-contract-matrix"
 
