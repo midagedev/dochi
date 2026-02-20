@@ -213,6 +213,8 @@ final class MockBuiltInToolService: BuiltInToolServiceProtocol {
     var enabledNames: [String] = []
     var resetCallCount = 0
     var lastPreferredToolGroups: [String]?
+    /// Optional delay injected before returning `stubbedResult` in `execute(name:arguments:)`.
+    var executeDelay: Duration?
 
     var nonBaselineToolSummaries: [(name: String, description: String, category: ToolCategory)] = []
     var allToolInfos: [ToolInfo] = []
@@ -228,6 +230,9 @@ final class MockBuiltInToolService: BuiltInToolServiceProtocol {
     }
 
     func execute(name: String, arguments: [String: Any]) async -> ToolResult {
+        if let delay = executeDelay {
+            try? await Task.sleep(for: delay)
+        }
         executeCallCount += 1
         lastExecutedName = name
         lastArguments = arguments
