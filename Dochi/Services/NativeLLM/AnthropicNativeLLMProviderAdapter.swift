@@ -165,6 +165,44 @@ struct OpenAINativeLLMProviderAdapter: NativeLLMProviderAdapter {
     }
 }
 
+struct ZAINativeLLMProviderAdapter: NativeLLMProviderAdapter {
+    let provider: LLMProvider = .zai
+
+    private let openAICompatibleAdapter: OpenAINativeLLMProviderAdapter
+
+    init(httpClient: any NativeLLMHTTPClient = URLSessionNativeLLMHTTPClient()) {
+        self.openAICompatibleAdapter = OpenAINativeLLMProviderAdapter(httpClient: httpClient)
+    }
+
+    func stream(request: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
+        guard request.provider == .zai else {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: NativeLLMError(
+                    code: .unsupportedProvider,
+                    message: "Z.AI adapter cannot handle provider: \(request.provider.rawValue)",
+                    statusCode: nil,
+                    retryAfterSeconds: nil
+                ))
+            }
+        }
+
+        let bridgedRequest = NativeLLMRequest(
+            provider: .openai,
+            model: request.model,
+            apiKey: request.apiKey,
+            systemPrompt: request.systemPrompt,
+            messages: request.messages,
+            tools: request.tools,
+            maxTokens: request.maxTokens,
+            temperature: request.temperature,
+            endpointURL: request.endpointURL ?? LLMProvider.zai.apiURL,
+            timeoutSeconds: request.timeoutSeconds,
+            anthropicVersion: request.anthropicVersion
+        )
+        return openAICompatibleAdapter.stream(request: bridgedRequest)
+    }
+}
+
 private extension OpenAINativeLLMProviderAdapter {
     struct OpenAIRequestPayload: Encodable {
         let model: String

@@ -304,7 +304,8 @@ final class DochiViewModel {
         self.nativeAgentLoopService = nativeAgentLoopService ?? NativeAgentLoopService(
             adapters: [
                 AnthropicNativeLLMProviderAdapter(),
-                OpenAINativeLLMProviderAdapter()
+                OpenAINativeLLMProviderAdapter(),
+                ZAINativeLLMProviderAdapter()
             ],
             toolService: toolService,
             memoryPipeline: resolvedMemoryPipeline
