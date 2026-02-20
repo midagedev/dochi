@@ -139,7 +139,7 @@ final class NativeAgentLoopServiceTests: XCTestCase {
 
         let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { _ in
             [
-                .toolUse(toolCallId: "tool_1", toolName: "shell.execute", toolInputJSON: "{\"cmd\":\"rm -rf /\"}"),
+                .toolUse(toolCallId: "tool_1", toolName: "shell.execute", toolInputJSON: "{\"cmd\":\"echo hi\"}"),
                 .done(text: nil),
             ]
         }
@@ -160,6 +160,253 @@ final class NativeAgentLoopServiceTests: XCTestCase {
             return XCTFail("Expected NativeLLMError")
         }
         XCTAssertEqual(error.code, .toolExecutionFailed)
+    }
+
+    func testNativeAgentLoopServiceRecordsStandardizedAuditFields() async throws {
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(toolCallId: "", content: "created")
+        toolService.allToolInfos = [
+            ToolInfo(
+                name: "calendar.create",
+                description: "create event",
+                category: .sensitive,
+                isBaseline: false,
+                isEnabled: true,
+                parameters: []
+            ),
+        ]
+
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.done(text: "done")]
+            }
+            return [
+                .toolUse(toolCallId: "tool_1", toolName: "calendar.create", toolInputJSON: "{\"title\":\"회의\"}"),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "native-session-1",
+                    workspaceId: "workspace-1",
+                    agentId: "도치"
+                )
+            )
+        )
+
+        XCTAssertEqual(service.auditLog.count, 1)
+        guard let audit = service.auditLog.first else {
+            return XCTFail("Expected audit event")
+        }
+        XCTAssertEqual(audit.toolCallId, "tool_1")
+        XCTAssertEqual(audit.sessionId, "native-session-1")
+        XCTAssertEqual(audit.agentId, "도치")
+        XCTAssertEqual(audit.toolName, "calendar.create")
+        XCTAssertEqual(audit.riskLevel, ToolCategory.sensitive.rawValue)
+        XCTAssertEqual(audit.decision, .approved)
+        XCTAssertFalse(audit.argumentsHash.isEmpty)
+        XCTAssertNil(audit.resultCode)
+    }
+
+    func testNativeAgentLoopServiceAppliesPreHookBlockAndAuditsDecision() async {
+        let toolService = MockBuiltInToolService()
+        toolService.allToolInfos = [
+            ToolInfo(
+                name: "shell.execute",
+                description: "run shell",
+                category: .restricted,
+                isBaseline: false,
+                isEnabled: true,
+                parameters: []
+            ),
+        ]
+
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { _ in
+            [
+                .toolUse(toolCallId: "tool_1", toolName: "shell.execute", toolInputJSON: "{\"cmd\":\"rm -rf /\"}"),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService
+        )
+
+        let result = await collectEventsAndError(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "native-session-2",
+                    workspaceId: "workspace-2",
+                    agentId: "도치"
+                )
+            )
+        )
+
+        XCTAssertEqual(result.events.map(\.kind), [.toolUse, .toolResult])
+        XCTAssertEqual(toolService.executeCallCount, 0)
+        guard let error = result.error as? NativeLLMError else {
+            return XCTFail("Expected NativeLLMError")
+        }
+        XCTAssertEqual(error.code, .toolExecutionFailed)
+
+        XCTAssertEqual(service.auditLog.count, 1)
+        guard let audit = service.auditLog.first else {
+            return XCTFail("Expected audit event")
+        }
+        XCTAssertEqual(audit.decision, .hookBlocked)
+        XCTAssertEqual(audit.hookName, "ForbiddenPattern")
+        XCTAssertEqual(audit.riskLevel, ToolCategory.restricted.rawValue)
+        XCTAssertEqual(audit.resultCode, BridgeErrorCode.toolPermissionDenied.rawValue)
+    }
+
+    func testNativeAgentLoopServiceForwardsMemoryCandidateToPipeline() async throws {
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(
+            toolCallId: "",
+            content: "오늘 일정: 14시 제품 리뷰 미팅, 16시 디자인 동기화"
+        )
+        toolService.allToolInfos = [
+            ToolInfo(
+                name: "calendar.today",
+                description: "today",
+                category: .safe,
+                isBaseline: true,
+                isEnabled: true,
+                parameters: []
+            ),
+        ]
+
+        let memoryPipeline = MockMemoryPipelineService()
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.done(text: "done")]
+            }
+            return [
+                .toolUse(toolCallId: "tool_1", toolName: "calendar.today", toolInputJSON: "{}"),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService,
+            memoryPipeline: memoryPipeline
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "native-session-3",
+                    workspaceId: "workspace-3",
+                    agentId: "도치"
+                )
+            )
+        )
+        try await Task.sleep(for: .milliseconds(30))
+
+        XCTAssertEqual(memoryPipeline.submitCallCount, 1)
+        guard let candidate = memoryPipeline.submittedCandidates.first else {
+            return XCTFail("Expected memory candidate")
+        }
+        XCTAssertEqual(candidate.sessionId, "native-session-3")
+        XCTAssertEqual(candidate.workspaceId, "workspace-3")
+        XCTAssertEqual(candidate.agentId, "도치")
+        XCTAssertEqual(candidate.source, .toolResult)
+    }
+
+    func testNativeAgentLoopServiceHandlesOutOfRangeUnsignedArguments() async throws {
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(toolCallId: "", content: "ok")
+        toolService.allToolInfos = [
+            ToolInfo(
+                name: "calculator",
+                description: "calculate",
+                category: .safe,
+                isBaseline: true,
+                isEnabled: true,
+                parameters: []
+            ),
+        ]
+
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.done(text: "done")]
+            }
+            return [
+                .toolUse(
+                    toolCallId: "tool_1",
+                    toolName: "calculator",
+                    toolInputJSON: "{\"n\":18446744073709551615}"
+                ),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "native-session-5",
+                    workspaceId: "workspace-5",
+                    agentId: "도치"
+                )
+            )
+        )
+
+        XCTAssertEqual(toolService.executeCallCount, 1)
+        guard let audit = service.auditLog.first else {
+            return XCTFail("Expected audit event for out-of-range integer argument")
+        }
+        XCTAssertFalse(audit.argumentsHash.isEmpty)
+    }
+
+    func testNativeAgentLoopServiceRunsSessionCloseAndStopHooks() async throws {
+        let spyHook = SpyLifecycleHook()
+        let hookPipeline = HookPipeline()
+        hookPipeline.registerLifecycleHook(spyHook)
+
+        let adapter = StaticNativeLLMProviderAdapter(
+            provider: .anthropic,
+            events: [.done(text: "done")]
+        )
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            hookPipeline: hookPipeline
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "native-session-4",
+                    workspaceId: "workspace-4",
+                    agentId: "도치"
+                )
+            )
+        )
+
+        XCTAssertEqual(spyHook.sessionCloseCallCount, 1)
+        XCTAssertEqual(spyHook.lastSessionId, "native-session-4")
+
+        service.runStopHooks()
+        XCTAssertEqual(spyHook.stopCallCount, 1)
     }
 }
 
@@ -237,6 +484,23 @@ private final class CapturingNativeLLMProviderAdapter: @unchecked Sendable, Nati
                 continuation.finish(throwing: error)
             }
         }
+    }
+}
+
+@MainActor
+private final class SpyLifecycleHook: SessionLifecycleHook {
+    let name = "SpyLifecycle"
+    private(set) var sessionCloseCallCount = 0
+    private(set) var stopCallCount = 0
+    private(set) var lastSessionId: String?
+
+    func onSessionClose(sessionId: String, auditLog _: [ToolAuditEvent]) {
+        sessionCloseCallCount += 1
+        lastSessionId = sessionId
+    }
+
+    func onStop(auditLog _: [ToolAuditEvent]) {
+        stopCallCount += 1
     }
 }
 

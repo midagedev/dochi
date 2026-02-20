@@ -224,6 +224,7 @@ final class DochiViewModel {
     private let nativeAgentLoopService: NativeAgentLoopService
     private let nativeSessionStore: NativeSessionStore
     private let contextCompactionService: ContextCompactionService
+    private let memoryPipeline: any MemoryPipelineProtocol
 
     /// Optional runtime bridge for SDK session path.
     /// When available and in `.ready` state, input is routed through the SDK session.
@@ -284,7 +285,8 @@ final class DochiViewModel {
         runtimeBridge: (any RuntimeBridgeProtocol)? = nil,
         nativeAgentLoopService: NativeAgentLoopService? = nil,
         nativeSessionStore: NativeSessionStore? = nil,
-        contextCompactionService: ContextCompactionService? = nil
+        contextCompactionService: ContextCompactionService? = nil,
+        memoryPipeline: (any MemoryPipelineProtocol)? = nil
     ) {
         self.toolService = toolService
         self.contextService = contextService
@@ -297,10 +299,16 @@ final class DochiViewModel {
         self.sessionContext = sessionContext
         self.metricsCollector = metricsCollector
         self.runtimeBridge = runtimeBridge
+        let resolvedMemoryPipeline = memoryPipeline ?? MemoryPipelineService(contextService: contextService)
+        self.memoryPipeline = resolvedMemoryPipeline
         self.nativeAgentLoopService = nativeAgentLoopService ?? NativeAgentLoopService(
             adapters: [AnthropicNativeLLMProviderAdapter()],
-            toolService: toolService
+            toolService: toolService,
+            memoryPipeline: resolvedMemoryPipeline
         )
+        if nativeAgentLoopService != nil {
+            self.nativeAgentLoopService.setMemoryPipeline(resolvedMemoryPipeline)
+        }
         self.nativeSessionStore = nativeSessionStore ?? NativeSessionStore()
         self.contextCompactionService = contextCompactionService ?? ContextCompactionService()
 
@@ -1235,6 +1243,7 @@ final class DochiViewModel {
         sentenceChunker = SentenceChunker()
         interruptSDKSession()
         markCurrentNativeSessionInterrupted()
+        nativeAgentLoopService.runStopHooks()
 
         // Preserve partial streaming text as assistant message
         if !streamingText.isEmpty {
@@ -1302,11 +1311,19 @@ final class DochiViewModel {
 
         do {
             let request = try buildNativeLLMRequestFromConversation()
+            let nativeHookContext = NativeAgentLoopHookContext(
+                sessionId: currentConversation?.id.uuidString ?? UUID().uuidString,
+                workspaceId: sessionContext.workspaceId.uuidString,
+                agentId: settings.activeAgentName
+            )
 
             streamingText = ""
             var accumulatedText = ""
 
-            eventLoop: for try await event in nativeAgentLoopService.run(request: request) {
+            eventLoop: for try await event in nativeAgentLoopService.run(
+                request: request,
+                hookContext: nativeHookContext
+            ) {
                 guard !Task.isCancelled else { break }
 
                 switch event.kind {
