@@ -305,7 +305,9 @@ final class DochiViewModel {
             adapters: [
                 AnthropicNativeLLMProviderAdapter(),
                 OpenAINativeLLMProviderAdapter(),
-                ZAINativeLLMProviderAdapter()
+                ZAINativeLLMProviderAdapter(),
+                OllamaNativeLLMProviderAdapter(),
+                LMStudioNativeLLMProviderAdapter()
             ],
             toolService: toolService,
             memoryPipeline: resolvedMemoryPipeline
@@ -2981,16 +2983,56 @@ final class DochiViewModel {
     private func nativeEndpointURL(for provider: LLMProvider) -> URL? {
         switch provider {
         case .ollama:
-            let trimmed = settings.ollamaBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return provider.apiURL }
-            guard let baseURL = URL(string: trimmed) else { return provider.apiURL }
-            return baseURL
-                .appendingPathComponent("v1")
-                .appendingPathComponent("chat")
-                .appendingPathComponent("completions")
+            return localChatCompletionsEndpoint(
+                baseURLString: settings.ollamaBaseURL,
+                fallback: provider.apiURL
+            )
+        case .lmStudio:
+            return localChatCompletionsEndpoint(
+                baseURLString: settings.lmStudioBaseURL,
+                fallback: provider.apiURL
+            )
         default:
             return nil
         }
+    }
+
+    private func localChatCompletionsEndpoint(baseURLString: String, fallback: URL) -> URL {
+        let trimmed = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let baseURL = URL(string: trimmed) else {
+            return fallback
+        }
+
+        let normalizedPath = baseURL.path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if normalizedPath.hasSuffix("v1/chat/completions") {
+            return baseURL
+        }
+        if normalizedPath.hasSuffix("chat/completions") {
+            return baseURL
+        }
+        if normalizedPath.hasSuffix("v1/models") {
+            return baseURL
+                .deletingLastPathComponent()
+                .appendingPathComponent("chat")
+                .appendingPathComponent("completions")
+        }
+        if normalizedPath.hasSuffix("v1") {
+            return baseURL
+                .appendingPathComponent("chat")
+                .appendingPathComponent("completions")
+        }
+        if normalizedPath.hasSuffix("api/tags") {
+            return baseURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("v1")
+                .appendingPathComponent("chat")
+                .appendingPathComponent("completions")
+        }
+        return baseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("chat")
+            .appendingPathComponent("completions")
     }
 
     private func loadNativeAPIKey(for provider: LLMProvider) -> String? {

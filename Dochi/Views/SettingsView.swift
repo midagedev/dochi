@@ -1309,20 +1309,28 @@ struct ModelSettingsView: View {
 
     @ViewBuilder
     private func localServerStatusRow(available: Bool?) -> some View {
-        HStack {
-            Text("상태")
-            Spacer()
-            if let available {
-                if available {
-                    Label("연결됨", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("상태")
+                Spacer()
+                if let available {
+                    if available {
+                        Label("연결됨", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Label("연결 불가", systemImage: "xmark.circle.fill")
+                            .foregroundStyle(.red)
+                    }
                 } else {
-                    Label("연결 불가", systemImage: "xmark.circle.fill")
-                        .foregroundStyle(.red)
+                    ProgressView()
+                        .controlSize(.small)
                 }
-            } else {
-                ProgressView()
-                    .controlSize(.small)
+            }
+
+            if available == false {
+                Text("로컬 서버를 실행한 뒤 Base URL을 확인하고 '모델 새로고침'을 눌러주세요.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
     }

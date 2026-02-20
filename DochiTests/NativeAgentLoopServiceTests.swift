@@ -16,8 +16,18 @@ final class NativeAgentLoopServiceTests: XCTestCase {
             provider: .zai,
             events: [.partial("zai"), .done(text: "zai")]
         )
+        let ollamaAdapter = StaticNativeLLMProviderAdapter(
+            provider: .ollama,
+            events: [.partial("ollama"), .done(text: "ollama")]
+        )
+        let lmStudioAdapter = StaticNativeLLMProviderAdapter(
+            provider: .lmStudio,
+            events: [.partial("lmstudio"), .done(text: "lmstudio")]
+        )
 
-        let service = NativeAgentLoopService(adapters: [anthropicAdapter, openAIAdapter, zaiAdapter])
+        let service = NativeAgentLoopService(
+            adapters: [anthropicAdapter, openAIAdapter, zaiAdapter, ollamaAdapter, lmStudioAdapter]
+        )
 
         let anthropicEvents = try await collectEvents(from: service.run(request: makeRequest(provider: .anthropic)))
         XCTAssertEqual(anthropicEvents.first?.text, "anthropic")
@@ -27,6 +37,12 @@ final class NativeAgentLoopServiceTests: XCTestCase {
 
         let zaiEvents = try await collectEvents(from: service.run(request: makeRequest(provider: .zai)))
         XCTAssertEqual(zaiEvents.first?.text, "zai")
+
+        let ollamaEvents = try await collectEvents(from: service.run(request: makeRequest(provider: .ollama)))
+        XCTAssertEqual(ollamaEvents.first?.text, "ollama")
+
+        let lmStudioEvents = try await collectEvents(from: service.run(request: makeRequest(provider: .lmStudio)))
+        XCTAssertEqual(lmStudioEvents.first?.text, "lmstudio")
     }
 
     func testNativeAgentLoopServiceReturnsUnsupportedProviderError() async {
