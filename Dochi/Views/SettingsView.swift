@@ -170,7 +170,8 @@ struct SettingsView: View {
                 keychainService: keychainService,
                 telegramService: telegramService,
                 mcpService: mcpService,
-                settings: settings
+                settings: settings,
+                sessionContext: sessionContext
             )
 
         case .shortcuts:

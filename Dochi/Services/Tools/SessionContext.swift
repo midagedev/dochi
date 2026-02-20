@@ -7,8 +7,22 @@ final class SessionContext {
     var workspaceId: UUID
     var currentUserId: String?
     var currentProjectId: String?
-    var currentRepoPath: String?
     var currentBranch: String?
+
+    /// Called when `currentRepoPath` changes to a new non-nil value.
+    var onRepoPathChanged: ((String) async -> Void)?
+
+    /// The active repository path. Setting a new value triggers `onRepoPathChanged`.
+    var currentRepoPath: String? {
+        didSet {
+            guard let newPath = currentRepoPath, newPath != oldValue else { return }
+            if let callback = onRepoPathChanged {
+                Task { @MainActor in
+                    await callback(newPath)
+                }
+            }
+        }
+    }
 
     init(
         workspaceId: UUID,

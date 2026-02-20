@@ -9,6 +9,9 @@ protocol MCPServiceProtocol {
     func disconnect(serverId: UUID)
     func disconnectAll()
 
+    /// Atomically replaces a server config (disconnect old -> remove -> add new -> reconnect if enabled).
+    func updateServer(config: MCPServerConfig) async throws
+
     // Query
     func listServers() -> [MCPServerConfig]
     func getServer(id: UUID) -> MCPServerConfig?

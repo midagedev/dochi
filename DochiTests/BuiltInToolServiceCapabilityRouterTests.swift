@@ -13,6 +13,7 @@ private final class MockMCPServiceForCapabilityTests: MCPServiceProtocol {
     func connect(serverId: UUID) async throws {}
     func disconnect(serverId: UUID) {}
     func disconnectAll() {}
+    func updateServer(config: MCPServerConfig) async throws {}
     func listServers() -> [MCPServerConfig] { [] }
     func getServer(id: UUID) -> MCPServerConfig? { nil }
     func listTools() -> [MCPToolInfo] { tools }

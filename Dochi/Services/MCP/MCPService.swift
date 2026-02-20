@@ -300,6 +300,17 @@ final class MCPService: MCPServiceProtocol {
         Log.mcp.info("Server removed: \(name) (id: \(id))")
     }
 
+    func updateServer(config: MCPServerConfig) async throws {
+        let wasConnected = connections[config.id] != nil
+        removeServer(id: config.id)
+        addServer(config: config)
+
+        if config.isEnabled && wasConnected {
+            try await connect(serverId: config.id)
+        }
+        Log.mcp.info("Server updated: \(config.name) (id: \(config.id))")
+    }
+
     func connect(serverId: UUID) async throws {
         guard let config = configs[serverId] else {
             Log.mcp.error("Connect failed: server not found (id: \(serverId))")
