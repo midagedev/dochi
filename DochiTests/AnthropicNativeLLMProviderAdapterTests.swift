@@ -132,6 +132,86 @@ final class AnthropicNativeLLMProviderAdapterTests: XCTestCase {
             XCTFail("Unexpected error type: \(error)")
         }
     }
+
+    func testAnthropicAdapterEmitsPartialBeforeStreamCompletion() async throws {
+        let streamLines = [
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial-now\"}}",
+            "",
+            ": heartbeat",
+            ": heartbeat",
+            ": heartbeat",
+            ": heartbeat",
+            ": heartbeat",
+            "event: message_stop",
+            "data: {\"type\":\"message_stop\"}",
+            "",
+        ]
+        let httpClient = MockNativeLLMHTTPClient(
+            statusCode: 200,
+            headers: [:],
+            body: Data(),
+            streamLines: streamLines,
+            streamLineDelayNanoseconds: 25_000_000
+        )
+        let adapter = AnthropicNativeLLMProviderAdapter(httpClient: httpClient)
+        let request = makeRequest(provider: .anthropic, apiKey: "test-key")
+
+        let stream = adapter.stream(request: request)
+        var iterator = stream.makeAsyncIterator()
+        let startedAt = Date()
+
+        let first = try await iterator.next()
+        let firstLatency = Date().timeIntervalSince(startedAt)
+        let second = try await iterator.next()
+        let totalLatency = Date().timeIntervalSince(startedAt)
+
+        XCTAssertEqual(first?.kind, .partial)
+        XCTAssertEqual(first?.text, "partial-now")
+        XCTAssertLessThan(firstLatency, totalLatency)
+        XCTAssertGreaterThan(totalLatency - firstLatency, 0.05)
+        XCTAssertEqual(second?.kind, .done)
+        XCTAssertEqual(await httpClient.sendStreamingCallCount, 1)
+        XCTAssertEqual(await httpClient.sendCallCount, 0)
+    }
+
+    func testAnthropicAdapterCancelsNetworkStreamWhenConsumerStopsEarly() async throws {
+        let streamLines = [
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"first\"}}",
+            "",
+            ": heartbeat",
+            ": heartbeat",
+            ": heartbeat",
+            ": heartbeat",
+            "event: message_stop",
+            "data: {\"type\":\"message_stop\"}",
+            "",
+        ]
+        let httpClient = MockNativeLLMHTTPClient(
+            statusCode: 200,
+            headers: [:],
+            body: Data(),
+            streamLines: streamLines,
+            streamLineDelayNanoseconds: 30_000_000
+        )
+        let adapter = AnthropicNativeLLMProviderAdapter(httpClient: httpClient)
+        let request = makeRequest(provider: .anthropic, apiKey: "test-key")
+
+        let firstEventTask = Task<NativeLLMStreamEvent?, Error> {
+            for try await event in adapter.stream(request: request) {
+                return event
+            }
+            return nil
+        }
+
+        let first = try await firstEventTask.value
+        XCTAssertEqual(first?.kind, .partial)
+        XCTAssertEqual(first?.text, "first")
+
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertTrue(await httpClient.didCancelStream())
+    }
 }
 
 private extension AnthropicNativeLLMProviderAdapterTests {
