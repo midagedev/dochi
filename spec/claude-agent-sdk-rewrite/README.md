@@ -1,64 +1,72 @@
-# Claude Agent SDK Rewrite Spec
+# Native + MCP Rewrite Program
 
-이 디렉토리는 Dochi를 Claude Agent SDK 중심으로 재구성하기 위한 리라이트 정본 문서 묶음입니다.
+상태 갱신: 2026-02-20
 
-기준일: 2026-02-19
-상태: Architecture Draft (Rewrite Kickoff)
+> 이 디렉토리는 원래 Claude Agent SDK 전면 전환 계획의 정본이었지만,
+> 아키텍처 결정 [#318](https://github.com/midagedev/dochi/issues/318) 이후
+> **Native + MCP 기준 실행 트랙**으로 재정렬되었다.
 
-## 목표
+## 현재 결정
 
-- 기존 커스텀 에이전트 루프를 제거하고 SDK 런타임을 표준 엔진으로 채택한다.
-- Dochi 고유 가치(워크스페이스/개인 컨텍스트, 로컬 실행, 에이전트 역할 분리)는 유지하고 강화한다.
-- 향후 구현/삭제/마이그레이션 작업의 단일 기준 문서로 사용한다.
+- 대화/음성 기본 경로: 네이티브 Swift + provider adapter
+- 도구 확장: MCP 계층 유지/강화
+- 장시간 코딩 작업: Claude Code / Codex CLI 오케스트레이션
+- SDK sidecar 전면 의존 계획: deprecated (history only)
 
-## 읽기 순서
+## 읽기 순서 (Current SoT)
 
-1. `rewrite-delivery-context.md`
-2. `01-claude-agent-sdk-reference.md`
-3. `02-architecture-principles.md`
-4. `03-target-system-architecture.md`
-5. `04-runtime-bridge-design.md`
-6. `05-context-and-memory-architecture.md`
-7. `06-agent-definition-and-lifecycle.md`
-8. `07-tools-permissions-hooks.md`
-9. `08-multi-device-sync-topology.md`
-10. `09-implementation-roadmap.md`
-11. `10-testing-observability-operations.md`
-12. `11-tool-routing-policy.md`
-13. `12-cli-orchestration-contract.md`
+1. [#318](https://github.com/midagedev/dochi/issues/318) 프로그램 결정/체크리스트
+2. `spec/claude-agent-sdk-rewrite/rewrite-delivery-context.md`
+3. `spec/claude-agent-sdk-rewrite/10-mcp-coding-profiles-guide.md`
+4. `spec/claude-agent-sdk-rewrite/11-tool-routing-policy.md`
+5. `spec/claude-agent-sdk-rewrite/12-cli-orchestration-contract.md`
+6. `spec/llm-requirements.md`, `spec/tools.md`, `spec/security.md`, `spec/tech-spec.md`
 
-## 문서 맵
+## 이슈 맵 (Native Track)
 
-| 문서 | 목적 |
-|------|------|
-| `rewrite-delivery-context.md` | 참고 문서 + GH 이슈 + 품질 게이트를 한 번에 보는 실행 컨텍스트 |
-| `01-claude-agent-sdk-reference.md` | SDK 핵심 개념, 인증/세션/권한/훅/서브에이전트/MCP 요약 |
-| `02-architecture-principles.md` | CONCEPT 기반 설계 원칙과 비기능 요구 |
-| `03-target-system-architecture.md` | 이상적인 시스템 아키텍처와 책임 분할 |
-| `04-runtime-bridge-design.md` | Swift 앱과 Agent Runtime 사이 브리지 프로토콜 |
-| `05-context-and-memory-architecture.md` | 4계층 컨텍스트/메모리 저장·주입·압축 전략 |
-| `06-agent-definition-and-lifecycle.md` | 선언적 에이전트 모델, 웨이크워드 라우팅, 세션 수명주기 |
-| `07-tools-permissions-hooks.md` | 도구 실행·권한·사용자 확인·훅 정책 |
-| `08-multi-device-sync-topology.md` | 멀티 디바이스/워크스페이스 동기화·실행 위임 모델 |
-| `09-implementation-roadmap.md` | 실제 rewrite 단계별 실행 계획 |
-| `10-testing-observability-operations.md` | 테스트, 운영 가시성, SLO, 장애 대응 |
-| `11-tool-routing-policy.md` | BuiltIn/MCP 라우팅 및 위험도 정책 |
-| `12-cli-orchestration-contract.md` | 장시간 외부 CLI 작업 위임/조회/중단/요약 계약 |
+| Phase | Issue | 상태 | 스펙/코드 기준 |
+|------|-------|------|----------------|
+| Phase 1 | [#320](https://github.com/midagedev/dochi/issues/320) 멀티 Provider 인터페이스 + Anthropic | CLOSED | `spec/llm-requirements.md` |
+| Phase 1 | [#321](https://github.com/midagedev/dochi/issues/321) NativeAgentLoopService | CLOSED | `Dochi/Services/NativeLLM/*` |
+| Phase 1 | [#322](https://github.com/midagedev/dochi/issues/322) DochiViewModel 컷오버 | CLOSED | `Dochi/ViewModels/DochiViewModel.swift` |
+| Phase 1 | [#323](https://github.com/midagedev/dochi/issues/323) 세션 지속성/재개 | CLOSED | `Dochi/Services/NativeLLM/*` |
+| Phase 2 | [#324](https://github.com/midagedev/dochi/issues/324) ContextCompactionService | CLOSED | `Dochi/Services/NativeLLM/ContextCompactionService.swift` |
+| Phase 2 | [#325](https://github.com/midagedev/dochi/issues/325) HookPipeline 통합 | CLOSED | `Dochi/Services/Runtime/Hooks/*` |
+| Phase 3 | [#326](https://github.com/midagedev/dochi/issues/326) MCP 프로파일/lifecycle | CLOSED | `10-mcp-coding-profiles-guide.md` |
+| Phase 3 | [#327](https://github.com/midagedev/dochi/issues/327) BuiltIn/MCP 라우팅 정책 | CLOSED | `11-tool-routing-policy.md` |
+| Phase 3 | [#328](https://github.com/midagedev/dochi/issues/328) CLI 오케스트레이션 계약 | CLOSED | `12-cli-orchestration-contract.md` |
+| Phase 4 | [#329](https://github.com/midagedev/dochi/issues/329) SDK sidecar 제거 | CLOSED | `Dochi/ViewModels/DochiViewModel.swift` |
+| Phase 4 | [#330](https://github.com/midagedev/dochi/issues/330) 회귀/성능/SLO 게이트 | OPEN | `10-testing-observability-operations.md` |
+| Phase 4 | [#331](https://github.com/midagedev/dochi/issues/331) 스펙/이슈 동기화 | OPEN | 본 문서 + `rewrite-delivery-context.md` |
+| Phase 1 (Provider) | [#332](https://github.com/midagedev/dochi/issues/332) OpenAI 어댑터 | OPEN | `spec/llm-requirements.md` |
+| Phase 1 (Provider) | [#333](https://github.com/midagedev/dochi/issues/333) Z.AI 어댑터 | OPEN | `spec/llm-requirements.md` |
+| Phase 1 (Provider) | [#334](https://github.com/midagedev/dochi/issues/334) Ollama/LM Studio 어댑터 | OPEN | `spec/llm-requirements.md` |
+| Phase 2 (Provider) | [#335](https://github.com/midagedev/dochi/issues/335) Capability Matrix | OPEN | `spec/llm-requirements.md` |
+| Phase 2 (Provider) | [#336](https://github.com/midagedev/dochi/issues/336) ModelRouter v2 | OPEN | `spec/tech-spec.md`, `spec/tools.md` |
+| Phase 4 (Provider) | [#337](https://github.com/midagedev/dochi/issues/337) Provider Contract Test Matrix | OPEN | `DochiTests/*Provider*` |
 
-## 적용 범위
+## Deprecated/Archive 문서
 
-- 포함: macOS 앱, CLI/메신저 연동, 컨텍스트/동기화, 에이전트 런타임
-- 제외: 단기 UI 픽셀 수정, legacy 엔진 유지보수 확장
+아래 문서는 **SDK 전면 전환 당시 설계 이력**으로 보관한다.
 
-## 핵심 결정
+- `01-claude-agent-sdk-reference.md`
+- `02-architecture-principles.md`
+- `03-target-system-architecture.md`
+- `04-runtime-bridge-design.md`
+- `05-context-and-memory-architecture.md`
+- `06-agent-definition-and-lifecycle.md`
+- `07-tools-permissions-hooks.md`
+- `08-multi-device-sync-topology.md`
+- `09-implementation-roadmap.md`
 
-- 에이전트 런타임은 Claude Agent SDK를 기준으로 한다.
-- 런타임 언어는 TypeScript를 우선 채택한다.
-- 앱은 "오케스트레이터 + 도메인 시스템"으로 남고, 에이전트 추론 루프는 런타임에 위임한다.
-- Supabase는 동기화/메시지 라우팅 계층으로 제한한다.
+사용 규칙:
 
-## 관련 상위 문서
+- 신규 기능 설계의 1차 근거로 사용하지 않는다.
+- 필요한 경우 "history reference"로만 인용한다.
+- 현재 동작/우선순위 판단은 #318 + 본 문서 기준으로 한다.
 
-- `CONCEPT.md`
-- `ROADMAP.md`
-- `spec/execution-context.md`
+## 유지보수 규칙
+
+- 이슈 상태 변경 시 이 문서 표를 함께 갱신한다.
+- Program 레벨 결정 변경 시 `rewrite-delivery-context.md`를 먼저 갱신한다.
+- obsolete 계획은 문서 내에 deprecated로 명시한다.

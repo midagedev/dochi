@@ -17,6 +17,7 @@
 | 문서 | 역할 |
 |------|------|
 | [execution-context.md](./execution-context.md) | 이슈 드리븐 실행 정본. 구현 완료 축약 + 구현 예정 상세 + UX 일관성 계약 + 이슈 템플릿/백로그 |
+| [claude-agent-sdk-rewrite/README.md](./claude-agent-sdk-rewrite/README.md) | Native + MCP 리라이트 프로그램 이슈 맵/진행 컨텍스트 (현재 트랙) |
 | [product-spec.md](./product-spec.md) | 제품 배경, 목표, 요구사항, 성공 지표 |
 | [tech-spec.md](./tech-spec.md) | 아키텍처, 컴포넌트, 의존성, 규칙 |
 | [states.md](./states.md) | 앱 상태 머신, 전이 규칙, 금지 조합 |
