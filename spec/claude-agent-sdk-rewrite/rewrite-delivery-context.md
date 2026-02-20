@@ -48,6 +48,14 @@
 - [ ] [#336](https://github.com/midagedev/dochi/issues/336) ModelRouter v2
 - [ ] [#337](https://github.com/midagedev/dochi/issues/337) Contract Test Matrix
 
+### Follow-up / Stabilization Backlog
+
+- [ ] [#339](https://github.com/midagedev/dochi/issues/339) Anthropic SSE incremental parser 적용
+- [ ] [#344](https://github.com/midagedev/dochi/issues/344) ContextCompaction tokenizer 정밀도 개선
+- [ ] [#347](https://github.com/midagedev/dochi/issues/347) coding-git MCP repo 경로 자동 동기화
+- [ ] [#350](https://github.com/midagedev/dochi/issues/350) orchestrator summarize 로직 서비스 분리
+- [ ] [#352](https://github.com/midagedev/dochi/issues/352) DochiViewModel SDK dead code 제거
+
 ## 4) Legacy SDK Program (#281~#293) Status Mapping
 
 | Legacy Issue | 상태 | Native Track 대응 |

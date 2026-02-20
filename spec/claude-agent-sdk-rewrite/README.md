@@ -45,6 +45,18 @@
 | Phase 2 (Provider) | [#336](https://github.com/midagedev/dochi/issues/336) ModelRouter v2 | OPEN | `spec/tech-spec.md`, `spec/tools.md` |
 | Phase 4 (Provider) | [#337](https://github.com/midagedev/dochi/issues/337) Provider Contract Test Matrix | OPEN | `DochiTests/*Provider*` |
 
+## Follow-up/Stabilization Backlog
+
+`#320~#337` 실행 중 파생된 보완 이슈. 문서-실행 트랙 매핑을 유지하기 위해 함께 관리한다.
+
+| Track | Issue | 상태 | 비고 |
+|------|-------|------|------|
+| Phase 1 hardening | [#339](https://github.com/midagedev/dochi/issues/339) Anthropic SSE incremental parser | OPEN | first partial latency 개선 |
+| Phase 2 hardening | [#344](https://github.com/midagedev/dochi/issues/344) ContextCompaction token estimator 정밀도 개선 | OPEN | tokenizer 전략 주입 |
+| Phase 3 hardening | [#347](https://github.com/midagedev/dochi/issues/347) coding-git MCP repo 경로 자동 동기화 | OPEN | repo context 연동 |
+| Phase 3 hardening | [#350](https://github.com/midagedev/dochi/issues/350) orchestrator summarize 서비스 분리 | OPEN | 테스트 가능성 강화 |
+| Phase 4 cleanup | [#352](https://github.com/midagedev/dochi/issues/352) DochiViewModel SDK dead code 제거 | OPEN | #329 후속 정리 |
+
 ## Deprecated/Archive 문서
 
 아래 문서는 **SDK 전면 전환 당시 설계 이력**으로 보관한다.
