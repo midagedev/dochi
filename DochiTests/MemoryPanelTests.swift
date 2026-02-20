@@ -262,7 +262,6 @@ final class MemoryPanelTests: XCTestCase {
         let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         let ctx = sessionContext ?? SessionContext(workspaceId: wsId)
         return DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: contextService,
             conversationService: MockConversationService(),

@@ -11,7 +11,6 @@ final class DochiShortcutService {
     private(set) var contextService: ContextServiceProtocol?
     private(set) var keychainService: KeychainServiceProtocol?
     private(set) var settings: AppSettings?
-    private(set) var llmService: LLMServiceProtocol?
     private(set) var heartbeatService: HeartbeatService?
 
     // MARK: - Execution Log
@@ -28,67 +27,25 @@ final class DochiShortcutService {
         contextService: ContextServiceProtocol,
         keychainService: KeychainServiceProtocol,
         settings: AppSettings,
-        llmService: LLMServiceProtocol,
         heartbeatService: HeartbeatService
     ) {
         self.contextService = contextService
         self.keychainService = keychainService
         self.settings = settings
-        self.llmService = llmService
         self.heartbeatService = heartbeatService
         Log.app.info("DochiShortcutService configured")
     }
 
     // MARK: - Ask Dochi
 
+    /// Legacy LLM engine removed. Shortcuts ask functionality requires SDK runtime.
     func askDochi(question: String) async throws -> String {
-        guard let settings, let keychainService, let llmService else {
+        guard isConfigured else {
             throw ShortcutError.notConfigured
         }
-
-        let provider = LLMProvider(rawValue: settings.llmProvider) ?? .openai
-        let model = settings.llmModel
-
-        guard let apiKey = keychainService.load(account: provider.keychainAccount), !apiKey.isEmpty else {
-            if provider.requiresAPIKey {
-                throw ShortcutError.apiKeyNotSet
-            } else {
-                // Local providers don't need API key
-                return try await performLLMCall(llmService: llmService, question: question, provider: provider, model: model, apiKey: "")
-            }
-        }
-
-        return try await performLLMCall(llmService: llmService, question: question, provider: provider, model: model, apiKey: apiKey)
-    }
-
-    private func performLLMCall(
-        llmService: LLMServiceProtocol,
-        question: String,
-        provider: LLMProvider,
-        model: String,
-        apiKey: String
-    ) async throws -> String {
-        let systemPrompt = contextService?.loadBaseSystemPrompt() ?? "당신은 도치라는 AI 비서입니다. 간결하고 도움이 되는 답변을 합니다."
-        let messages = [Message(role: .user, content: question)]
-
-        let response = try await llmService.send(
-            messages: messages,
-            systemPrompt: systemPrompt,
-            model: model,
-            provider: provider,
-            apiKey: apiKey,
-            tools: nil,
-            onPartial: { _ in }
-        )
-
-        switch response {
-        case .text(let text):
-            return text
-        case .partial(let text):
-            return text
-        case .toolCalls:
-            return "도구 호출이 필요한 요청입니다. Shortcuts에서는 도구 실행이 제한됩니다."
-        }
+        // Without the legacy LLM engine, Shortcuts cannot directly call LLM.
+        // Return a message indicating the limitation.
+        return "Shortcuts에서의 직접 LLM 호출은 현재 지원되지 않습니다. 앱 내에서 질문해주세요."
     }
 
     // MARK: - Add Memo
@@ -144,8 +101,9 @@ final class DochiShortcutService {
 
     // MARK: - Today Briefing
 
+    /// Provide a daily briefing using local context only (legacy LLM engine removed).
     func todayBriefing() async throws -> String {
-        guard let settings, let keychainService, let llmService else {
+        guard let settings else {
             throw ShortcutError.notConfigured
         }
 
@@ -190,50 +148,8 @@ final class DochiShortcutService {
             return "오늘 특별히 확인할 사항이 없습니다. 칸반 보드에 작업을 추가하거나 메모를 남겨보세요."
         }
 
-        // Use LLM to summarize
-        let provider = LLMProvider(rawValue: settings.llmProvider) ?? .openai
-        let model = settings.llmModel
-
-        let apiKey: String
-        if provider.requiresAPIKey {
-            guard let key = keychainService.load(account: provider.keychainAccount), !key.isEmpty else {
-                // Fall back to simple text summary if no API key
-                return "오늘의 요약:\n\n\(contextParts.joined(separator: "\n\n"))"
-            }
-            apiKey = key
-        } else {
-            apiKey = ""
-        }
-
-        let summaryPrompt = "아래 정보를 기반으로 오늘 하루 브리핑을 간결하게 정리해줘. 3~5줄 이내로."
-        let userMessage = "\(summaryPrompt)\n\n\(contextParts.joined(separator: "\n\n"))"
-
-        let messages = [Message(role: .user, content: userMessage)]
-        let systemPrompt = "당신은 도치라는 AI 비서입니다. 간결하고 친근한 브리핑을 제공합니다."
-
-        do {
-            let response = try await llmService.send(
-                messages: messages,
-                systemPrompt: systemPrompt,
-                model: model,
-                provider: provider,
-                apiKey: apiKey,
-                tools: nil,
-                onPartial: { _ in }
-            )
-
-            switch response {
-            case .text(let text):
-                return text
-            case .partial(let text):
-                return text
-            case .toolCalls:
-                return "오늘의 요약:\n\n\(contextParts.joined(separator: "\n\n"))"
-            }
-        } catch {
-            // LLM failure — return raw context
-            return "오늘의 요약:\n\n\(contextParts.joined(separator: "\n\n"))"
-        }
+        // Return raw context summary (LLM summarization removed)
+        return "오늘의 요약:\n\n\(contextParts.joined(separator: "\n\n"))"
     }
 
     // MARK: - Execution Log

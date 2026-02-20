@@ -53,7 +53,6 @@ final class MenuBarManagerTests: XCTestCase {
             currentUserId: nil
         )
         return DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -211,7 +210,6 @@ final class MenuBarPopoverDataTests: XCTestCase {
             currentUserId: nil
         )
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -237,7 +235,6 @@ final class MenuBarPopoverDataTests: XCTestCase {
             currentUserId: nil
         )
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -264,7 +261,6 @@ final class MenuBarPopoverDataTests: XCTestCase {
             currentUserId: nil
         )
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -298,7 +294,6 @@ final class MenuBarPopoverDataTests: XCTestCase {
             currentUserId: nil
         )
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

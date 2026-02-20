@@ -310,7 +310,6 @@ final class ToolDispatchTests: XCTestCase {
         bridge.runtimeState = .ready
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -377,7 +376,6 @@ final class ToolDispatchTests: XCTestCase {
         ]
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

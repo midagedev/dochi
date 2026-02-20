@@ -117,7 +117,6 @@ struct DochiApp: App {
         let keychainService = KeychainService()
         Self.migrateLegacyAPIKeysIfNeeded(keychainService: keychainService)
         let conversationService = ConversationService()
-        let llmService = LLMService(settings: settings)
         let speechService = SpeechService()
         let ttsService = TTSRouter(settings: settings, keychainService: keychainService)
         let soundService = SoundService()
@@ -175,7 +174,6 @@ struct DochiApp: App {
             supabaseService: supabaseService,
             telegramService: telegramService,
             mcpService: mcpService,
-            llmService: llmService,
             delegationManager: delegationManager
         )
         self.toolService = toolService
@@ -242,13 +240,11 @@ struct DochiApp: App {
         // Memory Consolidator (I-2)
         let memoryConsolidator = MemoryConsolidator(
             contextService: contextService,
-            llmService: llmService,
             keychainService: keychainService
         )
         self.memoryConsolidator = memoryConsolidator
 
         let viewModel = DochiViewModel(
-            llmService: llmService,
             toolService: toolService,
             contextService: contextService,
             conversationService: conversationService,
@@ -285,7 +281,6 @@ struct DochiApp: App {
             contextService: contextService,
             keychainService: keychainService,
             settings: settings,
-            llmService: llmService,
             heartbeatService: heartbeatService
         )
 

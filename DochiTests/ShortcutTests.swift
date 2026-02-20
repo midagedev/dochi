@@ -205,14 +205,12 @@ final class DochiShortcutServiceTests: XCTestCase {
         let mockContext = MockContextService()
         let mockKeychain = MockKeychainService()
         let settings = AppSettings()
-        let mockLLM = MockLLMService()
         let heartbeatService = HeartbeatService(settings: settings)
 
         DochiShortcutService.shared.configure(
             contextService: mockContext,
             keychainService: mockKeychain,
             settings: settings,
-            llmService: mockLLM,
             heartbeatService: heartbeatService
         )
 
@@ -233,14 +231,12 @@ final class DochiShortcutServiceTests: XCTestCase {
         let mockContext = MockContextService()
         let mockKeychain = MockKeychainService()
         let settings = AppSettings()
-        let mockLLM = MockLLMService()
         let heartbeatService = HeartbeatService(settings: settings)
 
         DochiShortcutService.shared.configure(
             contextService: mockContext,
             keychainService: mockKeychain,
             settings: settings,
-            llmService: mockLLM,
             heartbeatService: heartbeatService
         )
 
@@ -257,37 +253,32 @@ final class DochiShortcutServiceTests: XCTestCase {
         let mockContext = MockContextService()
         let mockKeychain = MockKeychainService()
         let settings = AppSettings()
-        let mockLLM = MockLLMService()
         let heartbeatService = HeartbeatService(settings: settings)
 
         mockKeychain.store["openai"] = "test-key"
-        mockLLM.stubbedResponse = .text("AI 응답입니다")
 
         DochiShortcutService.shared.configure(
             contextService: mockContext,
             keychainService: mockKeychain,
             settings: settings,
-            llmService: mockLLM,
             heartbeatService: heartbeatService
         )
 
         let result = try await DochiShortcutService.shared.askDochi(question: "테스트 질문")
-        XCTAssertEqual(result, "AI 응답입니다")
-        XCTAssertEqual(mockLLM.sendCallCount, 1)
+        // Legacy LLM removed; askDochi returns stub message
+        XCTAssertFalse(result.isEmpty)
     }
 
     func testRecordExecution() {
         let mockContext = MockContextService()
         let mockKeychain = MockKeychainService()
         let settings = AppSettings()
-        let mockLLM = MockLLMService()
         let heartbeatService = HeartbeatService(settings: settings)
 
         DochiShortcutService.shared.configure(
             contextService: mockContext,
             keychainService: mockKeychain,
             settings: settings,
-            llmService: mockLLM,
             heartbeatService: heartbeatService
         )
 

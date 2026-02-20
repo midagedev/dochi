@@ -569,7 +569,6 @@ final class ProactiveActivitySignalTests: XCTestCase {
         let proactive = MockProactiveSuggestionService()
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: conversationService,

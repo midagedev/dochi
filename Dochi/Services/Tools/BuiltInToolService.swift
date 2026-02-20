@@ -31,7 +31,6 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         supabaseService: SupabaseServiceProtocol,
         telegramService: TelegramServiceProtocol,
         mcpService: MCPServiceProtocol,
-        llmService: LLMServiceProtocol? = nil,
         delegationManager: DelegationManager? = nil
     ) {
         self.sessionContext = sessionContext
@@ -226,7 +225,6 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
             contextService: contextService,
             sessionContext: sessionContext,
             settings: settings,
-            llmService: llmService,
             keychainService: keychainService,
             delegationManager: delegationManager
         ))

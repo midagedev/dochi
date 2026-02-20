@@ -144,7 +144,6 @@ final class SpotlightIndexerTests: XCTestCase {
         conversationService.conversations[uuid] = conversation
 
         let vm = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: conversationService,
@@ -164,7 +163,6 @@ final class SpotlightIndexerTests: XCTestCase {
 
     func testViewModelHandleDeepLinkMemory() {
         let vm = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -184,7 +182,6 @@ final class SpotlightIndexerTests: XCTestCase {
 
     func testViewModelHandleInvalidDeepLink() {
         let vm = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -210,7 +207,6 @@ final class SpotlightIndexerTests: XCTestCase {
         conversationService.conversations[uuid] = Conversation(id: uuid, title: "삭제할 대화")
 
         let vm = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: conversationService,
@@ -234,7 +230,6 @@ final class SpotlightIndexerTests: XCTestCase {
 
     func testConcreteSpotlightIndexerReturnsNilForMock() {
         let vm = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -255,7 +250,6 @@ final class SpotlightIndexerTests: XCTestCase {
     func testConcreteSpotlightIndexerReturnsConcreteType() {
         let settings = AppSettings()
         let vm = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

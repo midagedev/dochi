@@ -526,7 +526,6 @@ final class FeedbackModelAttributionTests: XCTestCase {
         let sessionContext = SessionContext(workspaceId: wsId)
 
         viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

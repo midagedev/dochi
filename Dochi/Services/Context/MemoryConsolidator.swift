@@ -39,7 +39,6 @@ final class MemoryConsolidator: MemoryConsolidatorProtocol {
     // MARK: - Dependencies
 
     private let contextService: ContextServiceProtocol
-    private let llmService: LLMServiceProtocol
     private let keychainService: KeychainServiceProtocol
 
     // MARK: - Storage
@@ -59,12 +58,10 @@ final class MemoryConsolidator: MemoryConsolidatorProtocol {
 
     init(
         contextService: ContextServiceProtocol,
-        llmService: LLMServiceProtocol,
         keychainService: KeychainServiceProtocol,
         baseURL: URL? = nil
     ) {
         self.contextService = contextService
-        self.llmService = llmService
         self.keychainService = keychainService
 
         let base = baseURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -309,59 +306,37 @@ final class MemoryConsolidator: MemoryConsolidatorProtocol {
 
     // MARK: - Private
 
+    /// Extract facts from conversation using local heuristic analysis.
+    /// Legacy LLM-based extraction has been removed; this uses keyword-based extraction instead.
     private func extractFacts(
         from conversation: Conversation,
         settings: AppSettings
     ) async throws -> [ExtractedFact] {
-        let provider = resolveProvider(settings: settings)
-        let model = resolveModel(settings: settings)
-        let apiKey = keychainService.load(account: provider.keychainAccount) ?? ""
+        // Local heuristic extraction: look for user messages with factual content
+        let userMessages = conversation.messages
+            .filter { $0.role == .user }
+            .suffix(20)
 
-        guard !apiKey.isEmpty || !provider.requiresAPIKey else {
-            throw ConsolidationError.noAPIKey
+        var facts: [ExtractedFact] = []
+
+        for message in userMessages {
+            let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard content.count > 10 else { continue }
+
+            // Skip questions and short messages
+            if content.hasSuffix("?") || content.hasSuffix("？") { continue }
+
+            // Look for preference/fact indicators
+            let factIndicators = ["좋아", "싫어", "선호", "결정", "계획", "목표", "기억", "중요", "항상", "절대"]
+            let hasIndicator = factIndicators.contains { content.contains($0) }
+
+            if hasIndicator && facts.count < 10 {
+                let summary = String(content.prefix(100))
+                facts.append(ExtractedFact(content: summary, scope: .personal))
+            }
         }
 
-        let conversationText = conversation.messages
-            .filter { $0.role == .user || $0.role == .assistant }
-            .prefix(50)
-            .map { "\($0.role == .user ? "사용자" : "AI"): \($0.content)" }
-            .joined(separator: "\n")
-
-        let systemPrompt = """
-        당신은 대화에서 중요한 사실과 결정을 추출하는 분석가입니다.
-        대화 내용을 분석하여 기억할 가치가 있는 주요 사실, 결정, 선호도를 추출하세요.
-
-        규칙:
-        - 각 항목은 한 줄로 간결하게 작성
-        - "- " 접두사로 시작
-        - 사용자의 개인 정보, 선호도, 결정 사항 위주로 추출
-        - 일상적 인사나 대화 흐름은 제외
-        - 최대 10개까지만 추출
-        - JSON 형식으로 응답: [{"content": "사실 내용", "scope": "personal"}]
-        - scope은 "personal" (개인), "workspace" (프로젝트), "agent" (에이전트 관련) 중 하나
-
-        대화 내용에서 기억할 사실이 없으면 빈 배열 [] 을 반환하세요.
-        """
-
-        let messages = [
-            Message(role: .user, content: "다음 대화에서 중요한 사실과 결정을 추출하세요:\n\n\(conversationText)")
-        ]
-
-        let response = try await llmService.send(
-            messages: messages,
-            systemPrompt: systemPrompt,
-            model: model,
-            provider: provider,
-            apiKey: apiKey,
-            tools: nil,
-            onPartial: { _ in }
-        )
-
-        guard case .text(let text) = response else {
-            return []
-        }
-
-        return parseFacts(from: text)
+        return facts
     }
 
     private func parseFacts(from text: String) -> [ExtractedFact] {
