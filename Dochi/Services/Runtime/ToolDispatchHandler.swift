@@ -273,39 +273,35 @@ final class ToolDispatchHandler {
         return approved
     }
 
-    /// Execute a tool with a timeout using a TaskGroup race pattern.
-    /// Whichever child task (execution or timeout sentinel) finishes first
-    /// produces the result; `cancelAll()` cancels the remaining child.
+    /// Execute a tool with a timeout by racing execution and timeout tasks.
+    /// The first published result wins, then both tasks are canceled.
     func executeWithTimeout(
         toolName: String,
         toolCallId: String,
         arguments: [String: Any],
         timeout: TimeInterval
     ) async -> ToolResult {
-        nonisolated(unsafe) let sendableArgs = arguments
-        nonisolated(unsafe) let sendableToolService = toolService
+        let raceResultBox = ToolExecutionRaceResultBox()
 
-        return await withTaskGroup(of: ToolResult.self) { group in
-            // Child 1 — tool execution (auto-hops to MainActor via protocol requirement)
-            group.addTask {
-                await sendableToolService.execute(name: toolName, arguments: sendableArgs)
-            }
-
-            // Child 2 — timeout sentinel
-            group.addTask {
-                try? await Task.sleep(for: .seconds(timeout))
-                return ToolResult(
-                    toolCallId: toolCallId,
-                    content: "Tool '\(toolName)' timed out after \(Int(timeout))s",
-                    isError: true
-                )
-            }
-
-            // First child to finish wins; cancel the other.
-            let result = await group.next()!
-            group.cancelAll()
-            return result
+        let executionTask = Task { @MainActor in
+            let result = await self.toolService.execute(name: toolName, arguments: arguments)
+            await raceResultBox.publish(result)
         }
+
+        let timeoutTask = Task {
+            try? await Task.sleep(for: .seconds(timeout))
+            let timeoutResult = ToolResult(
+                toolCallId: toolCallId,
+                content: "Tool '\(toolName)' timed out after \(Int(timeout))s",
+                isError: true
+            )
+            await raceResultBox.publish(timeoutResult)
+        }
+
+        let firstResult = await raceResultBox.waitForFirstResult()
+        executionTask.cancel()
+        timeoutTask.cancel()
+        return firstResult
     }
 
     private func sendToolResult(
@@ -420,6 +416,30 @@ final class ToolDispatchHandler {
         case "sensitive": return ToolTimeoutPolicy.sensitive
         case "restricted": return ToolTimeoutPolicy.restricted
         default: return ToolTimeoutPolicy.safe
+        }
+    }
+}
+
+private actor ToolExecutionRaceResultBox {
+    private var firstResult: ToolResult?
+    private var waiters: [CheckedContinuation<ToolResult, Never>] = []
+
+    func publish(_ result: ToolResult) {
+        guard firstResult == nil else { return }
+        firstResult = result
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations {
+            continuation.resume(returning: result)
+        }
+    }
+
+    func waitForFirstResult() async -> ToolResult {
+        if let firstResult {
+            return firstResult
+        }
+        return await withCheckedContinuation { continuation in
+            waiters.append(continuation)
         }
     }
 }
