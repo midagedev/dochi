@@ -519,7 +519,6 @@ final class ResourceOptimizerTests: XCTestCase {
         let wsId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

@@ -519,7 +519,6 @@ final class PermissionApprovalTests: XCTestCase {
         bridge.runtimeState = .ready
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -545,7 +544,6 @@ final class PermissionApprovalTests: XCTestCase {
     @MainActor
     func testSDKApprovalRespondApproveOnce() async throws {
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -595,7 +593,6 @@ final class PermissionApprovalTests: XCTestCase {
     @MainActor
     func testSDKApprovalRespondApproveSession() async throws {
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -638,7 +635,6 @@ final class PermissionApprovalTests: XCTestCase {
     @MainActor
     func testSDKApprovalRespondDeny() async throws {
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -681,7 +677,6 @@ final class PermissionApprovalTests: XCTestCase {
     @MainActor
     func testSDKApprovalRespondNoPending() {
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

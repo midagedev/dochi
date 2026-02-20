@@ -232,7 +232,6 @@ final class SelectConversationByIndexTests: XCTestCase {
         mockConversation.save(conversation: conv3)
 
         let vm = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: mockConversation,
@@ -262,7 +261,6 @@ final class SelectConversationByIndexTests: XCTestCase {
         mockConversation.save(conversation: conv)
 
         let vm = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: mockConversation,
@@ -283,7 +281,6 @@ final class SelectConversationByIndexTests: XCTestCase {
     @MainActor
     func testSelectByIndexZero() {
         let vm = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

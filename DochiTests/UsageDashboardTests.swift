@@ -598,7 +598,6 @@ final class BudgetBlockingTests: XCTestCase {
         try? keychainService.save(account: LLMProvider.openai.keychainAccount, value: "test-key")
 
         return DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

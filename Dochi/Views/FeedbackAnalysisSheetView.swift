@@ -1,10 +1,9 @@
 import SwiftUI
 import AppKit
 
-/// LLM 기반 부정 피드백 패턴 분석 시트 (I-4)
+/// 부정 피드백 패턴 분석 시트 (I-4)
 struct FeedbackAnalysisSheetView: View {
     var feedbackStore: FeedbackStoreProtocol
-    var viewModel: DochiViewModel?
 
     @State private var analysisResult: String = ""
     @State private var isAnalyzing = false
@@ -121,111 +120,9 @@ struct FeedbackAnalysisSheetView: View {
 
         isAnalyzing = true
 
-        // Build summary of negative feedback for LLM
-        let summary = buildFeedbackSummary(negativeFeedback)
-
-        // Use a local analysis without LLM as fallback
-        // (If viewModel is not available, do a simple local analysis)
-        if viewModel == nil {
-            analysisResult = buildLocalAnalysis(negativeFeedback)
-            isAnalyzing = false
-            return
-        }
-
-        Task {
-            do {
-                let prompt = """
-                다음은 AI 어시스턴트의 응답에 대한 사용자 부정 피드백 요약입니다.
-                패턴을 분석하고, 시스템 프롬프트 개선 방안을 구체적으로 제안해주세요.
-
-                형식:
-                ## 주요 패턴
-                - (패턴 1)
-                - (패턴 2)
-
-                ## 개선 제안
-                1. (제안 1)
-                2. (제안 2)
-
-                ## 추가 시스템 프롬프트 문구 제안
-                ```
-                (추가할 프롬프트 텍스트)
-                ```
-
-                ---
-                피드백 데이터:
-                \(summary)
-                """
-
-                let messages = [Message(role: .user, content: prompt)]
-                let model = viewModel?.settings.llmModel ?? "gpt-4o-mini"
-                let provider = viewModel?.settings.currentProvider ?? .openai
-                let apiKey = viewModel?.keychainService.load(account: provider.keychainAccount) ?? ""
-
-                guard !apiKey.isEmpty else {
-                    analysisResult = buildLocalAnalysis(negativeFeedback)
-                    isAnalyzing = false
-                    return
-                }
-
-                let llmService = LLMService()
-                let response = try await llmService.send(
-                    messages: messages,
-                    systemPrompt: "당신은 AI 어시스턴트 품질 분석가입니다. 한국어로 답변하세요.",
-                    model: model,
-                    provider: provider,
-                    apiKey: apiKey,
-                    tools: nil,
-                    onPartial: { _ in }
-                )
-
-                switch response {
-                case .text(let text):
-                    analysisResult = text
-                default:
-                    analysisResult = buildLocalAnalysis(negativeFeedback)
-                }
-            } catch {
-                Log.app.error("Feedback analysis failed: \(error.localizedDescription)")
-                analysisResult = buildLocalAnalysis(negativeFeedback)
-            }
-
-            isAnalyzing = false
-        }
-    }
-
-    private func buildFeedbackSummary(_ entries: [FeedbackEntry]) -> String {
-        let categories = feedbackStore.categoryDistribution()
-        let models = feedbackStore.modelBreakdown()
-
-        var lines: [String] = []
-        lines.append("총 부정 피드백: \(entries.count)건")
-        lines.append("")
-
-        if !categories.isEmpty {
-            lines.append("카테고리 분포:")
-            for cat in categories {
-                lines.append("  - \(cat.category.displayName): \(cat.count)건")
-            }
-            lines.append("")
-        }
-
-        if !models.isEmpty {
-            lines.append("모델별 만족도:")
-            for model in models {
-                lines.append("  - \(model.model): \(String(format: "%.0f%%", model.satisfactionRate * 100)) (\(model.totalCount)건)")
-            }
-            lines.append("")
-        }
-
-        lines.append("최근 피드백 코멘트:")
-        for entry in entries.prefix(10) {
-            let cat = entry.category?.displayName ?? "미지정"
-            let comment = entry.comment ?? "(코멘트 없음)"
-            lines.append("  [\(cat)] \(comment) — \(entry.model)")
-        }
-
-        return lines.joined(separator: "\n")
+        // Legacy LLM engine removed — use local pattern analysis
+        analysisResult = buildLocalAnalysis(negativeFeedback)
+        isAnalyzing = false
     }
 
     private func buildLocalAnalysis(_ entries: [FeedbackEntry]) -> String {

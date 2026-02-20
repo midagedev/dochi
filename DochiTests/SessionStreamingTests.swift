@@ -389,7 +389,6 @@ final class SessionStreamingTests: XCTestCase {
     @MainActor
     private func makeViewModel(bridge: MockRuntimeBridgeService) -> DochiViewModel {
         DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

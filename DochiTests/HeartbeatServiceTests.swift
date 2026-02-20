@@ -11,7 +11,6 @@ final class HeartbeatServiceTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         return DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: contextService,
             conversationService: MockConversationService(),
@@ -281,7 +280,6 @@ final class HeartbeatServiceTests: XCTestCase {
         let sessionContext = SessionContext(workspaceId: UUID())
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: contextService,
             conversationService: MockConversationService(),
@@ -312,7 +310,6 @@ final class HeartbeatServiceTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

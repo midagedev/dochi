@@ -266,8 +266,7 @@ struct FeedbackStatsView: View {
         .padding()
         .sheet(isPresented: $showAnalysisSheet) {
             FeedbackAnalysisSheetView(
-                feedbackStore: feedbackStore,
-                viewModel: viewModel
+                feedbackStore: feedbackStore
             )
         }
     }

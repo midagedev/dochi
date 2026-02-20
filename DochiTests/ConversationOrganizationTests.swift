@@ -272,7 +272,6 @@ final class ViewModelOrganizationTests: XCTestCase {
         sessionContext = SessionContext(workspaceId: wsId)
 
         viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: contextService,
             conversationService: conversationService,

@@ -224,7 +224,6 @@ final class NotificationCenterTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -265,7 +264,6 @@ final class NotificationCenterTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -315,7 +313,6 @@ final class NotificationCenterTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -354,7 +351,6 @@ final class NotificationCenterTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -376,7 +372,6 @@ final class NotificationCenterTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -398,7 +393,6 @@ final class NotificationCenterTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -420,7 +414,6 @@ final class NotificationCenterTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -443,7 +436,6 @@ final class NotificationCenterTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -466,7 +458,6 @@ final class NotificationCenterTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),

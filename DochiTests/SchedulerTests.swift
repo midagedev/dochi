@@ -573,7 +573,6 @@ final class SchedulerTests: XCTestCase {
         let contextService = MockContextService()
         let toolService = MockBuiltInToolService()
         let viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: toolService,
             contextService: contextService,
             conversationService: MockConversationService(),

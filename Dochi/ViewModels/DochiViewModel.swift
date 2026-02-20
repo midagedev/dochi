@@ -210,7 +210,6 @@ final class DochiViewModel {
 
     // MARK: - Services
 
-    private let llmService: LLMServiceProtocol
     private var toolService: BuiltInToolServiceProtocol
     var allToolInfos: [ToolInfo] { toolService.allToolInfos }
     let contextService: ContextServiceProtocol
@@ -227,7 +226,7 @@ final class DochiViewModel {
     /// When available and in `.ready` state, input is routed through the SDK session.
     private var runtimeBridge: (any RuntimeBridgeProtocol)?
 
-    /// Active SDK session ID for the current conversation (nil = use legacy LLM path).
+    /// Active SDK session ID for the current conversation.
     private(set) var activeSDKSessionId: String?
 
     // MARK: - Internal
@@ -238,20 +237,8 @@ final class DochiViewModel {
     private var sdkApprovalTimeoutTask: Task<Void, Never>?
     private var localServerMonitorTask: Task<Void, Never>?
     private var sentenceChunker = SentenceChunker()
-    private var llmStreamActive = false
-    private static let maxToolLoopIterations = 10
-    private static let maxSameToolSignatureCalls = 2
-    private static let maxToolControlCallsPerTurn = 1
-    private static let maxRecentMessages = 30
     private static let sessionEndingTimeout: TimeInterval = 10
     private static let toolConfirmationTimeout: TimeInterval = 30
-    private static let compressionModel = "gpt-4o-mini"
-    private static let compressionSummaryPrompt = "다음 메모리를 핵심 사실만 보존하여 50% 이하로 요약하세요. 라인 단위(`- ...`) 형식 유지."
-    private static let toolControlNames: Set<String> = [
-        "tools.enable",
-        "tools.enable_ttl",
-        "tools.reset",
-    ]
 
     // MARK: - Computed
 
@@ -265,12 +252,12 @@ final class DochiViewModel {
 
     /// Token usage from the most recent LLM exchange (input tokens sent).
     var lastInputTokens: Int? {
-        llmService.lastMetrics?.inputTokens
+        metricsCollector.recentMetrics.last?.inputTokens
     }
 
     /// Token usage from the most recent LLM exchange (output tokens received).
     var lastOutputTokens: Int? {
-        llmService.lastMetrics?.outputTokens
+        metricsCollector.recentMetrics.last?.outputTokens
     }
 
     /// Context window size (tokens) for the currently selected model.
@@ -281,7 +268,6 @@ final class DochiViewModel {
     // MARK: - Init
 
     init(
-        llmService: LLMServiceProtocol,
         toolService: BuiltInToolServiceProtocol,
         contextService: ContextServiceProtocol,
         conversationService: ConversationServiceProtocol,
@@ -294,7 +280,6 @@ final class DochiViewModel {
         metricsCollector: MetricsCollector = MetricsCollector(),
         runtimeBridge: (any RuntimeBridgeProtocol)? = nil
     ) {
-        self.llmService = llmService
         self.toolService = toolService
         self.contextService = contextService
         self.conversationService = conversationService
@@ -1003,22 +988,14 @@ final class DochiViewModel {
             transition(to: .processing)
             processingSubState = .streaming
 
-            // Route through SDK session if runtime is ready; otherwise use legacy LLM path
-            if isSDKSessionAvailable {
-                processingTask = Task {
-                    await processSDKSession(input: finalText)
-                }
-            } else {
-                llmStreamActive = true
-                processingTask = Task {
-                    await processLLMLoop()
-                }
+            // Route through SDK runtime session
+            processingTask = Task {
+                await processSDKSession(input: finalText)
             }
         } else {
-            // Process images off main thread, then send
+            // Process images off main thread, then send via SDK session
             transition(to: .processing)
             processingSubState = .streaming
-            llmStreamActive = true
             processingTask = Task {
                 let imageContents = await Task.detached { () -> [ImageContent] in
                     var processed: [ImageContent] = []
@@ -1036,7 +1013,7 @@ final class DochiViewModel {
                     Log.app.info("Attached \(imageContents.count) image(s) to message")
                 }
                 appendUserMessage(finalText, imageData: imageContents.isEmpty ? nil : imageContents)
-                await processLLMLoop()
+                await processSDKSession(input: finalText)
             }
         }
     }
@@ -1239,8 +1216,6 @@ final class DochiViewModel {
     func cancelRequest() {
         processingTask?.cancel()
         processingTask = nil
-        llmService.cancel()
-        llmStreamActive = false
         ttsService.stopAndClear()
         sentenceChunker = SentenceChunker()
         interruptSDKSession()
@@ -2088,7 +2063,7 @@ final class DochiViewModel {
         processingSubState = .streaming
 
         processingTask = Task {
-            await processLLMLoop()
+            await processSDKSession(input: cleanedText)
         }
     }
 
@@ -2124,9 +2099,6 @@ final class DochiViewModel {
     private func handleTTSComplete() {
         guard interactionState == .speaking else { return }
 
-        // LLM is still streaming — TTS queue just temporarily emptied.
-        // More sentences will arrive; don't transition yet.
-        if llmStreamActive { return }
 
         if sessionState == .active {
             // Continuous conversation: speaking → idle → listening
@@ -2314,192 +2286,129 @@ final class DochiViewModel {
         conversation.messages.append(userMessage)
         conversation.updatedAt = Date()
 
-        let systemPrompt = composeSystemPrompt()
-
-        // Resolve model (agent config applies to Telegram too)
-        let router = ModelRouter(settings: settings, keychainService: keychainService)
-        let telegramAgentConfig = contextService.loadAgentConfig(
-            workspaceId: sessionContext.workspaceId,
-            agentName: settings.activeAgentName
-        )
-        guard let model = router.resolvePrimary(agentConfig: telegramAgentConfig) else {
-            Log.telegram.error("No API key configured for Telegram response")
+        // Route through SDK runtime session
+        guard let bridge = runtimeBridge else {
+            Log.telegram.warning("Runtime bridge not available for Telegram message")
+            if let tg = getTelegramService() {
+                _ = try? await tg.sendMessage(chatId: update.chatId, text: "런타임 브릿지가 준비되지 않았습니다. 앱 설정을 확인해주세요.")
+            }
             return
         }
 
-        let useStreaming = settings.telegramStreamReplies
-        let telegramTools = telegramSafeToolSchemas()
-
         do {
-            var finalText: String?
+            // Open or reuse session for Telegram
+            let conversationId = conversation.id.uuidString
+            if activeSDKSessionId == nil {
+                let openResult = try await bridge.openSession(params: SessionOpenParams(
+                    workspaceId: sessionContext.workspaceId.uuidString,
+                    agentId: settings.activeAgentName,
+                    conversationId: conversationId,
+                    userId: sessionContext.currentUserId ?? "anonymous",
+                    deviceId: nil,
+                    sdkSessionId: nil
+                ))
+                activeSDKSessionId = openResult.sessionId
+            }
+
+            guard let sessionId = activeSDKSessionId else { return }
+
+            let snapshotRef = bridge.buildContextSnapshot(
+                workspaceId: sessionContext.workspaceId,
+                agentId: settings.activeAgentName,
+                userId: sessionContext.currentUserId,
+                channelMetadata: "telegram:\(update.chatId)",
+                tokenBudget: ContextSnapshotBuilder.defaultTokenBudget
+            )
+
+            let runParams = SessionRunParams(
+                sessionId: sessionId,
+                input: update.text,
+                contextSnapshotRef: snapshotRef,
+                permissionMode: nil
+            )
+
+            var accumulatedText = ""
             var streamMessageId: Int64?
             var pendingStreamSnapshot: String?
             var streamFlushTask: Task<Void, Never>?
             var lastEditLength = 0
-            var loopConversation = conversation
-            var toolLoopCount = 0
+            let useStreaming = settings.telegramStreamReplies
 
-            telegramLoop: while toolLoopCount <= Self.maxToolLoopIterations + 1 {
-                // loopText is reset per model turn, so reset stream edit threshold too.
-                lastEditLength = 0
+            for try await event in bridge.runSession(params: runParams) {
+                switch event.eventType {
+                case .sessionPartial:
+                    if let delta = extractPayloadString(event.payload, key: "delta") {
+                        accumulatedText += delta
 
-                // For non-streaming mode, send typing indicator before each model request
-                if !useStreaming, let tg = getTelegramService() {
-                    try? await tg.sendChatAction(chatId: update.chatId, action: "typing")
-                }
+                        // Stream to Telegram if enabled
+                        if useStreaming, let tg = getTelegramService() {
+                            let currentLength = accumulatedText.count
+                            if currentLength - lastEditLength >= 50 || streamMessageId == nil {
+                                let textSnapshot = accumulatedText + " ▍"
+                                lastEditLength = currentLength
+                                pendingStreamSnapshot = textSnapshot
 
-                var loopText = ""
-                let onPartial: @MainActor @Sendable (String) -> Void = { [weak self] partial in
-                    loopText += partial
-
-                    guard useStreaming, let self, let tg = self.getTelegramService() else { return }
-
-                    // Throttle edits: only update every 50+ chars or first chunk
-                    let currentLength = loopText.count
-                    guard currentLength - lastEditLength >= 50 || streamMessageId == nil else { return }
-
-                    let textSnapshot = loopText + " ▍"
-                    lastEditLength = currentLength
-                    pendingStreamSnapshot = textSnapshot
-
-                    // Serialize streaming updates so one response always maps to one Telegram message.
-                    guard streamFlushTask == nil else { return }
-
-                    streamFlushTask = Task { @MainActor in
-                        defer { streamFlushTask = nil }
-
-                        while let snapshot = pendingStreamSnapshot {
-                            pendingStreamSnapshot = nil
-
-                            do {
-                                if let msgId = streamMessageId {
-                                    try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: snapshot)
-                                } else {
-                                    streamMessageId = try await tg.sendMessage(chatId: update.chatId, text: snapshot)
+                                if streamFlushTask == nil {
+                                    streamFlushTask = Task { @MainActor in
+                                        defer { streamFlushTask = nil }
+                                        while let snapshot = pendingStreamSnapshot {
+                                            pendingStreamSnapshot = nil
+                                            do {
+                                                if let msgId = streamMessageId {
+                                                    try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: snapshot)
+                                                } else {
+                                                    streamMessageId = try await tg.sendMessage(chatId: update.chatId, text: snapshot)
+                                                }
+                                            } catch {
+                                                Log.telegram.debug("Streaming edit skipped: \(error.localizedDescription)")
+                                            }
+                                        }
+                                    }
                                 }
-                            } catch {
-                                Log.telegram.debug("Streaming edit skipped: \(error.localizedDescription)")
                             }
                         }
                     }
-                }
 
-                let response = try await llmService.send(
-                    messages: prepareMessages(from: loopConversation),
-                    systemPrompt: systemPrompt,
-                    model: model.model,
-                    provider: model.provider,
-                    apiKey: model.apiKey,
-                    tools: telegramTools.isEmpty ? nil : telegramTools,
-                    onPartial: onPartial
-                )
-
-                switch response {
-                case .text(let text):
-                    let resolved = text.isEmpty ? loopText : text
-                    guard !resolved.isEmpty else {
+                case .sessionCompleted:
+                    let finalText = extractPayloadString(event.payload, key: "text") ?? accumulatedText
+                    guard !finalText.isEmpty else {
                         Log.telegram.warning("Empty response for Telegram message")
                         return
                     }
-                    finalText = resolved
-                    break telegramLoop
 
-                case .partial(let partial):
-                    let resolved = partial.isEmpty ? loopText : partial
-                    guard !resolved.isEmpty else {
-                        Log.telegram.warning("Empty partial response for Telegram message")
-                        return
-                    }
-                    finalText = resolved
-                    break telegramLoop
+                    conversation.messages.append(Message(role: .assistant, content: finalText))
+                    conversation.updatedAt = Date()
 
-                case .toolCalls(let toolCalls):
-                    toolLoopCount += 1
-
-                    // Save assistant tool-call message for the next loop context
-                    loopConversation.messages.append(
-                        Message(role: .assistant, content: loopText, toolCalls: toolCalls)
-                    )
-
-                    if toolLoopCount > Self.maxToolLoopIterations {
-                        loopConversation.messages.append(
-                            Message(
-                                role: .tool,
-                                content: "도구 호출이 너무 많습니다 (최대 \(Self.maxToolLoopIterations)회). 최종 응답을 생성해주세요.",
-                                toolCallId: toolCalls.first?.id
-                            )
-                        )
-                        continue telegramLoop
+                    // Auto-title from first user message
+                    if conversation.title == "새 대화",
+                       let firstUser = conversation.messages.first(where: { $0.role == .user }) {
+                        let title = String(firstUser.content.prefix(40))
+                        conversation.title = title.count < firstUser.content.count ? title + "…" : title
                     }
 
-                    for codableCall in toolCalls {
-                        let call = ToolCall(
-                            id: codableCall.id,
-                            name: codableCall.name,
-                            arguments: codableCall.arguments
-                        )
+                    conversationService.save(conversation: conversation)
+                    loadConversations()
 
-                        let normalizedName = Self.desanitizeToolNameForLLM(call.name)
-                        let blockedForTelegram =
-                            normalizedName.hasPrefix("mcp_")
-                            || Self.toolControlNames.contains(normalizedName)
-                            || (toolInfoForLLMName(call.name)?.category != .safe)
-
-                        let result: ToolResult
-                        if blockedForTelegram {
-                            result = ToolResult(
-                                toolCallId: call.id,
-                                content: "원격(텔레그램)에서는 safe 도구만 사용할 수 있습니다. 이 작업은 앱에서 직접 실행해주세요.",
-                                isError: true
-                            )
-                            Log.telegram.info("Blocked remote tool call: \(call.name)")
+                    // Flush stream and send final
+                    if useStreaming { await streamFlushTask?.value }
+                    if let tg = getTelegramService() {
+                        if useStreaming, let msgId = streamMessageId {
+                            try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: finalText)
                         } else {
-                            result = await toolService.execute(name: call.name, arguments: call.arguments)
+                            _ = try await tg.sendMessage(chatId: update.chatId, text: finalText)
                         }
-
-                        loopConversation.messages.append(
-                            Message(role: .tool, content: result.content, toolCallId: call.id)
-                        )
                     }
-                }
-            }
-
-            guard let finalText, !finalText.isEmpty else {
-                Log.telegram.warning("Failed to produce final Telegram response")
-                return
-            }
-
-            // Ensure latest streamed snapshot is flushed before final cursor-less update.
-            if useStreaming {
-                await streamFlushTask?.value
-            }
-
-            // Append assistant response to conversation
-            loopConversation.messages.append(Message(role: .assistant, content: finalText))
-            loopConversation.updatedAt = Date()
-            conversation = loopConversation
-
-            // Auto-title from first user message
-            if conversation.title == "새 대화",
-               let firstUser = conversation.messages.first(where: { $0.role == .user }) {
-                let title = String(firstUser.content.prefix(40))
-                conversation.title = title.count < firstUser.content.count ? title + "…" : title
-            }
-
-            // Persist conversation and refresh sidebar
-            conversationService.save(conversation: conversation)
-            loadConversations()
-
-            // Send/finalize response via Telegram
-            if let tg = getTelegramService() {
-                if useStreaming, let msgId = streamMessageId {
-                    // Final edit to remove cursor and show complete text
-                    try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: finalText)
-                    Log.telegram.info("Finalized streaming response to chat \(update.chatId)")
-                } else {
-                    // Non-streaming: send complete response in single message
-                    _ = try await tg.sendMessage(chatId: update.chatId, text: finalText)
                     Log.telegram.info("Sent Telegram response to chat \(update.chatId)")
+
+                case .sessionFailed:
+                    let reason = extractPayloadString(event.payload, key: "error") ?? "알 수 없는 오류"
+                    Log.telegram.error("SDK session failed for Telegram: \(reason)")
+                    if let tg = getTelegramService() {
+                        _ = try? await tg.sendMessage(chatId: update.chatId, text: "오류가 발생했습니다: \(reason)")
+                    }
+
+                default:
+                    break
                 }
             }
         } catch {
@@ -2507,29 +2416,6 @@ final class DochiViewModel {
         }
     }
 
-    private static func desanitizeToolNameForLLM(_ name: String) -> String {
-        name.replacingOccurrences(of: "-_-", with: ".")
-    }
-
-    private func toolInfoForLLMName(_ llmName: String) -> ToolInfo? {
-        if let info = toolService.toolInfo(named: llmName) { return info }
-        return toolService.toolInfo(named: Self.desanitizeToolNameForLLM(llmName))
-    }
-
-    private func telegramSafeToolSchemas() -> [[String: Any]] {
-        let safeSchemas = toolService.availableToolSchemas(for: ["safe"])
-        selectedCapabilityLabel = toolService.selectedCapabilityLabel
-        return safeSchemas.filter { schema in
-            guard let function = schema["function"] as? [String: Any],
-                  let name = function["name"] as? String else {
-                return false
-            }
-
-            if name.hasPrefix("mcp_") { return false }
-            if Self.toolControlNames.contains(Self.desanitizeToolNameForLLM(name)) { return false }
-            return true
-        }
-    }
 
     /// Find an existing telegram conversation by chatId, or create a new one.
     private func findOrCreateTelegramConversation(chatId: Int64, username: String?) -> Conversation {
@@ -2630,617 +2516,6 @@ final class DochiViewModel {
         return JamoMatcher.isMatch(transcript: text, wakeWord: wakeWord)
     }
 
-    // MARK: - LLM Processing Loop
-
-    private func processLLMLoop() async {
-        guard var conversation = currentConversation else { return }
-
-        // Resolve model via router (primary + optional fallback)
-        let router = ModelRouter(settings: settings, keychainService: keychainService)
-        let agentConfig = contextService.loadAgentConfig(
-            workspaceId: sessionContext.workspaceId,
-            agentName: settings.activeAgentName
-        )
-
-        // Classify task complexity from last user message
-        let lastUserText = conversation.messages.last(where: { $0.role == .user })?.content ?? ""
-        let complexity = TaskComplexityClassifier.classify(lastUserText)
-
-        guard let primaryModel = router.resolveForComplexity(complexity, agentConfig: agentConfig) else {
-            handleError(LLMError.noAPIKey)
-            return
-        }
-        let fallbackModel = router.resolveFallback()
-
-        // Compress context if needed (before composing final prompt)
-        await compressContextIfNeeded()
-
-        // Compose context (after potential compression)
-        var systemPrompt = composeSystemPrompt()
-        if let toolUsageHint = buildRecentToolUsageHint(from: conversation) {
-            systemPrompt += "\n\n\(toolUsageHint)"
-        }
-
-        // RAG: Search for relevant documents and inject context (I-1)
-        ragLastContextInfo = nil
-        if settings.ragEnabled && settings.ragAutoSearch, let indexer = documentIndexer {
-            do {
-                let results = try await indexer.search(query: lastUserText)
-                if !results.isEmpty {
-                    var ragSection = "\n\n## 참조 문서"
-                    var totalChars = 0
-                    var refs: [RAGReference] = []
-
-                    for result in results {
-                        let snippet = result.content
-                        ragSection += "\n\n### \(result.fileName)"
-                        if let section = result.sectionTitle {
-                            ragSection += " > \(section)"
-                        }
-                        ragSection += " (유사도: \(result.similarityPercent))\n\(snippet)"
-                        totalChars += snippet.count
-
-                        refs.append(RAGReference(
-                            documentId: result.documentId.uuidString,
-                            fileName: result.fileName,
-                            sectionTitle: result.sectionTitle,
-                            similarity: result.similarity,
-                            snippetPreview: String(snippet.prefix(100))
-                        ))
-                    }
-
-                    systemPrompt += ragSection
-                    ragLastContextInfo = RAGContextInfo(references: refs, totalCharsInjected: totalChars)
-                    Log.storage.info("RAG: Injected \(results.count) references (\(totalChars) chars)")
-                }
-            } catch {
-                Log.storage.error("RAG search failed: \(error.localizedDescription)")
-            }
-        }
-
-        // Get available tool schemas
-        let agentPermissions = currentAgentPermissions()
-        let preferredToolGroups = currentAgentPreferredToolGroups()
-        let tools = toolService.availableToolSchemas(
-            for: agentPermissions,
-            preferredToolGroups: preferredToolGroups
-        )
-        selectedCapabilityLabel = toolService.selectedCapabilityLabel
-
-        // Reset sentence chunker for TTS streaming
-        sentenceChunker = SentenceChunker()
-
-        // Clear tool executions from previous turn (UX-7)
-        toolExecutions = []
-
-        var toolLoopCount = 0
-        var toolSignatureCounts: [String: Int] = [:]
-        var toolControlCallCount = 0
-
-        while toolLoopCount <= Self.maxToolLoopIterations + 1 {
-            guard !Task.isCancelled else { return }
-
-            // Prepare messages (trim to recent + respect context size)
-            let messages = prepareMessages(from: conversation)
-
-            processingSubState = .streaming
-            streamingText = ""
-
-            let response: LLMResponse
-            do {
-                response = try await sendWithFallback(
-                    messages: messages,
-                    systemPrompt: systemPrompt,
-                    primary: primaryModel,
-                    fallback: fallbackModel,
-                    tools: tools
-                )
-            } catch {
-                if Task.isCancelled { return }
-                handleError(error)
-                return
-            }
-
-            guard !Task.isCancelled else { return }
-
-            switch response {
-            case .text(let text):
-                llmStreamActive = false
-
-                let finalText = text.isEmpty ? streamingText : text
-                if finalText.isEmpty {
-                    handleError(LLMError.emptyResponse)
-                    return
-                }
-                streamingText = ""
-
-                // UX-7: Archive tool execution records to the message
-                let records = toolExecutions.isEmpty ? nil : toolExecutions.map { $0.toRecord() }
-                appendAssistantMessage(finalText, metadata: buildMessageMetadata(), toolExecutionRecords: records)
-                conversation = currentConversation!
-                saveConversation()
-                // Keep live cards only while running. After completion, archived summary stays in message.
-                toolExecutions = []
-
-                // Flush remaining TTS text from sentence chunker
-                if isVoiceMode, let remaining = sentenceChunker.flush() {
-                    if interactionState == .processing {
-                        processingSubState = .complete
-                        transition(to: .speaking)
-                    }
-                    ttsService.enqueueSentence(remaining)
-                }
-
-                processingSubState = .complete
-
-                if isVoiceMode && ttsService.isSpeaking {
-                    // TTS is playing — stay in speaking, handleTTSComplete will transition
-                } else if isVoiceMode && sessionState == .active {
-                    // No TTS to play, go directly to listening
-                    transition(to: .idle)
-                    startListening()
-                } else {
-                    transition(to: .idle)
-                }
-                return
-
-            case .partial(let text):
-                streamingText = text
-
-            case .toolCalls(let toolCalls):
-                toolLoopCount += 1
-
-                let assistantMsg = Message(
-                    role: .assistant,
-                    content: streamingText,
-                    toolCalls: toolCalls
-                )
-                currentConversation?.messages.append(assistantMsg)
-                conversation = currentConversation!
-                streamingText = ""
-
-                // Check tool loop limit
-                if toolLoopCount > Self.maxToolLoopIterations {
-                    let errorResult = ToolResult(
-                        toolCallId: toolCalls.first?.id ?? "",
-                        content: "도구 호출이 너무 많습니다 (최대 \(Self.maxToolLoopIterations)회). 최종 응답을 생성해주세요.",
-                        isError: true
-                    )
-                    appendToolResultMessage(errorResult)
-                    conversation = currentConversation!
-                    continue
-                }
-
-                // Execute tools
-                processingSubState = .toolCalling
-                for codableCall in toolCalls {
-                    guard !Task.isCancelled else { return }
-
-                    let call = ToolCall(
-                        id: codableCall.id,
-                        name: codableCall.name,
-                        arguments: codableCall.arguments
-                    )
-
-                    if let guardError = evaluateToolLoopGuard(
-                        call: call,
-                        toolSignatureCounts: &toolSignatureCounts,
-                        toolControlCallCount: &toolControlCallCount
-                    ) {
-                        appendToolResultMessage(guardError)
-                        processingSubState = .toolError
-                        Log.tool.warning("Blocked repetitive tool call: \(call.name)")
-                        continue
-                    }
-
-                    currentToolName = codableCall.name
-                    Log.tool.info("Executing tool: \(codableCall.name) (loop \(toolLoopCount))")
-
-                    // UX-7: Create live ToolExecution for UI tracking
-                    let info = toolService.toolInfo(named: call.name)
-                    let inputSummary = ToolExecutionSummary.generateInputSummary(from: call.arguments)
-                    let execution = ToolExecution(
-                        toolName: call.name,
-                        toolCallId: call.id,
-                        displayName: info?.description ?? call.name,
-                        category: info?.category ?? .safe,
-                        inputSummary: inputSummary,
-                        loopIndex: toolLoopCount
-                    )
-                    toolExecutions.append(execution)
-
-                    let result = await toolService.execute(
-                        name: call.name,
-                        arguments: call.arguments
-                    )
-
-                    // UX-7: Update execution with result
-                    let resultSummary = ToolExecutionSummary.generateResultSummary(from: result.content, isError: result.isError)
-                    if result.isError {
-                        execution.fail(errorSummary: resultSummary, errorFull: result.content)
-                    } else {
-                        execution.complete(resultSummary: resultSummary, resultFull: result.content)
-
-                        // UX-8: Memory toast for save/update memory tools
-                        if call.name == "save_memory" || call.name == "update_memory" {
-                            let scope: MemoryToastEvent.Scope
-                            if let scopeStr = call.arguments["scope"] as? String, scopeStr == "personal" {
-                                scope = .personal
-                            } else {
-                                scope = .workspace
-                            }
-                            let action: MemoryToastEvent.Action = call.name == "save_memory" ? .saved : .updated
-                            let preview = (call.arguments["content"] as? String) ?? (call.arguments["new_content"] as? String) ?? ""
-                            showMemoryToast(scope: scope, action: action, contentPreview: preview)
-
-                            // H-4: 메모리 저장/수정 시 Spotlight 인크리멘탈 인덱싱
-                            indexMemoryForSpotlight(scope: scope, content: preview)
-                        }
-                    }
-
-                    let toolResult = ToolResult(
-                        toolCallId: call.id,
-                        content: result.content,
-                        isError: result.isError
-                    )
-                    appendToolResultMessage(toolResult)
-
-                    if result.isError {
-                        processingSubState = .toolError
-                        Log.tool.warning("Tool error: \(call.name) — \(result.content)")
-                    }
-                }
-
-                currentToolName = nil
-                conversation = currentConversation!
-            }
-        }
-
-        // Exceeded max loops
-        Log.tool.warning("Tool loop exceeded max iterations")
-        processingSubState = .complete
-        if !streamingText.isEmpty {
-            appendAssistantMessage(streamingText)
-            streamingText = ""
-        }
-        saveConversation()
-        transition(to: .idle)
-    }
-
-    // MARK: - LLM Send with Fallback
-
-    /// Send to the primary model, falling back to alternate model on transient failure.
-    /// If both primary and regular fallback fail with a network error and offline fallback
-    /// is enabled, attempts to use the configured local offline fallback model.
-    private func sendWithFallback(
-        messages: [Message],
-        systemPrompt: String,
-        primary: ResolvedModel,
-        fallback: ResolvedModel?,
-        tools: [[String: Any]]
-    ) async throws -> LLMResponse {
-        let onPartial: @MainActor @Sendable (String) -> Void = { [weak self] partial in
-            guard let self else { return }
-            self.streamingText += partial
-
-            if self.isVoiceMode {
-                let sentences = self.sentenceChunker.append(partial)
-                for sentence in sentences {
-                    if self.interactionState == .processing {
-                        self.processingSubState = .complete
-                        self.transition(to: .speaking)
-                    }
-                    self.ttsService.enqueueSentence(sentence)
-                }
-            }
-        }
-
-        do {
-            let response = try await llmService.send(
-                messages: messages,
-                systemPrompt: systemPrompt,
-                model: primary.model,
-                provider: primary.provider,
-                apiKey: primary.apiKey,
-                tools: tools.isEmpty ? nil : tools,
-                onPartial: onPartial
-            )
-            recordMetrics(wasFallback: false)
-            return response
-        } catch {
-            // Try regular fallback if available and the error is eligible
-            if let fallback, ModelRouter.shouldFallback(for: error) {
-                Log.llm.warning("Primary model failed, trying fallback: \(fallback.provider.displayName)/\(fallback.model)")
-                streamingText = ""
-                sentenceChunker = SentenceChunker()
-
-                do {
-                    let response = try await llmService.send(
-                        messages: messages,
-                        systemPrompt: systemPrompt,
-                        model: fallback.model,
-                        provider: fallback.provider,
-                        apiKey: fallback.apiKey,
-                        tools: tools.isEmpty ? nil : tools,
-                        onPartial: onPartial
-                    )
-                    recordMetrics(wasFallback: true)
-                    return response
-                } catch {
-                    // Regular fallback also failed — try offline fallback below
-                    Log.llm.warning("Regular fallback also failed: \(error.localizedDescription)")
-
-                    if let offlineResponse = try await attemptOfflineFallback(
-                        error: error,
-                        messages: messages,
-                        systemPrompt: systemPrompt,
-                        tools: tools,
-                        onPartial: onPartial
-                    ) {
-                        return offlineResponse
-                    }
-
-                    throw error
-                }
-            }
-
-            // No regular fallback — try offline fallback if it's a network error
-            if let offlineResponse = try await attemptOfflineFallback(
-                error: error,
-                messages: messages,
-                systemPrompt: systemPrompt,
-                tools: tools,
-                onPartial: onPartial
-            ) {
-                return offlineResponse
-            }
-
-            throw error
-        }
-    }
-
-    /// Attempt offline fallback if the error is a network error and offline fallback is configured.
-    /// Returns the LLM response on success, or nil if offline fallback is not applicable.
-    private func attemptOfflineFallback(
-        error: Error,
-        messages: [Message],
-        systemPrompt: String,
-        tools: [[String: Any]],
-        onPartial: @escaping @MainActor @Sendable (String) -> Void
-    ) async throws -> LLMResponse? {
-        guard ModelRouter.isNetworkError(error),
-              settings.offlineFallbackEnabled else {
-            return nil
-        }
-
-        let router = ModelRouter(settings: settings, keychainService: keychainService)
-        guard let offlineModel = router.resolveOfflineFallback() else {
-            Log.llm.warning("Offline fallback enabled but no valid offline model configured")
-            return nil
-        }
-
-        Log.llm.info("Network error detected, trying offline fallback: \(offlineModel.provider.displayName)/\(offlineModel.model)")
-        streamingText = ""
-        sentenceChunker = SentenceChunker()
-
-        let response = try await llmService.send(
-            messages: messages,
-            systemPrompt: systemPrompt,
-            model: offlineModel.model,
-            provider: offlineModel.provider,
-            apiKey: offlineModel.apiKey,
-            tools: tools.isEmpty ? nil : tools,
-            onPartial: onPartial
-        )
-
-        // Offline fallback succeeded — activate offline mode
-        activateOfflineFallback(provider: offlineModel.provider, model: offlineModel.model)
-        recordMetrics(wasFallback: true)
-        return response
-    }
-
-    /// Record metrics from the most recent LLM exchange.
-    private func recordMetrics(wasFallback: Bool) {
-        guard var metrics = llmService.lastMetrics else { return }
-        if wasFallback {
-            // Override the wasFallback flag since LLMService doesn't know about fallback
-            metrics = ExchangeMetrics(
-                provider: metrics.provider,
-                model: metrics.model,
-                inputTokens: metrics.inputTokens,
-                outputTokens: metrics.outputTokens,
-                totalTokens: metrics.totalTokens,
-                firstByteLatency: metrics.firstByteLatency,
-                totalLatency: metrics.totalLatency,
-                timestamp: metrics.timestamp,
-                wasFallback: true
-            )
-        }
-        metricsCollector.record(metrics)
-    }
-
-    // MARK: - Context Auto-Compression
-
-    /// Compress context memories if total context exceeds model's context window.
-    /// Priority order: workspace+agent memory first, then personal memory.
-    /// Base prompt and agent persona are NEVER compressed.
-    private func compressContextIfNeeded() async {
-        guard settings.contextAutoCompress else { return }
-        guard let conversation = currentConversation else { return }
-
-        let systemPrompt = composeSystemPrompt()
-        let messageChars = conversation.messages.reduce(0) { $0 + $1.content.count }
-        let totalChars = systemPrompt.count + messageChars
-        // Estimate max chars from model token window (Korean ~2 chars/token, use 80% budget)
-        let charLimit = Int(Double(contextWindowTokens) * 2.0 * 0.8)
-
-        guard totalChars > charLimit else {
-            Log.app.debug("Context size \(totalChars) within limit \(charLimit), no compression needed")
-            return
-        }
-
-        Log.app.info("Context size \(totalChars) exceeds limit \(charLimit), starting compression")
-
-        // Check for OpenAI API key (required for compression model)
-        guard let openAIKey = keychainService.load(account: LLMProvider.openai.keychainAccount),
-              !openAIKey.isEmpty else {
-            Log.app.warning("OpenAI API key not available, skipping context compression")
-            return
-        }
-
-        let wsId = sessionContext.workspaceId
-        let agentName = settings.activeAgentName
-
-        // Step 2: Compress workspace memory + agent memory
-        if let wsMem = contextService.loadWorkspaceMemory(workspaceId: wsId), !wsMem.isEmpty {
-            if let summary = await summarizeText(wsMem, apiKey: openAIKey) {
-                contextService.saveWorkspaceMemorySnapshot(workspaceId: wsId, content: wsMem)
-                contextService.saveWorkspaceMemory(workspaceId: wsId, content: summary)
-                Log.app.info("Compressed workspace memory: \(wsMem.count) → \(summary.count) chars")
-            }
-        }
-
-        if let agentMem = contextService.loadAgentMemory(workspaceId: wsId, agentName: agentName), !agentMem.isEmpty {
-            if let summary = await summarizeText(agentMem, apiKey: openAIKey) {
-                contextService.saveAgentMemorySnapshot(workspaceId: wsId, agentName: agentName, content: agentMem)
-                contextService.saveAgentMemory(workspaceId: wsId, agentName: agentName, content: summary)
-                Log.app.info("Compressed agent memory: \(agentMem.count) → \(summary.count) chars")
-            }
-        }
-
-        // Re-check if still over limit after workspace+agent compression
-        let afterStep2 = composeSystemPrompt().count + messageChars
-        guard afterStep2 > charLimit else {
-            Log.app.info("Context within limit after workspace+agent compression (\(afterStep2))")
-            return
-        }
-
-        // Step 3: Compress personal memory
-        if let userId = sessionContext.currentUserId,
-           let personalMem = contextService.loadUserMemory(userId: userId), !personalMem.isEmpty {
-            if let summary = await summarizeText(personalMem, apiKey: openAIKey) {
-                contextService.saveUserMemorySnapshot(userId: userId, content: personalMem)
-                contextService.saveUserMemory(userId: userId, content: summary)
-                Log.app.info("Compressed personal memory: \(personalMem.count) → \(summary.count) chars")
-            }
-        }
-
-        let afterStep3 = composeSystemPrompt().count + messageChars
-        Log.app.info("Context compression complete. Final size: \(afterStep3)")
-    }
-
-    /// Summarize text using a fixed lightweight model (gpt-4o-mini via OpenAI).
-    /// Returns the summary if shorter than the original, otherwise returns nil.
-    private func summarizeText(_ text: String, apiKey: String) async -> String? {
-        let userMessage = Message(role: .user, content: text)
-        let noopPartial: @MainActor @Sendable (String) -> Void = { _ in }
-
-        do {
-            let response = try await llmService.send(
-                messages: [userMessage],
-                systemPrompt: Self.compressionSummaryPrompt,
-                model: Self.compressionModel,
-                provider: .openai,
-                apiKey: apiKey,
-                tools: nil,
-                onPartial: noopPartial
-            )
-
-            switch response {
-            case .text(let summary):
-                let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else {
-                    Log.app.warning("Compression returned empty summary, keeping original")
-                    return nil
-                }
-                // Safety: if summary is not shorter, keep original
-                if trimmed.count >= text.count {
-                    Log.app.warning("Compression summary (\(trimmed.count)) not shorter than original (\(text.count)), keeping original")
-                    return nil
-                }
-                return trimmed
-            default:
-                Log.app.warning("Compression returned unexpected response type, keeping original")
-                return nil
-            }
-        } catch {
-            Log.app.error("Context compression LLM call failed: \(error.localizedDescription)")
-            return nil
-        }
-    }
-
-    private func buildRecentToolUsageHint(from conversation: Conversation) -> String? {
-        var recentNames: [String] = []
-        var seen: Set<String> = []
-
-        for message in conversation.messages.reversed() {
-            guard let toolCalls = message.toolCalls, !toolCalls.isEmpty else { continue }
-            for call in toolCalls.reversed() {
-                let normalizedName = Self.desanitizeToolNameForLLM(call.name)
-                guard seen.insert(normalizedName).inserted else { continue }
-                recentNames.append(normalizedName)
-                if recentNames.count >= 5 {
-                    break
-                }
-            }
-            if recentNames.count >= 5 {
-                break
-            }
-        }
-
-        guard !recentNames.isEmpty else { return nil }
-        let ordered = recentNames.reversed().joined(separator: ", ")
-        return """
-        ## 최근 도구 사용 힌트
-        - 최근 사용 도구: \(ordered)
-        - 같은 도구를 같은 인자로 반복 호출하지 마세요.
-        - 코딩 세션 현황 질의에서는 `coding.sessions`, `external_tool.status`, `dochi.bridge_status`를 우선 사용하세요.
-        """
-    }
-
-    private func evaluateToolLoopGuard(
-        call: ToolCall,
-        toolSignatureCounts: inout [String: Int],
-        toolControlCallCount: inout Int
-    ) -> ToolResult? {
-        let normalizedName = Self.desanitizeToolNameForLLM(call.name)
-        let signature = Self.toolCallSignature(name: normalizedName, arguments: call.arguments)
-        let signatureCount = (toolSignatureCounts[signature] ?? 0) + 1
-        toolSignatureCounts[signature] = signatureCount
-
-        if signatureCount > Self.maxSameToolSignatureCalls {
-            return ToolResult(
-                toolCallId: call.id,
-                content: "반복 호출 차단: 동일 도구/인자 호출이 \(Self.maxSameToolSignatureCalls)회를 초과했습니다. 다른 도구를 사용하거나 최종 응답을 생성하세요.",
-                isError: true
-            )
-        }
-
-        if Self.toolControlNames.contains(normalizedName) {
-            toolControlCallCount += 1
-            if toolControlCallCount > Self.maxToolControlCallsPerTurn {
-                return ToolResult(
-                    toolCallId: call.id,
-                    content: "제어 도구 호출 차단: tools.enable/tools.enable_ttl/tools.reset는 한 턴에 최대 \(Self.maxToolControlCallsPerTurn)회만 호출할 수 있습니다.",
-                    isError: true
-                )
-            }
-        }
-
-        return nil
-    }
-
-    private static func toolCallSignature(name: String, arguments: [String: Any]) -> String {
-        let payload: String
-        if JSONSerialization.isValidJSONObject(arguments),
-           let data = try? JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys]),
-           let json = String(data: data, encoding: .utf8) {
-            payload = json
-        } else {
-            payload = String(describing: arguments)
-        }
-        return "\(name)|\(payload)"
-    }
 
     // MARK: - Context Composition
 
@@ -3330,28 +2605,6 @@ final class DochiViewModel {
         }
 
         return parts.joined(separator: "\n\n")
-    }
-
-    // MARK: - Message Preparation
-
-    private func prepareMessages(from conversation: Conversation) -> [Message] {
-        var messages = conversation.messages
-
-        if messages.count > Self.maxRecentMessages {
-            messages = Array(messages.suffix(Self.maxRecentMessages))
-        }
-
-        // Estimate max chars from model's token window.
-        // Korean text averages ~2 chars/token; use 80% of window to leave room for system prompt + response.
-        let maxChars = Int(Double(contextWindowTokens) * 2.0 * 0.8)
-        var totalChars = messages.reduce(0) { $0 + $1.content.count }
-
-        while totalChars > maxChars && messages.count > 5 {
-            let removed = messages.removeFirst()
-            totalChars -= removed.content.count
-        }
-
-        return messages
     }
 
     // MARK: - API Key Management
@@ -3500,19 +2753,6 @@ final class DochiViewModel {
         currentConversation?.updatedAt = Date()
     }
 
-    /// Build MessageMetadata from the most recent LLM exchange metrics.
-    private func buildMessageMetadata() -> MessageMetadata? {
-        guard let metrics = llmService.lastMetrics else { return nil }
-        return MessageMetadata(
-            provider: metrics.provider,
-            model: metrics.model,
-            inputTokens: metrics.inputTokens,
-            outputTokens: metrics.outputTokens,
-            totalLatency: metrics.totalLatency,
-            wasFallback: metrics.wasFallback
-        )
-    }
-
     private func appendToolResultMessage(_ result: ToolResult) {
         let imageURLs = Self.extractImageURLs(from: result.content)
         currentConversation?.messages.append(
@@ -3565,41 +2805,12 @@ final class DochiViewModel {
         Log.app.debug("Conversation saved: \(conversation.id)")
     }
 
+
     // MARK: - Error Handling
 
     private func handleError(_ error: Error) {
-        let llmError = error as? LLMError
-
-        switch llmError {
-        case .noAPIKey:
-            errorMessage = "API 키가 설정되지 않았습니다. 설정에서 \(settings.currentProvider.displayName) API 키를 등록해주세요."
-        case .authenticationFailed:
-            errorMessage = "API 키를 확인해주세요. \(settings.currentProvider.displayName) 키가 유효하지 않습니다."
-        case .timeout:
-            errorMessage = "응답 시간이 초과되었습니다. 다른 모델로 변경하거나 잠시 후 다시 시도해주세요."
-        case .emptyResponse:
-            errorMessage = "응답을 생성하지 못했습니다. 다시 시도해주세요."
-        case .rateLimited:
-            errorMessage = "요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
-        case .cancelled:
-            break
-        case .modelNotFound(let model):
-            errorMessage = "모델 '\(model)'을(를) 찾을 수 없습니다. 설정에서 모델을 변경해주세요."
-        case .networkError(let msg):
-            errorMessage = "네트워크 오류: \(msg)"
-        case .serverError(let code, let msg):
-            errorMessage = "서버 오류 (\(code)): \(msg)"
-        case .invalidResponse(let msg):
-            errorMessage = "잘못된 응답: \(msg)"
-        case .none:
-            errorMessage = "오류가 발생했습니다: \(error.localizedDescription)"
-        }
-
-        if case .cancelled = llmError {
-            // skip logging
-        } else {
-            Log.app.error("LLM error: \(error.localizedDescription, privacy: .public)")
-        }
+        errorMessage = "오류가 발생했습니다: \(error.localizedDescription)"
+        Log.app.error("Error: \(error.localizedDescription, privacy: .public)")
 
         if !streamingText.isEmpty {
             appendAssistantMessage(streamingText)
@@ -3607,7 +2818,6 @@ final class DochiViewModel {
         }
 
         saveConversation()
-        llmStreamActive = false
         ttsService.stopAndClear()
         sentenceChunker = SentenceChunker()
         processingSubState = nil

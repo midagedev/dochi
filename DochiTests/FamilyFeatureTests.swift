@@ -118,7 +118,6 @@ final class ViewModelUserTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: MockBuiltInToolService(),
             contextService: contextService,
             conversationService: MockConversationService(),

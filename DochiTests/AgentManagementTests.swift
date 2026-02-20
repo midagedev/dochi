@@ -21,7 +21,6 @@ final class AgentManagementTests: XCTestCase {
         keychainService.store["openai_api_key"] = "sk-test"
 
         viewModel = DochiViewModel(
-            llmService: MockLLMService(),
             toolService: toolService,
             contextService: contextService,
             conversationService: MockConversationService(),
@@ -130,23 +129,4 @@ final class AgentManagementTests: XCTestCase {
         XCTAssertEqual(loaded?.effectivePermissions, ["safe"])
     }
 
-    func testSendMessagePassesPreferredToolGroupsToToolService() async {
-        let wsId = sessionContext.workspaceId
-        let agentName = settings.activeAgentName
-        contextService.saveAgentConfig(
-            workspaceId: wsId,
-            config: AgentConfig(
-                name: agentName,
-                permissions: ["safe"],
-                preferredToolGroups: ["coding", "git"]
-            )
-        )
-        toolService.stubbedSchemas = []
-
-        viewModel.inputText = "테스트 메시지"
-        viewModel.sendMessage()
-        try? await Task.sleep(for: .milliseconds(50))
-
-        XCTAssertEqual(toolService.lastPreferredToolGroups ?? [], ["coding", "git"])
-    }
 }

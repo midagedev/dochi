@@ -13,7 +13,6 @@ final class AgentDelegateTaskTool: BuiltInToolProtocol {
     private let contextService: ContextServiceProtocol
     private let sessionContext: SessionContext
     private let settings: AppSettings
-    private let llmService: LLMServiceProtocol?
     private let keychainService: KeychainServiceProtocol?
     private let delegationManager: DelegationManager?
 
@@ -21,14 +20,12 @@ final class AgentDelegateTaskTool: BuiltInToolProtocol {
         contextService: ContextServiceProtocol,
         sessionContext: SessionContext,
         settings: AppSettings,
-        llmService: LLMServiceProtocol? = nil,
         keychainService: KeychainServiceProtocol? = nil,
         delegationManager: DelegationManager? = nil
     ) {
         self.contextService = contextService
         self.sessionContext = sessionContext
         self.settings = settings
-        self.llmService = llmService
         self.keychainService = keychainService
         self.delegationManager = delegationManager
     }
@@ -144,99 +141,19 @@ final class AgentDelegateTaskTool: BuiltInToolProtocol {
             userContent += "\n\n추가 컨텍스트: \(additionalContext)"
         }
 
-        // Attempt actual LLM call if service is available
-        guard let llmService, let keychainService else {
-            // Fallback: return prepared summary without actual LLM call
-            let summary = """
-                위임 작업 준비 완료:
-                - 대상 에이전트: \(agentName)
-                - 작업: \(task)
-                - 페르소나: \(persona?.prefix(200) ?? "(없음)")...
-                - 메모리: \(memory?.prefix(200) ?? "(없음)")...
-                \(additionalContext.isEmpty ? "" : "- 추가 컨텍스트: \(additionalContext)")
+        // Return prepared summary (LLM-based delegation removed; use SDK runtime for actual delegation)
+        let summary = """
+            위임 작업 준비 완료:
+            - 대상 에이전트: \(agentName)
+            - 작업: \(task)
+            - 페르소나: \(persona?.prefix(200) ?? "(없음)")...
+            - 메모리: \(memory?.prefix(200) ?? "(없음)")...
+            \(additionalContext.isEmpty ? "" : "- 추가 컨텍스트: \(additionalContext)")
 
-                에이전트 '\(agentName)'에게 작업이 전달되었습니다. 해당 에이전트의 페르소나와 메모리를 참고하여 응답을 생성하세요.
-                """
-            delegationManager?.completeDelegation(id: delegationTask.id, result: summary)
-            return ToolResult(toolCallId: "", content: summary)
-        }
-
-        // Determine model and provider for the target agent
-        let model = targetConfig?.defaultModel ?? settings.llmModel
-        let provider = settings.currentProvider
-        let apiKey = keychainService.load(account: provider.keychainAccount) ?? ""
-
-        let messages = [
-            Message(role: .user, content: userContent)
-        ]
-
-        let timeoutSeconds = arguments["timeout_seconds"] as? Int ?? settings.delegationDefaultTimeoutSeconds
-        let delegationId = delegationTask.id
-        let capturedSystemPrompt = systemPrompt
-
-        do {
-            let response = try await withDelegationTimeout(seconds: timeoutSeconds) { [llmService] in
-                try await llmService.send(
-                    messages: messages,
-                    systemPrompt: capturedSystemPrompt,
-                    model: model,
-                    provider: provider,
-                    apiKey: apiKey,
-                    tools: nil,
-                    onPartial: { _ in }
-                )
-            }
-
-            let responseText: String
-            switch response {
-            case .text(let text):
-                responseText = text
-            case .toolCalls:
-                responseText = "(도구 호출 응답)"
-            case .partial(let text):
-                responseText = text
-            }
-
-            let resultContent = """
-                [에이전트 '\(agentName)' 위임 결과]
-                \(responseText)
-                """
-
-            delegationManager?.completeDelegation(id: delegationId, result: resultContent)
-            Log.tool.info("Delegation to '\(agentName)' completed successfully")
-
-            return ToolResult(toolCallId: "", content: resultContent)
-
-        } catch {
-            let errorMsg = "에이전트 '\(agentName)' 위임 실패: \(error.localizedDescription)"
-            delegationManager?.failDelegation(id: delegationId, error: errorMsg)
-            Log.tool.error("Delegation to '\(agentName)' failed: \(error.localizedDescription)")
-
-            return ToolResult(toolCallId: "", content: errorMsg, isError: true)
-        }
-    }
-
-    /// Execute a delegation LLM call with a timeout using task group racing.
-    private func withDelegationTimeout(seconds: Int, operation: @escaping @MainActor @Sendable () async throws -> LLMResponse) async throws -> LLMResponse {
-        let operationTask = Task<LLMResponse, Error> {
-            try await operation()
-        }
-        let timerTask = Task<LLMResponse, Error>.detached {
-            try await Task.sleep(for: .seconds(seconds))
-            operationTask.cancel()
-            throw DelegationError.timeout(seconds: seconds)
-        }
-
-        do {
-            let result = try await operationTask.value
-            timerTask.cancel()
-            return result
-        } catch is CancellationError {
-            throw DelegationError.timeout(seconds: seconds)
-        } catch {
-            timerTask.cancel()
-            throw error
-        }
+            에이전트 '\(agentName)'에게 작업이 전달되었습니다. 해당 에이전트의 페르소나와 메모리를 참고하여 응답을 생성하세요.
+            """
+        delegationManager?.completeDelegation(id: delegationTask.id, result: summary)
+        return ToolResult(toolCallId: "", content: summary)
     }
 }
 
