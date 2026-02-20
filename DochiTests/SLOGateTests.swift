@@ -793,3 +793,139 @@ final class DeployGateE2ETests: XCTestCase {
         )
     }
 }
+
+// MARK: - Native Rewrite Gate Runner Tests
+
+@MainActor
+private final class PassingRegressionScenarioRunner: RegressionScenarioRunner {
+    func run(scenario: RegressionScenario) async -> RegressionScenarioResult {
+        var scores: [RegressionCriterion: Double] = [:]
+        for criterion in scenario.criteria {
+            scores[criterion] = 1.0
+        }
+
+        return RegressionScenarioResult(
+            scenarioId: scenario.id,
+            scenarioName: scenario.name,
+            category: scenario.category,
+            passed: true,
+            scores: scores,
+            durationMs: 10.0,
+            details: "deterministic pass"
+        )
+    }
+}
+
+@MainActor
+final class NativeRewriteGateRunnerTests: XCTestCase {
+    func testRun_allPass_producesDeployableReport() async {
+        let metrics = makeHealthyMetrics()
+        let gateRunner = makeGateRunner(metrics: metrics)
+
+        let report = await gateRunner.run()
+
+        XCTAssertTrue(report.deployGateReport.deployable)
+        XCTAssertTrue(report.sloResult.passed)
+        XCTAssertEqual(report.regressionReport.overallPassRate, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(report.regressionReport.results.count, DefaultRegressionScenarios.all().count)
+        XCTAssertGreaterThan(report.performance.firstPartialP95Ms, 0)
+        XCTAssertGreaterThan(report.performance.toolLatencyP95Ms, 0)
+    }
+
+    func testRun_sloFailure_blocksDeployment() async {
+        let metrics = RuntimeMetrics()
+        metrics.incrementCounter(name: MetricName.requestTotal, labels: [:], delta: 100)
+        metrics.incrementCounter(name: MetricName.requestErrorTotal, labels: [:], delta: 10)
+        metrics.incrementCounter(name: MetricName.sessionResumeTotal, labels: [:], delta: 100)
+        metrics.incrementCounter(name: MetricName.sessionResumeSuccess, labels: [:], delta: 100)
+        for _ in 1...100 {
+            metrics.recordHistogram(name: MetricName.firstPartialLatencyMs, labels: [:], value: 3000)
+            metrics.recordHistogram(name: MetricName.toolLatencyMs, labels: ["tool": "calendar"], value: 1200)
+            metrics.recordHistogram(name: MetricName.totalResponseLatencyMs, labels: [:], value: 4000)
+        }
+
+        let gateRunner = makeGateRunner(metrics: metrics)
+        let report = await gateRunner.run()
+
+        XCTAssertFalse(report.deployGateReport.deployable)
+        XCTAssertFalse(report.sloResult.passed)
+        XCTAssertTrue(report.deployGateReport.failedChecks.contains(where: { $0.check == .sloGate }))
+    }
+
+    func testWrite_persistsJSONAndMarkdownReports() async throws {
+        let metrics = makeHealthyMetrics()
+        let gateRunner = makeGateRunner(metrics: metrics)
+        let report = await gateRunner.run()
+        let outputDir = temporaryDirectory().appendingPathComponent("native-rewrite-gate-write", isDirectory: true)
+
+        let files = try gateRunner.write(report: report, to: outputDir)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: files.jsonURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: files.markdownURL.path))
+
+        let jsonData = try Data(contentsOf: files.jsonURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(NativeRewriteGateReport.self, from: jsonData)
+        XCTAssertEqual(decoded.deployGateReport.deployable, report.deployGateReport.deployable)
+        XCTAssertEqual(decoded.performance.requestTotal, report.performance.requestTotal, accuracy: 0.001)
+
+        let markdown = try String(contentsOf: files.markdownURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("Native Rewrite Gate Report"))
+        XCTAssertTrue(markdown.contains("firstPartialP95Ms"))
+        XCTAssertTrue(markdown.contains("toolLatencyP95Ms"))
+    }
+
+    func testGenerateGateReportArtifactsForCI() async throws {
+        let metrics = makeHealthyMetrics()
+        let gateRunner = makeGateRunner(metrics: metrics)
+        let report = await gateRunner.run()
+
+        let outputDir: URL
+        if let path = ProcessInfo.processInfo.environment["DOCHI_GATE_REPORT_DIR"], !path.isEmpty {
+            outputDir = URL(fileURLWithPath: path, isDirectory: true)
+        } else {
+            outputDir = temporaryDirectory().appendingPathComponent("native-rewrite-gate-ci", isDirectory: true)
+        }
+
+        let files = try gateRunner.write(report: report, to: outputDir)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: files.jsonURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: files.markdownURL.path))
+    }
+
+    private func makeGateRunner(metrics: RuntimeMetrics) -> NativeRewriteGateRunner {
+        let regressionEvaluator = RegressionEvaluator(
+            runner: PassingRegressionScenarioRunner(),
+            registerDefaults: true
+        )
+        return NativeRewriteGateRunner(
+            metrics: metrics,
+            sloEvaluator: SLOEvaluator(),
+            regressionEvaluator: regressionEvaluator,
+            deployGate: DeployGate()
+        )
+    }
+
+    private func makeHealthyMetrics() -> RuntimeMetrics {
+        let metrics = RuntimeMetrics()
+        metrics.incrementCounter(name: MetricName.requestTotal, labels: [:], delta: 100)
+        metrics.incrementCounter(name: MetricName.requestErrorTotal, labels: [:], delta: 0)
+        metrics.incrementCounter(name: MetricName.sessionResumeTotal, labels: [:], delta: 100)
+        metrics.incrementCounter(name: MetricName.sessionResumeSuccess, labels: [:], delta: 100)
+
+        for _ in 1...100 {
+            metrics.recordHistogram(name: MetricName.firstPartialLatencyMs, labels: [:], value: 700)
+            metrics.recordHistogram(name: MetricName.toolLatencyMs, labels: ["tool": "calendar"], value: 450)
+            metrics.recordHistogram(name: MetricName.totalResponseLatencyMs, labels: [:], value: 2500)
+        }
+
+        return metrics
+    }
+
+    private func temporaryDirectory() -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-native-rewrite-gate-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.removeItem(at: directory)
+        return directory
+    }
+}

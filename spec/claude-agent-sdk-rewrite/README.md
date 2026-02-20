@@ -36,8 +36,8 @@
 | Phase 3 | [#327](https://github.com/midagedev/dochi/issues/327) BuiltIn/MCP 라우팅 정책 | CLOSED | `11-tool-routing-policy.md` |
 | Phase 3 | [#328](https://github.com/midagedev/dochi/issues/328) CLI 오케스트레이션 계약 | CLOSED | `12-cli-orchestration-contract.md` |
 | Phase 4 | [#329](https://github.com/midagedev/dochi/issues/329) SDK sidecar 제거 | CLOSED | `Dochi/ViewModels/DochiViewModel.swift` |
-| Phase 4 | [#330](https://github.com/midagedev/dochi/issues/330) 회귀/성능/SLO 게이트 | OPEN | `10-testing-observability-operations.md` |
-| Phase 4 | [#331](https://github.com/midagedev/dochi/issues/331) 스펙/이슈 동기화 | OPEN | 본 문서 + `rewrite-delivery-context.md` |
+| Phase 4 | [#330](https://github.com/midagedev/dochi/issues/330) 회귀/성능/SLO 게이트 | CLOSED | `Dochi/Services/Observability/*`, `scripts/native_rewrite_gate.sh` |
+| Phase 4 | [#331](https://github.com/midagedev/dochi/issues/331) 스펙/이슈 동기화 | CLOSED | 본 문서 + `rewrite-delivery-context.md` |
 | Phase 1 (Provider) | [#332](https://github.com/midagedev/dochi/issues/332) OpenAI 어댑터 | OPEN | `spec/llm-requirements.md` |
 | Phase 1 (Provider) | [#333](https://github.com/midagedev/dochi/issues/333) Z.AI 어댑터 | OPEN | `spec/llm-requirements.md` |
 | Phase 1 (Provider) | [#334](https://github.com/midagedev/dochi/issues/334) Ollama/LM Studio 어댑터 | OPEN | `spec/llm-requirements.md` |
@@ -56,6 +56,7 @@
 | Phase 3 hardening | [#347](https://github.com/midagedev/dochi/issues/347) coding-git MCP repo 경로 자동 동기화 | OPEN | repo context 연동 |
 | Phase 3 hardening | [#350](https://github.com/midagedev/dochi/issues/350) orchestrator summarize 서비스 분리 | OPEN | 테스트 가능성 강화 |
 | Phase 4 cleanup | [#352](https://github.com/midagedev/dochi/issues/352) DochiViewModel SDK dead code 제거 | OPEN | #329 후속 정리 |
+| Phase 4 hardening | [#355](https://github.com/midagedev/dochi/issues/355) RuntimeMetrics 실계측 경로 연결 | OPEN | #330 후속 계측 보강 |
 
 ## Deprecated/Archive 문서
 

@@ -36,8 +36,8 @@
 - [x] [#327](https://github.com/midagedev/dochi/issues/327) BuiltIn/MCP 라우팅 정책 일원화
 - [x] [#328](https://github.com/midagedev/dochi/issues/328) CLI 오케스트레이션 계약
 - [x] [#329](https://github.com/midagedev/dochi/issues/329) SDK sidecar 경로 제거
-- [ ] [#330](https://github.com/midagedev/dochi/issues/330) 회귀/성능 벤치/SLO 게이트
-- [ ] [#331](https://github.com/midagedev/dochi/issues/331) 스펙/이슈 트랙 동기화
+- [x] [#330](https://github.com/midagedev/dochi/issues/330) 회귀/성능 벤치/SLO 게이트
+- [x] [#331](https://github.com/midagedev/dochi/issues/331) 스펙/이슈 트랙 동기화
 
 ### Multi-Provider Extension Track
 
@@ -55,6 +55,7 @@
 - [ ] [#347](https://github.com/midagedev/dochi/issues/347) coding-git MCP repo 경로 자동 동기화
 - [ ] [#350](https://github.com/midagedev/dochi/issues/350) orchestrator summarize 로직 서비스 분리
 - [ ] [#352](https://github.com/midagedev/dochi/issues/352) DochiViewModel SDK dead code 제거
+- [ ] [#355](https://github.com/midagedev/dochi/issues/355) RuntimeMetrics 실계측(first partial/tool latency) 연동
 
 ## 4) Legacy SDK Program (#281~#293) Status Mapping
 
