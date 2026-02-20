@@ -1548,7 +1548,10 @@ final class DochiViewModel {
 
     func restoreNativeSessionIfNeeded() {
         guard currentConversation == nil else { return }
-        let userId = sessionContext.currentUserId
+        guard let userId = normalizedUserId(sessionContext.currentUserId) else {
+            Log.app.debug("Skipping native session restore: current user is not set")
+            return
+        }
         let records = nativeSessionStore.latestRecords(
             workspaceId: sessionContext.workspaceId,
             agentId: settings.activeAgentName,
@@ -1569,10 +1572,7 @@ final class DochiViewModel {
                 continue
             }
 
-            if let userId, !userId.isEmpty,
-               let conversationUserId = conversation.userId,
-               !conversationUserId.isEmpty,
-               conversationUserId != userId {
+            guard normalizedUserId(conversation.userId) == userId else {
                 continue
             }
 
@@ -1582,7 +1582,7 @@ final class DochiViewModel {
                     workspaceId: sessionContext.workspaceId,
                     agentId: settings.activeAgentName,
                     conversationId: conversation.id,
-                    userId: sessionContext.currentUserId
+                    userId: userId
                 )
             }
             Log.app.info("Restored native session conversation: \(conversation.id)")
@@ -3151,12 +3151,13 @@ final class DochiViewModel {
         guard let conversation = currentConversation else { return }
         let workspaceId = sessionContext.workspaceId
         let agentId = settings.activeAgentName
+        let ownerUserId = normalizedUserId(conversation.userId) ?? normalizedUserId(sessionContext.currentUserId)
 
         if nativeSessionStore.recoverIfInterrupted(
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversation.id,
-            userId: sessionContext.currentUserId
+            userId: ownerUserId
         ) != nil {
             return
         }
@@ -3165,18 +3166,27 @@ final class DochiViewModel {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversation.id,
-            userId: sessionContext.currentUserId
+            userId: ownerUserId
         )
     }
 
     private func markCurrentNativeSessionInterrupted() {
         guard let conversation = currentConversation else { return }
+        let ownerUserId = normalizedUserId(conversation.userId) ?? normalizedUserId(sessionContext.currentUserId)
         _ = nativeSessionStore.interrupt(
             workspaceId: sessionContext.workspaceId,
             agentId: settings.activeAgentName,
             conversationId: conversation.id,
-            userId: sessionContext.currentUserId
+            userId: ownerUserId
         )
+    }
+
+    private func normalizedUserId(_ userId: String?) -> String? {
+        guard let trimmed = userId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
     }
 
 

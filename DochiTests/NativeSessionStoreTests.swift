@@ -228,6 +228,165 @@ final class NativeSessionStoreTests: XCTestCase {
         XCTAssertEqual(viewModel.currentConversation?.id, userAConversation.id)
     }
 
+    func testRestoreSkippedWhenCurrentUserIsUnset() {
+        let workspaceId = UUID()
+        let sessionContext = SessionContext(workspaceId: workspaceId)
+        sessionContext.currentUserId = nil
+
+        let settings = AppSettings()
+        settings.activeAgentName = "도치"
+
+        let conversationDirectory = tempDir.appendingPathComponent("conversations")
+        let conversationService = ConversationService(baseURL: conversationDirectory)
+        let conversation = Conversation(userId: "user-a")
+        conversationService.save(conversation: conversation)
+
+        let store = NativeSessionStore(baseURL: tempDir)
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: conversation.id,
+            userId: "user-a"
+        )
+
+        let viewModel = makeViewModel(
+            settings: settings,
+            sessionContext: sessionContext,
+            conversationService: conversationService,
+            nativeSessionStore: store
+        )
+        viewModel.loadConversations()
+        viewModel.restoreNativeSessionIfNeeded()
+
+        XCTAssertNil(viewModel.currentConversation)
+    }
+
+    func testUpsertDoesNotOverwriteExistingSessionOwner() {
+        let workspaceId = UUID()
+        let conversationId = UUID()
+        let store = NativeSessionStore(baseURL: tempDir)
+
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: conversationId,
+            userId: "user-a"
+        )
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: conversationId,
+            userId: "user-b"
+        )
+
+        XCTAssertEqual(
+            store.record(
+                workspaceId: workspaceId,
+                agentId: "도치",
+                conversationId: conversationId
+            )?.userId,
+            "user-a"
+        )
+    }
+
+    func testLatestRecordsPreserveUpdateOrderAcrossReload() {
+        let workspaceId = UUID()
+        let firstConversation = UUID()
+        let secondConversation = UUID()
+
+        let store = NativeSessionStore(baseURL: tempDir)
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: firstConversation,
+            userId: "user-a"
+        )
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: secondConversation,
+            userId: "user-a"
+        )
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: firstConversation,
+            userId: "user-a"
+        )
+
+        let reloaded = NativeSessionStore(baseURL: tempDir)
+        let latest = reloaded.latestRecords(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            userId: "user-a"
+        )
+
+        XCTAssertEqual(latest.first?.conversationId, firstConversation.uuidString)
+    }
+
+    func testLegacyStoreMigrationNormalizesRecordOrderByUpdatedAt() throws {
+        let workspaceId = UUID()
+        let olderConversation = UUID()
+        let newerConversation = UUID()
+        let agentId = "도치"
+        let userId = "user-a"
+
+        let olderDate = "2026-01-01T00:00:05Z"
+        let newerDate = "2026-01-01T00:00:10Z"
+        let olderResumeKey = NativeSessionStore.makeResumeKey(
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: olderConversation
+        )
+        let newerResumeKey = NativeSessionStore.makeResumeKey(
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: newerConversation
+        )
+        let legacyJSON =
+            """
+            {
+              "records": [
+                {
+                  "resumeKey": "\(newerResumeKey)",
+                  "workspaceId": "\(workspaceId.uuidString)",
+                  "agentId": "\(agentId)",
+                  "conversationId": "\(newerConversation.uuidString)",
+                  "userId": "\(userId)",
+                  "status": "active",
+                  "createdAt": "\(newerDate)",
+                  "updatedAt": "\(newerDate)"
+                },
+                {
+                  "resumeKey": "\(olderResumeKey)",
+                  "workspaceId": "\(workspaceId.uuidString)",
+                  "agentId": "\(agentId)",
+                  "conversationId": "\(olderConversation.uuidString)",
+                  "userId": "\(userId)",
+                  "status": "active",
+                  "createdAt": "\(olderDate)",
+                  "updatedAt": "\(olderDate)"
+                }
+              ],
+              "version": 1
+            }
+            """
+        try legacyJSON.write(
+            to: tempDir.appendingPathComponent("native_sessions.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let migratedStore = NativeSessionStore(baseURL: tempDir)
+        let latest = migratedStore.latestRecords(
+            workspaceId: workspaceId,
+            agentId: agentId,
+            userId: userId
+        )
+
+        XCTAssertEqual(latest.first?.conversationId, newerConversation.uuidString)
+    }
+
     private func makeViewModel(
         settings: AppSettings,
         sessionContext: SessionContext,

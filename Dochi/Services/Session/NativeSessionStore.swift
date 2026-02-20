@@ -34,12 +34,18 @@ final class NativeSessionStore {
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .millisecondsSince1970
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
     }()
 
     private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        return decoder
+    }()
+
+    private static let legacyDecoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
@@ -148,7 +154,12 @@ final class NativeSessionStore {
         userId: String? = nil,
         statuses: Set<NativeSessionStatus> = [.active, .interrupted]
     ) -> [NativeSessionRecord] {
-        store.records
+        guard let normalizedUserId = Self.normalizeUserId(userId) else {
+            return []
+        }
+
+        return store.records
+            .reversed()
             .filter { record in
                 guard record.workspaceId == workspaceId.uuidString,
                       record.agentId == agentId,
@@ -156,11 +167,12 @@ final class NativeSessionStore {
                     return false
                 }
 
-                guard let userId, !userId.isEmpty else { return true }
-                return record.userId == nil || record.userId == userId
-            }
-            .sorted { lhs, rhs in
-                lhs.updatedAt > rhs.updatedAt
+                guard let recordUserId = Self.normalizeUserId(record.userId) else {
+                    // Backward-compat: include legacy records without user id and
+                    // rely on conversation user ownership checks during restore.
+                    return true
+                }
+                return recordUserId == normalizedUserId
             }
     }
 
@@ -206,13 +218,23 @@ final class NativeSessionStore {
             conversationId: conversationId
         )
         let now = Date()
+        let normalizedIncomingUserId = Self.normalizeUserId(userId)
 
         if let index = resumeKeyIndex[resumeKey], index < store.records.count {
-            store.records[index].status = status
-            store.records[index].userId = userId
-            store.records[index].updatedAt = now
+            var existing = store.records.remove(at: index)
+            existing.status = status
+
+            if let existingUserId = Self.normalizeUserId(existing.userId) {
+                existing.userId = existingUserId
+            } else {
+                existing.userId = normalizedIncomingUserId
+            }
+
+            existing.updatedAt = now
+            store.records.append(existing)
+            rebuildIndex()
             save()
-            return store.records[index]
+            return existing
         }
 
         let record = NativeSessionRecord(
@@ -220,7 +242,7 @@ final class NativeSessionStore {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
-            userId: userId,
+            userId: normalizedIncomingUserId,
             status: status,
             createdAt: now,
             updatedAt: now
@@ -240,7 +262,19 @@ final class NativeSessionStore {
 
         do {
             let data = try Data(contentsOf: fileURL)
-            store = try Self.decoder.decode(NativeSessionStoreData.self, from: data)
+            if let decoded = try? Self.decoder.decode(NativeSessionStoreData.self, from: data) {
+                store = decoded
+            } else if let legacyDecoded = try? Self.legacyDecoder.decode(NativeSessionStoreData.self, from: data) {
+                store = legacyDecoded
+                store.records = Self.normalizedLegacyRecordOrder(store.records)
+                save()
+            } else {
+                throw NSError(
+                    domain: "NativeSessionStore",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Unsupported native session store format"]
+                )
+            }
         } catch {
             Log.runtime.error("Failed to load native session store: \(error.localizedDescription)")
             store = NativeSessionStoreData()
@@ -267,5 +301,28 @@ final class NativeSessionStore {
         for (index, record) in store.records.enumerated() {
             resumeKeyIndex[record.resumeKey] = index
         }
+    }
+
+    private static func normalizeUserId(_ userId: String?) -> String? {
+        guard let trimmed = userId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func normalizedLegacyRecordOrder(_ records: [NativeSessionRecord]) -> [NativeSessionRecord] {
+        records
+            .enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.updatedAt != rhs.element.updatedAt {
+                    return lhs.element.updatedAt < rhs.element.updatedAt
+                }
+                if lhs.element.createdAt != rhs.element.createdAt {
+                    return lhs.element.createdAt < rhs.element.createdAt
+                }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 }
