@@ -248,10 +248,9 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
                     "permissionMode": params.permissionMode.map { .string($0) } ?? .null,
                 ]
                 let _: SessionRunResult = try await self.sendRpc(method: "session.run", params: rpcParams)
-                    // Ack received -- events will arrive via UDS notifications
-                } catch {
-                    continuation.finish(throwing: error)
-                }
+                // Ack received -- events will arrive via UDS notifications
+            } catch {
+                continuation.finish(throwing: error)
             }
         }
 
