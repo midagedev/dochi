@@ -463,22 +463,39 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         name.replacingOccurrences(of: "-_-", with: ".")
     }
 
+    private enum ApprovalOutcome {
+        case approved
+        case deniedByUser
+        case unavailable
+    }
+
     private func executeBuiltInTool(
         requestedName: String,
         tool: any BuiltInToolProtocol,
         arguments: [String: Any]
     ) async -> ToolResult {
-        let approved = await requestApprovalIfNeeded(
+        let approval = await requestApprovalIfNeeded(
             requestedToolName: requestedName,
             toolNameForPrompt: tool.name,
             toolDescription: tool.description,
             category: tool.category,
             skipConfirmation: tool.name == "shell.execute" || tool.name == "terminal.run"
         )
-        guard approved else {
+        switch approval {
+        case .approved:
+            break
+
+        case .deniedByUser:
             return ToolResult(
                 toolCallId: "",
                 content: "도구 '\(requestedName)' 실행이 사용자에 의해 거부되었습니다.",
+                isError: true
+            )
+
+        case .unavailable:
+            return ToolResult(
+                toolCallId: "",
+                content: "도구 '\(requestedName)' 실행을 위한 사용자 확인 채널을 사용할 수 없습니다.",
                 isError: true
             )
         }
@@ -504,17 +521,28 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         arguments: [String: Any]
     ) async -> ToolResult {
         let promptName = "[MCP:\(serverName)] \(originalName)"
-        let approved = await requestApprovalIfNeeded(
+        let approval = await requestApprovalIfNeeded(
             requestedToolName: requestedName,
             toolNameForPrompt: promptName,
             toolDescription: description,
             category: risk,
             skipConfirmation: false
         )
-        guard approved else {
+        switch approval {
+        case .approved:
+            break
+
+        case .deniedByUser:
             return ToolResult(
                 toolCallId: "",
                 content: "도구 '\(requestedName)' 실행이 사용자에 의해 거부되었습니다.",
+                isError: true
+            )
+
+        case .unavailable:
+            return ToolResult(
+                toolCallId: "",
+                content: "도구 '\(requestedName)' 실행을 위한 사용자 확인 채널을 사용할 수 없습니다.",
                 isError: true
             )
         }
@@ -542,21 +570,21 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         toolDescription: String,
         category: ToolCategory,
         skipConfirmation: Bool
-    ) async -> Bool {
-        guard !skipConfirmation else { return true }
-        guard category == .sensitive || category == .restricted else { return true }
+    ) async -> ApprovalOutcome {
+        guard !skipConfirmation else { return .approved }
+        guard category == .sensitive || category == .restricted else { return .approved }
 
         guard let handler = confirmationHandler else {
             Log.tool.warning("Tool \(requestedToolName) blocked: confirmation handler unavailable")
-            return false
+            return .unavailable
         }
 
         let approved = await handler(toolNameForPrompt, toolDescription)
         if !approved {
             Log.tool.info("Tool \(requestedToolName) denied by user")
-            return false
+            return .deniedByUser
         }
-        return true
+        return .approved
     }
 
     private func logRoutingDecision(
