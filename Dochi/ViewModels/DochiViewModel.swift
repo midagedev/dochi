@@ -1341,6 +1341,7 @@ final class DochiViewModel {
     private enum NativeLoopAttemptResult {
         case success
         case failure(reason: String)
+        case cancelled
     }
 
     private func processPrimaryLLMPath(
@@ -1409,6 +1410,13 @@ final class DochiViewModel {
                 streamingText = ""
                 processingSubState = .streaming
                 currentToolName = nil
+            case .cancelled:
+                errorMessage = nil
+                streamingText = ""
+                processingSubState = nil
+                currentToolName = nil
+                transition(to: .idle)
+                return
             }
         }
 
@@ -1425,6 +1433,7 @@ final class DochiViewModel {
         model: String
     ) async -> NativeLoopAttemptResult {
         var fallbackReason: String?
+        var cancelled = false
 
         do {
             let request = try buildNativeLLMRequestFromConversation(
@@ -1485,15 +1494,20 @@ final class DochiViewModel {
                         statusCode: nil,
                         retryAfterSeconds: nil
                     )
-                    fallbackReason = nativeError.message
-                    Log.runtime.warning("Native loop emitted error event: \(nativeError.message)")
+                    if nativeError.code == .cancelled {
+                        cancelled = true
+                        Log.runtime.info("Native loop cancelled by provider event")
+                    } else {
+                        fallbackReason = nativeError.message
+                        Log.runtime.warning("Native loop emitted error event: \(nativeError.message)")
+                    }
                     break eventLoop
                 }
             }
         } catch let error as NativeLLMError {
             if error.code == .cancelled {
                 Log.runtime.info("Native loop cancelled")
-                fallbackReason = error.message
+                cancelled = true
             } else {
                 fallbackReason = error.message
                 Log.runtime.error("Native loop failed: \(error.message)")
@@ -1501,6 +1515,11 @@ final class DochiViewModel {
         } catch {
             fallbackReason = error.localizedDescription
             Log.runtime.error("Native loop failed: \(error.localizedDescription)")
+        }
+
+        if cancelled {
+            streamingText = ""
+            return .cancelled
         }
 
         if let fallbackReason {

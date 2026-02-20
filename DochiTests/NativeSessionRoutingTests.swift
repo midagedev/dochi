@@ -231,6 +231,57 @@ final class NativeSessionRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeLoopCancelledDoesNotTriggerFallbackRetry() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+
+        let primaryAdapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[]],
+            errorsPerRequest: [NativeLLMError(
+                code: .cancelled,
+                message: "cancelled",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )]
+        )
+        let fallbackAdapter = StubNativeProviderAdapter(
+            provider: .openai,
+            eventsPerRequest: [[.done(text: "fallback-response")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [primaryAdapter, fallbackAdapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let keychain = MockKeychainService()
+        keychain.store[LLMProvider.anthropic.keychainAccount] = "anthropic-test-key"
+        keychain.store[LLMProvider.openai.keychainAccount] = "openai-test-key"
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            keychainService: keychain,
+            settingsTransform: { settings in
+                settings.fallbackLLMProvider = LLMProvider.openai.rawValue
+                settings.fallbackLLMModel = "gpt-4o-mini"
+            }
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(320))
+
+        XCTAssertEqual(primaryAdapter.callCount, 1)
+        XCTAssertEqual(fallbackAdapter.callCount, 0)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.interactionState, .idle)
+        let assistant = viewModel.currentConversation?.messages.last(where: { $0.role == .assistant })?.content
+        XCTAssertNil(assistant)
+    }
+
+    @MainActor
     func testTelegramMessageUsesNativeLoopAndSkipsRuntimeBridge() async {
         let bridge = MockRuntimeBridgeService()
         bridge.runtimeState = .ready
