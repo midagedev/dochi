@@ -16,7 +16,7 @@ final class CrossDeviceResumeService: CrossDeviceResumeServiceProtocol {
 
     // MARK: - Dependencies
 
-    private let sessionMappingService: SessionMappingService
+    private let sessionMappingService: any SessionMappingServiceProtocol
     private let bridge: any RuntimeBridgeProtocol
 
     // MARK: - State
@@ -26,7 +26,7 @@ final class CrossDeviceResumeService: CrossDeviceResumeServiceProtocol {
     // MARK: - Init
 
     init(
-        sessionMappingService: SessionMappingService,
+        sessionMappingService: any SessionMappingServiceProtocol,
         bridge: any RuntimeBridgeProtocol
     ) {
         self.sessionMappingService = sessionMappingService

@@ -6,7 +6,7 @@ import Foundation
 /// after runtime restart. Data is stored as JSON at:
 /// `~/Library/Application Support/Dochi/session_mappings.json`
 @MainActor
-final class SessionMappingService {
+final class SessionMappingService: SessionMappingServiceProtocol {
     private let fileURL: URL
     private var store: SessionMappingStore
     private var lookupIndex: [SessionLookupKey: Int] = [:]
