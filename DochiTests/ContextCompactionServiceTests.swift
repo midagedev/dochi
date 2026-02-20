@@ -15,15 +15,111 @@ final class ContextCompactionServiceTests: XCTestCase {
         super.tearDown()
     }
 
-    func testEstimatorCountsMessageAndTextTokens() {
-        let textTokens = service.estimateTokens(for: String(repeating: "가", count: 200))
-        XCTAssertEqual(textTokens, 100)
+    func testEstimatorDifferentiatesScripts() {
+        let cjkTokens = service.estimateTokens(
+            for: String(repeating: "가", count: 200),
+            provider: .openai,
+            model: "gpt-4o"
+        )
+        let latinTokens = service.estimateTokens(
+            for: String(repeating: "a", count: 200),
+            provider: .openai,
+            model: "gpt-4o"
+        )
+        XCTAssertGreaterThan(cjkTokens, latinTokens)
+    }
 
+    func testEstimatorUsesProviderAwareProfiles() {
+        let text = String(repeating: "hello-world ", count: 120)
+        let openAITokens = service.estimateTokens(
+            for: text,
+            provider: .openai,
+            model: "gpt-4o"
+        )
+        let anthropicTokens = service.estimateTokens(
+            for: text,
+            provider: .anthropic,
+            model: "claude-sonnet-4-5-20250514"
+        )
+        XCTAssertNotEqual(openAITokens, anthropicTokens)
+    }
+
+    func testRequestEstimatorIncludesToolDefinitionOverhead() {
+        let messages = [
+            NativeLLMMessage(role: .user, text: "일정을 만들어줘")
+        ]
+        let tool = NativeLLMToolDefinition(
+            name: "calendar.create",
+            description: "Create a calendar event",
+            inputSchema: [
+                "type": .string("object"),
+                "properties": .object([
+                    "title": .object(["type": .string("string")]),
+                    "date": .object(["type": .string("string")]),
+                ]),
+                "required": .array([.string("title"), .string("date")]),
+            ]
+        )
+
+        let withoutTools = service.estimateRequestInputTokens(
+            systemPrompt: "You are a helpful assistant.",
+            messages: messages,
+            tools: [],
+            provider: .openai,
+            model: "gpt-4o"
+        )
+        let withTools = service.estimateRequestInputTokens(
+            systemPrompt: "You are a helpful assistant.",
+            messages: messages,
+            tools: [tool],
+            provider: .openai,
+            model: "gpt-4o"
+        )
+
+        XCTAssertGreaterThan(withTools, withoutTools)
+    }
+
+    func testTokenizerStrategyCanBeInjected() {
+        let profile = ContextTokenizerProfile(
+            latinCharsPerToken: 10,
+            cjkCharsPerToken: 10,
+            digitCharsPerToken: 10,
+            symbolCharsPerToken: 10,
+            systemPromptOverhead: 5,
+            perMessageOverhead: 7,
+            perToolUseOverhead: 1,
+            perToolResultOverhead: 1,
+            perToolDefinitionOverhead: 1
+        )
+        let customService = ContextCompactionService(
+            tokenizerStrategy: FixedTokenizerStrategy(profile: profile)
+        )
+
+        let textTokens = customService.estimateTokens(
+            for: "abcdefghij",
+            provider: .openai,
+            model: "gpt-4o"
+        )
+        XCTAssertEqual(textTokens, 1)
+
+        let messageTokens = customService.estimateTokens(
+            for: NativeLLMMessage(role: .user, text: "abcdefghij"),
+            provider: .openai,
+            model: "gpt-4o"
+        )
+        XCTAssertEqual(messageTokens, 1 + profile.perMessageOverhead)
+    }
+
+    func testEstimatorCountsMessageAndTextTokens() {
         let messages = [
             NativeLLMMessage(role: .user, text: String(repeating: "u", count: 120)),
             NativeLLMMessage(role: .assistant, text: String(repeating: "a", count: 80)),
         ]
-        XCTAssertEqual(service.estimateTokens(for: messages), 100)
+        let messageTokens = service.estimateTokens(for: messages)
+        let userTextTokens = service.estimateTokens(for: String(repeating: "u", count: 120))
+        let assistantTextTokens = service.estimateTokens(for: String(repeating: "a", count: 80))
+
+        XCTAssertGreaterThan(messageTokens, userTextTokens + assistantTextTokens)
     }
 
     func testLayerPriorityCompactsPersonalBeforeWorkspace() {
@@ -95,9 +191,9 @@ final class ContextCompactionServiceTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(result.messages.count, 5)
-        XCTAssertEqual(result.metrics.droppedMessageCount, 5)
-        XCTAssertTrue(messageText(result.messages.first).contains("message-5"))
+        XCTAssertGreaterThanOrEqual(result.messages.count, 5)
+        XCTAssertEqual(result.messages.count, messages.count - result.metrics.droppedMessageCount)
+        XCTAssertTrue(messageText(result.messages.first).contains("message-\(result.metrics.droppedMessageCount)"))
     }
 
     func testCompactionDropsMessagesBeforeTruncatingMemoryLayers() {
@@ -117,14 +213,14 @@ final class ContextCompactionServiceTests: XCTestCase {
                 agentMemory: agentMemory,
                 personalMemory: personalMemory,
                 messages: messages,
-                tokenBudget: 1_000,
+                tokenBudget: 700,
                 fixedPromptTokens: 0,
                 autoCompactEnabled: true,
                 conversationSummary: nil
             )
         )
 
-        XCTAssertEqual(result.metrics.droppedMessageCount, 5)
+        XCTAssertGreaterThan(result.metrics.droppedMessageCount, 0)
         XCTAssertFalse(result.metrics.truncatedWorkspaceMemory)
         XCTAssertFalse(result.metrics.truncatedAgentMemory)
         XCTAssertFalse(result.metrics.truncatedPersonalMemory)
@@ -168,5 +264,13 @@ final class ContextCompactionServiceTests: XCTestCase {
             if case .text(let text) = $0 { return text }
             return ""
         }.joined()
+    }
+
+    private struct FixedTokenizerStrategy: ContextTokenizerStrategy {
+        let profile: ContextTokenizerProfile
+
+        func profile(for _: LLMProvider, model _: String) -> ContextTokenizerProfile {
+            profile
+        }
     }
 }

@@ -11,6 +11,9 @@ final class MetricsCollector {
     private static let maxEntries = 100
     /// Recent context compaction metrics (ring buffer, capped at `maxEntries`).
     private(set) var recentContextCompactions: [ContextCompactionMetrics] = []
+    /// Recent estimator-vs-actual token deviation samples (ring buffer, capped at `maxEntries`).
+    private(set) var recentTokenEstimationDeviations: [TokenEstimationDeviationSample] = []
+    private static let tokenDeviationP95Threshold = 0.15
 
     /// Persistent usage store for historical tracking.
     var usageStore: UsageStoreProtocol?
@@ -58,6 +61,46 @@ final class MetricsCollector {
 
         Log.llm.info(
             "Context compaction metrics: before=\(metrics.estimatedInputTokensBefore), after=\(metrics.estimatedInputTokensAfter), dropped=\(metrics.droppedMessageCount), fallback=\(metrics.usedSummaryFallback)"
+        )
+    }
+
+    /// Record estimator-vs-actual input token deviation for a request.
+    func recordTokenEstimationDeviation(
+        provider: String,
+        model: String,
+        estimatedInputTokens: Int,
+        actualInputTokens: Int
+    ) {
+        guard estimatedInputTokens > 0, actualInputTokens > 0 else { return }
+
+        let absoluteError = abs(estimatedInputTokens - actualInputTokens)
+        let relativeErrorRatio = Double(absoluteError) / Double(max(actualInputTokens, 1))
+        let sample = TokenEstimationDeviationSample(
+            provider: provider,
+            model: model,
+            estimatedInputTokens: estimatedInputTokens,
+            actualInputTokens: actualInputTokens,
+            absoluteErrorTokens: absoluteError,
+            relativeErrorRatio: relativeErrorRatio,
+            timestamp: Date()
+        )
+
+        recentTokenEstimationDeviations.append(sample)
+        if recentTokenEstimationDeviations.count > Self.maxEntries {
+            recentTokenEstimationDeviations.removeFirst(
+                recentTokenEstimationDeviations.count - Self.maxEntries
+            )
+        }
+
+        Log.llm.info(
+            "Token estimator deviation: \(provider)/\(model) est=\(estimatedInputTokens) actual=\(actualInputTokens) err=\(absoluteError) (\(String(format: "%.1f%%", sample.relativeErrorPercent)))"
+        )
+    }
+
+    var tokenEstimationDeviationReport: TokenEstimationDeviationReport? {
+        Self.makeTokenEstimationDeviationReport(
+            from: recentTokenEstimationDeviations,
+            threshold: Self.tokenDeviationP95Threshold
         )
     }
 
@@ -168,6 +211,37 @@ final class MetricsCollector {
         fmt.locale = Locale(identifier: "en_US_POSIX")
         return fmt
     }()
+
+    private static func makeTokenEstimationDeviationReport(
+        from samples: [TokenEstimationDeviationSample],
+        threshold: Double
+    ) -> TokenEstimationDeviationReport? {
+        guard !samples.isEmpty else { return nil }
+        let ratios = samples.map(\.relativeErrorRatio).sorted()
+        let totalAbsoluteError = samples.map { Double($0.absoluteErrorTokens) }.reduce(0, +)
+        let totalRelativeError = ratios.reduce(0, +)
+        let p95 = percentile(ratios, p: 0.95)
+
+        return TokenEstimationDeviationReport(
+            sampleCount: samples.count,
+            meanAbsoluteErrorTokens: totalAbsoluteError / Double(samples.count),
+            meanRelativeErrorRatio: totalRelativeError / Double(samples.count),
+            p95RelativeErrorRatio: p95,
+            maxRelativeErrorRatio: ratios.last ?? 0,
+            thresholdRatio: threshold
+        )
+    }
+
+    /// Percentile calculation with linear interpolation.
+    private static func percentile(_ sortedValues: [Double], p: Double) -> Double {
+        guard !sortedValues.isEmpty else { return 0 }
+        if sortedValues.count == 1 { return sortedValues[0] }
+        let rank = p * Double(sortedValues.count - 1)
+        let lower = Int(rank)
+        let upper = min(lower + 1, sortedValues.count - 1)
+        let fraction = rank - Double(lower)
+        return sortedValues[lower] + fraction * (sortedValues[upper] - sortedValues[lower])
+    }
 }
 
 /// Aggregated session metrics summary.
@@ -177,4 +251,31 @@ struct SessionMetricsSummary: Sendable {
     let totalOutputTokens: Int
     let averageLatency: TimeInterval
     let fallbackCount: Int
+}
+
+struct TokenEstimationDeviationSample: Sendable {
+    let provider: String
+    let model: String
+    let estimatedInputTokens: Int
+    let actualInputTokens: Int
+    let absoluteErrorTokens: Int
+    let relativeErrorRatio: Double
+    let timestamp: Date
+
+    var relativeErrorPercent: Double {
+        relativeErrorRatio * 100
+    }
+}
+
+struct TokenEstimationDeviationReport: Sendable {
+    let sampleCount: Int
+    let meanAbsoluteErrorTokens: Double
+    let meanRelativeErrorRatio: Double
+    let p95RelativeErrorRatio: Double
+    let maxRelativeErrorRatio: Double
+    let thresholdRatio: Double
+
+    var meetsThreshold: Bool {
+        p95RelativeErrorRatio <= thresholdRatio
+    }
 }

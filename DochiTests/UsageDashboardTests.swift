@@ -491,6 +491,71 @@ final class MetricsCollectorCostTests: XCTestCase {
     }
 }
 
+// MARK: - Token Estimation Deviation Tests
+
+@MainActor
+final class TokenEstimationDeviationTests: XCTestCase {
+
+    func testDeviationReportComputesP95AndThreshold() throws {
+        let collector = MetricsCollector()
+
+        collector.recordTokenEstimationDeviation(
+            provider: "openai",
+            model: "gpt-4o",
+            estimatedInputTokens: 110,
+            actualInputTokens: 100
+        )
+        collector.recordTokenEstimationDeviation(
+            provider: "openai",
+            model: "gpt-4o",
+            estimatedInputTokens: 130,
+            actualInputTokens: 100
+        )
+
+        let report = try XCTUnwrap(collector.tokenEstimationDeviationReport)
+        XCTAssertEqual(report.sampleCount, 2)
+        XCTAssertEqual(report.meanAbsoluteErrorTokens, 20, accuracy: 0.01)
+        XCTAssertEqual(report.meanRelativeErrorRatio, 0.20, accuracy: 0.001)
+        XCTAssertEqual(report.p95RelativeErrorRatio, 0.29, accuracy: 0.001)
+        XCTAssertFalse(report.meetsThreshold)
+    }
+
+    func testDeviationRecordingSkipsInvalidTokenCounts() {
+        let collector = MetricsCollector()
+
+        collector.recordTokenEstimationDeviation(
+            provider: "openai",
+            model: "gpt-4o",
+            estimatedInputTokens: 100,
+            actualInputTokens: 0
+        )
+        collector.recordTokenEstimationDeviation(
+            provider: "openai",
+            model: "gpt-4o",
+            estimatedInputTokens: 0,
+            actualInputTokens: 100
+        )
+
+        XCTAssertTrue(collector.recentTokenEstimationDeviations.isEmpty)
+        XCTAssertNil(collector.tokenEstimationDeviationReport)
+    }
+
+    func testDeviationRingBufferIsCapped() {
+        let collector = MetricsCollector()
+
+        for index in 0..<150 {
+            collector.recordTokenEstimationDeviation(
+                provider: "openai",
+                model: "gpt-4o",
+                estimatedInputTokens: 100 + index,
+                actualInputTokens: 100
+            )
+        }
+
+        XCTAssertEqual(collector.recentTokenEstimationDeviations.count, 100)
+    }
+}
+
 // MARK: - DailyUsageRecord Tests
 
 @MainActor

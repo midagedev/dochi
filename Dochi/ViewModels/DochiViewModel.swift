@@ -1412,9 +1412,17 @@ final class DochiViewModel {
         var doneInputTokens: Int?
         var doneOutputTokens: Int?
         var didReceiveDoneEvent = false
+        var estimatedInputTokensForLatestRequest: Int?
 
         do {
             let request = try buildNativeLLMRequestFromConversation(
+                provider: provider,
+                model: model
+            )
+            estimatedInputTokensForLatestRequest = contextCompactionService.estimateRequestInputTokens(
+                systemPrompt: request.systemPrompt,
+                messages: request.messages,
+                tools: request.tools,
                 provider: provider,
                 model: model
             )
@@ -1537,6 +1545,16 @@ final class DochiViewModel {
 
         if doneInputTokens == nil && doneOutputTokens == nil {
             Log.runtime.debug("Native loop usage unavailable for \(provider.rawValue)/\(model); recording nil token metrics")
+        }
+
+        if let estimatedInputTokens = estimatedInputTokensForLatestRequest,
+           let actualInputTokens = doneInputTokens {
+            metricsCollector.recordTokenEstimationDeviation(
+                provider: provider.rawValue,
+                model: model,
+                estimatedInputTokens: estimatedInputTokens,
+                actualInputTokens: actualInputTokens
+            )
         }
 
         recordNativeExchangeMetrics(
@@ -2838,6 +2856,9 @@ final class DochiViewModel {
             guard let userId = normalizedUserId(sessionContext.currentUserId) else { return "" }
             return contextService.loadUserMemory(userId: userId) ?? ""
         }()
+        let requestedTools = buildNativeToolDefinitions()
+        let shouldDisableToolsForCapability = !capabilities.supportsToolCalling && !requestedTools.isEmpty
+        let enabledTools = shouldDisableToolsForCapability ? [] : requestedTools
 
         let contextWindow = provider.contextWindowTokens(for: model)
         let reservedOutputTokens = min(4_096, max(contextWindow / 5, 1_024))
@@ -2850,16 +2871,27 @@ final class DochiViewModel {
             agentMemoryOverride: "",
             personalMemoryOverride: ""
         )
-        let fixedPromptTokens = contextCompactionService.estimateTokens(for: fixedPrompt)
+        let fixedPromptTokens = contextCompactionService.estimateSystemPromptTokens(
+            for: fixedPrompt,
+            provider: provider,
+            model: model
+        )
+        let fixedToolTokens = contextCompactionService.estimateTokens(
+            for: enabledTools,
+            provider: provider,
+            model: model
+        )
 
         let compaction = contextCompactionService.compact(
             request: ContextCompactionRequest(
+                provider: provider,
+                model: model,
                 workspaceMemory: workspaceMemory,
                 agentMemory: agentMemory,
                 personalMemory: personalMemory,
                 messages: rawMessages,
                 tokenBudget: tokenBudget,
-                fixedPromptTokens: fixedPromptTokens,
+                fixedPromptTokens: fixedPromptTokens + fixedToolTokens,
                 autoCompactEnabled: settings.contextAutoCompress,
                 conversationSummary: conversation.summary
             )
@@ -2871,9 +2903,6 @@ final class DochiViewModel {
             personalMemory: personalMemory,
             metrics: compaction.metrics
         )
-
-        let requestedTools = buildNativeToolDefinitions()
-        let shouldDisableToolsForCapability = !capabilities.supportsToolCalling && !requestedTools.isEmpty
 
         var additionalSections: [String] = []
         if let summarySnapshot = compaction.summarySnapshot, !summarySnapshot.isEmpty {
@@ -2897,8 +2926,13 @@ final class DochiViewModel {
             personalMemoryOverride: compaction.layers.personalMemory,
             additionalSections: additionalSections
         )
-        let compactedInputTokens = contextCompactionService.estimateTokens(for: compactedSystemPrompt) +
-            contextCompactionService.estimateTokens(for: compaction.messages)
+        let compactedInputTokens = contextCompactionService.estimateRequestInputTokens(
+            systemPrompt: compactedSystemPrompt,
+            messages: compaction.messages,
+            tools: enabledTools,
+            provider: provider,
+            model: model
+        )
         let outputTokenHeadroom = contextWindow - compactedInputTokens - 512
         guard outputTokenHeadroom > 0 else {
             throw NativeLLMError(
@@ -2916,7 +2950,7 @@ final class DochiViewModel {
             apiKey: loadNativeAPIKey(for: provider),
             systemPrompt: compactedSystemPrompt,
             messages: compaction.messages,
-            tools: shouldDisableToolsForCapability ? [] : requestedTools,
+            tools: enabledTools,
             maxTokens: maxTokens,
             endpointURL: nativeEndpointURL(for: provider)
         )
