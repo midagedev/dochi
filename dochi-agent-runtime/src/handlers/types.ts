@@ -197,6 +197,36 @@ export const TOOL_TIMEOUT = -32012;
 export const TOOL_PERMISSION_DENIED = -32013;
 export const TOOL_HOOK_BLOCKED = -32014;
 
+/**
+ * Structured RPC error class for type-safe error handling in handlers.
+ *
+ * Throw `new RpcError(code, message)` from any handler to produce a
+ * well-formed JSON-RPC error response. The `rpc-server` catches these
+ * via `instanceof RpcError` and maps them directly to {@link JsonRpcError}.
+ */
+export class RpcError extends Error {
+  readonly code: number;
+  readonly data?: unknown;
+
+  constructor(code: number, message: string, data?: unknown) {
+    super(message);
+    this.name = "RpcError";
+    this.code = code;
+    this.data = data;
+    // Restore prototype chain broken by extending built-in Error
+    Object.setPrototypeOf(this, RpcError.prototype);
+  }
+
+  /** Convert to the JSON-RPC error envelope shape. */
+  toJsonRpcError(): JsonRpcError {
+    const err: JsonRpcError = { code: this.code, message: this.message };
+    if (this.data !== undefined) {
+      err.data = this.data;
+    }
+    return err;
+  }
+}
+
 // Context snapshot types
 
 export interface ContextPushParams {

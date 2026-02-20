@@ -7,6 +7,7 @@ import {
   METHOD_NOT_FOUND,
   PARSE_ERROR,
   INTERNAL_ERROR,
+  RpcError,
 } from "./handlers/types";
 import {
   handleInitialize,
@@ -91,14 +92,12 @@ function processRequest(request: JsonRpcRequest): JsonRpcResponse {
     const result = handler(request.params);
     return { jsonrpc: "2.0", id: request.id, result };
   } catch (err) {
-    // Support structured error objects { code, message } from handlers
-    if (typeof err === "object" && err !== null && "code" in err && "message" in err) {
-      const structured = err as { code: number; message: string };
-      setLastError(structured.message);
+    if (err instanceof RpcError) {
+      setLastError(err.message);
       return {
         jsonrpc: "2.0",
         id: request.id,
-        error: { code: structured.code, message: structured.message },
+        error: err.toJsonRpcError(),
       };
     }
     const message = err instanceof Error ? err.message : String(err);
