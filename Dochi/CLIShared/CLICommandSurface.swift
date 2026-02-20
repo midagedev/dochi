@@ -535,24 +535,13 @@ enum CLICommandParser {
                     }
                     return .dev(.bridgeOrchestratorSelect(repositoryRoot: repositoryRoot))
                 case "execute":
-                    guard !orchestratorArgs.isEmpty, !orchestratorArgs[0].hasPrefix("--") else {
-                        throw CLIParseError.invalidUsage("dev bridge orchestrator execute <command> [--repo <path>] [--confirmed] 형식이 필요합니다.")
-                    }
                     var commandParts: [String] = []
                     var index = 0
-                    while index < orchestratorArgs.count, !orchestratorArgs[index].hasPrefix("--") {
-                        commandParts.append(orchestratorArgs[index])
-                        index += 1
-                    }
-                    let command = commandParts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !command.isEmpty else {
-                        throw CLIParseError.invalidUsage("dev bridge orchestrator execute <command> 형식이 필요합니다.")
-                    }
-
                     var repositoryRoot: String?
                     var confirmed = false
                     while index < orchestratorArgs.count {
-                        switch orchestratorArgs[index] {
+                        let token = orchestratorArgs[index]
+                        switch token {
                         case "--repo", "--repository-root":
                             guard index + 1 < orchestratorArgs.count else {
                                 throw CLIParseError.invalidUsage("dev bridge orchestrator execute --repo <path> 형식이 필요합니다.")
@@ -563,8 +552,13 @@ enum CLICommandParser {
                             confirmed = true
                             index += 1
                         default:
-                            throw CLIParseError.invalidUsage("dev bridge orchestrator execute의 알 수 없는 옵션입니다: \(orchestratorArgs[index])")
+                            commandParts.append(token)
+                            index += 1
                         }
+                    }
+                    let command = commandParts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !command.isEmpty else {
+                        throw CLIParseError.invalidUsage("dev bridge orchestrator execute <command> [--repo <path>] [--confirmed] 형식이 필요합니다.")
                     }
                     return .dev(.bridgeOrchestratorExecute(
                         command: command,

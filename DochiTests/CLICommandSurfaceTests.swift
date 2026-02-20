@@ -159,6 +159,22 @@ final class CLICommandSurfaceTests: XCTestCase {
         )
     }
 
+    func testParseDevBridgeOrchestratorExecuteKeepsCommandOptions() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "orchestrator", "execute",
+            "git", "show", "--stat",
+            "--repo", "~/repo/dochi",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeOrchestratorExecute(
+                command: "git show --stat",
+                repositoryRoot: "~/repo/dochi",
+                confirmed: false
+            ))
+        )
+    }
+
     func testParseDevBridgeOrchestratorStatusWithSessionAndLines() throws {
         let invocation = try CLICommandParser.parse([
             "dev", "bridge", "orchestrator", "status",
