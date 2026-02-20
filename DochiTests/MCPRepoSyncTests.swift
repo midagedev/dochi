@@ -44,6 +44,14 @@ private final class MockMCPServiceForRepoSync: MCPServiceProtocol {
     func callTool(name: String, arguments: [String: Any]) async throws -> MCPToolResult {
         MCPToolResult(content: "ok", isError: false)
     }
+
+    func activateProfile(_ profile: MCPServerProfile) async {}
+    func deactivateProfile(_ profile: MCPServerProfile) {}
+    func serverStatus(for serverId: UUID) -> MCPServerStatus { .disconnected }
+    func healthReport(for profile: MCPServerProfile) -> MCPProfileHealthReport {
+        MCPProfileHealthReport(profileName: profile.displayName, serverStatuses: [])
+    }
+    func fallbackMessage(for toolName: String) -> String { "" }
 }
 
 // MARK: - MCPServerConfig Helpers Tests

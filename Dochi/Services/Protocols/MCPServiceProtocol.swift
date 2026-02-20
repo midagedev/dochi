@@ -19,4 +19,15 @@ protocol MCPServiceProtocol {
     // Tools
     func listTools() -> [MCPToolInfo]
     func callTool(name: String, arguments: [String: Any]) async throws -> MCPToolResult
+
+    // Profile lifecycle
+    func activateProfile(_ profile: MCPServerProfile) async
+    func deactivateProfile(_ profile: MCPServerProfile)
+
+    // Health monitoring
+    func serverStatus(for serverId: UUID) -> MCPServerStatus
+    func healthReport(for profile: MCPServerProfile) -> MCPProfileHealthReport
+
+    // Fallback
+    func fallbackMessage(for toolName: String) -> String
 }
