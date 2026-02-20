@@ -408,6 +408,77 @@ final class SessionStreamingTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeLoopAppliesContextCompactionBeforeRequest() async throws {
+        let workspaceId = UUID()
+        let sessionContext = SessionContext(workspaceId: workspaceId)
+        sessionContext.currentUserId = "user-1"
+
+        let settings = AppSettings()
+        settings.nativeAgentLoopEnabled = true
+        settings.llmProvider = LLMProvider.anthropic.rawValue
+        settings.llmModel = "claude-sonnet-4-5-20250514"
+        settings.contextAutoCompress = true
+        settings.contextMaxSize = 1_200
+
+        let contextService = MockContextService()
+        contextService.workspaceMemory[workspaceId] = String(repeating: "W", count: 8_000)
+        contextService.agentMemories["\(workspaceId)|도치"] = String(repeating: "A", count: 8_000)
+        contextService.userMemory["user-1"] = String(repeating: "P", count: 8_000)
+
+        let conversationService = MockConversationService()
+        var conversation = Conversation(userId: "user-1")
+        for index in 0..<10 {
+            let role: MessageRole = index % 2 == 0 ? .user : .assistant
+            let content = "message-\(index) " + String(repeating: "x", count: 1_200)
+            conversation.messages.append(Message(role: role, content: content))
+        }
+        conversationService.save(conversation: conversation)
+
+        let metricsCollector = MetricsCollector()
+        let adapter = CapturingStubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.done(text: "native")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let viewModel = DochiViewModel(
+            toolService: MockBuiltInToolService(),
+            contextService: contextService,
+            conversationService: conversationService,
+            keychainService: MockKeychainService(),
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: sessionContext,
+            metricsCollector: metricsCollector,
+            runtimeBridge: nil,
+            nativeAgentLoopService: nativeService
+        )
+        viewModel.loadConversations()
+        viewModel.selectConversation(id: conversation.id)
+        viewModel.inputText = "latest message " + String(repeating: "z", count: 800)
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(260))
+
+        XCTAssertEqual(adapter.callCount, 1)
+        guard let request = adapter.capturedRequests.first else {
+            return XCTFail("Expected captured native request")
+        }
+
+        let compactionMetric = metricsCollector.recentContextCompactions.last
+        XCTAssertNotNil(compactionMetric)
+        XCTAssertTrue(compactionMetric?.didCompact == true)
+        XCTAssertGreaterThan(compactionMetric?.droppedMessageCount ?? 0, 0)
+        XCTAssertTrue(compactionMetric?.usedSummaryFallback == true)
+        XCTAssertTrue(request.systemPrompt?.contains("컨텍스트 요약 스냅샷") == true)
+    }
+
+    @MainActor
     func testNativeLoopDisabledFallsBackToSDKPath() async throws {
         let bridge = MockRuntimeBridgeService()
         bridge.runtimeState = .ready
@@ -657,6 +728,35 @@ private final class StubNativeProviderAdapter: @unchecked Sendable, NativeLLMPro
                 }
                 continuation.finish()
             }
+        }
+    }
+}
+
+private final class CapturingStubNativeProviderAdapter: @unchecked Sendable, NativeLLMProviderAdapter {
+    let provider: LLMProvider
+    private let eventsPerRequest: [[NativeLLMStreamEvent]]
+    private(set) var callCount: Int = 0
+    private(set) var capturedRequests: [NativeLLMRequest] = []
+
+    init(
+        provider: LLMProvider,
+        eventsPerRequest: [[NativeLLMStreamEvent]]
+    ) {
+        self.provider = provider
+        self.eventsPerRequest = eventsPerRequest
+    }
+
+    func stream(request: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
+        capturedRequests.append(request)
+        let index = min(callCount, max(0, eventsPerRequest.count - 1))
+        let events = eventsPerRequest.isEmpty ? [] : eventsPerRequest[index]
+        callCount += 1
+
+        return AsyncThrowingStream { continuation in
+            for event in events {
+                continuation.yield(event)
+            }
+            continuation.finish()
         }
     }
 }
