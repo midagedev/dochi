@@ -123,11 +123,15 @@ private extension AnthropicNativeLLMProviderAdapter {
 
     enum AnthropicContentBlock: Encodable {
         case text(String)
+        case toolUse(id: String, name: String, input: AnyCodableValue)
         case toolResult(toolUseId: String, content: String, isError: Bool)
 
         enum CodingKeys: String, CodingKey {
             case type
             case text
+            case id
+            case name
+            case input
             case toolUseId = "tool_use_id"
             case content
             case isError = "is_error"
@@ -139,6 +143,11 @@ private extension AnthropicNativeLLMProviderAdapter {
             case .text(let text):
                 try container.encode("text", forKey: .type)
                 try container.encode(text, forKey: .text)
+            case .toolUse(let id, let name, let input):
+                try container.encode("tool_use", forKey: .type)
+                try container.encode(id, forKey: .id)
+                try container.encode(name, forKey: .name)
+                try container.encode(input, forKey: .input)
             case .toolResult(let toolUseId, let content, let isError):
                 try container.encode("tool_result", forKey: .type)
                 try container.encode(toolUseId, forKey: .toolUseId)
@@ -316,6 +325,12 @@ private extension AnthropicNativeLLMProviderAdapter {
             switch content {
             case .text(let text):
                 return .text(text)
+            case .toolUse(let toolCallId, let name, let inputJSON):
+                return .toolUse(
+                    id: toolCallId,
+                    name: name,
+                    input: parseToolUseInputJSON(inputJSON)
+                )
             case .toolResult(let toolCallId, let content, let isError):
                 return .toolResult(toolUseId: toolCallId, content: content, isError: isError)
             }
@@ -485,6 +500,17 @@ private extension AnthropicNativeLLMProviderAdapter {
         guard let value else { return nil }
         guard let data = try? JSONEncoder().encode(value) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    static func parseToolUseInputJSON(_ raw: String) -> AnyCodableValue {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else {
+            return .object([:])
+        }
+        if let value = try? JSONDecoder().decode(AnyCodableValue.self, from: data) {
+            return value
+        }
+        return .object([:])
     }
 
     static func mapHTTPError(
