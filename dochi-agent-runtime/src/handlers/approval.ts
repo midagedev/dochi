@@ -1,7 +1,7 @@
 import * as crypto from "crypto";
 import type * as net from "net";
 import type { ApprovalResolveParams, ApprovalResolveAck } from "./types";
-import { TOOL_PERMISSION_DENIED } from "./types";
+import { TOOL_PERMISSION_DENIED, APPROVAL_NOT_FOUND, RpcError } from "../errors/rpc-error";
 
 /** Tracks a pending approval awaiting user decision from the app. */
 interface PendingApproval {
@@ -109,8 +109,11 @@ export function requestApproval(
 export function handleApprovalResolve(params: ApprovalResolveParams): ApprovalResolveAck {
   const pending = pendingApprovals.get(params.approvalId);
   if (!pending) {
-    console.error(`[approval] received resolve for unknown approvalId: ${params.approvalId}`);
-    return { received: false, approvalId: params.approvalId };
+    throw new RpcError(
+      APPROVAL_NOT_FOUND,
+      `No pending approval for approvalId: ${params.approvalId}`,
+      { approvalId: params.approvalId },
+    );
   }
 
   clearTimeout(pending.timer);

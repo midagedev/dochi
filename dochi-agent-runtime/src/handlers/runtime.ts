@@ -1,10 +1,11 @@
 import * as crypto from "crypto";
-import {
-  type InitializeParams,
-  type InitializeResult,
-  type HealthResult,
-  type ShutdownResult,
+import type {
+  InitializeParams,
+  InitializeResult,
+  HealthResult,
+  ShutdownResult,
 } from "./types";
+import { RpcError, RUNTIME_NOT_READY, INVALID_PARAMS } from "../errors/rpc-error";
 import { getActiveSessionCount } from "./session";
 import { flushAllAudit } from "./hooks";
 
@@ -13,6 +14,13 @@ let lastError: string | null = null;
 let runtimeSessionId: string | null = null;
 
 export function handleInitialize(params: InitializeParams): InitializeResult {
+  if (!params.runtimeVersion || !params.configProfile) {
+    throw new RpcError(
+      INVALID_PARAMS,
+      "runtime.initialize requires runtimeVersion and configProfile",
+    );
+  }
+
   runtimeSessionId = crypto.randomUUID();
   console.error(
     `[runtime] initialized: version=${params.runtimeVersion} profile=${params.configProfile} sessionId=${runtimeSessionId}`
