@@ -788,6 +788,12 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(localControlPlaneEnabled, forKey: "localControlPlaneEnabled") }
     }
 
+    /// Native agent loop execution path toggle.
+    /// When disabled, DochiViewModel falls back to SDK runtime session path.
+    var nativeAgentLoopEnabled: Bool = UserDefaults.standard.object(forKey: "nativeAgentLoopEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(nativeAgentLoopEnabled, forKey: "nativeAgentLoopEnabled") }
+    }
+
     // MARK: - Proactive Suggestions (K-2)
 
     var proactiveSuggestionEnabled: Bool = UserDefaults.standard.object(forKey: "proactiveSuggestionEnabled") as? Bool ?? false {

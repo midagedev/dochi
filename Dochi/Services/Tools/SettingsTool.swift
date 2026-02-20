@@ -20,10 +20,11 @@ private enum SettingKey: String, CaseIterable {
     case fallbackLLMProvider
     case fallbackLLMModel
     case capabilityRouterV2Enabled
+    case nativeAgentLoopEnabled
 
     var typeHint: String {
         switch self {
-        case .wakeWordEnabled, .contextAutoCompress, .capabilityRouterV2Enabled:
+        case .wakeWordEnabled, .contextAutoCompress, .capabilityRouterV2Enabled, .nativeAgentLoopEnabled:
             return "Bool"
         case .chatFontSize, .ttsSpeed, .sttSilenceTimeout:
             return "Double"
@@ -119,6 +120,7 @@ final class SettingsListTool: BuiltInToolProtocol {
         case .fallbackLLMProvider: return settings.fallbackLLMProvider.isEmpty ? "(미설정)" : settings.fallbackLLMProvider
         case .fallbackLLMModel: return settings.fallbackLLMModel.isEmpty ? "(미설정)" : settings.fallbackLLMModel
         case .capabilityRouterV2Enabled: return String(settings.capabilityRouterV2Enabled)
+        case .nativeAgentLoopEnabled: return String(settings.nativeAgentLoopEnabled)
         }
     }
 }
@@ -195,6 +197,7 @@ final class SettingsGetTool: BuiltInToolProtocol {
         case .fallbackLLMProvider: return settings.fallbackLLMProvider.isEmpty ? "(미설정)" : settings.fallbackLLMProvider
         case .fallbackLLMModel: return settings.fallbackLLMModel.isEmpty ? "(미설정)" : settings.fallbackLLMModel
         case .capabilityRouterV2Enabled: return String(settings.capabilityRouterV2Enabled)
+        case .nativeAgentLoopEnabled: return String(settings.nativeAgentLoopEnabled)
         }
     }
 }
@@ -284,6 +287,11 @@ final class SettingsSetTool: BuiltInToolProtocol {
                 return invalidTypeResult(key: key, expected: "Bool (true/false)")
             }
             settings.capabilityRouterV2Enabled = parsed
+        case .nativeAgentLoopEnabled:
+            guard let parsed = parseBool(rawValue) else {
+                return invalidTypeResult(key: key, expected: "Bool (true/false)")
+            }
+            settings.nativeAgentLoopEnabled = parsed
 
         // Double settings with validation
         case .chatFontSize:

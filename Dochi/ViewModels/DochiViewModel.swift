@@ -221,6 +221,7 @@ final class DochiViewModel {
     let settings: AppSettings
     let sessionContext: SessionContext
     let metricsCollector: MetricsCollector
+    private let nativeAgentLoopService: NativeAgentLoopService
 
     /// Optional runtime bridge for SDK session path.
     /// When available and in `.ready` state, input is routed through the SDK session.
@@ -278,7 +279,8 @@ final class DochiViewModel {
         settings: AppSettings,
         sessionContext: SessionContext,
         metricsCollector: MetricsCollector = MetricsCollector(),
-        runtimeBridge: (any RuntimeBridgeProtocol)? = nil
+        runtimeBridge: (any RuntimeBridgeProtocol)? = nil,
+        nativeAgentLoopService: NativeAgentLoopService? = nil
     ) {
         self.toolService = toolService
         self.contextService = contextService
@@ -291,6 +293,10 @@ final class DochiViewModel {
         self.sessionContext = sessionContext
         self.metricsCollector = metricsCollector
         self.runtimeBridge = runtimeBridge
+        self.nativeAgentLoopService = nativeAgentLoopService ?? NativeAgentLoopService(
+            adapters: [AnthropicNativeLLMProviderAdapter()],
+            toolService: toolService
+        )
 
         // Wire TTS completion callback
         self.ttsService.onComplete = { [weak self] in
@@ -988,12 +994,13 @@ final class DochiViewModel {
             transition(to: .processing)
             processingSubState = .streaming
 
-            // Route through SDK runtime session
+            // Route through native loop (default) or SDK fallback path.
             processingTask = Task {
-                await processSDKSession(input: finalText)
+                await processPrimaryLLMPath(input: finalText, includesImages: false)
             }
         } else {
-            // Process images off main thread, then send via SDK session
+            // Process images off main thread, then send.
+            // Native path currently handles text-first; image requests use SDK fallback.
             transition(to: .processing)
             processingSubState = .streaming
             processingTask = Task {
@@ -1013,7 +1020,7 @@ final class DochiViewModel {
                     Log.app.info("Attached \(imageContents.count) image(s) to message")
                 }
                 appendUserMessage(finalText, imageData: imageContents.isEmpty ? nil : imageContents)
-                await processSDKSession(input: finalText)
+                await processPrimaryLLMPath(input: finalText, includesImages: !imageContents.isEmpty)
             }
         }
     }
@@ -1248,6 +1255,132 @@ final class DochiViewModel {
             guard let self else { return (approved: false, scope: .once) }
             return await self.requestSDKToolApproval(params: params)
         }
+    }
+
+    private func processPrimaryLLMPath(input: String, includesImages: Bool) async {
+        let provider = settings.currentProvider
+
+        if shouldUseNativeAgentLoop(provider: provider, includesImages: includesImages) {
+            let nativeCompleted = await processNativeAgentLoop(input: input)
+            if nativeCompleted {
+                return
+            }
+
+            // Native path failed with recoverable error, retry via SDK session path.
+            await processSDKSession(input: input)
+            return
+        }
+
+        if settings.nativeAgentLoopEnabled {
+            if includesImages {
+                Log.runtime.debug("Native loop skipped: image request uses SDK fallback path")
+            } else if !nativeAgentLoopService.supports(provider: provider) {
+                Log.runtime.debug("Native loop skipped: unsupported provider \(provider.rawValue)")
+            }
+        }
+
+        await processSDKSession(input: input)
+    }
+
+    private func shouldUseNativeAgentLoop(provider: LLMProvider, includesImages: Bool) -> Bool {
+        guard settings.nativeAgentLoopEnabled else { return false }
+        guard !includesImages else { return false }
+        return nativeAgentLoopService.supports(provider: provider)
+    }
+
+    private func processNativeAgentLoop(input _: String) async -> Bool {
+        var fallbackReason: String?
+
+        do {
+            let request = try buildNativeLLMRequestFromConversation()
+
+            streamingText = ""
+            var accumulatedText = ""
+
+            eventLoop: for try await event in nativeAgentLoopService.run(request: request) {
+                guard !Task.isCancelled else { break }
+
+                switch event.kind {
+                case .partial:
+                    processingSubState = .streaming
+                    if let delta = event.text {
+                        accumulatedText += delta
+                        streamingText = accumulatedText
+                    }
+
+                case .toolUse:
+                    processingSubState = .toolCalling
+                    currentToolName = event.toolName
+
+                case .toolResult:
+                    processingSubState = .streaming
+                    currentToolName = nil
+
+                    let toolResult = ToolResult(
+                        toolCallId: event.toolCallId ?? "",
+                        content: event.toolResultText ?? "",
+                        isError: event.isToolResultError ?? false
+                    )
+                    appendToolResultMessage(toolResult)
+
+                case .done:
+                    let finalText = event.text ?? accumulatedText
+                    if !finalText.isEmpty {
+                        appendAssistantMessage(finalText)
+                    }
+                    streamingText = ""
+                    processingSubState = .complete
+                    saveConversation()
+
+                case .error:
+                    let nativeError = event.error ?? NativeLLMError(
+                        code: .unknown,
+                        message: "Native loop error event without payload",
+                        statusCode: nil,
+                        retryAfterSeconds: nil
+                    )
+                    fallbackReason = nativeError.message
+                    Log.runtime.warning("Native loop emitted error event: \(nativeError.message)")
+                    break eventLoop
+                }
+            }
+        } catch let error as NativeLLMError {
+            if error.code == .cancelled {
+                Log.runtime.info("Native loop cancelled")
+            } else {
+                fallbackReason = error.message
+                Log.runtime.error("Native loop failed: \(error.message)")
+            }
+        } catch {
+            fallbackReason = error.localizedDescription
+            Log.runtime.error("Native loop failed: \(error.localizedDescription)")
+        }
+
+        if let fallbackReason {
+            streamingText = ""
+            processingSubState = nil
+            currentToolName = nil
+
+            // SDK bridge is optional during migration; report the native error when fallback is unavailable.
+            guard runtimeBridge != nil else {
+                errorMessage = "네이티브 루프 오류: \(fallbackReason)"
+                transition(to: .idle)
+                return true
+            }
+
+            Log.runtime.warning("Native loop failed; falling back to SDK session path")
+            return false
+        }
+
+        // Clean up
+        if !streamingText.isEmpty {
+            appendAssistantMessage(streamingText)
+            streamingText = ""
+        }
+        processingSubState = nil
+        currentToolName = nil
+        transition(to: .idle)
+        return true
     }
 
     /// Process user input through the SDK runtime session.
@@ -2057,13 +2190,14 @@ final class DochiViewModel {
             return
         }
 
+        ensureConversation()
         appendUserMessage(cleanedText)
 
         transition(to: .processing)
         processingSubState = .streaming
 
         processingTask = Task {
-            await processSDKSession(input: cleanedText)
+            await processPrimaryLLMPath(input: cleanedText, includesImages: false)
         }
     }
 
@@ -2605,6 +2739,155 @@ final class DochiViewModel {
         }
 
         return parts.joined(separator: "\n\n")
+    }
+
+    private func buildNativeLLMRequestFromConversation() throws -> NativeLLMRequest {
+        guard let conversation = currentConversation else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "현재 대화가 없습니다.",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        let provider = settings.currentProvider
+        let messages = buildNativeMessages(from: conversation.messages)
+        if messages.isEmpty {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "네이티브 요청에 포함할 대화 메시지가 없습니다.",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        return NativeLLMRequest(
+            provider: provider,
+            model: settings.llmModel,
+            apiKey: loadNativeAPIKey(for: provider),
+            systemPrompt: composeSystemPrompt(),
+            messages: messages,
+            tools: buildNativeToolDefinitions(),
+            endpointURL: nativeEndpointURL(for: provider)
+        )
+    }
+
+    private func buildNativeMessages(from messages: [Message]) -> [NativeLLMMessage] {
+        messages.compactMap { message in
+            switch message.role {
+            case .system:
+                return nil
+            case .user:
+                return NativeLLMMessage(role: .user, text: message.content)
+            case .assistant:
+                return NativeLLMMessage(role: .assistant, text: message.content)
+            case .tool:
+                return NativeLLMMessage(
+                    role: .user,
+                    contents: [.toolResult(
+                        toolCallId: message.toolCallId ?? message.id.uuidString,
+                        content: message.content,
+                        isError: Self.isLikelyToolError(message.content)
+                    )]
+                )
+            }
+        }
+    }
+
+    private func buildNativeToolDefinitions() -> [NativeLLMToolDefinition] {
+        let schemas = toolService.availableToolSchemas(
+            for: currentAgentPermissions(),
+            preferredToolGroups: currentAgentPreferredToolGroups()
+        )
+        selectedCapabilityLabel = toolService.selectedCapabilityLabel
+
+        return schemas.compactMap { schema in
+            guard let function = schema["function"] as? [String: Any],
+                  let name = function["name"] as? String,
+                  let description = function["description"] as? String,
+                  let rawInputSchema = function["parameters"] as? [String: Any] else {
+                return nil
+            }
+
+            let inputSchema = rawInputSchema.compactMapValues { Self.toAnyCodableValue($0) }
+            return NativeLLMToolDefinition(
+                name: name,
+                description: description,
+                inputSchema: inputSchema
+            )
+        }
+    }
+
+    private func nativeEndpointURL(for provider: LLMProvider) -> URL? {
+        switch provider {
+        case .ollama:
+            let trimmed = settings.ollamaBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return provider.apiURL }
+            guard let baseURL = URL(string: trimmed) else { return provider.apiURL }
+            return baseURL
+                .appendingPathComponent("v1")
+                .appendingPathComponent("chat")
+                .appendingPathComponent("completions")
+        default:
+            return nil
+        }
+    }
+
+    private func loadNativeAPIKey(for provider: LLMProvider) -> String? {
+        guard provider.requiresAPIKey else { return nil }
+
+        if let key = keychainService.load(account: provider.keychainAccount)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !key.isEmpty {
+            return key
+        }
+
+        if let legacyAccount = provider.legacyAPIKeyAccount,
+           let legacy = keychainService.load(account: legacyAccount)?
+           .trimmingCharacters(in: .whitespacesAndNewlines),
+           !legacy.isEmpty {
+            return legacy
+        }
+
+        return nil
+    }
+
+    private static func toAnyCodableValue(_ value: Any) -> AnyCodableValue? {
+        switch value {
+        case let string as String:
+            return .string(string)
+        case let bool as Bool:
+            return .bool(bool)
+        case let int as Int:
+            return .int(int)
+        case let double as Double:
+            return .double(double)
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return .bool(number.boolValue)
+            }
+            let doubleValue = number.doubleValue
+            if floor(doubleValue) == doubleValue {
+                return .int(number.intValue)
+            }
+            return .double(doubleValue)
+        case let array as [Any]:
+            let converted = array.compactMap(Self.toAnyCodableValue)
+            return .array(converted)
+        case let dictionary as [String: Any]:
+            let converted = dictionary.compactMapValues(Self.toAnyCodableValue)
+            return .object(converted)
+        case _ as NSNull:
+            return .null
+        default:
+            return nil
+        }
+    }
+
+    private static func isLikelyToolError(_ content: String) -> Bool {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.hasPrefix("오류") || trimmed.hasPrefix("error")
     }
 
     // MARK: - API Key Management
