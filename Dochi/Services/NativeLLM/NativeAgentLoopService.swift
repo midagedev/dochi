@@ -37,6 +37,7 @@ final class NativeAgentLoopService {
     private let adapters: [LLMProvider: any NativeLLMProviderAdapter]
     private let toolService: (any BuiltInToolServiceProtocol)?
     private let hookPipeline: HookPipeline
+    private let runtimeMetrics: (any RuntimeMetricsProtocol)?
     private let guardPolicy: NativeAgentLoopGuardPolicy
     private var memoryPipeline: (any MemoryPipelineProtocol)?
     private(set) var auditLog: [ToolAuditEvent] = []
@@ -45,6 +46,7 @@ final class NativeAgentLoopService {
         adapters: [any NativeLLMProviderAdapter],
         toolService: (any BuiltInToolServiceProtocol)? = nil,
         hookPipeline: HookPipeline = HookPipeline(),
+        runtimeMetrics: (any RuntimeMetricsProtocol)? = nil,
         memoryPipeline: (any MemoryPipelineProtocol)? = nil,
         guardPolicy: NativeAgentLoopGuardPolicy = .default
     ) {
@@ -55,6 +57,7 @@ final class NativeAgentLoopService {
         self.adapters = map
         self.toolService = toolService
         self.hookPipeline = hookPipeline
+        self.runtimeMetrics = runtimeMetrics
         self.memoryPipeline = memoryPipeline
         self.guardPolicy = guardPolicy
     }
@@ -101,6 +104,8 @@ final class NativeAgentLoopService {
                     var iteration = 0
                     var lastToolSignature: String?
                     var repeatedSignatureCount = 0
+                    let runStartedAt = Date()
+                    var didRecordFirstPartial = false
 
                     while !Task.isCancelled {
                         iteration += 1
@@ -127,6 +132,18 @@ final class NativeAgentLoopService {
                             case .partial:
                                 if let text = event.text {
                                     accumulatedAssistantText += text
+                                    if !didRecordFirstPartial, !text.isEmpty {
+                                        didRecordFirstPartial = true
+                                        let firstPartialLatencyMs = Date().timeIntervalSince(runStartedAt) * 1000
+                                        runtimeMetrics?.recordHistogram(
+                                            name: MetricName.firstPartialLatencyMs,
+                                            labels: Self.metricLabels(
+                                                provider: currentRequest.provider.rawValue,
+                                                sessionId: resolvedHookContext.sessionId
+                                            ),
+                                            value: firstPartialLatencyMs
+                                        )
+                                    }
                                 }
                                 continuation.yield(event)
 
@@ -293,6 +310,15 @@ final class NativeAgentLoopService {
                             ))
 
                             let latencyMs = Int(Date().timeIntervalSince(startTime) * 1000)
+                            runtimeMetrics?.recordHistogram(
+                                name: MetricName.toolLatencyMs,
+                                labels: Self.metricLabels(
+                                    provider: currentRequest.provider.rawValue,
+                                    sessionId: resolvedHookContext.sessionId,
+                                    toolName: pending.name
+                                ),
+                                value: Double(latencyMs)
+                            )
                             _ = hookPipeline.runPostHooks(
                                 context: toolHookContext,
                                 result: result,
@@ -390,6 +416,21 @@ private extension NativeAgentLoopService {
             workspaceId: workspaceId,
             agentId: context.agentId
         )
+    }
+
+    private static func metricLabels(
+        provider: String,
+        sessionId: String,
+        toolName: String? = nil
+    ) -> [String: String] {
+        var labels: [String: String] = [
+            "provider": provider,
+            "session": sessionId
+        ]
+        if let toolName, !toolName.isEmpty {
+            labels["tool"] = toolName
+        }
+        return labels
     }
 
     private static func makeToolSignature(for toolUses: [PendingToolUse]) -> String {
