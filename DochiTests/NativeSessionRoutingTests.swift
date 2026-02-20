@@ -282,6 +282,92 @@ final class NativeSessionRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeLoopRecordsUsageMetricsFromDoneEvent() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+
+        let adapter = StubNativeProviderAdapter(
+            provider: .openai,
+            eventsPerRequest: [[.done(text: "usage-response", inputTokens: 21, outputTokens: 8)]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let keychain = MockKeychainService()
+        keychain.store[LLMProvider.openai.keychainAccount] = "openai-test-key"
+        let metricsCollector = MetricsCollector()
+        let usageStore = MockUsageStore()
+        metricsCollector.usageStore = usageStore
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            provider: .openai,
+            nativeLoopService: nativeService,
+            keychainService: keychain,
+            metricsCollector: metricsCollector
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(260))
+
+        XCTAssertEqual(metricsCollector.recentMetrics.count, 1)
+        XCTAssertEqual(metricsCollector.recentMetrics.last?.inputTokens, 21)
+        XCTAssertEqual(metricsCollector.recentMetrics.last?.outputTokens, 8)
+
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(usageStore.recordedMetrics.count, 1)
+        XCTAssertEqual(usageStore.recordedMetrics.last?.inputTokens, 21)
+        XCTAssertEqual(usageStore.recordedMetrics.last?.outputTokens, 8)
+
+        let assistantMessage = try XCTUnwrap(viewModel.currentConversation?.messages.last(where: { $0.role == .assistant }))
+        XCTAssertEqual(assistantMessage.metadata?.inputTokens, 21)
+        XCTAssertEqual(assistantMessage.metadata?.outputTokens, 8)
+    }
+
+    @MainActor
+    func testNativeLoopRecordsNilUsageWhenProviderDoesNotReturnUsage() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+
+        let adapter = StubNativeProviderAdapter(
+            provider: .ollama,
+            eventsPerRequest: [[.done(text: "no-usage-response")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let metricsCollector = MetricsCollector()
+        let usageStore = MockUsageStore()
+        metricsCollector.usageStore = usageStore
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            provider: .ollama,
+            nativeLoopService: nativeService,
+            metricsCollector: metricsCollector
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(260))
+
+        XCTAssertEqual(metricsCollector.recentMetrics.count, 1)
+        XCTAssertNil(metricsCollector.recentMetrics.last?.inputTokens)
+        XCTAssertNil(metricsCollector.recentMetrics.last?.outputTokens)
+
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(usageStore.recordedMetrics.count, 1)
+        XCTAssertNil(usageStore.recordedMetrics.last?.inputTokens)
+        XCTAssertNil(usageStore.recordedMetrics.last?.outputTokens)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    @MainActor
     func testTelegramMessageUsesNativeLoopAndSkipsRuntimeBridge() async {
         let bridge = MockRuntimeBridgeService()
         bridge.runtimeState = .ready
@@ -328,10 +414,12 @@ final class NativeSessionRoutingTests: XCTestCase {
         toolService: MockBuiltInToolService? = nil,
         model: String? = nil,
         keychainService: MockKeychainService? = nil,
-        settingsTransform: ((AppSettings) -> Void)? = nil
+        settingsTransform: ((AppSettings) -> Void)? = nil,
+        metricsCollector: MetricsCollector? = nil
     ) -> DochiViewModel {
         let resolvedToolService = toolService ?? MockBuiltInToolService()
         let resolvedKeychainService = keychainService ?? MockKeychainService()
+        let resolvedMetricsCollector = metricsCollector ?? MetricsCollector()
         let settings = AppSettings()
         settings.nativeAgentLoopEnabled = true
         settings.llmProvider = provider.rawValue
@@ -356,6 +444,7 @@ final class NativeSessionRoutingTests: XCTestCase {
             soundService: MockSoundService(),
             settings: settings,
             sessionContext: SessionContext(workspaceId: UUID()),
+            metricsCollector: resolvedMetricsCollector,
             runtimeBridge: bridge,
             nativeAgentLoopService: nativeLoopService,
             modelRouter: router

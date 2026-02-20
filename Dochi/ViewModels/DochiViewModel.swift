@@ -1393,7 +1393,8 @@ final class DochiViewModel {
             let result = await processNativeAgentLoop(
                 input: input,
                 provider: target.provider,
-                model: target.model
+                model: target.model,
+                wasFallback: index > 0
             )
 
             switch result {
@@ -1430,10 +1431,16 @@ final class DochiViewModel {
     private func processNativeAgentLoop(
         input _: String,
         provider: LLMProvider,
-        model: String
+        model: String,
+        wasFallback: Bool
     ) async -> NativeLoopAttemptResult {
         var fallbackReason: String?
         var cancelled = false
+        let startedAt = Date()
+        var firstPartialLatency: TimeInterval?
+        var doneInputTokens: Int?
+        var doneOutputTokens: Int?
+        var didReceiveDoneEvent = false
 
         do {
             let request = try buildNativeLLMRequestFromConversation(
@@ -1459,6 +1466,9 @@ final class DochiViewModel {
                 case .partial:
                     processingSubState = .streaming
                     if let delta = event.text {
+                        if firstPartialLatency == nil, !delta.isEmpty {
+                            firstPartialLatency = Date().timeIntervalSince(startedAt)
+                        }
                         accumulatedText += delta
                         streamingText = accumulatedText
                     }
@@ -1479,9 +1489,21 @@ final class DochiViewModel {
                     appendToolResultMessage(toolResult)
 
                 case .done:
+                    didReceiveDoneEvent = true
+                    doneInputTokens = event.inputTokens
+                    doneOutputTokens = event.outputTokens
                     let finalText = event.text ?? accumulatedText
+                    let totalLatency = Date().timeIntervalSince(startedAt)
+                    let metadata = buildNativeMessageMetadata(
+                        provider: provider,
+                        model: model,
+                        inputTokens: doneInputTokens,
+                        outputTokens: doneOutputTokens,
+                        totalLatency: totalLatency,
+                        wasFallback: wasFallback
+                    )
                     if !finalText.isEmpty {
-                        appendAssistantMessage(finalText)
+                        appendAssistantMessage(finalText, metadata: metadata)
                     }
                     streamingText = ""
                     processingSubState = .complete
@@ -1528,10 +1550,33 @@ final class DochiViewModel {
         }
 
         // Clean up
-        if !streamingText.isEmpty {
-            appendAssistantMessage(streamingText)
+        let totalLatency = Date().timeIntervalSince(startedAt)
+        if !didReceiveDoneEvent, !streamingText.isEmpty {
+            let metadata = buildNativeMessageMetadata(
+                provider: provider,
+                model: model,
+                inputTokens: doneInputTokens,
+                outputTokens: doneOutputTokens,
+                totalLatency: totalLatency,
+                wasFallback: wasFallback
+            )
+            appendAssistantMessage(streamingText, metadata: metadata)
             streamingText = ""
         }
+
+        if doneInputTokens == nil && doneOutputTokens == nil {
+            Log.runtime.debug("Native loop usage unavailable for \(provider.rawValue)/\(model); recording nil token metrics")
+        }
+
+        recordNativeExchangeMetrics(
+            provider: provider,
+            model: model,
+            inputTokens: doneInputTokens,
+            outputTokens: doneOutputTokens,
+            firstByteLatency: firstPartialLatency,
+            totalLatency: totalLatency,
+            wasFallback: wasFallback
+        )
         return .success
     }
 
@@ -3402,6 +3447,54 @@ final class DochiViewModel {
         let memoryInfo = buildMemoryContextInfo()
         currentConversation?.messages.append(Message(role: .assistant, content: text, metadata: metadata, toolExecutionRecords: toolExecutionRecords, memoryContextInfo: memoryInfo.hasAnyMemory ? memoryInfo : nil, ragContextInfo: ragLastContextInfo))
         currentConversation?.updatedAt = Date()
+    }
+
+    private func buildNativeMessageMetadata(
+        provider: LLMProvider,
+        model: String,
+        inputTokens: Int?,
+        outputTokens: Int?,
+        totalLatency: TimeInterval,
+        wasFallback: Bool
+    ) -> MessageMetadata {
+        MessageMetadata(
+            provider: provider.rawValue,
+            model: model,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            totalLatency: totalLatency,
+            wasFallback: wasFallback
+        )
+    }
+
+    private func recordNativeExchangeMetrics(
+        provider: LLMProvider,
+        model: String,
+        inputTokens: Int?,
+        outputTokens: Int?,
+        firstByteLatency: TimeInterval?,
+        totalLatency: TimeInterval,
+        wasFallback: Bool
+    ) {
+        let totalTokens: Int?
+        if inputTokens == nil && outputTokens == nil {
+            totalTokens = nil
+        } else {
+            totalTokens = (inputTokens ?? 0) + (outputTokens ?? 0)
+        }
+
+        metricsCollector.record(ExchangeMetrics(
+            provider: provider.rawValue,
+            model: model,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            totalTokens: totalTokens,
+            firstByteLatency: firstByteLatency,
+            totalLatency: totalLatency,
+            timestamp: Date(),
+            wasFallback: wasFallback,
+            agentName: settings.activeAgentName
+        ))
     }
 
     private func appendToolResultMessage(_ result: ToolResult) {
