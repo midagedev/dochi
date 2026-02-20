@@ -24,6 +24,7 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
 
     // Work dispatch
     func sendCommand(sessionId: UUID, command: String) async throws
+    func interruptSession(sessionId: UUID) async throws
 
     // Health check
     func checkHealth(sessionId: UUID) async
@@ -119,6 +120,10 @@ extension ExternalToolSessionManagerProtocol {
         path _: String,
         repositoryRoot _: String?
     ) {}
+
+    func interruptSession(sessionId _: UUID) async throws {
+        throw ExternalToolError.commandDispatchFailed("세션 중단을 지원하지 않습니다.")
+    }
 
     func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {
         OrchestrationSessionSelection(
@@ -716,6 +721,36 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             session.lastCommandDate = Date()
             Log.app.info("Sent command to \(session.tmuxSessionName): \(command.prefix(50))")
         }
+    }
+
+    func interruptSession(sessionId: UUID) async throws {
+        guard let session = sessions.first(where: { $0.id == sessionId }) else {
+            throw ExternalToolError.sessionNotFound(sessionId)
+        }
+        let profile = profiles.first(where: { $0.id == session.profileId })
+
+        let interruptArgs: [String]
+        if let profile, profile.isRemote, let ssh = profile.sshConfig {
+            let sshKeyArgs = ssh.keyPath.map { ["-i", $0] } ?? []
+            let remoteCmd = "\(settings.externalToolTmuxPath) send-keys -t \(session.tmuxSessionName) C-c"
+            interruptArgs = ["ssh"] + sshKeyArgs + ["-p", "\(ssh.port)", "\(ssh.user)@\(ssh.host)", remoteCmd]
+        } else {
+            interruptArgs = [settings.externalToolTmuxPath, "send-keys", "-t", session.tmuxSessionName, "C-c"]
+        }
+
+        let (output, exitCode) = await runProcess(interruptArgs)
+        guard exitCode == 0 else {
+            let reason = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if reason.isEmpty {
+                throw ExternalToolError.commandDispatchFailed("interrupt send-keys exit code: \(exitCode)")
+            }
+            throw ExternalToolError.commandDispatchFailed(reason)
+        }
+
+        session.status = .unknown
+        session.lastActivityText = "^C interrupt"
+        session.lastCommandDate = Date()
+        Log.app.info("Sent interrupt signal to \(session.tmuxSessionName)")
     }
 
     // MARK: - Health Check

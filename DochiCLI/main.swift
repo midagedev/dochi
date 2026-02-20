@@ -978,6 +978,122 @@ enum DochiCLI {
                 return CLIResult(exitCode: .runtimeError, command: "dev.bridge.read", message: "요청 실패: \(error.localizedDescription)")
             }
 
+        case .bridgeOrchestratorSelect(let repositoryRoot):
+            do {
+                var params: [String: Any] = [:]
+                if let repositoryRoot, !repositoryRoot.isEmpty {
+                    params["repository_root"] = repositoryRoot
+                }
+                let result = try client.call(method: "bridge.orchestrator.select_session", params: params)
+                let action = result["action"] as? String ?? "unknown"
+                let reason = result["reason"] as? String ?? "-"
+                let selectedSession = result["selected_session"] as? [String: Any]
+                let provider = selectedSession?["provider"] as? String ?? "-"
+                let nativeSessionId = selectedSession?["native_session_id"] as? String ?? "-"
+                let message = selectedSession == nil
+                    ? "orchestrator.select action=\(action) reason=\(reason)"
+                    : "orchestrator.select action=\(action) provider=\(provider) session=\(nativeSessionId)\nreason: \(reason)"
+                return CLIResult(exitCode: .success, command: "dev.bridge.orchestrator.select", message: message, data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.orchestrator.select")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.orchestrator.select", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeOrchestratorExecute(let command, let repositoryRoot, let confirmed):
+            do {
+                var params: [String: Any] = [
+                    "command": command,
+                ]
+                if let repositoryRoot, !repositoryRoot.isEmpty {
+                    params["repository_root"] = repositoryRoot
+                }
+                if confirmed {
+                    params["confirmed"] = true
+                }
+                let result = try client.call(method: "bridge.orchestrator.execute", params: params)
+                let status = result["status"] as? String ?? "sent"
+                let guardPayload = result["guard"] as? [String: Any]
+                let policyCode = guardPayload?["policy_code"] as? String ?? "-"
+                let reason = guardPayload?["reason"] as? String ?? "-"
+                let message = "orchestrator.execute status=\(status) policy=\(policyCode)\nreason: \(reason)"
+                return CLIResult(exitCode: .success, command: "dev.bridge.orchestrator.execute", message: message, data: result)
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.orchestrator.execute")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.orchestrator.execute", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeOrchestratorStatus(let repositoryRoot, let sessionId, let lines):
+            do {
+                var params: [String: Any] = ["lines": lines]
+                if let repositoryRoot, !repositoryRoot.isEmpty {
+                    params["repository_root"] = repositoryRoot
+                }
+                if let sessionId, !sessionId.isEmpty {
+                    params["session_id"] = sessionId
+                }
+                let result = try client.call(method: "bridge.orchestrator.status", params: params)
+                let summary = result["summary"] as? String ?? "(요약 없음)"
+                let kind = result["result_kind"] as? String ?? "unknown"
+                return CLIResult(
+                    exitCode: .success,
+                    command: "dev.bridge.orchestrator.status",
+                    message: "orchestrator.status kind=\(kind)\(summary.isEmpty ? "" : "\n\(summary)")",
+                    data: result
+                )
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.orchestrator.status")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.orchestrator.status", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeOrchestratorInterrupt(let repositoryRoot, let sessionId):
+            do {
+                var params: [String: Any] = [:]
+                if let repositoryRoot, !repositoryRoot.isEmpty {
+                    params["repository_root"] = repositoryRoot
+                }
+                if let sessionId, !sessionId.isEmpty {
+                    params["session_id"] = sessionId
+                }
+                let result = try client.call(method: "bridge.orchestrator.interrupt", params: params)
+                return CLIResult(
+                    exitCode: .success,
+                    command: "dev.bridge.orchestrator.interrupt",
+                    message: "중단 신호를 전송했습니다.",
+                    data: result
+                )
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.orchestrator.interrupt")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.orchestrator.interrupt", message: "요청 실패: \(error.localizedDescription)")
+            }
+
+        case .bridgeOrchestratorSummarize(let repositoryRoot, let sessionId, let lines):
+            do {
+                var params: [String: Any] = ["lines": lines]
+                if let repositoryRoot, !repositoryRoot.isEmpty {
+                    params["repository_root"] = repositoryRoot
+                }
+                if let sessionId, !sessionId.isEmpty {
+                    params["session_id"] = sessionId
+                }
+                let result = try client.call(method: "bridge.orchestrator.summarize", params: params)
+                let summary = result["summary"] as? String ?? "(요약 없음)"
+                let kind = result["result_kind"] as? String ?? "unknown"
+                return CLIResult(
+                    exitCode: .success,
+                    command: "dev.bridge.orchestrator.summarize",
+                    message: "orchestrator.summarize kind=\(kind)\n\(summary)",
+                    data: result
+                )
+            } catch let error as CLIControlPlaneError {
+                return mapControlPlaneError(error, command: "dev.bridge.orchestrator.summarize")
+            } catch {
+                return CLIResult(exitCode: .runtimeError, command: "dev.bridge.orchestrator.summarize", message: "요청 실패: \(error.localizedDescription)")
+            }
+
         case .bridgeRepoList:
             do {
                 let result = try client.call(method: "bridge.repo.list")
@@ -1448,6 +1564,11 @@ enum DochiCLI {
           dochi dev bridge status [session_id]
           dochi dev bridge send <session_id> <command>
           dochi dev bridge read <session_id> [lines]
+          dochi dev bridge orchestrator select [--repo PATH]
+          dochi dev bridge orchestrator execute <command> [--repo PATH] [--confirmed]
+          dochi dev bridge orchestrator status [--repo PATH] [--session ID] [--lines N]
+          dochi dev bridge orchestrator interrupt [--repo PATH] [--session ID]
+          dochi dev bridge orchestrator summarize [--repo PATH] [--session ID] [--lines N]
           dochi dev bridge repo list
           dochi dev bridge repo init <path> [--branch NAME] [--readme] [--gitignore]
           dochi dev bridge repo clone <remote_url> <destination_path> [--branch NAME]
