@@ -286,8 +286,8 @@ final class ToolDispatchHandler {
         nonisolated(unsafe) let sendableToolService = toolService
 
         return await withTaskGroup(of: ToolResult.self) { group in
-            // Child 1 — tool execution
-            group.addTask { @MainActor in
+            // Child 1 — tool execution (auto-hops to MainActor via protocol requirement)
+            group.addTask {
                 await sendableToolService.execute(name: toolName, arguments: sendableArgs)
             }
 
