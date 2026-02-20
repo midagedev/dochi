@@ -48,34 +48,46 @@ final class ToolDispatchHandler {
         hookPipeline.runStopHooks(auditLog: auditLog)
     }
 
+    // MARK: - Payload Decoding
+
+    /// Decode a `Codable` type from a `BridgeEvent`'s payload, injecting `sessionId`
+    /// from the event envelope when missing in the payload object.
+    static func decodePayload<T: Decodable>(event: BridgeEvent) -> T? {
+        guard let payload = event.payload,
+              case .object(var dict) = payload else {
+            return nil
+        }
+
+        // Inject sessionId from event envelope if not present in the payload
+        if dict["sessionId"] == nil, let sessionId = event.sessionId {
+            dict["sessionId"] = .string(sessionId)
+        }
+
+        do {
+            let data = try JSONEncoder().encode(AnyCodableValue.object(dict))
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            Log.runtime.warning("Failed to decode payload as \(T.self): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Tool Dispatch
 
     /// Handle a `tool.dispatch` bridge event.
     /// Runs PreToolUse hooks, checks permission, executes the tool, runs PostToolUse hooks,
     /// and sends back `tool.result`.
     func handleDispatch(event: BridgeEvent) {
-        guard let payload = event.payload,
-              case .object(let dict) = payload,
-              case .string(let toolCallId) = dict["toolCallId"],
-              case .string(let toolName) = dict["toolName"],
-              let sessionId = event.sessionId else {
+        guard let params: ToolDispatchParams = Self.decodePayload(event: event) else {
             Log.runtime.warning("Invalid tool.dispatch payload")
             return
         }
 
-        let codableArguments: [String: AnyCodableValue]
-        if case .object(let argsDict) = dict["arguments"] {
-            codableArguments = argsDict
-        } else {
-            codableArguments = [:]
-        }
-
-        let riskLevel: String
-        if case .string(let risk) = dict["riskLevel"] {
-            riskLevel = risk
-        } else {
-            riskLevel = "safe"
-        }
+        let toolCallId = params.toolCallId
+        let toolName = params.toolName
+        let sessionId = params.sessionId
+        let codableArguments = params.arguments
+        let riskLevel = params.riskLevel
 
         let timeout = Self.timeout(for: riskLevel)
         let argsHash = HookPipeline.argumentsHash(codableArguments)
@@ -167,31 +179,16 @@ final class ToolDispatchHandler {
     /// Handle an `approval.required` bridge event from the runtime.
     /// Shows approval UI and sends `approval.resolve` RPC back.
     func handleApprovalRequest(event: BridgeEvent) {
-        guard let payload = event.payload,
-              case .object(let dict) = payload,
-              case .string(let approvalId) = dict["approvalId"],
-              case .string(let toolCallId) = dict["toolCallId"],
-              case .string(let toolName) = dict["toolName"],
-              case .string(let riskLevel) = dict["riskLevel"],
-              let sessionId = event.sessionId else {
+        guard let params: ApprovalRequestParams = Self.decodePayload(event: event) else {
             Log.runtime.warning("Invalid approval.required payload")
             return
         }
 
-        let reason: String
-        if case .string(let r) = dict["reason"] { reason = r } else { reason = "" }
-        let argumentsSummary: String
-        if case .string(let s) = dict["argumentsSummary"] { argumentsSummary = s } else { argumentsSummary = "" }
-
-        let params = ApprovalRequestParams(
-            approvalId: approvalId,
-            toolCallId: toolCallId,
-            sessionId: sessionId,
-            toolName: toolName,
-            riskLevel: riskLevel,
-            reason: reason,
-            argumentsSummary: argumentsSummary
-        )
+        let approvalId = params.approvalId
+        let toolCallId = params.toolCallId
+        let sessionId = params.sessionId
+        let toolName = params.toolName
+        let riskLevel = params.riskLevel
 
         Task { @MainActor in
             let startTime = Date()
