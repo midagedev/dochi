@@ -1,0 +1,603 @@
+import Foundation
+
+protocol NativeLLMHTTPClient: Sendable {
+    func send(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse)
+}
+
+struct URLSessionNativeLLMHTTPClient: NativeLLMHTTPClient {
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    func send(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse) {
+        let (data, rawResponse) = try await session.data(for: request)
+        guard let response = rawResponse as? HTTPURLResponse else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "Invalid HTTP response from Anthropic",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+        return (data, response)
+    }
+}
+
+struct AnthropicNativeLLMProviderAdapter: NativeLLMProviderAdapter {
+    let provider: LLMProvider = .anthropic
+
+    private let httpClient: any NativeLLMHTTPClient
+
+    init(httpClient: any NativeLLMHTTPClient = URLSessionNativeLLMHTTPClient()) {
+        self.httpClient = httpClient
+    }
+
+    func stream(request: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let urlRequest = try Self.makeURLRequest(from: request)
+                    let (data, response) = try await httpClient.send(urlRequest)
+
+                    guard (200...299).contains(response.statusCode) else {
+                        let mappedError = Self.mapHTTPError(
+                            statusCode: response.statusCode,
+                            data: data,
+                            headers: response.allHeaderFields
+                        )
+                        continuation.yield(.error(mappedError))
+                        throw mappedError
+                    }
+
+                    let events = try Self.parseStreamEvents(from: data)
+                    var emittedDone = false
+                    for event in events {
+                        continuation.yield(event)
+                        if event.kind == .done {
+                            emittedDone = true
+                        }
+                        if event.kind == .error, let error = event.error {
+                            throw error
+                        }
+                    }
+
+                    if !emittedDone {
+                        continuation.yield(.done(text: nil))
+                    }
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish(throwing: NativeLLMError(
+                        code: .cancelled,
+                        message: "Anthropic request cancelled",
+                        statusCode: nil,
+                        retryAfterSeconds: nil
+                    ))
+                } catch let error as NativeLLMError {
+                    continuation.finish(throwing: error)
+                } catch let error as URLError {
+                    continuation.finish(throwing: Self.mapURLError(error))
+                } catch {
+                    continuation.finish(throwing: NativeLLMError(
+                        code: .unknown,
+                        message: error.localizedDescription,
+                        statusCode: nil,
+                        retryAfterSeconds: nil
+                    ))
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+}
+
+private extension AnthropicNativeLLMProviderAdapter {
+    struct AnthropicRequestPayload: Encodable {
+        let model: String
+        let maxTokens: Int
+        let stream: Bool
+        let system: String?
+        let temperature: Double?
+        let messages: [AnthropicMessage]
+        let tools: [AnthropicTool]?
+
+        enum CodingKeys: String, CodingKey {
+            case model
+            case maxTokens = "max_tokens"
+            case stream
+            case system
+            case temperature
+            case messages
+            case tools
+        }
+    }
+
+    struct AnthropicMessage: Encodable {
+        let role: String
+        let content: [AnthropicContentBlock]
+    }
+
+    enum AnthropicContentBlock: Encodable {
+        case text(String)
+        case toolResult(toolUseId: String, content: String, isError: Bool)
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case text
+            case toolUseId = "tool_use_id"
+            case content
+            case isError = "is_error"
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .text(let text):
+                try container.encode("text", forKey: .type)
+                try container.encode(text, forKey: .text)
+            case .toolResult(let toolUseId, let content, let isError):
+                try container.encode("tool_result", forKey: .type)
+                try container.encode(toolUseId, forKey: .toolUseId)
+                try container.encode(content, forKey: .content)
+                try container.encode(isError, forKey: .isError)
+            }
+        }
+    }
+
+    struct AnthropicTool: Encodable {
+        let name: String
+        let description: String
+        let inputSchema: [String: AnyCodableValue]
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case description
+            case inputSchema = "input_schema"
+        }
+    }
+
+    struct SSEEvent {
+        let name: String
+        let data: String
+    }
+
+    struct SSEEventAccumulator {
+        private(set) var eventName: String = "message"
+        private(set) var dataLines: [String] = []
+
+        mutating func append(line: String) -> SSEEvent? {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedLine.isEmpty {
+                return flush()
+            }
+
+            if trimmedLine.hasPrefix(":") {
+                return nil
+            }
+
+            if let value = trimmedLine.removing(prefix: "event:") {
+                eventName = value.trimmingCharacters(in: .whitespaces)
+                return nil
+            }
+
+            if let value = trimmedLine.removing(prefix: "data:") {
+                dataLines.append(value.trimmingCharacters(in: .whitespaces))
+                return nil
+            }
+
+            return nil
+        }
+
+        mutating func flush() -> SSEEvent? {
+            guard !dataLines.isEmpty else {
+                eventName = "message"
+                return nil
+            }
+            defer {
+                eventName = "message"
+                dataLines.removeAll(keepingCapacity: true)
+            }
+            return SSEEvent(name: eventName, data: dataLines.joined(separator: "\n"))
+        }
+    }
+
+    struct ToolUseBuffer {
+        let toolCallId: String
+        let toolName: String
+        var inputJSON: String
+    }
+
+    struct ContentBlockStartEnvelope: Decodable {
+        let index: Int
+        let contentBlock: ContentBlock
+
+        enum CodingKeys: String, CodingKey {
+            case index
+            case contentBlock = "content_block"
+        }
+    }
+
+    struct ContentBlock: Decodable {
+        let type: String
+        let id: String?
+        let name: String?
+        let input: AnyCodableValue?
+    }
+
+    struct ContentBlockDeltaEnvelope: Decodable {
+        let index: Int
+        let delta: Delta
+    }
+
+    struct Delta: Decodable {
+        let type: String
+        let text: String?
+        let partialJSON: String?
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case text
+            case partialJSON = "partial_json"
+        }
+    }
+
+    struct ContentBlockStopEnvelope: Decodable {
+        let index: Int
+    }
+
+    struct StreamErrorEnvelope: Decodable {
+        let error: StreamErrorBody
+    }
+
+    struct StreamErrorBody: Decodable {
+        let type: String?
+        let message: String
+    }
+
+    static func makeURLRequest(from request: NativeLLMRequest) throws -> URLRequest {
+        guard request.provider == .anthropic else {
+            throw NativeLLMError(
+                code: .unsupportedProvider,
+                message: "Anthropic adapter cannot handle provider: \(request.provider.rawValue)",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        guard let apiKey = request.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !apiKey.isEmpty else {
+            throw NativeLLMError(
+                code: .authentication,
+                message: "Anthropic API key is required",
+                statusCode: 401,
+                retryAfterSeconds: nil
+            )
+        }
+
+        guard request.maxTokens > 0 else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "maxTokens must be greater than 0",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        let endpoint = request.endpointURL ?? request.provider.apiURL
+        var urlRequest = URLRequest(url: endpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.timeoutInterval = request.timeoutSeconds
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        urlRequest.setValue(request.anthropicVersion, forHTTPHeaderField: "anthropic-version")
+
+        let payload = AnthropicRequestPayload(
+            model: request.model,
+            maxTokens: request.maxTokens,
+            stream: true,
+            system: request.systemPrompt,
+            temperature: request.temperature,
+            messages: request.messages.map(Self.convertMessage),
+            tools: request.tools.isEmpty ? nil : request.tools.map { tool in
+                AnthropicTool(name: tool.name, description: tool.description, inputSchema: tool.inputSchema)
+            }
+        )
+        urlRequest.httpBody = try JSONEncoder().encode(payload)
+        return urlRequest
+    }
+
+    static func convertMessage(_ message: NativeLLMMessage) -> AnthropicMessage {
+        let blocks = message.contents.map { content -> AnthropicContentBlock in
+            switch content {
+            case .text(let text):
+                return .text(text)
+            case .toolResult(let toolCallId, let content, let isError):
+                return .toolResult(toolUseId: toolCallId, content: content, isError: isError)
+            }
+        }
+        return AnthropicMessage(
+            role: message.role.rawValue,
+            content: blocks.isEmpty ? [.text("")] : blocks
+        )
+    }
+
+    static func parseStreamEvents(from data: Data) throws -> [NativeLLMStreamEvent] {
+        guard let payload = String(data: data, encoding: .utf8) else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "Anthropic response body is not valid UTF-8",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        var accumulator = SSEEventAccumulator()
+        var toolBuffers: [Int: ToolUseBuffer] = [:]
+        var events: [NativeLLMStreamEvent] = []
+        var hasDone = false
+
+        let lines = payload.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        for line in lines {
+            if let sseEvent = accumulator.append(line: line.replacingOccurrences(of: "\r", with: "")) {
+                let mapped = try mapSSEEvent(sseEvent, toolBuffers: &toolBuffers)
+                events.append(contentsOf: mapped)
+                if mapped.contains(where: { $0.kind == .done }) {
+                    hasDone = true
+                }
+            }
+        }
+
+        if let pending = accumulator.flush() {
+            let mapped = try mapSSEEvent(pending, toolBuffers: &toolBuffers)
+            events.append(contentsOf: mapped)
+            if mapped.contains(where: { $0.kind == .done }) {
+                hasDone = true
+            }
+        }
+
+        if !toolBuffers.isEmpty {
+            for index in toolBuffers.keys.sorted() {
+                if let buffer = toolBuffers[index] {
+                    events.append(.toolUse(
+                        toolCallId: buffer.toolCallId,
+                        toolName: buffer.toolName,
+                        toolInputJSON: buffer.inputJSON
+                    ))
+                }
+            }
+        }
+
+        if !hasDone {
+            events.append(.done(text: nil))
+        }
+
+        return events
+    }
+
+    static func mapSSEEvent(
+        _ event: SSEEvent,
+        toolBuffers: inout [Int: ToolUseBuffer]
+    ) throws -> [NativeLLMStreamEvent] {
+        if event.data == "[DONE]" {
+            return [.done(text: nil)]
+        }
+
+        switch event.name {
+        case "content_block_start":
+            let envelope: ContentBlockStartEnvelope = try decode(event.data)
+            guard envelope.contentBlock.type == "tool_use" else { return [] }
+
+            let toolCallId = envelope.contentBlock.id ?? UUID().uuidString
+            let toolName = envelope.contentBlock.name ?? "unknown_tool"
+            let initialInput = jsonString(from: envelope.contentBlock.input) ?? ""
+            toolBuffers[envelope.index] = ToolUseBuffer(
+                toolCallId: toolCallId,
+                toolName: toolName,
+                inputJSON: initialInput
+            )
+            return []
+
+        case "content_block_delta":
+            let envelope: ContentBlockDeltaEnvelope = try decode(event.data)
+            switch envelope.delta.type {
+            case "text_delta":
+                guard let text = envelope.delta.text, !text.isEmpty else { return [] }
+                return [.partial(text)]
+
+            case "input_json_delta":
+                guard var buffer = toolBuffers[envelope.index] else { return [] }
+                if let partialJSON = envelope.delta.partialJSON {
+                    buffer.inputJSON += partialJSON
+                    toolBuffers[envelope.index] = buffer
+                }
+                return []
+
+            default:
+                return []
+            }
+
+        case "content_block_stop":
+            let envelope: ContentBlockStopEnvelope = try decode(event.data)
+            guard let tool = toolBuffers.removeValue(forKey: envelope.index) else { return [] }
+            return [.toolUse(
+                toolCallId: tool.toolCallId,
+                toolName: tool.toolName,
+                toolInputJSON: tool.inputJSON
+            )]
+
+        case "message_stop":
+            var events: [NativeLLMStreamEvent] = []
+            if !toolBuffers.isEmpty {
+                for index in toolBuffers.keys.sorted() {
+                    if let tool = toolBuffers.removeValue(forKey: index) {
+                        events.append(.toolUse(
+                            toolCallId: tool.toolCallId,
+                            toolName: tool.toolName,
+                            toolInputJSON: tool.inputJSON
+                        ))
+                    }
+                }
+            }
+            events.append(.done(text: nil))
+            return events
+
+        case "error":
+            let envelope: StreamErrorEnvelope = try decode(event.data)
+            let mappedError = mapStreamError(
+                type: envelope.error.type,
+                message: envelope.error.message
+            )
+            return [.error(mappedError)]
+
+        default:
+            return []
+        }
+    }
+
+    static func decode<T: Decodable>(_ raw: String) throws -> T {
+        guard let data = raw.data(using: .utf8) else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "Failed to decode SSE JSON payload",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "Failed to parse Anthropic SSE payload: \(error.localizedDescription)",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+    }
+
+    static func jsonString(from value: AnyCodableValue?) -> String? {
+        guard let value else { return nil }
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func mapHTTPError(
+        statusCode: Int,
+        data: Data,
+        headers: [AnyHashable: Any]
+    ) -> NativeLLMError {
+        let message = extractErrorMessage(from: data) ?? "Anthropic API request failed"
+        let retryAfter = parseRetryAfter(headers: headers)
+
+        let code: NativeLLMErrorCode
+        switch statusCode {
+        case 401, 403:
+            code = .authentication
+        case 404:
+            code = .modelNotFound
+        case 429:
+            code = .rateLimited
+        case 500...599:
+            code = .server
+        default:
+            code = .invalidResponse
+        }
+
+        return NativeLLMError(
+            code: code,
+            message: message,
+            statusCode: statusCode,
+            retryAfterSeconds: retryAfter
+        )
+    }
+
+    static func mapURLError(_ error: URLError) -> NativeLLMError {
+        let code: NativeLLMErrorCode
+        switch error.code {
+        case .timedOut:
+            code = .timeout
+        case .cancelled:
+            code = .cancelled
+        case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+            code = .network
+        default:
+            code = .unknown
+        }
+
+        return NativeLLMError(
+            code: code,
+            message: error.localizedDescription,
+            statusCode: nil,
+            retryAfterSeconds: nil
+        )
+    }
+
+    static func mapStreamError(type: String?, message: String) -> NativeLLMError {
+        let normalizedType = (type ?? "").lowercased()
+        let loweredMessage = message.lowercased()
+
+        let code: NativeLLMErrorCode
+        if normalizedType == "rate_limit_error" {
+            code = .rateLimited
+        } else if normalizedType == "authentication_error" || normalizedType == "permission_error" {
+            code = .authentication
+        } else if normalizedType == "overloaded_error" || normalizedType == "api_error" {
+            code = .server
+        } else if loweredMessage.contains("model") && loweredMessage.contains("not found") {
+            code = .modelNotFound
+        } else {
+            code = .unknown
+        }
+
+        return NativeLLMError(
+            code: code,
+            message: message,
+            statusCode: nil,
+            retryAfterSeconds: nil
+        )
+    }
+
+    static func parseRetryAfter(headers: [AnyHashable: Any]) -> TimeInterval? {
+        for (key, value) in headers {
+            if String(describing: key).caseInsensitiveCompare("Retry-After") == .orderedSame {
+                if let seconds = TimeInterval(String(describing: value)) {
+                    return seconds
+                }
+            }
+        }
+        return nil
+    }
+
+    static func extractErrorMessage(from data: Data) -> String? {
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let errorObject = object["error"] as? [String: Any],
+               let message = errorObject["message"] as? String,
+               !message.isEmpty {
+                return message
+            }
+            if let message = object["message"] as? String, !message.isEmpty {
+                return message
+            }
+        }
+
+        if let plain = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !plain.isEmpty {
+            return plain
+        }
+        return nil
+    }
+}
+
+private extension String {
+    func removing(prefix: String) -> String? {
+        guard hasPrefix(prefix) else { return nil }
+        return String(dropFirst(prefix.count))
+    }
+}
