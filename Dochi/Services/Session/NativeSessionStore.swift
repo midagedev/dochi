@@ -10,6 +10,7 @@ struct NativeSessionRecord: Codable, Sendable, Equatable {
     let workspaceId: String
     let agentId: String
     let conversationId: String
+    var userId: String?
     var status: NativeSessionStatus
     let createdAt: Date
     var updatedAt: Date
@@ -77,12 +78,14 @@ final class NativeSessionStore {
     func activate(
         workspaceId: UUID,
         agentId: String,
-        conversationId: UUID
+        conversationId: UUID,
+        userId: String? = nil
     ) -> NativeSessionRecord {
         upsert(
             workspaceId: workspaceId.uuidString,
             agentId: agentId,
             conversationId: conversationId.uuidString,
+            userId: userId,
             status: .active
         )
     }
@@ -91,12 +94,14 @@ final class NativeSessionStore {
     func interrupt(
         workspaceId: UUID,
         agentId: String,
-        conversationId: UUID
+        conversationId: UUID,
+        userId: String? = nil
     ) -> NativeSessionRecord {
         upsert(
             workspaceId: workspaceId.uuidString,
             agentId: agentId,
             conversationId: conversationId.uuidString,
+            userId: userId,
             status: .interrupted
         )
     }
@@ -105,7 +110,8 @@ final class NativeSessionStore {
     func recoverIfInterrupted(
         workspaceId: UUID,
         agentId: String,
-        conversationId: UUID
+        conversationId: UUID,
+        userId: String? = nil
     ) -> NativeSessionRecord? {
         let resumeKey = Self.makeResumeKey(
             workspaceId: workspaceId,
@@ -119,7 +125,8 @@ final class NativeSessionStore {
         return activate(
             workspaceId: workspaceId,
             agentId: agentId,
-            conversationId: conversationId
+            conversationId: conversationId,
+            userId: userId
         )
     }
 
@@ -135,19 +142,25 @@ final class NativeSessionStore {
         ))
     }
 
-    func latestRecord(
+    func latestRecords(
         workspaceId: UUID,
         agentId: String,
+        userId: String? = nil,
         statuses: Set<NativeSessionStatus> = [.active, .interrupted]
-    ) -> NativeSessionRecord? {
+    ) -> [NativeSessionRecord] {
         store.records
             .filter { record in
-                record.workspaceId == workspaceId.uuidString &&
-                    record.agentId == agentId &&
-                    statuses.contains(record.status)
+                guard record.workspaceId == workspaceId.uuidString,
+                      record.agentId == agentId,
+                      statuses.contains(record.status) else {
+                    return false
+                }
+
+                guard let userId, !userId.isEmpty else { return true }
+                return record.userId == nil || record.userId == userId
             }
-            .max { lhs, rhs in
-                lhs.updatedAt < rhs.updatedAt
+            .sorted { lhs, rhs in
+                lhs.updatedAt > rhs.updatedAt
             }
     }
 
@@ -184,6 +197,7 @@ final class NativeSessionStore {
         workspaceId: String,
         agentId: String,
         conversationId: String,
+        userId: String?,
         status: NativeSessionStatus
     ) -> NativeSessionRecord {
         let resumeKey = Self.makeResumeKey(
@@ -195,6 +209,7 @@ final class NativeSessionStore {
 
         if let index = resumeKeyIndex[resumeKey], index < store.records.count {
             store.records[index].status = status
+            store.records[index].userId = userId
             store.records[index].updatedAt = now
             save()
             return store.records[index]
@@ -205,6 +220,7 @@ final class NativeSessionStore {
             workspaceId: workspaceId,
             agentId: agentId,
             conversationId: conversationId,
+            userId: userId,
             status: status,
             createdAt: now,
             updatedAt: now

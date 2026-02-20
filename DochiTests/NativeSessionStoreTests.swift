@@ -65,15 +65,25 @@ final class NativeSessionStoreTests: XCTestCase {
         _ = firstStore.activate(
             workspaceId: workspaceId,
             agentId: "도치",
-            conversationId: firstConversation
+            conversationId: firstConversation,
+            userId: "user-a"
         )
         _ = firstStore.interrupt(
             workspaceId: workspaceId,
             agentId: "도치",
-            conversationId: secondConversation
+            conversationId: secondConversation,
+            userId: "user-a"
         )
 
         let reloaded = NativeSessionStore(baseURL: tempDir)
+        XCTAssertEqual(
+            reloaded.record(
+                workspaceId: workspaceId,
+                agentId: "도치",
+                conversationId: firstConversation
+            )?.userId,
+            "user-a"
+        )
         XCTAssertEqual(
             reloaded.record(
                 workspaceId: workspaceId,
@@ -95,6 +105,7 @@ final class NativeSessionStoreTests: XCTestCase {
     func testViewModelRestoresConversationAfterRestart() {
         let workspaceId = UUID()
         let sessionContext = SessionContext(workspaceId: workspaceId)
+        sessionContext.currentUserId = "user-a"
         let settings = AppSettings()
         settings.activeAgentName = "도치"
 
@@ -126,6 +137,95 @@ final class NativeSessionStoreTests: XCTestCase {
         secondViewModel.restoreNativeSessionIfNeeded()
 
         XCTAssertEqual(secondViewModel.currentConversation?.id, conversation.id)
+    }
+
+    func testRestoreFallsBackToOlderValidRecordWhenLatestIsMissing() {
+        let workspaceId = UUID()
+        let sessionContext = SessionContext(workspaceId: workspaceId)
+        sessionContext.currentUserId = "user-a"
+
+        let settings = AppSettings()
+        settings.activeAgentName = "도치"
+
+        let conversationDirectory = tempDir.appendingPathComponent("conversations")
+        let conversationService = ConversationService(baseURL: conversationDirectory)
+        let validConversation = Conversation(userId: "user-a")
+        conversationService.save(conversation: validConversation)
+
+        let missingConversationId = UUID()
+
+        let store = NativeSessionStore(baseURL: tempDir)
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: validConversation.id,
+            userId: "user-a"
+        )
+        Thread.sleep(forTimeInterval: 0.01)
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: missingConversationId,
+            userId: "user-a"
+        )
+
+        let viewModel = makeViewModel(
+            settings: settings,
+            sessionContext: sessionContext,
+            conversationService: conversationService,
+            nativeSessionStore: store
+        )
+        viewModel.loadConversations()
+        viewModel.restoreNativeSessionIfNeeded()
+
+        XCTAssertEqual(viewModel.currentConversation?.id, validConversation.id)
+        XCTAssertNil(store.record(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: missingConversationId
+        ))
+    }
+
+    func testRestoreSkipsConversationFromDifferentUser() {
+        let workspaceId = UUID()
+        let sessionContext = SessionContext(workspaceId: workspaceId)
+        sessionContext.currentUserId = "user-a"
+
+        let settings = AppSettings()
+        settings.activeAgentName = "도치"
+
+        let conversationDirectory = tempDir.appendingPathComponent("conversations")
+        let conversationService = ConversationService(baseURL: conversationDirectory)
+        let userAConversation = Conversation(userId: "user-a")
+        let userBConversation = Conversation(userId: "user-b")
+        conversationService.save(conversation: userAConversation)
+        conversationService.save(conversation: userBConversation)
+
+        let store = NativeSessionStore(baseURL: tempDir)
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: userAConversation.id,
+            userId: "user-a"
+        )
+        Thread.sleep(forTimeInterval: 0.01)
+        _ = store.activate(
+            workspaceId: workspaceId,
+            agentId: "도치",
+            conversationId: userBConversation.id,
+            userId: "user-b"
+        )
+
+        let viewModel = makeViewModel(
+            settings: settings,
+            sessionContext: sessionContext,
+            conversationService: conversationService,
+            nativeSessionStore: store
+        )
+        viewModel.loadConversations()
+        viewModel.restoreNativeSessionIfNeeded()
+
+        XCTAssertEqual(viewModel.currentConversation?.id, userAConversation.id)
     }
 
     private func makeViewModel(

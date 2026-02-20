@@ -1548,33 +1548,46 @@ final class DochiViewModel {
 
     func restoreNativeSessionIfNeeded() {
         guard currentConversation == nil else { return }
-
-        guard let record = nativeSessionStore.latestRecord(
+        let userId = sessionContext.currentUserId
+        let records = nativeSessionStore.latestRecords(
             workspaceId: sessionContext.workspaceId,
-            agentId: settings.activeAgentName
-        ) else { return }
+            agentId: settings.activeAgentName,
+            userId: userId
+        )
 
-        guard let conversationId = UUID(uuidString: record.conversationId),
-              let conversation = conversationService.load(id: conversationId) else {
-            if let conversationId = UUID(uuidString: record.conversationId) {
+        for record in records {
+            guard let conversationId = UUID(uuidString: record.conversationId) else {
+                continue
+            }
+
+            guard let conversation = conversationService.load(id: conversationId) else {
                 nativeSessionStore.remove(
                     workspaceId: sessionContext.workspaceId,
                     agentId: settings.activeAgentName,
                     conversationId: conversationId
                 )
+                continue
             }
+
+            if let userId, !userId.isEmpty,
+               let conversationUserId = conversation.userId,
+               !conversationUserId.isEmpty,
+               conversationUserId != userId {
+                continue
+            }
+
+            currentConversation = conversation
+            if record.status == .interrupted {
+                _ = nativeSessionStore.recoverIfInterrupted(
+                    workspaceId: sessionContext.workspaceId,
+                    agentId: settings.activeAgentName,
+                    conversationId: conversation.id,
+                    userId: sessionContext.currentUserId
+                )
+            }
+            Log.app.info("Restored native session conversation: \(conversation.id)")
             return
         }
-
-        currentConversation = conversation
-        if record.status == .interrupted {
-            _ = nativeSessionStore.recoverIfInterrupted(
-                workspaceId: sessionContext.workspaceId,
-                agentId: settings.activeAgentName,
-                conversationId: conversation.id
-            )
-        }
-        Log.app.info("Restored native session conversation: \(conversation.id)")
     }
 
     func selectConversation(id: UUID) {
@@ -3142,7 +3155,8 @@ final class DochiViewModel {
         if nativeSessionStore.recoverIfInterrupted(
             workspaceId: workspaceId,
             agentId: agentId,
-            conversationId: conversation.id
+            conversationId: conversation.id,
+            userId: sessionContext.currentUserId
         ) != nil {
             return
         }
@@ -3150,7 +3164,8 @@ final class DochiViewModel {
         _ = nativeSessionStore.activate(
             workspaceId: workspaceId,
             agentId: agentId,
-            conversationId: conversation.id
+            conversationId: conversation.id,
+            userId: sessionContext.currentUserId
         )
     }
 
@@ -3159,7 +3174,8 @@ final class DochiViewModel {
         _ = nativeSessionStore.interrupt(
             workspaceId: sessionContext.workspaceId,
             agentId: settings.activeAgentName,
-            conversationId: conversation.id
+            conversationId: conversation.id,
+            userId: sessionContext.currentUserId
         )
     }
 
