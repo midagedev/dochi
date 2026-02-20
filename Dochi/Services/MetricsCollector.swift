@@ -92,9 +92,13 @@ final class MetricsCollector {
             )
         }
 
-        Log.llm.info(
+        let logMessage =
             "Token estimator deviation: \(provider)/\(model) est=\(estimatedInputTokens) actual=\(actualInputTokens) err=\(absoluteError) (\(String(format: "%.1f%%", sample.relativeErrorPercent)))"
-        )
+        if relativeErrorRatio > Self.tokenDeviationP95Threshold {
+            Log.llm.notice("\(logMessage)")
+        } else {
+            Log.llm.debug("\(logMessage)")
+        }
     }
 
     var tokenEstimationDeviationReport: TokenEstimationDeviationReport? {
