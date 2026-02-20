@@ -522,6 +522,53 @@ final class SessionStreamingTests: XCTestCase {
         XCTAssertEqual(assistant, "sdk-response")
     }
 
+    @MainActor
+    func testNativeLoopFailureFallsBackToSDKPath() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+        bridge.stubbedSessionEvents = [
+            makeEvent(type: .sessionCompleted, payload: ["text": .string("sdk-response")]),
+        ]
+
+        let settings = AppSettings()
+        settings.nativeAgentLoopEnabled = true
+        settings.llmProvider = LLMProvider.anthropic.rawValue
+        settings.llmModel = "claude-sonnet-4-5-20250514"
+
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[]],
+            errorsPerRequest: [NativeLLMError(
+                code: .network,
+                message: "network down",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            settings: settings,
+            nativeLoopService: nativeService
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(240))
+
+        XCTAssertEqual(adapter.callCount, 1)
+        XCTAssertEqual(bridge.runCallCount, 1)
+        XCTAssertEqual(viewModel.interactionState, .idle)
+        XCTAssertNil(viewModel.processingSubState)
+        XCTAssertNil(viewModel.errorMessage)
+        let assistant = viewModel.currentConversation?.messages.last(where: { $0.role == .assistant })?.content
+        XCTAssertEqual(assistant, "sdk-response")
+    }
+
     // MARK: - Helpers
 
     private func makeEvent(
@@ -574,26 +621,34 @@ final class SessionStreamingTests: XCTestCase {
 private final class StubNativeProviderAdapter: @unchecked Sendable, NativeLLMProviderAdapter {
     let provider: LLMProvider
     private let eventsPerRequest: [[NativeLLMStreamEvent]]
+    private let errorsPerRequest: [Error?]
     private let eventDelayNanos: UInt64
     private(set) var callCount: Int = 0
 
     init(
         provider: LLMProvider,
         eventsPerRequest: [[NativeLLMStreamEvent]],
+        errorsPerRequest: [Error?] = [],
         eventDelayNanos: UInt64 = 0
     ) {
         self.provider = provider
         self.eventsPerRequest = eventsPerRequest
+        self.errorsPerRequest = errorsPerRequest
         self.eventDelayNanos = eventDelayNanos
     }
 
     func stream(request _: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
         let index = min(callCount, max(0, eventsPerRequest.count - 1))
         let events = eventsPerRequest.isEmpty ? [] : eventsPerRequest[index]
+        let error = errorsPerRequest.isEmpty ? nil : errorsPerRequest[min(index, errorsPerRequest.count - 1)]
         callCount += 1
 
         return AsyncThrowingStream { continuation in
             Task {
+                if let error {
+                    continuation.finish(throwing: error)
+                    return
+                }
                 for (index, event) in events.enumerated() {
                     continuation.yield(event)
                     if eventDelayNanos > 0, index < events.count - 1 {

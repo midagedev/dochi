@@ -1261,7 +1261,13 @@ final class DochiViewModel {
         let provider = settings.currentProvider
 
         if shouldUseNativeAgentLoop(provider: provider, includesImages: includesImages) {
-            await processNativeAgentLoop(input: input)
+            let nativeCompleted = await processNativeAgentLoop(input: input)
+            if nativeCompleted {
+                return
+            }
+
+            // Native path failed with recoverable error, retry via SDK session path.
+            await processSDKSession(input: input)
             return
         }
 
@@ -1282,14 +1288,16 @@ final class DochiViewModel {
         return nativeAgentLoopService.supports(provider: provider)
     }
 
-    private func processNativeAgentLoop(input _: String) async {
+    private func processNativeAgentLoop(input _: String) async -> Bool {
+        var fallbackReason: String?
+
         do {
             let request = try buildNativeLLMRequestFromConversation()
 
             streamingText = ""
             var accumulatedText = ""
 
-            for try await event in nativeAgentLoopService.run(request: request) {
+            eventLoop: for try await event in nativeAgentLoopService.run(request: request) {
                 guard !Task.isCancelled else { break }
 
                 switch event.kind {
@@ -1331,18 +1339,37 @@ final class DochiViewModel {
                         statusCode: nil,
                         retryAfterSeconds: nil
                     )
-                    errorMessage = "네이티브 루프 오류: \(nativeError.message)"
-                    streamingText = ""
+                    fallbackReason = nativeError.message
+                    Log.runtime.warning("Native loop emitted error event: \(nativeError.message)")
+                    break eventLoop
                 }
             }
         } catch let error as NativeLLMError {
-            if error.code != .cancelled {
-                errorMessage = "네이티브 루프 오류: \(error.message)"
+            if error.code == .cancelled {
+                Log.runtime.info("Native loop cancelled")
+            } else {
+                fallbackReason = error.message
+                Log.runtime.error("Native loop failed: \(error.message)")
             }
-            Log.runtime.error("Native loop failed: \(error.message)")
         } catch {
-            errorMessage = "네이티브 루프 오류: \(error.localizedDescription)"
+            fallbackReason = error.localizedDescription
             Log.runtime.error("Native loop failed: \(error.localizedDescription)")
+        }
+
+        if let fallbackReason {
+            streamingText = ""
+            processingSubState = nil
+            currentToolName = nil
+
+            // SDK bridge is optional during migration; report the native error when fallback is unavailable.
+            guard runtimeBridge != nil else {
+                errorMessage = "네이티브 루프 오류: \(fallbackReason)"
+                transition(to: .idle)
+                return true
+            }
+
+            Log.runtime.warning("Native loop failed; falling back to SDK session path")
+            return false
         }
 
         // Clean up
@@ -1353,6 +1380,7 @@ final class DochiViewModel {
         processingSubState = nil
         currentToolName = nil
         transition(to: .idle)
+        return true
     }
 
     /// Process user input through the SDK runtime session.
