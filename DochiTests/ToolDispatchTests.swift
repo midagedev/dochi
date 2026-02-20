@@ -303,4 +303,45 @@ final class ToolDispatchTests: XCTestCase {
         XCTAssertEqual(bridge.configureToolDispatchCallCount, 1)
         XCTAssertNotNil(bridge.lastToolService)
     }
+
+    // MARK: - executeWithTimeout (Continuation Race Pattern)
+
+    @MainActor
+    func testExecuteWithTimeoutReturnsResultWhenFast() async {
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.stubbedResult = ToolResult(toolCallId: "tc-fast", content: "fast result")
+        mockToolService.executeDelay = 0
+        let handler = ToolDispatchHandler(toolService: mockToolService)
+        let result = await handler.executeWithTimeout(toolName: "test.tool", toolCallId: "tc-fast", arguments: [:], timeout: 5)
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(result.content, "fast result")
+        XCTAssertEqual(mockToolService.executeCallCount, 1)
+    }
+
+    @MainActor
+    func testExecuteWithTimeoutReturnsTimeoutWhenSlow() async {
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.stubbedResult = ToolResult(toolCallId: "tc-slow", content: "should not see this")
+        mockToolService.executeDelay = 10
+        let handler = ToolDispatchHandler(toolService: mockToolService)
+        let start = Date()
+        let result = await handler.executeWithTimeout(toolName: "slow.tool", toolCallId: "tc-slow", arguments: [:], timeout: 0.2)
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("timed out"))
+        XCTAssertTrue(result.content.contains("slow.tool"))
+        XCTAssertLessThan(elapsed, 2.0)
+    }
+
+    @MainActor
+    func testExecuteWithTimeoutPassesArgumentsCorrectly() async {
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.stubbedResult = ToolResult(toolCallId: "tc-args", content: "done")
+        let handler = ToolDispatchHandler(toolService: mockToolService)
+        let args: [String: Any] = ["key": "value", "count": 42]
+        let _ = await handler.executeWithTimeout(toolName: "args.tool", toolCallId: "tc-args", arguments: args, timeout: 5)
+        XCTAssertEqual(mockToolService.lastExecutedName, "args.tool")
+        XCTAssertEqual(mockToolService.lastArguments?["key"] as? String, "value")
+        XCTAssertEqual(mockToolService.lastArguments?["count"] as? Int, 42)
+    }
 }

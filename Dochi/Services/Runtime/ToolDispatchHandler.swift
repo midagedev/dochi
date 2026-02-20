@@ -276,29 +276,37 @@ final class ToolDispatchHandler {
         return approved
     }
 
-    private func executeWithTimeout(
+    func executeWithTimeout(
         toolName: String,
         toolCallId: String,
         arguments: [String: Any],
         timeout: TimeInterval
     ) async -> ToolResult {
-        let executionTask = Task { @MainActor in
-            await self.toolService.execute(name: toolName, arguments: arguments)
+        let raceGuard = ExecutionRaceGuard()
+        return await withCheckedContinuation { continuation in
+            let executionTask = Task { @MainActor [toolService] in
+                let result = await toolService.execute(name: toolName, arguments: arguments)
+                if raceGuard.tryWin() {
+                    continuation.resume(returning: result)
+                }
+            }
+            let timeoutTask = Task {
+                try? await Task.sleep(for: .seconds(timeout))
+                if raceGuard.tryWin() {
+                    let result = ToolResult(
+                        toolCallId: toolCallId,
+                        content: "Tool '\(toolName)' timed out after \(Int(timeout))s",
+                        isError: true
+                    )
+                    continuation.resume(returning: result)
+                    executionTask.cancel()
+                }
+            }
+            Task { @MainActor in
+                _ = await executionTask.result
+                timeoutTask.cancel()
+            }
         }
-
-        let timeoutTask = Task {
-            try await Task.sleep(for: .seconds(timeout))
-            executionTask.cancel()
-            return ToolResult(
-                toolCallId: toolCallId,
-                content: "Tool '\(toolName)' timed out after \(Int(timeout))s",
-                isError: true
-            )
-        }
-
-        let result = await executionTask.value
-        timeoutTask.cancel()
-        return result
     }
 
     private func sendToolResult(
@@ -436,5 +444,18 @@ extension AnyCodableValue {
 extension Dictionary where Key == String, Value == AnyCodableValue {
     func toNativeDict() -> [String: Any] {
         mapValues { $0.toNative() }
+    }
+}
+
+// MARK: - ExecutionRaceGuard
+
+private final class ExecutionRaceGuard: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: false)
+    func tryWin() -> Bool {
+        state.withLock { won in
+            if won { return false }
+            won = true
+            return true
+        }
     }
 }

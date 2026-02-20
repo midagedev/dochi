@@ -213,6 +213,7 @@ final class MockBuiltInToolService: BuiltInToolServiceProtocol {
     var enabledNames: [String] = []
     var resetCallCount = 0
     var lastPreferredToolGroups: [String]?
+    var executeDelay: TimeInterval = 0
 
     var nonBaselineToolSummaries: [(name: String, description: String, category: ToolCategory)] = []
     var allToolInfos: [ToolInfo] = []
@@ -231,6 +232,9 @@ final class MockBuiltInToolService: BuiltInToolServiceProtocol {
         executeCallCount += 1
         lastExecutedName = name
         lastArguments = arguments
+        if executeDelay > 0 {
+            try? await Task.sleep(for: .seconds(executeDelay))
+        }
         return stubbedResult
     }
 
