@@ -581,6 +581,30 @@ final class OllamaNativeLLMProviderAdapterTests: XCTestCase {
             XCTFail("Unexpected error type: \(error)")
         }
     }
+
+    func testOllamaAdapterUsesCustomEndpointOverride() async throws {
+        let streamPayload = """
+        data: [DONE]
+        """
+        let httpClient = MockNativeLLMHTTPClient(
+            statusCode: 200,
+            headers: [:],
+            body: Data(streamPayload.utf8)
+        )
+        let adapter = OllamaNativeLLMProviderAdapter(httpClient: httpClient)
+        let customEndpoint = URL(string: "http://127.0.0.1:11435/v1/chat/completions")!
+        let request = NativeLLMRequest(
+            provider: .ollama,
+            model: "llama3.2",
+            apiKey: nil,
+            messages: [.init(role: .user, text: "hello")],
+            endpointURL: customEndpoint
+        )
+
+        _ = try await collectEvents(from: adapter.stream(request: request))
+        let captured = await httpClient.capturedRequest()
+        XCTAssertEqual(captured?.url, customEndpoint)
+    }
 }
 
 final class LMStudioNativeLLMProviderAdapterTests: XCTestCase {
@@ -665,6 +689,30 @@ final class LMStudioNativeLLMProviderAdapterTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error type: \(error)")
         }
+    }
+
+    func testLMStudioAdapterUsesCustomEndpointOverride() async throws {
+        let streamPayload = """
+        data: [DONE]
+        """
+        let httpClient = MockNativeLLMHTTPClient(
+            statusCode: 200,
+            headers: [:],
+            body: Data(streamPayload.utf8)
+        )
+        let adapter = LMStudioNativeLLMProviderAdapter(httpClient: httpClient)
+        let customEndpoint = URL(string: "http://127.0.0.1:1240/v1/chat/completions")!
+        let request = NativeLLMRequest(
+            provider: .lmStudio,
+            model: "qwen2.5-7b-instruct",
+            apiKey: nil,
+            messages: [.init(role: .user, text: "hello")],
+            endpointURL: customEndpoint
+        )
+
+        _ = try await collectEvents(from: adapter.stream(request: request))
+        let captured = await httpClient.capturedRequest()
+        XCTAssertEqual(captured?.url, customEndpoint)
     }
 }
 
