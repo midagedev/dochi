@@ -1009,13 +1009,13 @@ final class DochiViewModel {
             transition(to: .processing)
             processingSubState = .streaming
 
-            // Route through native loop (default) or SDK fallback path.
+            // Route through native loop.
             processingTask = Task {
                 await processPrimaryLLMPath(input: finalText, includesImages: false)
             }
         } else {
             // Process images off main thread, then send.
-            // Native path currently handles text-first; image requests use SDK fallback.
+            // Native path currently handles image messages as text-first requests.
             transition(to: .processing)
             processingSubState = .streaming
             processingTask = Task {
@@ -1241,7 +1241,6 @@ final class DochiViewModel {
         processingTask = nil
         ttsService.stopAndClear()
         sentenceChunker = SentenceChunker()
-        interruptSDKSession()
         markCurrentNativeSessionInterrupted()
         nativeAgentLoopService.runStopHooks()
 
@@ -1257,14 +1256,14 @@ final class DochiViewModel {
         Log.app.info("Request cancelled by user")
     }
 
-    // MARK: - SDK Session Path
+    // MARK: - Legacy SDK Session Bridge
 
-    /// Whether the SDK session path is available and should be used.
+    /// Legacy runtime bridge availability. Native loop is now the default execution path.
     var isSDKSessionAvailable: Bool {
         runtimeBridge?.runtimeState == .ready
     }
 
-    /// Configures the runtime bridge for SDK session support.
+    /// Configures the legacy runtime bridge.
     func configureRuntimeBridge(_ bridge: any RuntimeBridgeProtocol) {
         self.runtimeBridge = bridge
         bridge.configureToolDispatch(toolService: toolService)
@@ -1279,30 +1278,22 @@ final class DochiViewModel {
         let provider = settings.currentProvider
 
         if shouldUseNativeAgentLoop(provider: provider, includesImages: includesImages) {
-            let nativeCompleted = await processNativeAgentLoop(input: input)
-            if nativeCompleted {
-                return
-            }
-
-            // Native path failed with recoverable error, retry via SDK session path.
-            await processSDKSession(input: input)
+            _ = await processNativeAgentLoop(input: input)
             return
         }
 
-        if settings.nativeAgentLoopEnabled {
-            if includesImages {
-                Log.runtime.debug("Native loop skipped: image request uses SDK fallback path")
-            } else if !nativeAgentLoopService.supports(provider: provider) {
-                Log.runtime.debug("Native loop skipped: unsupported provider \(provider.rawValue)")
-            }
-        }
-
-        await processSDKSession(input: input)
+        errorMessage = "현재 제공자(\(provider.displayName))는 네이티브 에이전트 루프를 아직 지원하지 않습니다."
+        processingSubState = nil
+        currentToolName = nil
+        transition(to: .idle)
+        Log.runtime.warning("Native loop unavailable for provider \(provider.rawValue)")
     }
 
     private func shouldUseNativeAgentLoop(provider: LLMProvider, includesImages: Bool) -> Bool {
         guard settings.nativeAgentLoopEnabled else { return false }
-        guard !includesImages else { return false }
+        if includesImages {
+            Log.runtime.debug("Native loop will process image message as text-first request")
+        }
         return nativeAgentLoopService.supports(provider: provider)
     }
 
@@ -1386,16 +1377,9 @@ final class DochiViewModel {
             streamingText = ""
             processingSubState = nil
             currentToolName = nil
-
-            // SDK bridge is optional during migration; report the native error when fallback is unavailable.
-            guard runtimeBridge != nil else {
-                errorMessage = "네이티브 루프 오류: \(fallbackReason)"
-                transition(to: .idle)
-                return true
-            }
-
-            Log.runtime.warning("Native loop failed; falling back to SDK session path")
-            return false
+            errorMessage = "네이티브 루프 오류: \(fallbackReason)"
+            transition(to: .idle)
+            return true
         }
 
         // Clean up
@@ -1542,18 +1526,6 @@ final class DochiViewModel {
 
         // I-2: 이전 대화에 대해 메모리 자동 정리 트리거
         triggerMemoryConsolidation(for: currentConversation)
-
-        // Close SDK session for previous conversation
-        if let bridge = runtimeBridge, let sessionId = activeSDKSessionId {
-            Task {
-                do {
-                    _ = try await bridge.closeSession(sessionId: sessionId)
-                } catch {
-                    Log.runtime.warning("Failed to close SDK session \(sessionId): \(error.localizedDescription)")
-                }
-            }
-        }
-        activeSDKSessionId = nil
 
         currentConversation = nil
         streamingText = ""
@@ -2497,45 +2469,15 @@ final class DochiViewModel {
         conversation.messages.append(userMessage)
         conversation.updatedAt = Date()
 
-        // Route through SDK runtime session
-        guard let bridge = runtimeBridge else {
-            Log.telegram.warning("Runtime bridge not available for Telegram message")
-            if let tg = getTelegramService() {
-                _ = try? await tg.sendMessage(chatId: update.chatId, text: "런타임 브릿지가 준비되지 않았습니다. 앱 설정을 확인해주세요.")
-            }
-            return
-        }
-
         do {
-            // Open or reuse session for Telegram
-            let conversationId = conversation.id.uuidString
-            if activeSDKSessionId == nil {
-                let openResult = try await bridge.openSession(params: SessionOpenParams(
-                    workspaceId: sessionContext.workspaceId.uuidString,
-                    agentId: settings.activeAgentName,
-                    conversationId: conversationId,
-                    userId: sessionContext.currentUserId ?? "anonymous",
-                    deviceId: nil,
-                    sdkSessionId: nil
-                ))
-                activeSDKSessionId = openResult.sessionId
-            }
-
-            guard let sessionId = activeSDKSessionId else { return }
-
-            let snapshotRef = bridge.buildContextSnapshot(
-                workspaceId: sessionContext.workspaceId,
-                agentId: settings.activeAgentName,
-                userId: sessionContext.currentUserId,
-                channelMetadata: "telegram:\(update.chatId)",
-                tokenBudget: ContextSnapshotBuilder.defaultTokenBudget
+            let request = try buildNativeLLMRequestFromConversation(
+                conversation: conversation,
+                channelMetadata: "telegram:\(update.chatId)"
             )
-
-            let runParams = SessionRunParams(
-                sessionId: sessionId,
-                input: update.text,
-                contextSnapshotRef: snapshotRef,
-                permissionMode: nil
+            let hookContext = NativeAgentLoopHookContext(
+                sessionId: conversation.id.uuidString,
+                workspaceId: sessionContext.workspaceId.uuidString,
+                agentId: settings.activeAgentName
             )
 
             var accumulatedText = ""
@@ -2545,13 +2487,12 @@ final class DochiViewModel {
             var lastEditLength = 0
             let useStreaming = settings.telegramStreamReplies
 
-            for try await event in bridge.runSession(params: runParams) {
-                switch event.eventType {
-                case .sessionPartial:
-                    if let delta = extractPayloadString(event.payload, key: "delta") {
+            for try await event in nativeAgentLoopService.run(request: request, hookContext: hookContext) {
+                switch event.kind {
+                case .partial:
+                    if let delta = event.text {
                         accumulatedText += delta
 
-                        // Stream to Telegram if enabled
                         if useStreaming, let tg = getTelegramService() {
                             let currentLength = accumulatedText.count
                             if currentLength - lastEditLength >= 50 || streamMessageId == nil {
@@ -2580,10 +2521,16 @@ final class DochiViewModel {
                         }
                     }
 
-                case .sessionCompleted:
-                    let finalText = extractPayloadString(event.payload, key: "text") ?? accumulatedText
+                case .toolUse, .toolResult:
+                    continue
+
+                case .done:
+                    let finalText = (event.text ?? accumulatedText).trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !finalText.isEmpty else {
                         Log.telegram.warning("Empty response for Telegram message")
+                        if useStreaming {
+                            await streamFlushTask?.value
+                        }
                         return
                     }
 
@@ -2600,8 +2547,9 @@ final class DochiViewModel {
                     conversationService.save(conversation: conversation)
                     loadConversations()
 
-                    // Flush stream and send final
-                    if useStreaming { await streamFlushTask?.value }
+                    if useStreaming {
+                        await streamFlushTask?.value
+                    }
                     if let tg = getTelegramService() {
                         if useStreaming, let msgId = streamMessageId {
                             try await tg.editMessage(chatId: update.chatId, messageId: msgId, text: finalText)
@@ -2610,16 +2558,18 @@ final class DochiViewModel {
                         }
                     }
                     Log.telegram.info("Sent Telegram response to chat \(update.chatId)")
+                    return
 
-                case .sessionFailed:
-                    let reason = extractPayloadString(event.payload, key: "error") ?? "알 수 없는 오류"
-                    Log.telegram.error("SDK session failed for Telegram: \(reason)")
+                case .error:
+                    let reason = event.error?.message ?? "알 수 없는 오류"
+                    Log.telegram.error("Native loop failed for Telegram: \(reason)")
+                    if useStreaming {
+                        await streamFlushTask?.value
+                    }
                     if let tg = getTelegramService() {
                         _ = try? await tg.sendMessage(chatId: update.chatId, text: "오류가 발생했습니다: \(reason)")
                     }
-
-                default:
-                    break
+                    return
                 }
             }
         } catch {
@@ -2839,8 +2789,11 @@ final class DochiViewModel {
         return parts.joined(separator: "\n\n")
     }
 
-    private func buildNativeLLMRequestFromConversation() throws -> NativeLLMRequest {
-        guard let conversation = currentConversation else {
+    private func buildNativeLLMRequestFromConversation(
+        conversation: Conversation? = nil,
+        channelMetadata: String? = nil
+    ) throws -> NativeLLMRequest {
+        guard let conversation = conversation ?? currentConversation else {
             throw NativeLLMError(
                 code: .invalidResponse,
                 message: "현재 대화가 없습니다.",
@@ -2906,6 +2859,9 @@ final class DochiViewModel {
         var additionalSections: [String] = []
         if let summarySnapshot = compaction.summarySnapshot, !summarySnapshot.isEmpty {
             additionalSections.append("## 컨텍스트 요약 스냅샷\n\(summarySnapshot)")
+        }
+        if let channelMetadata, !channelMetadata.isEmpty {
+            additionalSections.append("## 채널 메타데이터\n\(channelMetadata)")
         }
 
         let compactedSystemPrompt = composeSystemPrompt(

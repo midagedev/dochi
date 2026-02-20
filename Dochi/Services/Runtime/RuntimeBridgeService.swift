@@ -8,6 +8,7 @@ import os
 /// - Communicate via JSON-RPC 2.0 over Unix Domain Socket
 /// - Health polling every 5 seconds
 /// - Exponential backoff restart on crash (1s, 2s, 4s, 8s, max 30s, max 5 retries)
+@available(*, deprecated, message: "Legacy SDK sidecar bridge. NativeAgentLoopService is the primary runtime path.")
 @MainActor
 final class RuntimeBridgeService: RuntimeBridgeProtocol {
     // MARK: - State
