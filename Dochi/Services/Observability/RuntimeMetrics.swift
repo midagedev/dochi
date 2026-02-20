@@ -83,6 +83,7 @@ enum MetricName {
     static let requestTotal = "dochi_request_total"
     static let requestErrorTotal = "dochi_request_error_total"
     static let firstPartialLatencyMs = "dochi_first_partial_latency_ms"
+    static let toolLatencyMs = "dochi_tool_latency_ms"
     static let totalResponseLatencyMs = "dochi_total_response_latency_ms"
 }
 
