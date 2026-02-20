@@ -73,7 +73,7 @@ final class NativeSessionRoutingTests: XCTestCase {
         XCTAssertEqual(adapter.callCount, 0)
         XCTAssertEqual(bridge.runCallCount, 0)
         XCTAssertEqual(viewModel.interactionState, .idle)
-        XCTAssertTrue(viewModel.errorMessage?.contains("네이티브 에이전트 루프") == true)
+        XCTAssertTrue(viewModel.errorMessage?.contains("사용 가능한 네이티브 provider") == true)
     }
 
     @MainActor
@@ -180,6 +180,57 @@ final class NativeSessionRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeLoopFallsBackToConfiguredProviderWhenPrimaryFails() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+
+        let primaryAdapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[]],
+            errorsPerRequest: [NativeLLMError(
+                code: .network,
+                message: "primary down",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )]
+        )
+        let fallbackAdapter = StubNativeProviderAdapter(
+            provider: .openai,
+            eventsPerRequest: [[.done(text: "fallback-response")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [primaryAdapter, fallbackAdapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let keychain = MockKeychainService()
+        keychain.store[LLMProvider.anthropic.keychainAccount] = "anthropic-test-key"
+        keychain.store[LLMProvider.openai.keychainAccount] = "openai-test-key"
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            keychainService: keychain,
+            settingsTransform: { settings in
+                settings.fallbackLLMProvider = LLMProvider.openai.rawValue
+                settings.fallbackLLMModel = "gpt-4o-mini"
+            }
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(320))
+
+        XCTAssertEqual(primaryAdapter.callCount, 1)
+        XCTAssertEqual(fallbackAdapter.callCount, 1)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.interactionState, .idle)
+        let assistant = viewModel.currentConversation?.messages.last(where: { $0.role == .assistant })?.content
+        XCTAssertEqual(assistant, "fallback-response")
+    }
+
+    @MainActor
     func testTelegramMessageUsesNativeLoopAndSkipsRuntimeBridge() async {
         let bridge = MockRuntimeBridgeService()
         bridge.runtimeState = .ready
@@ -224,27 +275,39 @@ final class NativeSessionRoutingTests: XCTestCase {
         nativeLoopService: NativeAgentLoopService,
         telegramStreamReplies: Bool = false,
         toolService: MockBuiltInToolService? = nil,
-        model: String? = nil
+        model: String? = nil,
+        keychainService: MockKeychainService? = nil,
+        settingsTransform: ((AppSettings) -> Void)? = nil
     ) -> DochiViewModel {
         let resolvedToolService = toolService ?? MockBuiltInToolService()
+        let resolvedKeychainService = keychainService ?? MockKeychainService()
         let settings = AppSettings()
         settings.nativeAgentLoopEnabled = true
         settings.llmProvider = provider.rawValue
         settings.llmModel = model ?? provider.onboardingDefaultModel
         settings.telegramStreamReplies = telegramStreamReplies
+        settingsTransform?(settings)
+        let router = ModelRouterV2(
+            settings: settings,
+            readinessProbe: { _ in true },
+            supportsProvider: { candidate in
+                nativeLoopService.supports(provider: candidate)
+            }
+        )
 
         return DochiViewModel(
             toolService: resolvedToolService,
             contextService: MockContextService(),
             conversationService: MockConversationService(),
-            keychainService: MockKeychainService(),
+            keychainService: resolvedKeychainService,
             speechService: MockSpeechService(),
             ttsService: MockTTSService(),
             soundService: MockSoundService(),
             settings: settings,
             sessionContext: SessionContext(workspaceId: UUID()),
             runtimeBridge: bridge,
-            nativeAgentLoopService: nativeLoopService
+            nativeAgentLoopService: nativeLoopService,
+            modelRouter: router
         )
     }
 
