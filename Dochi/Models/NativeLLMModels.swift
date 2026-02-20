@@ -94,6 +94,8 @@ enum NativeLLMErrorCode: String, Codable, Sendable {
     case invalidResponse = "invalid_response"
     case cancelled = "cancelled"
     case unsupportedProvider = "unsupported_provider"
+    case loopGuardTriggered = "loop_guard_triggered"
+    case toolExecutionFailed = "tool_execution_failed"
     case unknown = "unknown_error"
 }
 
@@ -113,6 +115,7 @@ enum NativeLLMMessageRole: String, Codable, Sendable {
 
 enum NativeLLMMessageContent: Sendable {
     case text(String)
+    case toolUse(toolCallId: String, name: String, inputJSON: String)
     case toolResult(toolCallId: String, content: String, isError: Bool)
 }
 
