@@ -1,0 +1,35 @@
+name: Provider Contract Matrix
+
+on:
+  pull_request:
+    paths:
+      - "Dochi/Services/NativeLLM/**"
+      - "DochiTests/**"
+      - "scripts/provider_contract_matrix.sh"
+      - ".github/workflows/provider-contract-matrix.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "Dochi/Services/NativeLLM/**"
+      - "DochiTests/**"
+      - "scripts/provider_contract_matrix.sh"
+      - ".github/workflows/provider-contract-matrix.yml"
+
+jobs:
+  provider-contract:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Provider Contract Matrix
+        run: bash scripts/provider_contract_matrix.sh "$GITHUB_WORKSPACE/.artifacts/provider-contract-matrix"
+
+      - name: Upload Provider Contract Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-contract-matrix
+          path: ${{ github.workspace }}/.artifacts/provider-contract-matrix
