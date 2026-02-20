@@ -1978,13 +1978,19 @@ struct DochiApp: App {
         let resolvedServers: [MCPServerConfig]
 
         if servers.isEmpty {
-            resolvedServers = MCPServerConfig.codingDefaultProfiles()
-            if let encoded = encodeMCPServers(resolvedServers) {
-                settings.mcpServersJSON = encoded
+            if settings.mcpDefaultProfilesBootstrapped {
+                resolvedServers = []
+            } else {
+                resolvedServers = MCPServerConfig.codingDefaultProfiles()
+                if let encoded = encodeMCPServers(resolvedServers) {
+                    settings.mcpServersJSON = encoded
+                }
+                settings.mcpDefaultProfilesBootstrapped = true
+                Log.app.info("Bootstrapped default MCP coding profiles: \(resolvedServers.count)")
             }
-            Log.app.info("Bootstrapped default MCP coding profiles: \(resolvedServers.count)")
         } else {
             resolvedServers = servers
+            settings.mcpDefaultProfilesBootstrapped = true
         }
 
         for server in resolvedServers {
