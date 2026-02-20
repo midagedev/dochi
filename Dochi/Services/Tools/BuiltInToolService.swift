@@ -6,6 +6,7 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     private let registry = ToolRegistry()
     private let sessionContext: SessionContext
     private let settings: AppSettings
+    private let toolContextStore: (any ToolContextStoreProtocol)?
     private let capabilityRouter = CapabilityRouter()
     private let routingPolicy = ToolRoutingPolicy()
     var confirmationHandler: ToolConfirmationHandler? {
@@ -32,11 +33,13 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         supabaseService: SupabaseServiceProtocol,
         telegramService: TelegramServiceProtocol,
         mcpService: MCPServiceProtocol,
+        toolContextStore: (any ToolContextStoreProtocol)? = nil,
         delegationManager: DelegationManager? = nil
     ) {
         self.sessionContext = sessionContext
         self.settings = settings
         self.mcpService = mcpService
+        self.toolContextStore = toolContextStore
 
         // Registry meta-tools (baseline, safe)
         registry.register(ToolsListTool(registry: registry))
@@ -300,10 +303,14 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
     }
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]] {
-        availableToolSchemas(for: permissions, preferredToolGroups: [])
+        availableToolSchemas(for: permissions, preferredToolGroups: [], intentHint: nil)
     }
 
     func availableToolSchemas(for permissions: [String], preferredToolGroups: [String]) -> [[String: Any]] {
+        availableToolSchemas(for: permissions, preferredToolGroups: preferredToolGroups, intentHint: nil)
+    }
+
+    func availableToolSchemas(for permissions: [String], preferredToolGroups: [String], intentHint: String?) -> [[String: Any]] {
         var schemas: [[String: Any]] = []
         selectedCapabilityLabel = nil
 
@@ -322,7 +329,13 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
             tools = availableTools
         }
 
-        let orderedTools = orderedToolsByPreference(tools, preferredToolGroups: preferredToolGroups)
+        let rankingContext = currentToolRankingContext()
+        let orderedTools = orderedToolsByPreference(
+            tools,
+            preferredToolGroups: preferredToolGroups,
+            rankingContext: rankingContext,
+            intentHint: intentHint
+        )
         for tool in orderedTools {
             // OpenAI requires tool names to match ^[a-zA-Z0-9_-]+$
             let sanitizedName = Self.sanitizeToolName(tool.name)
@@ -355,7 +368,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
     private func orderedToolsByPreference(
         _ tools: [any BuiltInToolProtocol],
-        preferredToolGroups: [String]
+        preferredToolGroups: [String],
+        rankingContext: ToolRankingContext,
+        intentHint: String?
     ) -> [any BuiltInToolProtocol] {
         var orderedGroups: [String] = []
         var seen: Set<String> = []
@@ -366,16 +381,104 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
                 orderedGroups.append(normalized)
             }
         }
-        guard !orderedGroups.isEmpty else { return tools.sorted { $0.name < $1.name } }
-
         let priorities = Dictionary(uniqueKeysWithValues: orderedGroups.enumerated().map { ($0.element, $0.offset) })
 
         return tools.sorted { lhs, rhs in
-            let lhsPriority = priorities[ToolGroupResolver.group(forToolName: lhs.name)] ?? Int.max
-            let rhsPriority = priorities[ToolGroupResolver.group(forToolName: rhs.name)] ?? Int.max
+            let lhsGroup = ToolGroupResolver.group(forToolName: lhs.name)
+            let rhsGroup = ToolGroupResolver.group(forToolName: rhs.name)
+
+            let lhsPriority = priorities[lhsGroup] ?? Int.max
+            let rhsPriority = priorities[rhsGroup] ?? Int.max
+
+            let lhsScore = rankingScore(
+                for: lhs,
+                group: lhsGroup,
+                priority: lhsPriority,
+                rankingContext: rankingContext,
+                intentHint: intentHint
+            )
+            let rhsScore = rankingScore(
+                for: rhs,
+                group: rhsGroup,
+                priority: rhsPriority,
+                rankingContext: rankingContext,
+                intentHint: intentHint
+            )
+
+            if lhsScore != rhsScore { return lhsScore > rhsScore }
             if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
             return lhs.name < rhs.name
         }
+    }
+
+    private func rankingScore(
+        for tool: any BuiltInToolProtocol,
+        group: String,
+        priority: Int,
+        rankingContext: ToolRankingContext,
+        intentHint: String?
+    ) -> Double {
+        var score = 0.0
+
+        if priority != Int.max {
+            // Strong boost for explicit per-agent preferred group order.
+            score += Double(max(0, 20 - priority)) * 12.0
+        }
+
+        if rankingContext.preferredCategories.contains(group) {
+            score += 96.0
+        }
+
+        if rankingContext.suppressedCategories.contains(group) {
+            score -= 160.0
+        }
+
+        score += (rankingContext.categoryScores[group] ?? 0.0) * 24.0
+        score += (rankingContext.toolScores[tool.name] ?? 0.0) * 32.0
+        score += intentBoost(toolName: tool.name, group: group, hint: intentHint)
+
+        return score
+    }
+
+    private func intentBoost(toolName: String, group: String, hint: String?) -> Double {
+        guard let hint else { return 0 }
+        let normalized = hint.lowercased()
+        let codingAgentKeywords = [
+            "코딩 에이전트",
+            "에이전트 목록",
+            "에이전트 상태",
+            "코딩 세션",
+            "세션 목록",
+            "coding agent",
+            "agent list",
+            "agent status",
+            "coding session",
+            "session list",
+            "sessions"
+        ]
+        guard codingAgentKeywords.contains(where: { normalized.contains($0) }) else {
+            return 0
+        }
+
+        switch toolName {
+        case "agent.list", "coding.sessions":
+            return 240.0
+        case "agent.check_status", "agent.delegation_status", "coding.session_pause", "coding.session_end":
+            return 180.0
+        default:
+            if group == "agent" || group == "coding" {
+                return 100.0
+            }
+            return 0.0
+        }
+    }
+
+    private func currentToolRankingContext() -> ToolRankingContext {
+        guard let toolContextStore else { return .empty }
+        let workspaceId = sessionContext.workspaceId.uuidString
+        let activeAgentName = settings.activeAgentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedAgentName = activeAgentName.isEmpty ? ToolUsageEvent.defaultAgentName : activeAgentName
+        return toolContextStore.rankingContext(workspaceId: workspaceId, agentName: resolvedAgentName)
     }
 
     func execute(name: String, arguments: [String: Any]) async -> ToolResult {
@@ -398,6 +501,11 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
             )
         }
 
+        let startedAt = Date()
+        let result: ToolResult
+        let usageToolName: String
+        let usageRisk: ToolCategory
+
         switch route {
         case .builtIn(let tool, let reason):
             logRoutingDecision(
@@ -407,7 +515,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
                 risk: tool.category,
                 reason: reason
             )
-            return await executeBuiltInTool(
+            usageToolName = tool.name
+            usageRisk = tool.category
+            result = await executeBuiltInTool(
                 requestedName: name,
                 tool: tool,
                 arguments: arguments
@@ -428,7 +538,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
                 risk: risk,
                 reason: reason
             )
-            return await executeMCPTool(
+            usageToolName = requestedName
+            usageRisk = risk
+            result = await executeMCPTool(
                 requestedName: requestedName,
                 originalName: originalName,
                 serverName: serverName,
@@ -437,6 +549,16 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
                 arguments: arguments
             )
         }
+
+        let latencyMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+        recordUsageContext(
+            toolName: usageToolName,
+            risk: usageRisk,
+            result: result,
+            latencyMs: latencyMs
+        )
+
+        return result
     }
 
     func enableTools(names: [String]) {
@@ -621,5 +743,41 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         }
 
         return "MCP 도구 실행 실패: \(error.localizedDescription)"
+    }
+
+    private func recordUsageContext(
+        toolName: String,
+        risk: ToolCategory,
+        result: ToolResult,
+        latencyMs: Int
+    ) {
+        guard let toolContextStore else { return }
+
+        let usageDecision: ToolUsageDecision
+        if result.isError {
+            if result.content.contains("거부") {
+                usageDecision = .denied
+            } else {
+                usageDecision = .policyBlocked
+            }
+        } else {
+            usageDecision = (risk == .safe) ? .allowed : .approved
+        }
+
+        let activeAgentName = settings.activeAgentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedAgentName = activeAgentName.isEmpty ? ToolUsageEvent.defaultAgentName : activeAgentName
+        let usageEvent = ToolUsageEvent(
+            toolName: toolName,
+            category: ToolGroupResolver.group(forToolName: toolName),
+            decision: usageDecision,
+            latencyMs: latencyMs,
+            agentName: resolvedAgentName,
+            workspaceId: sessionContext.workspaceId.uuidString,
+            timestamp: Date()
+        )
+
+        Task { @MainActor in
+            await toolContextStore.record(usageEvent)
+        }
     }
 }

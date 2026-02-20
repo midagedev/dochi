@@ -21,6 +21,7 @@ protocol BuiltInToolServiceProtocol {
 
     func availableToolSchemas(for permissions: [String]) -> [[String: Any]]
     func availableToolSchemas(for permissions: [String], preferredToolGroups: [String]) -> [[String: Any]]
+    func availableToolSchemas(for permissions: [String], preferredToolGroups: [String], intentHint: String?) -> [[String: Any]]
     func execute(name: String, arguments: [String: Any]) async -> ToolResult
     func enableTools(names: [String])
     func enableToolsTTL(minutes: Int)
@@ -35,6 +36,10 @@ extension BuiltInToolServiceProtocol {
 
     func availableToolSchemas(for permissions: [String], preferredToolGroups _: [String]) -> [[String: Any]] {
         availableToolSchemas(for: permissions)
+    }
+
+    func availableToolSchemas(for permissions: [String], preferredToolGroups: [String], intentHint _: String?) -> [[String: Any]] {
+        availableToolSchemas(for: permissions, preferredToolGroups: preferredToolGroups)
     }
 
     func toolInfo(named name: String) -> ToolInfo? {

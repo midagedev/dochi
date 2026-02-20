@@ -5,6 +5,8 @@ import UserNotifications
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// UsageStore reference for flushing pending data on app termination (C-3).
     var usageStore: UsageStore?
+    /// ToolContextStore reference for flushing pending ranking context on app termination.
+    var toolContextStore: ToolContextStore?
     /// MenuBarManager reference for popover toggle (H-1).
     var menuBarManager: MenuBarManager?
 
@@ -38,6 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let store = usageStore {
             store.flushToDiskSync()
             Log.app.info("UsageStore flushed on app termination")
+        }
+        if let store = toolContextStore {
+            store.flushToDiskSync()
+            Log.app.info("ToolContextStore flushed on app termination")
         }
 
         // Teardown menu bar (H-1)
@@ -94,6 +100,7 @@ struct DochiApp: App {
     private let notificationManager: NotificationManager
     private let modelDownloadManager: ModelDownloadManager
     private let usageStore: UsageStore
+    private let toolContextStore: ToolContextStore
     private let spotlightIndexer: SpotlightIndexer
     private let vectorStore: VectorStore
     private let documentIndexer: DocumentIndexer
@@ -162,6 +169,13 @@ struct DochiApp: App {
         let schedulerService = SchedulerService(settings: settings)
         self.schedulerService = schedulerService
 
+        let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Dochi")
+        let usageStore = UsageStore(baseURL: appSupportURL)
+        self.usageStore = usageStore
+        let toolContextStore = ToolContextStore(baseURL: appSupportURL)
+        self.toolContextStore = toolContextStore
+
         // Plugin Manager (J-4)
         let pluginManager = PluginManager()
         self.pluginManager = pluginManager
@@ -174,15 +188,12 @@ struct DochiApp: App {
             supabaseService: supabaseService,
             telegramService: telegramService,
             mcpService: mcpService,
+            toolContextStore: toolContextStore,
             delegationManager: delegationManager
         )
         self.toolService = toolService
 
         let metricsCollector = MetricsCollector()
-        let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Dochi")
-        let usageStore = UsageStore(baseURL: appSupportURL)
-        self.usageStore = usageStore
         metricsCollector.usageStore = usageStore
         metricsCollector.settings = settings
 
@@ -481,6 +492,7 @@ struct DochiApp: App {
 
                 // Wire UsageStore to AppDelegate for flush on termination (C-3)
                 appDelegate.usageStore = usageStore
+                appDelegate.toolContextStore = toolContextStore
 
                 // Setup menu bar manager (H-1)
                 if appDelegate.menuBarManager == nil {

@@ -19,7 +19,7 @@ final class ToolContextStore: ToolContextStoreProtocol {
     }
 
     func record(_ event: ToolUsageEvent) async {
-        var file = await load()
+        var file = load()
         let profileKey = Self.profileKey(workspaceId: event.workspaceId, agentName: event.agentName)
         var profile = file.profiles[profileKey] ?? ToolContextProfile(
             agentName: event.agentName,
@@ -53,18 +53,35 @@ final class ToolContextStore: ToolContextStoreProtocol {
     }
 
     func profile(workspaceId: String, agentName: String) async -> ToolContextProfile? {
-        let file = await load()
+        let file = load()
         let key = Self.profileKey(workspaceId: workspaceId, agentName: agentName)
         return file.profiles[key]
     }
 
     func userPreference(workspaceId: String) async -> UserToolPreference {
-        let file = await load()
+        let file = load()
         return file.userPreferences[workspaceId] ?? UserToolPreference()
     }
 
+    func rankingContext(workspaceId: String, agentName: String) -> ToolRankingContext {
+        let file = load()
+        let profileKey = Self.profileKey(workspaceId: workspaceId, agentName: agentName)
+        let profile = file.profiles[profileKey]
+        let preference = file.userPreferences[workspaceId] ?? UserToolPreference()
+        let preferred = Self.normalizedCategories(preference.preferredCategories)
+        let suppressedRaw = Self.normalizedCategories(preference.suppressedCategories)
+        let suppressed = suppressedRaw.filter { !preferred.contains($0) }
+
+        return ToolRankingContext(
+            categoryScores: profile?.categoryScores ?? [:],
+            toolScores: profile?.toolScores ?? [:],
+            preferredCategories: preferred,
+            suppressedCategories: suppressed
+        )
+    }
+
     func updateUserPreference(_ preference: UserToolPreference, workspaceId: String) async {
-        var file = await load()
+        var file = load()
         let preferred = Self.normalizedCategories(preference.preferredCategories)
         let suppressedRaw = Self.normalizedCategories(preference.suppressedCategories)
         let suppressed = suppressedRaw.filter { !preferred.contains($0) }
@@ -97,10 +114,30 @@ final class ToolContextStore: ToolContextStoreProtocol {
             Log.storage.error("Failed to save tool context: \(error.localizedDescription)")
         }
     }
+
+    nonisolated func flushToDiskSync() {
+        MainActor.assumeIsolated {
+            guard isDirty else { return }
+            guard let file = cache else { return }
+
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+            do {
+                let data = try encoder.encode(file)
+                try data.write(to: fileURL, options: .atomic)
+                isDirty = false
+                Log.storage.debug("Tool context saved to disk (sync)")
+            } catch {
+                Log.storage.error("Failed to save tool context (sync): \(error.localizedDescription)")
+            }
+        }
+    }
 }
 
 private extension ToolContextStore {
-    func load() async -> ToolContextFile {
+    func load() -> ToolContextFile {
         if let cache {
             return cache
         }
