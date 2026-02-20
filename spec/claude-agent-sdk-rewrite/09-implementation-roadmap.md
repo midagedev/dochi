@@ -1,5 +1,8 @@
 # 09. Implementation Roadmap
 
+> Deprecated (2026-02-20): 본 문서는 SDK 전면 전환 시점 로드맵 이력이다.  
+> 현재 active 로드맵은 `spec/claude-agent-sdk-rewrite/README.md`와 `spec/claude-agent-sdk-rewrite/rewrite-delivery-context.md`, 그리고 이슈 [#318](https://github.com/midagedev/dochi/issues/318)을 따른다.
+
 ## 1) 전략
 
 전면 교체가 목표이지만, 실행은 짧은 단계로 쪼개 리스크를 줄인다.
@@ -121,4 +124,3 @@
 3. Session ID mapping 저장소 도입
 4. Approval UI 컴포넌트 스켈레톤 구현
 5. Hook 이벤트 로그 스키마 정의
-
