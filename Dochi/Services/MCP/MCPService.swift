@@ -92,14 +92,14 @@ private actor ProcessStdioTransport: Transport {
         )
 
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: command)
-        proc.arguments = arguments
-
-        // Merge custom environment with current process environment
         var env = ProcessInfo.processInfo.environment
         for (key, value) in environment {
             env[key] = value
         }
+
+        let executablePath = Self.resolveExecutablePath(command: command, environment: env) ?? command
+        proc.executableURL = URL(fileURLWithPath: executablePath)
+        proc.arguments = arguments
         proc.environment = env
 
         let stdinPipe = Pipe()
@@ -120,6 +120,77 @@ private actor ProcessStdioTransport: Transport {
         let readFD = FileDescriptor(rawValue: stdoutPipe.fileHandleForReading.fileDescriptor)
         let writeFD = FileDescriptor(rawValue: stdinPipe.fileHandleForWriting.fileDescriptor)
         self.inner = StdioTransport(input: readFD, output: writeFD, logger: self.logger)
+    }
+
+    private static func resolveExecutablePath(command: String, environment: [String: String]) -> String? {
+        let expanded = NSString(string: command).expandingTildeInPath
+
+        // Absolute path or relative path with slash
+        if expanded.contains("/") {
+            return FileManager.default.isExecutableFile(atPath: expanded) ? expanded : nil
+        }
+
+        let pathEnv = environment["PATH"] ?? ProcessInfo.processInfo.environment["PATH"] ?? ""
+        for directory in pathEnv.split(separator: ":") {
+            let candidate = String(directory) + "/" + expanded
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+
+        let home = NSHomeDirectory()
+        let fallbackDirectories = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "\(home)/.local/bin",
+            "\(home)/.cargo/bin",
+        ]
+        for directory in fallbackDirectories {
+            let candidate = directory + "/" + expanded
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+
+        if let shellResolved = resolveExecutableUsingLoginShell(expanded) {
+            return shellResolved
+        }
+
+        return nil
+    }
+
+    private static func resolveExecutableUsingLoginShell(_ command: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", "command -v \(shellEscape(command))"]
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else { return nil }
+
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !output.isEmpty else {
+            return nil
+        }
+        return output
+    }
+
+    private static func shellEscape(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     func connect() async throws {
@@ -188,17 +259,33 @@ final class MCPService: MCPServiceProtocol {
     /// Active connections keyed by server ID.
     private var connections: [UUID: ServerConnection] = [:]
 
+    /// Last known state per server ID (including disconnected / error states without active connection).
+    private var states: [UUID: MCPConnectionState] = [:]
+
     /// Maps tool name -> server ID for routing callTool requests.
     private var toolServerMap: [String: UUID] = [:]
 
+    /// Background health monitor task.
+    private var healthMonitorTask: Task<Void, Never>?
+
+    private let healthCheckIntervalNs: UInt64
+
     // MARK: - Init
 
-    init() {}
+    init(healthCheckIntervalSeconds: UInt64 = 8) {
+        self.healthCheckIntervalNs = max(1, healthCheckIntervalSeconds) * 1_000_000_000
+        startHealthMonitor()
+    }
+
+    deinit {
+        healthMonitorTask?.cancel()
+    }
 
     // MARK: - Server Management
 
     func addServer(config: MCPServerConfig) {
         configs[config.id] = config
+        states[config.id] = .disconnected
         Log.mcp.info("Server added: \(config.name) (id: \(config.id))")
     }
 
@@ -209,6 +296,7 @@ final class MCPService: MCPServiceProtocol {
         }
         let name = configs[id]?.name ?? "unknown"
         configs.removeValue(forKey: id)
+        states.removeValue(forKey: id)
         Log.mcp.info("Server removed: \(name) (id: \(id))")
     }
 
@@ -349,6 +437,15 @@ final class MCPService: MCPServiceProtocol {
             throw MCPServiceError.toolNotFound
         }
 
+        let healthy = await ensureServerHealthy(
+            serverId: serverId,
+            reason: "server unavailable before tool call"
+        )
+        guard healthy else {
+            Log.mcp.error("Server is unavailable for tool: \(name)")
+            throw MCPServiceError.notConnected
+        }
+
         guard let conn = connections[serverId] else {
             Log.mcp.error("Server not connected for tool: \(name)")
             throw MCPServiceError.notConnected
@@ -357,31 +454,46 @@ final class MCPService: MCPServiceProtocol {
         let serverName = configs[serverId]?.name ?? "unknown"
         Log.mcp.info("Calling tool '\(name)' on server '\(serverName)'")
 
-        do {
-            // Convert [String: Any] arguments to [String: Value]
-            let valueArgs = convertToValueDict(arguments)
+        // Convert [String: Any] arguments to [String: Value]
+        let valueArgs = convertToValueDict(arguments)
 
-            let result = try await conn.client.callTool(
-                name: name,
+        do {
+            return try await executeToolCall(
+                on: conn.client,
+                toolName: name,
                 arguments: valueArgs
             )
+        } catch {
+            let shouldRecover = shouldAttemptReconnect(after: error)
+                || !(connections[serverId]?.process.isRunning ?? false)
 
-            // Extract text content from the result
-            let contentText = result.content.map { extractText(from: $0) }.joined(separator: "\n")
-            let isError = result.isError ?? false
-
-            if isError {
-                Log.mcp.warning("Tool '\(name)' returned error: \(contentText)")
-            } else {
-                Log.mcp.debug("Tool '\(name)' completed successfully")
+            guard shouldRecover else {
+                let message = error.localizedDescription
+                Log.mcp.error("Tool execution failed for '\(name)': \(message)")
+                throw MCPServiceError.executionFailed(message)
             }
 
-            return MCPToolResult(content: contentText, isError: isError)
+            let recovered = await recoverServerConnection(
+                serverId: serverId,
+                reason: "tool call transport failure: \(error.localizedDescription)"
+            )
+            guard recovered, let recoveredConn = connections[serverId] else {
+                let message = error.localizedDescription
+                Log.mcp.error("Recovery failed for '\(name)': \(message)")
+                throw MCPServiceError.executionFailed(message)
+            }
 
-        } catch {
-            let message = error.localizedDescription
-            Log.mcp.error("Tool execution failed for '\(name)': \(message)")
-            throw MCPServiceError.executionFailed(message)
+            do {
+                return try await executeToolCall(
+                    on: recoveredConn.client,
+                    toolName: name,
+                    arguments: valueArgs
+                )
+            } catch {
+                let message = error.localizedDescription
+                Log.mcp.error("Tool execution retry failed for '\(name)': \(message)")
+                throw MCPServiceError.executionFailed(message)
+            }
         }
     }
 
@@ -389,15 +501,13 @@ final class MCPService: MCPServiceProtocol {
 
     /// Returns the connection state for a given server.
     func connectionState(for serverId: UUID) -> MCPConnectionState {
-        if let conn = connections[serverId] {
-            return conn.state
-        }
-        return .disconnected
+        states[serverId] ?? .disconnected
     }
 
     // MARK: - Private Helpers
 
     private func updateState(serverId: UUID, state: MCPConnectionState) {
+        states[serverId] = state
         if connections[serverId] != nil {
             connections[serverId]?.state = state
         }
@@ -411,6 +521,117 @@ final class MCPService: MCPServiceProtocol {
         case .error(let msg):
             Log.mcp.debug("State -> error: \(msg) (server: \(serverId))")
         }
+    }
+
+    private func executeToolCall(
+        on client: Client,
+        toolName: String,
+        arguments: [String: Value]
+    ) async throws -> MCPToolResult {
+        let result = try await client.callTool(
+            name: toolName,
+            arguments: arguments
+        )
+
+        let contentText = result.content.map { extractText(from: $0) }.joined(separator: "\n")
+        let isError = result.isError ?? false
+
+        if isError {
+            Log.mcp.warning("Tool '\(toolName)' returned error: \(contentText)")
+        } else {
+            Log.mcp.debug("Tool '\(toolName)' completed successfully")
+        }
+
+        return MCPToolResult(content: contentText, isError: isError)
+    }
+
+    private func startHealthMonitor() {
+        guard healthMonitorTask == nil else { return }
+
+        healthMonitorTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: self.healthCheckIntervalNs)
+                } catch {
+                    break
+                }
+                await self.checkConnectionHealth()
+            }
+        }
+    }
+
+    private func checkConnectionHealth() async {
+        let disconnectedServerIds = connections
+            .filter { !$0.value.process.isRunning }
+            .map(\.key)
+
+        for serverId in disconnectedServerIds {
+            _ = await recoverServerConnection(
+                serverId: serverId,
+                reason: "detected dead MCP process"
+            )
+        }
+    }
+
+    private func ensureServerHealthy(serverId: UUID, reason: String) async -> Bool {
+        guard let conn = connections[serverId] else {
+            return await recoverServerConnection(serverId: serverId, reason: reason)
+        }
+
+        guard conn.process.isRunning else {
+            return await recoverServerConnection(serverId: serverId, reason: reason)
+        }
+
+        return true
+    }
+
+    private func recoverServerConnection(serverId: UUID, reason: String) async -> Bool {
+        cleanupConnection(serverId: serverId, reason: reason)
+
+        guard let config = configs[serverId] else {
+            Log.mcp.warning("Recovery skipped: missing config for server \(serverId)")
+            return false
+        }
+        guard config.isEnabled else {
+            Log.mcp.warning("Recovery skipped: server '\(config.name)' is disabled")
+            return false
+        }
+
+        do {
+            try await connect(serverId: serverId)
+            Log.mcp.info("Recovered server connection: \(config.name)")
+            return true
+        } catch {
+            Log.mcp.error("Recovery failed for '\(config.name)': \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func cleanupConnection(serverId: UUID, reason: String) {
+        guard let conn = connections[serverId] else {
+            updateState(serverId: serverId, state: .error(reason))
+            return
+        }
+
+        for tool in conn.tools {
+            toolServerMap.removeValue(forKey: tool.name)
+        }
+
+        Task {
+            await conn.client.disconnect()
+        }
+        connections.removeValue(forKey: serverId)
+        updateState(serverId: serverId, state: .error(reason))
+    }
+
+    private func shouldAttemptReconnect(after error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("transport")
+            || message.contains("connection")
+            || message.contains("disconnected")
+            || message.contains("broken pipe")
+            || message.contains("connection reset")
     }
 
     /// Discovers all tools from a connected MCP client, handling pagination.

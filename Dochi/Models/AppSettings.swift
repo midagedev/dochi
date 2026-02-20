@@ -268,6 +268,12 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(mcpServersJSON, forKey: "mcpServersJSON") }
     }
 
+    /// Tracks whether default MCP coding profiles were already bootstrapped.
+    /// Prevents re-creating defaults after the user intentionally clears all MCP servers.
+    var mcpDefaultProfilesBootstrapped: Bool = UserDefaults.standard.object(forKey: "mcpDefaultProfilesBootstrapped") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(mcpDefaultProfilesBootstrapped, forKey: "mcpDefaultProfilesBootstrapped") }
+    }
+
     var wakeWordAlwaysOn: Bool = UserDefaults.standard.object(forKey: "wakeWordAlwaysOn") as? Bool ?? false {
         didSet { UserDefaults.standard.set(wakeWordAlwaysOn, forKey: "wakeWordAlwaysOn") }
     }

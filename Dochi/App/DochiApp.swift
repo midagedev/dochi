@@ -319,8 +319,8 @@ struct DochiApp: App {
             }
         }
 
-        // Restore MCP servers from AppStorage
-        restoreMCPServers(mcpService: mcpService, json: settings.mcpServersJSON)
+        // Restore MCP servers from AppStorage (or bootstrap coding defaults on first run)
+        restoreMCPServers(mcpService: mcpService, settings: settings)
 
         // Configure Supabase if previously set
         if !settings.supabaseURL.isEmpty, !settings.supabaseAnonKey.isEmpty,
@@ -1973,20 +1973,52 @@ struct DochiApp: App {
         await toolService.execute(name: name, arguments: arguments.value)
     }
 
-    private func restoreMCPServers(mcpService: MCPService, json: String) {
-        guard let data = json.data(using: .utf8),
-              let servers = try? JSONDecoder().decode([MCPServerConfig].self, from: data) else {
-            return
-        }
-        for server in servers {
-            mcpService.addServer(config: server)
-            if server.isEnabled {
-                Task {
-                    try? await mcpService.connect(serverId: server.id)
+    private func restoreMCPServers(mcpService: MCPService, settings: AppSettings) {
+        let servers = decodedMCPServers(from: settings.mcpServersJSON)
+        let resolvedServers: [MCPServerConfig]
+
+        if servers.isEmpty {
+            if settings.mcpDefaultProfilesBootstrapped {
+                resolvedServers = []
+            } else {
+                resolvedServers = MCPServerConfig.codingDefaultProfiles()
+                if let encoded = encodeMCPServers(resolvedServers) {
+                    settings.mcpServersJSON = encoded
                 }
+                settings.mcpDefaultProfilesBootstrapped = true
+                Log.app.info("Bootstrapped default MCP coding profiles: \(resolvedServers.count)")
+            }
+        } else {
+            resolvedServers = servers
+            settings.mcpDefaultProfilesBootstrapped = true
+        }
+
+        for server in resolvedServers {
+            mcpService.addServer(config: server)
+            if !server.isEnabled {
+                continue
+            }
+            Task {
+                try? await mcpService.connect(serverId: server.id)
             }
         }
-        Log.app.info("Restored \(servers.count) MCP server(s) from settings")
+        Log.app.info("Restored \(resolvedServers.count) MCP server(s) from settings")
+    }
+
+    private func decodedMCPServers(from json: String) -> [MCPServerConfig] {
+        guard let data = json.data(using: .utf8),
+              let servers = try? JSONDecoder().decode([MCPServerConfig].self, from: data) else {
+            return []
+        }
+        return servers
+    }
+
+    private func encodeMCPServers(_ servers: [MCPServerConfig]) -> String? {
+        guard let data = try? JSONEncoder().encode(servers),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
     }
 
     private static func migrateLegacyAPIKeysIfNeeded(keychainService: KeychainServiceProtocol) {
