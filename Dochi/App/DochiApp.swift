@@ -919,6 +919,15 @@ struct DochiApp: App {
         case "bridge.orchestrator.execute":
             return await handleBridgeOrchestratorExecute(params: params, externalToolManager: externalToolManager)
 
+        case "bridge.orchestrator.status":
+            return await handleBridgeOrchestratorStatus(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.orchestrator.interrupt":
+            return await handleBridgeOrchestratorInterrupt(params: params, externalToolManager: externalToolManager)
+
+        case "bridge.orchestrator.summarize":
+            return await handleBridgeOrchestratorSummarize(params: params, externalToolManager: externalToolManager)
+
         case "bridge.repo.list":
             return await handleBridgeRepositoryList(externalToolManager: externalToolManager)
 
@@ -1697,6 +1706,185 @@ struct DochiApp: App {
         }
     }
 
+    private struct OrchestrationTargetResolution {
+        let runtimeSessionId: UUID
+        let selection: OrchestrationSessionSelection?
+    }
+
+    private enum OrchestrationTargetResolutionResult {
+        case resolved(OrchestrationTargetResolution)
+        case failed(LocalControlPlaneMethodResult)
+    }
+
+    private struct OrchestrationOutputSummary {
+        let resultKind: String
+        let summary: String
+        let highlights: [String]
+    }
+
+    nonisolated private static func resolveOrchestrationTarget(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> OrchestrationTargetResolutionResult {
+        if let sessionIdRaw = nonEmptyString(params["session_id"]) {
+            guard let sessionId = UUID(uuidString: sessionIdRaw) else {
+                return .failed(.failure(code: "invalid_session_id", message: "session_id 형식이 올바르지 않습니다."))
+            }
+            let exists = await MainActor.run {
+                externalToolManager.sessions.contains(where: { $0.id == sessionId })
+            }
+            guard exists else {
+                return .failed(.failure(code: "session_not_found", message: "세션을 찾을 수 없습니다: \(sessionIdRaw)"))
+            }
+            return .resolved(OrchestrationTargetResolution(runtimeSessionId: sessionId, selection: nil))
+        }
+
+        let repositoryRoot = nonEmptyString(params["repository_root"])
+        let selection = await externalToolManager.selectSessionForOrchestration(repositoryRoot: repositoryRoot)
+        switch selection.action {
+        case .reuseT0Active, .attachT1:
+            guard let session = selection.selectedSession else {
+                return .failed(.failure(code: "session_not_found", message: "선택된 세션을 찾을 수 없습니다."))
+            }
+            guard let runtimeSessionId = session.runtimeSessionId,
+                  let runtimeUUID = UUID(uuidString: runtimeSessionId) else {
+                return .failed(.failure(code: "runtime_session_missing", message: "실행 가능한 runtime_session_id를 찾을 수 없습니다."))
+            }
+            return .resolved(OrchestrationTargetResolution(runtimeSessionId: runtimeUUID, selection: selection))
+        case .createT0:
+            return .failed(.failure(
+                code: "session_creation_required",
+                message: "실행 가능한 세션이 없어 새 T0 세션 생성이 필요합니다."
+            ))
+        case .analyzeOnly:
+            return .failed(.failure(
+                code: "analyze_only_fallback",
+                message: "현재는 분석 전용(T2/T3) 세션만 존재하여 실행 세션을 선택할 수 없습니다."
+            ))
+        case .none:
+            return .failed(.failure(code: "session_not_found", message: selection.reason))
+        }
+    }
+
+    nonisolated private static func handleBridgeOrchestratorStatus(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        let resolutionResult = await resolveOrchestrationTarget(
+            params: params,
+            externalToolManager: externalToolManager
+        )
+        let resolution: OrchestrationTargetResolution
+        switch resolutionResult {
+        case .resolved(let resolved):
+            resolution = resolved
+        case .failed(let failure):
+            return failure
+        }
+
+        let lines = max(1, min(500, params["lines"] as? Int ?? 120))
+        let output = await externalToolManager.captureOutput(sessionId: resolution.runtimeSessionId, lines: lines)
+        let summary = summarizeOrchestrationOutput(output)
+        let sessionPayload = await MainActor.run { () -> UncheckedJSONObject? in
+            guard let payload = bridgeSessionPayload(sessionId: resolution.runtimeSessionId, manager: externalToolManager) else {
+                return nil
+            }
+            return UncheckedJSONObject(value: payload)
+        }
+        guard let sessionPayload else {
+            return .failure(code: "session_not_found", message: "세션 상태를 조회할 수 없습니다.")
+        }
+
+        return .ok([
+            "session": sessionPayload.value,
+            "selection": resolution.selection.map(serializeOrchestrationSelection(_:)) ?? NSNull(),
+            "line_count": output.count,
+            "output_lines": output,
+            "result_kind": summary.resultKind,
+            "summary": summary.summary,
+            "highlights": summary.highlights,
+        ])
+    }
+
+    nonisolated private static func handleBridgeOrchestratorInterrupt(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        let resolutionResult = await resolveOrchestrationTarget(
+            params: params,
+            externalToolManager: externalToolManager
+        )
+        let resolution: OrchestrationTargetResolution
+        switch resolutionResult {
+        case .resolved(let resolved):
+            resolution = resolved
+        case .failed(let failure):
+            return failure
+        }
+
+        do {
+            try await externalToolManager.interruptSession(sessionId: resolution.runtimeSessionId)
+        } catch {
+            return .failure(code: "bridge_interrupt_failed", message: error.localizedDescription)
+        }
+
+        let sessionPayload = await MainActor.run { () -> UncheckedJSONObject? in
+            guard let payload = bridgeSessionPayload(sessionId: resolution.runtimeSessionId, manager: externalToolManager) else {
+                return nil
+            }
+            return UncheckedJSONObject(value: payload)
+        }
+        guard let sessionPayload else {
+            return .failure(code: "session_not_found", message: "중단 후 세션 상태를 조회할 수 없습니다.")
+        }
+
+        return .ok([
+            "status": "interrupted",
+            "session": sessionPayload.value,
+            "selection": resolution.selection.map(serializeOrchestrationSelection(_:)) ?? NSNull(),
+        ])
+    }
+
+    nonisolated private static func handleBridgeOrchestratorSummarize(
+        params: [String: Any],
+        externalToolManager: ExternalToolSessionManagerProtocol
+    ) async -> LocalControlPlaneMethodResult {
+        let resolutionResult = await resolveOrchestrationTarget(
+            params: params,
+            externalToolManager: externalToolManager
+        )
+        let resolution: OrchestrationTargetResolution
+        switch resolutionResult {
+        case .resolved(let resolved):
+            resolution = resolved
+        case .failed(let failure):
+            return failure
+        }
+
+        let lines = max(1, min(500, params["lines"] as? Int ?? 160))
+        let output = await externalToolManager.captureOutput(sessionId: resolution.runtimeSessionId, lines: lines)
+        let summary = summarizeOrchestrationOutput(output)
+        let sessionPayload = await MainActor.run { () -> UncheckedJSONObject? in
+            guard let payload = bridgeSessionPayload(sessionId: resolution.runtimeSessionId, manager: externalToolManager) else {
+                return nil
+            }
+            return UncheckedJSONObject(value: payload)
+        }
+
+        return .ok([
+            "session": sessionPayload?.value ?? NSNull(),
+            "selection": resolution.selection.map(serializeOrchestrationSelection(_:)) ?? NSNull(),
+            "line_count": output.count,
+            "result_kind": summary.resultKind,
+            "summary": summary.summary,
+            "highlights": summary.highlights,
+            "context_reflection": [
+                "conversation_summary": "[external-cli:\(summary.resultKind)] \(summary.summary)",
+                "memory_candidate": summary.highlights.joined(separator: " | "),
+            ],
+        ])
+    }
+
     nonisolated private static func handleBridgeRepositoryList(
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1869,6 +2057,79 @@ struct DochiApp: App {
             payload["selected_session"] = NSNull()
         }
         return payload
+    }
+
+    nonisolated private static func summarizeOrchestrationOutput(
+        _ lines: [String]
+    ) -> OrchestrationOutputSummary {
+        let normalized = lines
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !normalized.isEmpty else {
+            return OrchestrationOutputSummary(
+                resultKind: "unknown",
+                summary: "최근 출력이 없어 작업 결과를 판별할 수 없습니다.",
+                highlights: []
+            )
+        }
+
+        let recent = Array(normalized.suffix(80))
+        let failureKeywords = ["error", "failed", "exception", "traceback", "panic", "fatal", "test failed", "build failed"]
+        let successKeywords = ["success", "completed", "done", "passed", "all checks passed", "merged"]
+
+        let lowered = recent.map { $0.lowercased() }
+        let hasFailure = lowered.contains(where: { line in
+            failureKeywords.contains(where: { line.contains($0) })
+        })
+        let hasSuccess = lowered.contains(where: { line in
+            successKeywords.contains(where: { line.contains($0) })
+        })
+
+        let resultKind: String
+        if hasFailure {
+            resultKind = "failed"
+        } else if hasSuccess {
+            resultKind = "succeeded"
+        } else {
+            resultKind = "running"
+        }
+
+        var highlights: [String] = []
+        for line in recent.reversed() {
+            if highlights.count >= 3 { break }
+            let loweredLine = line.lowercased()
+            let shouldInclude =
+                failureKeywords.contains(where: { loweredLine.contains($0) }) ||
+                successKeywords.contains(where: { loweredLine.contains($0) }) ||
+                loweredLine.contains("warning") ||
+                loweredLine.contains("todo")
+            if shouldInclude {
+                highlights.append(line)
+            }
+        }
+        if highlights.isEmpty, let last = recent.last {
+            highlights = [last]
+        } else {
+            highlights.reverse()
+        }
+
+        let headline: String
+        switch resultKind {
+        case "failed":
+            headline = "실패 신호가 감지되었습니다."
+        case "succeeded":
+            headline = "성공 신호가 확인되었습니다."
+        default:
+            headline = "작업이 진행 중이거나 최종 상태가 불명확합니다."
+        }
+        let detail = highlights.joined(separator: " | ")
+        let summary = detail.isEmpty ? headline : "\(headline) 핵심 출력: \(detail)"
+
+        return OrchestrationOutputSummary(
+            resultKind: resultKind,
+            summary: summary,
+            highlights: highlights
+        )
     }
 
     nonisolated private static func formatSessionManagementKPISummary(

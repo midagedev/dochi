@@ -24,6 +24,8 @@
 9. `08-multi-device-sync-topology.md`
 10. `09-implementation-roadmap.md`
 11. `10-testing-observability-operations.md`
+12. `11-tool-routing-policy.md`
+13. `12-cli-orchestration-contract.md`
 
 ## 문서 맵
 
@@ -40,6 +42,8 @@
 | `08-multi-device-sync-topology.md` | 멀티 디바이스/워크스페이스 동기화·실행 위임 모델 |
 | `09-implementation-roadmap.md` | 실제 rewrite 단계별 실행 계획 |
 | `10-testing-observability-operations.md` | 테스트, 운영 가시성, SLO, 장애 대응 |
+| `11-tool-routing-policy.md` | BuiltIn/MCP 라우팅 및 위험도 정책 |
+| `12-cli-orchestration-contract.md` | 장시간 외부 CLI 작업 위임/조회/중단/요약 계약 |
 
 ## 적용 범위
 

@@ -131,6 +131,96 @@ final class CLICommandSurfaceTests: XCTestCase {
         )
     }
 
+    func testParseDevBridgeOrchestratorSelectWithRepository() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "orchestrator", "select",
+            "--repo", "~/repo/dochi",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeOrchestratorSelect(repositoryRoot: "~/repo/dochi"))
+        )
+    }
+
+    func testParseDevBridgeOrchestratorExecuteWithConfirmation() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "orchestrator", "execute",
+            "xcodebuild", "test",
+            "--repo", "~/repo/dochi",
+            "--confirmed",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeOrchestratorExecute(
+                command: "xcodebuild test",
+                repositoryRoot: "~/repo/dochi",
+                confirmed: true
+            ))
+        )
+    }
+
+    func testParseDevBridgeOrchestratorExecuteKeepsCommandOptions() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "orchestrator", "execute",
+            "git", "show", "--stat",
+            "--repo", "~/repo/dochi",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeOrchestratorExecute(
+                command: "git show --stat",
+                repositoryRoot: "~/repo/dochi",
+                confirmed: false
+            ))
+        )
+    }
+
+    func testParseDevBridgeOrchestratorStatusWithSessionAndLines() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "orchestrator", "status",
+            "--session", "11111111-2222-3333-4444-555555555555",
+            "--lines", "200",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeOrchestratorStatus(
+                repositoryRoot: nil,
+                sessionId: "11111111-2222-3333-4444-555555555555",
+                lines: 200
+            ))
+        )
+    }
+
+    func testParseDevBridgeOrchestratorInterruptWithRepository() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "orchestrator", "interrupt",
+            "--repo", "~/repo/dochi",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeOrchestratorInterrupt(
+                repositoryRoot: "~/repo/dochi",
+                sessionId: nil
+            ))
+        )
+    }
+
+    func testParseDevBridgeOrchestratorSummarizeWithLines() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "bridge", "orchestrator", "summarize",
+            "--repo", "~/repo/dochi",
+            "--lines", "180",
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.bridgeOrchestratorSummarize(
+                repositoryRoot: "~/repo/dochi",
+                sessionId: nil,
+                lines: 180
+            ))
+        )
+    }
+
     func testParseDevBridgeRepoInitWithOptions() throws {
         let invocation = try CLICommandParser.parse([
             "dev", "bridge", "repo", "init", "~/repo/new-project",

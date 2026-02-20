@@ -953,6 +953,7 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var restartSessionCallCount = 0
     var openInTerminalCallCount = 0
     var sendCommandCallCount = 0
+    var interruptSessionCallCount = 0
     var checkHealthCallCount = 0
     var checkAllHealthCallCount = 0
     var captureOutputCallCount = 0
@@ -1068,6 +1069,16 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         guard sessions.contains(where: { $0.id == sessionId }) else {
             throw ExternalToolError.sessionNotFound(sessionId)
         }
+    }
+
+    func interruptSession(sessionId: UUID) async throws {
+        interruptSessionCallCount += 1
+        guard let session = sessions.first(where: { $0.id == sessionId }) else {
+            throw ExternalToolError.sessionNotFound(sessionId)
+        }
+        session.status = .unknown
+        session.lastActivityText = "^C interrupt"
+        session.lastCommandDate = Date()
     }
 
     func checkHealth(sessionId: UUID) async {

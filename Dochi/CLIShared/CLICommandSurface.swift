@@ -51,6 +51,11 @@ enum CLIDevAction: Equatable, Sendable {
     case bridgeStatus(sessionId: String?)
     case bridgeSend(sessionId: String, command: String)
     case bridgeRead(sessionId: String, lines: Int)
+    case bridgeOrchestratorSelect(repositoryRoot: String?)
+    case bridgeOrchestratorExecute(command: String, repositoryRoot: String?, confirmed: Bool)
+    case bridgeOrchestratorStatus(repositoryRoot: String?, sessionId: String?, lines: Int)
+    case bridgeOrchestratorInterrupt(repositoryRoot: String?, sessionId: String?)
+    case bridgeOrchestratorSummarize(repositoryRoot: String?, sessionId: String?, lines: Int)
     case bridgeRepoList
     case bridgeRepoInit(path: String, defaultBranch: String, createReadme: Bool, createGitignore: Bool)
     case bridgeRepoClone(remoteURL: String, destinationPath: String, branch: String?)
@@ -509,6 +514,154 @@ enum CLICommandParser {
                 }
                 let lines = rest.count >= 2 ? (Int(rest[1]) ?? 80) : 80
                 return .dev(.bridgeRead(sessionId: rest[0], lines: max(1, lines)))
+            case "orchestrator":
+                let orchestratorSub = rest.first ?? "status"
+                let orchestratorArgs = Array(rest.dropFirst())
+                switch orchestratorSub {
+                case "select":
+                    var repositoryRoot: String?
+                    var index = 0
+                    while index < orchestratorArgs.count {
+                        switch orchestratorArgs[index] {
+                        case "--repo", "--repository-root":
+                            guard index + 1 < orchestratorArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator select --repo <path> 형식이 필요합니다.")
+                            }
+                            repositoryRoot = orchestratorArgs[index + 1]
+                            index += 2
+                        default:
+                            throw CLIParseError.invalidUsage("dev bridge orchestrator select의 알 수 없는 옵션입니다: \(orchestratorArgs[index])")
+                        }
+                    }
+                    return .dev(.bridgeOrchestratorSelect(repositoryRoot: repositoryRoot))
+                case "execute":
+                    var commandParts: [String] = []
+                    var index = 0
+                    var repositoryRoot: String?
+                    var confirmed = false
+                    while index < orchestratorArgs.count {
+                        let token = orchestratorArgs[index]
+                        switch token {
+                        case "--repo", "--repository-root":
+                            guard index + 1 < orchestratorArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator execute --repo <path> 형식이 필요합니다.")
+                            }
+                            repositoryRoot = orchestratorArgs[index + 1]
+                            index += 2
+                        case "--confirmed":
+                            confirmed = true
+                            index += 1
+                        default:
+                            commandParts.append(token)
+                            index += 1
+                        }
+                    }
+                    let command = commandParts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !command.isEmpty else {
+                        throw CLIParseError.invalidUsage("dev bridge orchestrator execute <command> [--repo <path>] [--confirmed] 형식이 필요합니다.")
+                    }
+                    return .dev(.bridgeOrchestratorExecute(
+                        command: command,
+                        repositoryRoot: repositoryRoot,
+                        confirmed: confirmed
+                    ))
+                case "status":
+                    var repositoryRoot: String?
+                    var sessionId: String?
+                    var lines = 120
+                    var index = 0
+                    while index < orchestratorArgs.count {
+                        switch orchestratorArgs[index] {
+                        case "--repo", "--repository-root":
+                            guard index + 1 < orchestratorArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator status --repo <path> 형식이 필요합니다.")
+                            }
+                            repositoryRoot = orchestratorArgs[index + 1]
+                            index += 2
+                        case "--session":
+                            guard index + 1 < orchestratorArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator status --session <id> 형식이 필요합니다.")
+                            }
+                            sessionId = orchestratorArgs[index + 1]
+                            index += 2
+                        case "--lines":
+                            guard index + 1 < orchestratorArgs.count, let parsed = Int(orchestratorArgs[index + 1]) else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator status --lines <N> 형식이 필요합니다.")
+                            }
+                            lines = max(1, parsed)
+                            index += 2
+                        default:
+                            throw CLIParseError.invalidUsage("dev bridge orchestrator status의 알 수 없는 옵션입니다: \(orchestratorArgs[index])")
+                        }
+                    }
+                    return .dev(.bridgeOrchestratorStatus(
+                        repositoryRoot: repositoryRoot,
+                        sessionId: sessionId,
+                        lines: lines
+                    ))
+                case "interrupt":
+                    var repositoryRoot: String?
+                    var sessionId: String?
+                    var index = 0
+                    while index < orchestratorArgs.count {
+                        switch orchestratorArgs[index] {
+                        case "--repo", "--repository-root":
+                            guard index + 1 < orchestratorArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator interrupt --repo <path> 형식이 필요합니다.")
+                            }
+                            repositoryRoot = orchestratorArgs[index + 1]
+                            index += 2
+                        case "--session":
+                            guard index + 1 < orchestratorArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator interrupt --session <id> 형식이 필요합니다.")
+                            }
+                            sessionId = orchestratorArgs[index + 1]
+                            index += 2
+                        default:
+                            throw CLIParseError.invalidUsage("dev bridge orchestrator interrupt의 알 수 없는 옵션입니다: \(orchestratorArgs[index])")
+                        }
+                    }
+                    return .dev(.bridgeOrchestratorInterrupt(
+                        repositoryRoot: repositoryRoot,
+                        sessionId: sessionId
+                    ))
+                case "summarize":
+                    var repositoryRoot: String?
+                    var sessionId: String?
+                    var lines = 160
+                    var index = 0
+                    while index < orchestratorArgs.count {
+                        switch orchestratorArgs[index] {
+                        case "--repo", "--repository-root":
+                            guard index + 1 < orchestratorArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator summarize --repo <path> 형식이 필요합니다.")
+                            }
+                            repositoryRoot = orchestratorArgs[index + 1]
+                            index += 2
+                        case "--session":
+                            guard index + 1 < orchestratorArgs.count else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator summarize --session <id> 형식이 필요합니다.")
+                            }
+                            sessionId = orchestratorArgs[index + 1]
+                            index += 2
+                        case "--lines":
+                            guard index + 1 < orchestratorArgs.count, let parsed = Int(orchestratorArgs[index + 1]) else {
+                                throw CLIParseError.invalidUsage("dev bridge orchestrator summarize --lines <N> 형식이 필요합니다.")
+                            }
+                            lines = max(1, parsed)
+                            index += 2
+                        default:
+                            throw CLIParseError.invalidUsage("dev bridge orchestrator summarize의 알 수 없는 옵션입니다: \(orchestratorArgs[index])")
+                        }
+                    }
+                    return .dev(.bridgeOrchestratorSummarize(
+                        repositoryRoot: repositoryRoot,
+                        sessionId: sessionId,
+                        lines: lines
+                    ))
+                default:
+                    throw CLIParseError.invalidUsage("dev bridge orchestrator 하위 명령은 select/execute/status/interrupt/summarize만 지원합니다.")
+                }
             case "repo":
                 let repoSub = rest.first ?? "list"
                 let repoArgs = Array(rest.dropFirst())
@@ -597,7 +750,7 @@ enum CLICommandParser {
                     throw CLIParseError.invalidUsage("dev bridge repo 하위 명령은 list/init/clone/attach/remove만 지원합니다.")
                 }
             default:
-                throw CLIParseError.invalidUsage("dev bridge 하위 명령은 open/roots/status/send/read/repo만 지원합니다.")
+                throw CLIParseError.invalidUsage("dev bridge 하위 명령은 open/roots/status/send/read/orchestrator/repo만 지원합니다.")
             }
 
         default:

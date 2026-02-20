@@ -227,11 +227,45 @@ final class ExternalToolManagerTests: XCTestCase {
     }
 
     @MainActor
+    func testInterruptSession() async throws {
+        let manager = MockExternalToolSessionManager()
+
+        let profile = ExternalToolProfile(name: "aider", command: "aider")
+        manager.saveProfile(profile)
+        try await manager.startSession(profileId: profile.id)
+
+        let sessionId = try XCTUnwrap(manager.sessions.first?.id)
+        try await manager.interruptSession(sessionId: sessionId)
+
+        XCTAssertEqual(manager.interruptSessionCallCount, 1)
+        XCTAssertEqual(manager.sessions.first?.lastActivityText, "^C interrupt")
+        XCTAssertEqual(manager.sessions.first?.status, .unknown)
+    }
+
+    @MainActor
     func testSendCommandFailsWithUnknownSession() async {
         let manager = MockExternalToolSessionManager()
 
         do {
             try await manager.sendCommand(sessionId: UUID(), command: "hello")
+            XCTFail("Should throw sessionNotFound")
+        } catch let error as ExternalToolError {
+            if case .sessionNotFound = error {
+                // Expected
+            } else {
+                XCTFail("Wrong error: \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    @MainActor
+    func testInterruptSessionFailsWithUnknownSession() async {
+        let manager = MockExternalToolSessionManager()
+
+        do {
+            try await manager.interruptSession(sessionId: UUID())
             XCTFail("Should throw sessionNotFound")
         } catch let error as ExternalToolError {
             if case .sessionNotFound = error {
