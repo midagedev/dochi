@@ -270,6 +270,10 @@ final class NativeSessionRoutingTests: XCTestCase {
         XCTAssertEqual(metricsCollector.recentMetrics.count, 1)
         XCTAssertEqual(metricsCollector.recentMetrics.last?.inputTokens, 21)
         XCTAssertEqual(metricsCollector.recentMetrics.last?.outputTokens, 8)
+        XCTAssertEqual(metricsCollector.recentTokenEstimationDeviations.count, 1)
+        XCTAssertEqual(metricsCollector.recentTokenEstimationDeviations.last?.actualInputTokens, 21)
+        XCTAssertGreaterThan(metricsCollector.recentTokenEstimationDeviations.last?.estimatedInputTokens ?? 0, 0)
+        XCTAssertNotNil(metricsCollector.tokenEstimationDeviationReport)
 
         try await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(usageStore.recordedMetrics.count, 1)
@@ -309,6 +313,8 @@ final class NativeSessionRoutingTests: XCTestCase {
         XCTAssertEqual(metricsCollector.recentMetrics.count, 1)
         XCTAssertNil(metricsCollector.recentMetrics.last?.inputTokens)
         XCTAssertNil(metricsCollector.recentMetrics.last?.outputTokens)
+        XCTAssertTrue(metricsCollector.recentTokenEstimationDeviations.isEmpty)
+        XCTAssertNil(metricsCollector.tokenEstimationDeviationReport)
 
         try await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(usageStore.recordedMetrics.count, 1)
