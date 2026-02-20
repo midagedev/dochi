@@ -102,6 +102,27 @@ struct ToolDispatchParams: Codable, Sendable {
     let arguments: [String: AnyCodableValue]
     let sessionId: String
     let riskLevel: String  // "safe", "sensitive", "restricted"
+
+    init(toolCallId: String, toolName: String, arguments: [String: AnyCodableValue] = [:], sessionId: String, riskLevel: String = "safe") {
+        self.toolCallId = toolCallId
+        self.toolName = toolName
+        self.arguments = arguments
+        self.sessionId = sessionId
+        self.riskLevel = riskLevel
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        toolCallId = try container.decode(String.self, forKey: .toolCallId)
+        toolName = try container.decode(String.self, forKey: .toolName)
+        arguments = try container.decodeIfPresent([String: AnyCodableValue].self, forKey: .arguments) ?? [:]
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        riskLevel = try container.decodeIfPresent(String.self, forKey: .riskLevel) ?? "safe"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case toolCallId, toolName, arguments, sessionId, riskLevel
+    }
 }
 
 /// Parameters for `tool.result` (app → runtime RPC).
@@ -137,6 +158,31 @@ struct ApprovalRequestParams: Codable, Sendable {
     let riskLevel: String     // "sensitive", "restricted"
     let reason: String        // Why the tool is being called
     let argumentsSummary: String  // Human-readable arguments summary
+
+    init(approvalId: String, toolCallId: String, sessionId: String, toolName: String, riskLevel: String, reason: String = "", argumentsSummary: String = "") {
+        self.approvalId = approvalId
+        self.toolCallId = toolCallId
+        self.sessionId = sessionId
+        self.toolName = toolName
+        self.riskLevel = riskLevel
+        self.reason = reason
+        self.argumentsSummary = argumentsSummary
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        approvalId = try container.decode(String.self, forKey: .approvalId)
+        toolCallId = try container.decode(String.self, forKey: .toolCallId)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        toolName = try container.decode(String.self, forKey: .toolName)
+        riskLevel = try container.decode(String.self, forKey: .riskLevel)
+        reason = try container.decodeIfPresent(String.self, forKey: .reason) ?? ""
+        argumentsSummary = try container.decodeIfPresent(String.self, forKey: .argumentsSummary) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId, toolCallId, sessionId, toolName, riskLevel, reason, argumentsSummary
+    }
 }
 
 /// Parameters for `approval.resolve` (app → runtime RPC).

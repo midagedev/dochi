@@ -303,4 +303,188 @@ final class ToolDispatchTests: XCTestCase {
         XCTAssertEqual(bridge.configureToolDispatchCallCount, 1)
         XCTAssertNotNil(bridge.lastToolService)
     }
+
+    // MARK: - Codable Payload Decoding (decodePayload)
+
+    @MainActor
+    func testDecodePayloadInjectsSessionIdFromEnvelope() {
+        // Payload has no sessionId, but event envelope does
+        let event = BridgeEvent(
+            eventId: "e-1",
+            timestamp: "2024-01-01T00:00:00Z",
+            sessionId: "s-envelope",
+            workspaceId: nil,
+            agentId: nil,
+            eventType: .toolDispatch,
+            payload: .object([
+                "toolCallId": .string("tc-1"),
+                "toolName": .string("test.tool"),
+            ])
+        )
+
+        let decoded: ToolDispatchParams? = ToolDispatchHandler.decodePayload(event: event)
+        XCTAssertNotNil(decoded)
+        XCTAssertEqual(decoded?.sessionId, "s-envelope")
+        XCTAssertEqual(decoded?.toolCallId, "tc-1")
+        XCTAssertEqual(decoded?.toolName, "test.tool")
+        XCTAssertEqual(decoded?.riskLevel, "safe") // default
+        XCTAssertTrue(decoded?.arguments.isEmpty ?? false)
+    }
+
+    @MainActor
+    func testDecodePayloadUsesPayloadSessionIdWhenPresent() {
+        // Payload has its own sessionId — should take precedence
+        let event = BridgeEvent(
+            eventId: "e-1",
+            timestamp: "2024-01-01T00:00:00Z",
+            sessionId: "s-envelope",
+            workspaceId: nil,
+            agentId: nil,
+            eventType: .toolDispatch,
+            payload: .object([
+                "toolCallId": .string("tc-1"),
+                "toolName": .string("test.tool"),
+                "sessionId": .string("s-payload"),
+            ])
+        )
+
+        let decoded: ToolDispatchParams? = ToolDispatchHandler.decodePayload(event: event)
+        XCTAssertNotNil(decoded)
+        XCTAssertEqual(decoded?.sessionId, "s-payload")
+    }
+
+    @MainActor
+    func testDecodePayloadReturnsNilForNilPayload() {
+        let event = BridgeEvent(
+            eventId: "e-1",
+            timestamp: "2024-01-01T00:00:00Z",
+            sessionId: "s-1",
+            workspaceId: nil,
+            agentId: nil,
+            eventType: .toolDispatch,
+            payload: nil
+        )
+
+        let decoded: ToolDispatchParams? = ToolDispatchHandler.decodePayload(event: event)
+        XCTAssertNil(decoded)
+    }
+
+    @MainActor
+    func testDecodePayloadReturnsNilForNonObjectPayload() {
+        let event = BridgeEvent(
+            eventId: "e-1",
+            timestamp: "2024-01-01T00:00:00Z",
+            sessionId: "s-1",
+            workspaceId: nil,
+            agentId: nil,
+            eventType: .toolDispatch,
+            payload: .string("not an object")
+        )
+
+        let decoded: ToolDispatchParams? = ToolDispatchHandler.decodePayload(event: event)
+        XCTAssertNil(decoded)
+    }
+
+    @MainActor
+    func testDecodePayloadReturnsNilForMissingRequiredField() {
+        // Missing toolCallId (required)
+        let event = BridgeEvent(
+            eventId: "e-1",
+            timestamp: "2024-01-01T00:00:00Z",
+            sessionId: "s-1",
+            workspaceId: nil,
+            agentId: nil,
+            eventType: .toolDispatch,
+            payload: .object([
+                "toolName": .string("test"),
+            ])
+        )
+
+        let decoded: ToolDispatchParams? = ToolDispatchHandler.decodePayload(event: event)
+        XCTAssertNil(decoded)
+    }
+
+    @MainActor
+    func testDecodePayloadReturnsNilWhenNoSessionIdAnywhere() {
+        // No sessionId in payload or event envelope
+        let event = BridgeEvent(
+            eventId: "e-1",
+            timestamp: "2024-01-01T00:00:00Z",
+            sessionId: nil,
+            workspaceId: nil,
+            agentId: nil,
+            eventType: .toolDispatch,
+            payload: .object([
+                "toolCallId": .string("tc-1"),
+                "toolName": .string("test"),
+            ])
+        )
+
+        let decoded: ToolDispatchParams? = ToolDispatchHandler.decodePayload(event: event)
+        XCTAssertNil(decoded) // sessionId is required in ToolDispatchParams
+    }
+
+    func testToolDispatchParamsDefaultsWhenDecodingMinimalJSON() throws {
+        // Minimal JSON: only required fields
+        let json = """
+        {
+            "toolCallId": "tc-1",
+            "toolName": "test",
+            "sessionId": "s-1"
+        }
+        """
+        let decoded = try JSONDecoder().decode(ToolDispatchParams.self, from: json.data(using: .utf8)!)
+        XCTAssertEqual(decoded.riskLevel, "safe") // default
+        XCTAssertTrue(decoded.arguments.isEmpty) // default
+    }
+
+    func testToolDispatchParamsMemberwise() {
+        // Memberwise init defaults
+        let params = ToolDispatchParams(toolCallId: "tc-1", toolName: "test", sessionId: "s-1")
+        XCTAssertEqual(params.riskLevel, "safe")
+        XCTAssertTrue(params.arguments.isEmpty)
+    }
+
+    func testApprovalRequestParamsDefaultsWhenDecodingMinimalJSON() throws {
+        // Minimal JSON: only required fields
+        let json = """
+        {
+            "approvalId": "a-1",
+            "toolCallId": "tc-1",
+            "sessionId": "s-1",
+            "toolName": "test",
+            "riskLevel": "sensitive"
+        }
+        """
+        let decoded = try JSONDecoder().decode(ApprovalRequestParams.self, from: json.data(using: .utf8)!)
+        XCTAssertEqual(decoded.reason, "") // default
+        XCTAssertEqual(decoded.argumentsSummary, "") // default
+    }
+
+    @MainActor
+    func testDecodePayloadForApprovalRequest() {
+        // ApprovalRequestParams via decodePayload with sessionId injection
+        let event = BridgeEvent(
+            eventId: "e-1",
+            timestamp: "2024-01-01T00:00:00Z",
+            sessionId: "s-envelope",
+            workspaceId: nil,
+            agentId: nil,
+            eventType: .approvalRequired,
+            payload: .object([
+                "approvalId": .string("a-1"),
+                "toolCallId": .string("tc-1"),
+                "toolName": .string("fs.write"),
+                "riskLevel": .string("sensitive"),
+                "reason": .string("File system access"),
+            ])
+        )
+
+        let decoded: ApprovalRequestParams? = ToolDispatchHandler.decodePayload(event: event)
+        XCTAssertNotNil(decoded)
+        XCTAssertEqual(decoded?.approvalId, "a-1")
+        XCTAssertEqual(decoded?.sessionId, "s-envelope")
+        XCTAssertEqual(decoded?.reason, "File system access")
+        XCTAssertEqual(decoded?.argumentsSummary, "") // default
+    }
 }
