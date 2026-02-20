@@ -104,6 +104,23 @@ final class ToolContextStoreTests: XCTestCase {
         XCTAssertEqual(savedPreference.suppressedCategories, ["calendar"])
     }
 
+    func testUpdateUserPreferenceNormalizesAndDeduplicatesCategories() async throws {
+        let tempDir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let store = ToolContextStore(baseURL: tempDir)
+        let preference = UserToolPreference(
+            preferredCategories: [" Coding ", "coding", "AGENT"],
+            suppressedCategories: [" calendar ", "Calendar", "coding", ""]
+        )
+
+        await store.updateUserPreference(preference, workspaceId: "ws-1")
+        let savedPreference = await store.userPreference(workspaceId: "ws-1")
+
+        XCTAssertEqual(savedPreference.preferredCategories, ["coding", "agent"])
+        XCTAssertEqual(savedPreference.suppressedCategories, ["calendar"])
+    }
+
     func testMalformedJSONFallsBackToEmptyStore() async throws {
         let tempDir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: tempDir) }

@@ -65,7 +65,16 @@ final class ToolContextStore: ToolContextStoreProtocol {
 
     func updateUserPreference(_ preference: UserToolPreference, workspaceId: String) async {
         var file = await load()
-        file.userPreferences[workspaceId] = preference
+        let preferred = Self.normalizedCategories(preference.preferredCategories)
+        let suppressedRaw = Self.normalizedCategories(preference.suppressedCategories)
+        let suppressed = suppressedRaw.filter { !preferred.contains($0) }
+        let normalizedPreference = UserToolPreference(
+            preferredCategories: preferred,
+            suppressedCategories: suppressed,
+            updatedAt: Date()
+        )
+
+        file.userPreferences[workspaceId] = normalizedPreference
         cache = file
         isDirty = true
         scheduleSave()
@@ -126,6 +135,19 @@ private extension ToolContextStore {
 
     static func profileKey(workspaceId: String, agentName: String) -> String {
         "\(workspaceId)::\(agentName)"
+    }
+
+    static func normalizedCategories(_ categories: [String]) -> [String] {
+        var result: [String] = []
+        var seen: Set<String> = []
+        for raw in categories {
+            let normalized = ToolGroupResolver.normalizeGroupName(raw)
+            guard !normalized.isEmpty else { continue }
+            if seen.insert(normalized).inserted {
+                result.append(normalized)
+            }
+        }
+        return result
     }
 
     func applyDecay(to profile: inout ToolContextProfile, now: Date) {
