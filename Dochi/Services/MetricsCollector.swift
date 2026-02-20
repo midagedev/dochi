@@ -108,6 +108,15 @@ final class MetricsCollector {
         )
     }
 
+    var tokenEstimationDriftAlertMessage: String? {
+        guard let report = tokenEstimationDeviationReport, !report.meetsThreshold else { return nil }
+        return String(
+            format: "토큰 추정 drift 경고: p95 %.1f%% (임계 %.1f%%)",
+            report.p95RelativeErrorRatio * 100,
+            report.thresholdRatio * 100
+        )
+    }
+
     /// Aggregate stats for the current session.
     var sessionSummary: SessionMetricsSummary {
         let totalExchanges = recentMetrics.count

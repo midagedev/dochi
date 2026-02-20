@@ -44,7 +44,10 @@ for entry in "${PROVIDER_MATRIX[@]}"; do
     -project Dochi.xcodeproj \
     -scheme Dochi \
     -destination 'platform=macOS' \
-    -only-testing:"DochiTests/${test_class}" >"$log_file" 2>&1; then
+    -only-testing:"DochiTests/${test_class}" \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGN_IDENTITY="" >"$log_file" 2>&1; then
     passed=true
     status_label="PASS"
   else

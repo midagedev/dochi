@@ -1555,6 +1555,12 @@ final class DochiViewModel {
                 estimatedInputTokens: estimatedInputTokens,
                 actualInputTokens: actualInputTokens
             )
+            contextCompactionService.recordObservedInputTokens(
+                provider: provider,
+                model: model,
+                estimatedInputTokens: estimatedInputTokens,
+                actualInputTokens: actualInputTokens
+            )
         }
 
         recordNativeExchangeMetrics(
