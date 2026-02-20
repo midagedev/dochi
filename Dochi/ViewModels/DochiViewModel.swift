@@ -225,6 +225,7 @@ final class DochiViewModel {
     private let nativeSessionStore: NativeSessionStore
     private let contextCompactionService: ContextCompactionService
     private let memoryPipeline: any MemoryPipelineProtocol
+    @ObservationIgnored private var modelRouterV2: ModelRouterV2
 
     /// Optional runtime bridge for SDK session path.
     /// When available and in `.ready` state, input is routed through the SDK session.
@@ -286,7 +287,8 @@ final class DochiViewModel {
         nativeAgentLoopService: NativeAgentLoopService? = nil,
         nativeSessionStore: NativeSessionStore? = nil,
         contextCompactionService: ContextCompactionService? = nil,
-        memoryPipeline: (any MemoryPipelineProtocol)? = nil
+        memoryPipeline: (any MemoryPipelineProtocol)? = nil,
+        modelRouter: ModelRouterV2? = nil
     ) {
         self.toolService = toolService
         self.contextService = contextService
@@ -301,22 +303,66 @@ final class DochiViewModel {
         self.runtimeBridge = runtimeBridge
         let resolvedMemoryPipeline = memoryPipeline ?? MemoryPipelineService(contextService: contextService)
         self.memoryPipeline = resolvedMemoryPipeline
-        self.nativeAgentLoopService = nativeAgentLoopService ?? NativeAgentLoopService(
-            adapters: [
-                AnthropicNativeLLMProviderAdapter(),
-                OpenAINativeLLMProviderAdapter(),
-                ZAINativeLLMProviderAdapter(),
-                OllamaNativeLLMProviderAdapter(),
-                LMStudioNativeLLMProviderAdapter()
-            ],
-            toolService: toolService,
-            memoryPipeline: resolvedMemoryPipeline
-        )
-        if nativeAgentLoopService != nil {
-            self.nativeAgentLoopService.setMemoryPipeline(resolvedMemoryPipeline)
+        let resolvedNativeAgentLoopService: NativeAgentLoopService
+        if let nativeAgentLoopService {
+            nativeAgentLoopService.setMemoryPipeline(resolvedMemoryPipeline)
+            resolvedNativeAgentLoopService = nativeAgentLoopService
+        } else {
+            resolvedNativeAgentLoopService = NativeAgentLoopService(
+                adapters: [
+                    AnthropicNativeLLMProviderAdapter(),
+                    OpenAINativeLLMProviderAdapter(),
+                    ZAINativeLLMProviderAdapter(),
+                    OllamaNativeLLMProviderAdapter(),
+                    LMStudioNativeLLMProviderAdapter()
+                ],
+                toolService: toolService,
+                memoryPipeline: resolvedMemoryPipeline
+            )
         }
+        self.nativeAgentLoopService = resolvedNativeAgentLoopService
         self.nativeSessionStore = nativeSessionStore ?? NativeSessionStore()
         self.contextCompactionService = contextCompactionService ?? ContextCompactionService()
+        if let modelRouter {
+            self.modelRouterV2 = modelRouter
+        } else {
+            self.modelRouterV2 = ModelRouterV2(
+                settings: settings,
+                readinessProbe: { provider in
+                    if provider.isLocal {
+                        switch provider {
+                        case .ollama:
+                            let baseURL = URL(string: settings.ollamaBaseURL)
+                            ?? URL(string: "http://localhost:11434")!
+                            return await OllamaModelFetcher.isAvailable(baseURL: baseURL)
+                        case .lmStudio:
+                            let baseURL = URL(string: settings.lmStudioBaseURL)
+                            ?? URL(string: "http://localhost:1234")!
+                            return await LMStudioModelFetcher.isAvailable(baseURL: baseURL)
+                        default:
+                            return false
+                        }
+                    }
+
+                    guard provider.requiresAPIKey else { return true }
+                    if let key = keychainService.load(account: provider.keychainAccount)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                       !key.isEmpty {
+                        return true
+                    }
+                    if let legacyAccount = provider.legacyAPIKeyAccount,
+                       let legacy = keychainService.load(account: legacyAccount)?
+                       .trimmingCharacters(in: .whitespacesAndNewlines),
+                       !legacy.isEmpty {
+                        return true
+                    }
+                    return false
+                },
+                supportsProvider: { provider in
+                    resolvedNativeAgentLoopService.supports(provider: provider)
+                }
+            )
+        }
 
         // Wire TTS completion callback
         self.ttsService.onComplete = { [weak self] in
@@ -1021,7 +1067,11 @@ final class DochiViewModel {
 
             // Route through native loop.
             processingTask = Task {
-                await processPrimaryLLMPath(input: finalText, includesImages: false)
+                await processPrimaryLLMPath(
+                    input: finalText,
+                    includesImages: false,
+                    channel: .chat
+                )
             }
         } else {
             // Process images off main thread, then send.
@@ -1046,7 +1096,11 @@ final class DochiViewModel {
                 }
                 appendUserMessage(finalText, imageData: imageContents.isEmpty ? nil : imageContents)
                 markCurrentNativeSessionActive()
-                await processPrimaryLLMPath(input: finalText, includesImages: !imageContents.isEmpty)
+                await processPrimaryLLMPath(
+                    input: finalText,
+                    includesImages: !imageContents.isEmpty,
+                    channel: .chat
+                )
             }
         }
     }
@@ -1284,34 +1338,108 @@ final class DochiViewModel {
         }
     }
 
-    private func processPrimaryLLMPath(input: String, includesImages: Bool) async {
-        let provider = settings.currentProvider
+    private enum NativeLoopAttemptResult {
+        case success
+        case failure(reason: String)
+        case cancelled
+    }
 
-        if shouldUseNativeAgentLoop(provider: provider, includesImages: includesImages) {
-            _ = await processNativeAgentLoop(input: input)
+    private func processPrimaryLLMPath(
+        input: String,
+        includesImages: Bool,
+        channel: ModelRoutingChannel
+    ) async {
+        guard !Task.isCancelled else { return }
+        guard settings.nativeAgentLoopEnabled else {
+            errorMessage = "네이티브 에이전트 루프가 비활성화되어 있습니다."
+            processingSubState = nil
+            currentToolName = nil
+            transition(to: .idle)
             return
         }
 
-        errorMessage = "현재 제공자(\(provider.displayName))는 네이티브 에이전트 루프를 아직 지원하지 않습니다."
-        processingSubState = nil
-        currentToolName = nil
-        transition(to: .idle)
-        Log.runtime.warning("Native loop unavailable for provider \(provider.rawValue)")
-    }
-
-    private func shouldUseNativeAgentLoop(provider: LLMProvider, includesImages: Bool) -> Bool {
-        guard settings.nativeAgentLoopEnabled else { return false }
         if includesImages {
             Log.runtime.debug("Native loop will process image message as text-first request")
         }
-        return nativeAgentLoopService.supports(provider: provider)
+
+        let decision = await modelRouterV2.decide(input: ModelRoutingInput(
+            userInput: input,
+            channel: channel,
+            includesImages: includesImages
+        ))
+        Log.runtime.info("ModelRouterV2 decision: \(decision.summary)")
+
+        let targets = decision.orderedReadyTargets
+        guard !targets.isEmpty else {
+            errorMessage = "사용 가능한 네이티브 provider가 없습니다. API 키/로컬 서버 상태를 확인해주세요."
+            processingSubState = nil
+            currentToolName = nil
+            transition(to: .idle)
+            return
+        }
+
+        var lastFailureReason: String?
+
+        for (index, target) in targets.enumerated() {
+            guard !Task.isCancelled else { return }
+
+            if index > 0 {
+                processingSubState = .streaming
+                Log.runtime.warning(
+                    "ModelRouterV2 fallback attempt \(index + 1)/\(targets.count): \(target.provider.rawValue)/\(target.model)"
+                )
+            }
+
+            let result = await processNativeAgentLoop(
+                input: input,
+                provider: target.provider,
+                model: target.model
+            )
+
+            switch result {
+            case .success:
+                modelRouterV2.recordAttempt(provider: target.provider, success: true)
+                errorMessage = nil
+                processingSubState = nil
+                currentToolName = nil
+                transition(to: .idle)
+                return
+            case .failure(let reason):
+                modelRouterV2.recordAttempt(provider: target.provider, success: false)
+                lastFailureReason = reason
+                streamingText = ""
+                processingSubState = .streaming
+                currentToolName = nil
+            case .cancelled:
+                errorMessage = nil
+                streamingText = ""
+                processingSubState = nil
+                currentToolName = nil
+                transition(to: .idle)
+                return
+            }
+        }
+
+        guard !Task.isCancelled else { return }
+        errorMessage = "네이티브 루프 오류: \(lastFailureReason ?? "사용 가능한 provider가 없습니다.")"
+        processingSubState = nil
+        currentToolName = nil
+        transition(to: .idle)
     }
 
-    private func processNativeAgentLoop(input _: String) async -> Bool {
+    private func processNativeAgentLoop(
+        input _: String,
+        provider: LLMProvider,
+        model: String
+    ) async -> NativeLoopAttemptResult {
         var fallbackReason: String?
+        var cancelled = false
 
         do {
-            let request = try buildNativeLLMRequestFromConversation()
+            let request = try buildNativeLLMRequestFromConversation(
+                provider: provider,
+                model: model
+            )
             let nativeHookContext = NativeAgentLoopHookContext(
                 sessionId: currentConversation?.id.uuidString ?? UUID().uuidString,
                 workspaceId: sessionContext.workspaceId.uuidString,
@@ -1366,14 +1494,20 @@ final class DochiViewModel {
                         statusCode: nil,
                         retryAfterSeconds: nil
                     )
-                    fallbackReason = nativeError.message
-                    Log.runtime.warning("Native loop emitted error event: \(nativeError.message)")
+                    if nativeError.code == .cancelled {
+                        cancelled = true
+                        Log.runtime.info("Native loop cancelled by provider event")
+                    } else {
+                        fallbackReason = nativeError.message
+                        Log.runtime.warning("Native loop emitted error event: \(nativeError.message)")
+                    }
                     break eventLoop
                 }
             }
         } catch let error as NativeLLMError {
             if error.code == .cancelled {
                 Log.runtime.info("Native loop cancelled")
+                cancelled = true
             } else {
                 fallbackReason = error.message
                 Log.runtime.error("Native loop failed: \(error.message)")
@@ -1383,13 +1517,14 @@ final class DochiViewModel {
             Log.runtime.error("Native loop failed: \(error.localizedDescription)")
         }
 
+        if cancelled {
+            streamingText = ""
+            return .cancelled
+        }
+
         if let fallbackReason {
             streamingText = ""
-            processingSubState = nil
-            currentToolName = nil
-            errorMessage = "네이티브 루프 오류: \(fallbackReason)"
-            transition(to: .idle)
-            return true
+            return .failure(reason: fallbackReason)
         }
 
         // Clean up
@@ -1397,10 +1532,7 @@ final class DochiViewModel {
             appendAssistantMessage(streamingText)
             streamingText = ""
         }
-        processingSubState = nil
-        currentToolName = nil
-        transition(to: .idle)
-        return true
+        return .success
     }
 
     /// Process user input through the SDK runtime session.
@@ -2256,7 +2388,11 @@ final class DochiViewModel {
         processingSubState = .streaming
 
         processingTask = Task {
-            await processPrimaryLLMPath(input: cleanedText, includesImages: false)
+            await processPrimaryLLMPath(
+                input: cleanedText,
+                includesImages: false,
+                channel: .voice
+            )
         }
     }
 
@@ -2801,7 +2937,9 @@ final class DochiViewModel {
 
     private func buildNativeLLMRequestFromConversation(
         conversation: Conversation? = nil,
-        channelMetadata: String? = nil
+        channelMetadata: String? = nil,
+        provider overrideProvider: LLMProvider? = nil,
+        model overrideModel: String? = nil
     ) throws -> NativeLLMRequest {
         guard let conversation = conversation ?? currentConversation else {
             throw NativeLLMError(
@@ -2812,8 +2950,9 @@ final class DochiViewModel {
             )
         }
 
-        let provider = settings.currentProvider
-        let model = settings.llmModel
+        let provider = overrideProvider ?? settings.currentProvider
+        let candidateModel = (overrideModel ?? settings.llmModel).trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = candidateModel.isEmpty ? provider.onboardingDefaultModel : candidateModel
         let capabilities = ProviderCapabilityMatrix.capabilities(
             for: provider,
             model: model
@@ -2845,7 +2984,7 @@ final class DochiViewModel {
             return contextService.loadUserMemory(userId: userId) ?? ""
         }()
 
-        let contextWindow = settings.currentProvider.contextWindowTokens(for: settings.llmModel)
+        let contextWindow = provider.contextWindowTokens(for: model)
         let reservedOutputTokens = min(4_096, max(contextWindow / 5, 1_024))
         let configuredBudgetTokens = max(settings.contextMaxSize / 2, 1)
         let maxInputBudget = max(contextWindow - reservedOutputTokens, 1)
