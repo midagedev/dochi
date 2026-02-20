@@ -47,6 +47,7 @@ struct ContextCompactionResult: Sendable {
 @MainActor
 final class ContextCompactionService {
     private static let minimumWorkingBudgetTokens = 256
+    private static let minimumRetainedMessages = 5
     private static let memoryBudgetRatio = 0.35
     private static let workspaceLayerRatio = 0.50
     private static let agentLayerRatio = 0.30
@@ -90,53 +91,65 @@ final class ContextCompactionService {
         var truncatedAgent = false
         var truncatedPersonal = false
 
+        var compactedMessages = request.messages
+        var droppedMessages: [NativeLLMMessage] = []
         let shouldCompact = request.autoCompactEnabled || originalTotal > workingBudget
         if shouldCompact {
-            let memoryBudget = max(
-                Int(Double(workingBudget) * Self.memoryBudgetRatio),
+            while totalTokens(
+                workspaceMemory: workspaceMemory,
+                agentMemory: agentMemory,
+                personalMemory: personalMemory,
+                messages: compactedMessages
+            ) > workingBudget, compactedMessages.count > Self.minimumRetainedMessages {
+                droppedMessages.append(compactedMessages.removeFirst())
+            }
+
+            let availableLayerBudget = max(
+                workingBudget - estimateTokens(for: compactedMessages),
                 Self.minimumWorkingBudgetTokens / 2
             )
-            let workspaceBudget = max(Int(Double(memoryBudget) * Self.workspaceLayerRatio), 32)
-            let agentBudget = max(Int(Double(memoryBudget) * Self.agentLayerRatio), 32)
-            let personalBudget = max(Int(Double(memoryBudget) * Self.personalLayerRatio), 32)
+            let currentLayerTokens = estimateTokens(for: workspaceMemory) +
+                estimateTokens(for: agentMemory) +
+                estimateTokens(for: personalMemory)
 
-            let workspaceResult = trimText(
-                workspaceMemory,
-                tokenBudget: workspaceBudget,
-                note: "[워크스페이스 메모리 축약됨]"
-            )
-            workspaceMemory = workspaceResult.text
-            truncatedWorkspace = workspaceResult.truncated
+            if currentLayerTokens > availableLayerBudget {
+                let memoryBudget = max(
+                    Int(Double(availableLayerBudget) * Self.memoryBudgetRatio),
+                    Self.minimumWorkingBudgetTokens / 2
+                )
+                let workspaceBudget = max(Int(Double(memoryBudget) * Self.workspaceLayerRatio), 32)
+                let agentBudget = max(Int(Double(memoryBudget) * Self.agentLayerRatio), 32)
+                let personalBudget = max(Int(Double(memoryBudget) * Self.personalLayerRatio), 32)
 
-            let agentResult = trimText(
-                agentMemory,
-                tokenBudget: agentBudget,
-                note: "[에이전트 메모리 축약됨]"
-            )
-            agentMemory = agentResult.text
-            truncatedAgent = agentResult.truncated
+                let workspaceResult = trimText(
+                    workspaceMemory,
+                    tokenBudget: workspaceBudget,
+                    note: "[워크스페이스 메모리 축약됨]"
+                )
+                workspaceMemory = workspaceResult.text
+                truncatedWorkspace = workspaceResult.truncated
 
-            let personalResult = trimText(
-                personalMemory,
-                tokenBudget: personalBudget,
-                note: "[개인 메모리 축약됨]"
-            )
-            personalMemory = personalResult.text
-            truncatedPersonal = personalResult.truncated
+                let agentResult = trimText(
+                    agentMemory,
+                    tokenBudget: agentBudget,
+                    note: "[에이전트 메모리 축약됨]"
+                )
+                agentMemory = agentResult.text
+                truncatedAgent = agentResult.truncated
+
+                let personalResult = trimText(
+                    personalMemory,
+                    tokenBudget: personalBudget,
+                    note: "[개인 메모리 축약됨]"
+                )
+                personalMemory = personalResult.text
+                truncatedPersonal = personalResult.truncated
+            }
         }
 
         let compactedLayerTokens = estimateTokens(for: workspaceMemory) +
             estimateTokens(for: agentMemory) +
             estimateTokens(for: personalMemory)
-        let messageBudget = max(workingBudget - compactedLayerTokens, 64)
-
-        var compactedMessages = request.messages
-        var droppedMessages: [NativeLLMMessage] = []
-        if shouldCompact && estimateTokens(for: compactedMessages) > messageBudget {
-            while compactedMessages.count > 1, estimateTokens(for: compactedMessages) > messageBudget {
-                droppedMessages.append(compactedMessages.removeFirst())
-            }
-        }
 
         var summarySnapshot: String?
         var usedSummaryFallback = false
@@ -145,18 +158,13 @@ final class ContextCompactionService {
                 droppedMessages: droppedMessages,
                 conversationSummary: request.conversationSummary
             )
-            if let summarySnapshot {
-                let summaryMessage = NativeLLMMessage(role: .assistant, text: summarySnapshot)
-                compactedMessages.insert(summaryMessage, at: 0)
-                usedSummaryFallback = true
-            }
+            usedSummaryFallback = summarySnapshot != nil
         }
 
+        let messageBudget = max(workingBudget - compactedLayerTokens, 48)
         if estimateTokens(for: compactedMessages) > messageBudget {
             compactedMessages = compactFailSafeMessages(
                 currentMessages: compactedMessages,
-                droppedMessages: droppedMessages,
-                conversationSummary: request.conversationSummary,
                 messageBudget: messageBudget
             )
             if summarySnapshot == nil {
@@ -200,6 +208,18 @@ final class ContextCompactionService {
 }
 
 private extension ContextCompactionService {
+    func totalTokens(
+        workspaceMemory: String,
+        agentMemory: String,
+        personalMemory: String,
+        messages: [NativeLLMMessage]
+    ) -> Int {
+        estimateTokens(for: workspaceMemory) +
+            estimateTokens(for: agentMemory) +
+            estimateTokens(for: personalMemory) +
+            estimateTokens(for: messages)
+    }
+
     func trimText(_ text: String, tokenBudget: Int, note: String) -> (text: String, truncated: Bool) {
         guard !text.isEmpty else { return ("", false) }
         let maxChars = max(tokenBudget * 2, 0)
@@ -213,29 +233,35 @@ private extension ContextCompactionService {
 
     func compactFailSafeMessages(
         currentMessages: [NativeLLMMessage],
-        droppedMessages: [NativeLLMMessage],
-        conversationSummary: String?,
         messageBudget: Int
     ) -> [NativeLLMMessage] {
-        guard let lastMessage = currentMessages.last else {
+        guard !currentMessages.isEmpty else {
             return []
         }
 
-        var failSafeMessages: [NativeLLMMessage] = []
-        if let summary = makeSummarySnapshot(droppedMessages: droppedMessages, conversationSummary: conversationSummary) {
-            let summaryChars = min(Self.maxSummaryChars, max(messageBudget * 2 / 3, 120))
-            failSafeMessages.append(
-                NativeLLMMessage(role: .assistant, text: String(summary.prefix(summaryChars)))
-            )
-        }
-
-        let remainingBudget = max(messageBudget - estimateTokens(for: failSafeMessages), 48)
-        failSafeMessages.append(trimmedMessage(lastMessage, tokenBudget: remainingBudget))
+        let preferredCount = min(Self.minimumRetainedMessages, currentMessages.count)
+        var failSafeMessages = Array(currentMessages.suffix(preferredCount))
 
         if estimateTokens(for: failSafeMessages) <= messageBudget {
             return failSafeMessages
         }
 
+        let perMessageBudget = max(messageBudget / max(failSafeMessages.count, 1), 16)
+        failSafeMessages = failSafeMessages.map { trimmedMessage($0, tokenBudget: perMessageBudget) }
+
+        if estimateTokens(for: failSafeMessages) <= messageBudget {
+            return failSafeMessages
+        }
+
+        while estimateTokens(for: failSafeMessages) > messageBudget, failSafeMessages.count > 1 {
+            failSafeMessages.removeFirst()
+        }
+
+        if estimateTokens(for: failSafeMessages) <= messageBudget {
+            return failSafeMessages
+        }
+
+        guard let lastMessage = failSafeMessages.last else { return [] }
         return [trimmedMessage(lastMessage, tokenBudget: messageBudget)]
     }
 

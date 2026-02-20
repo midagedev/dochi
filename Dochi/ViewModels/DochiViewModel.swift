@@ -2855,8 +2855,9 @@ final class DochiViewModel {
 
         let contextWindow = settings.currentProvider.contextWindowTokens(for: settings.llmModel)
         let reservedOutputTokens = min(4_096, max(contextWindow / 5, 1_024))
-        let configuredBudget = max(settings.contextMaxSize, 1_024)
-        let tokenBudget = max(1_024, min(contextWindow - reservedOutputTokens, configuredBudget))
+        let configuredBudgetTokens = max(settings.contextMaxSize / 2, 1)
+        let maxInputBudget = max(contextWindow - reservedOutputTokens, 1)
+        let tokenBudget = min(maxInputBudget, configuredBudgetTokens)
 
         let fixedPrompt = composeSystemPrompt(
             workspaceMemoryOverride: "",
@@ -2898,7 +2899,16 @@ final class DochiViewModel {
         )
         let compactedInputTokens = contextCompactionService.estimateTokens(for: compactedSystemPrompt) +
             contextCompactionService.estimateTokens(for: compaction.messages)
-        let maxTokens = max(256, min(4_096, contextWindow - compactedInputTokens - 512))
+        let outputTokenHeadroom = contextWindow - compactedInputTokens - 512
+        guard outputTokenHeadroom > 0 else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "컨텍스트 예산이 부족합니다. contextMaxSize를 늘리거나 대화를 정리한 뒤 다시 시도해주세요.",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+        let maxTokens = min(4_096, outputTokenHeadroom)
 
         return NativeLLMRequest(
             provider: provider,

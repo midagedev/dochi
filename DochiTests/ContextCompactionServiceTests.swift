@@ -71,15 +71,66 @@ final class ContextCompactionServiceTests: XCTestCase {
         XCTAssertGreaterThan(result.metrics.droppedMessageCount, 0)
         XCTAssertTrue(result.metrics.usedSummaryFallback)
         XCTAssertNotNil(result.summarySnapshot)
-        XCTAssertEqual(result.messages.first?.role, .assistant)
-        let firstText: String = {
-            guard let first = result.messages.first else { return "" }
-            return first.contents.map {
-                if case .text(let text) = $0 { return text }
-                return ""
-            }.joined()
-        }()
-        XCTAssertTrue(firstText.contains("요약 스냅샷"))
+        XCTAssertFalse(messageText(result.messages.first).contains("요약 스냅샷"))
+    }
+
+    func testCompactionKeepsAtLeastFiveRecentMessagesWhenBudgetAllows() {
+        let messages = (0..<10).map { index in
+            NativeLLMMessage(
+                role: index % 2 == 0 ? .user : .assistant,
+                text: "message-\(index) " + String(repeating: "x", count: 300)
+            )
+        }
+
+        let result = service.compact(
+            request: ContextCompactionRequest(
+                workspaceMemory: "",
+                agentMemory: "",
+                personalMemory: "",
+                messages: messages,
+                tokenBudget: 820,
+                fixedPromptTokens: 0,
+                autoCompactEnabled: true,
+                conversationSummary: nil
+            )
+        )
+
+        XCTAssertEqual(result.messages.count, 5)
+        XCTAssertEqual(result.metrics.droppedMessageCount, 5)
+        XCTAssertTrue(messageText(result.messages.first).contains("message-5"))
+    }
+
+    func testCompactionDropsMessagesBeforeTruncatingMemoryLayers() {
+        let workspaceMemory = String(repeating: "W", count: 320)
+        let agentMemory = String(repeating: "A", count: 240)
+        let personalMemory = String(repeating: "P", count: 240)
+        let messages = (0..<10).map { index in
+            NativeLLMMessage(
+                role: index % 2 == 0 ? .user : .assistant,
+                text: "message-\(index) " + String(repeating: "x", count: 200)
+            )
+        }
+
+        let result = service.compact(
+            request: ContextCompactionRequest(
+                workspaceMemory: workspaceMemory,
+                agentMemory: agentMemory,
+                personalMemory: personalMemory,
+                messages: messages,
+                tokenBudget: 1_000,
+                fixedPromptTokens: 0,
+                autoCompactEnabled: true,
+                conversationSummary: nil
+            )
+        )
+
+        XCTAssertEqual(result.metrics.droppedMessageCount, 5)
+        XCTAssertFalse(result.metrics.truncatedWorkspaceMemory)
+        XCTAssertFalse(result.metrics.truncatedAgentMemory)
+        XCTAssertFalse(result.metrics.truncatedPersonalMemory)
+        XCTAssertEqual(result.layers.workspaceMemory, workspaceMemory)
+        XCTAssertEqual(result.layers.agentMemory, agentMemory)
+        XCTAssertEqual(result.layers.personalMemory, personalMemory)
     }
 
     func testFailSafeKeepsRequestWithinBudgetEvenWhenAutoCompactIsDisabled() {
@@ -109,5 +160,13 @@ final class ContextCompactionServiceTests: XCTestCase {
         XCTAssertEqual(result.messages.last?.role, .user)
         XCTAssertLessThanOrEqual(result.metrics.estimatedInputTokensAfter, result.metrics.tokenBudget)
         XCTAssertTrue(result.metrics.didCompact)
+    }
+
+    private func messageText(_ message: NativeLLMMessage?) -> String {
+        guard let message else { return "" }
+        return message.contents.map {
+            if case .text(let text) = $0 { return text }
+            return ""
+        }.joined()
     }
 }
