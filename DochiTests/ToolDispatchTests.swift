@@ -487,4 +487,138 @@ final class ToolDispatchTests: XCTestCase {
         XCTAssertEqual(decoded?.reason, "File system access")
         XCTAssertEqual(decoded?.argumentsSummary, "") // default
     }
+
+    // MARK: - executeWithTimeout TaskGroup Race Tests (#305)
+
+    @MainActor
+    func testExecuteWithTimeout_FastExecution_ReturnsNormally() async {
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.stubbedResult = ToolResult(toolCallId: "tc-fast", content: "fast result")
+        // No delay -- tool finishes immediately
+
+        let handler = ToolDispatchHandler(toolService: mockToolService)
+
+        let result = await handler.executeWithTimeout(
+            toolName: "test.fast",
+            toolCallId: "tc-fast",
+            arguments: ["key": "value"],
+            timeout: 5
+        )
+
+        XCTAssertEqual(result.content, "fast result")
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(mockToolService.executeCallCount, 1)
+    }
+
+    @MainActor
+    func testExecuteWithTimeout_SlowExecution_ReturnsTimeout() async {
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.stubbedResult = ToolResult(toolCallId: "tc-slow", content: "should not see this")
+        mockToolService.executeDelay = .seconds(10) // Much longer than timeout
+
+        let handler = ToolDispatchHandler(toolService: mockToolService)
+
+        let result = await handler.executeWithTimeout(
+            toolName: "test.slow",
+            toolCallId: "tc-slow",
+            arguments: [:],
+            timeout: 0.1 // 100ms timeout
+        )
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("timed out"))
+        XCTAssertTrue(result.content.contains("test.slow"))
+    }
+
+    @MainActor
+    func testExecuteWithTimeout_ArgumentsForwarded() async {
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.stubbedResult = ToolResult(toolCallId: "tc-args", content: "ok")
+
+        let handler = ToolDispatchHandler(toolService: mockToolService)
+
+        let args: [String: Any] = ["query": "hello", "count": 42]
+        let _ = await handler.executeWithTimeout(
+            toolName: "test.args",
+            toolCallId: "tc-args",
+            arguments: args,
+            timeout: 5
+        )
+
+        XCTAssertEqual(mockToolService.lastExecutedName, "test.args")
+        XCTAssertEqual(mockToolService.lastArguments?["query"] as? String, "hello")
+        XCTAssertEqual(mockToolService.lastArguments?["count"] as? Int, 42)
+    }
+
+    @MainActor
+    func testExecuteWithTimeout_TimeoutIncludesToolNameAndDuration() async {
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.executeDelay = .seconds(10)
+
+        let handler = ToolDispatchHandler(toolService: mockToolService)
+
+        let result = await handler.executeWithTimeout(
+            toolName: "fs.write",
+            toolCallId: "tc-msg",
+            arguments: [:],
+            timeout: 0.05
+        )
+
+        XCTAssertTrue(result.isError)
+        XCTAssertEqual(result.toolCallId, "tc-msg")
+        // Verify the error message includes tool name and timeout duration
+        XCTAssertTrue(result.content.contains("fs.write"))
+        XCTAssertTrue(result.content.contains("0"))  // Int(0.05) == 0
+    }
+
+    @MainActor
+    func testExecuteWithTimeout_ReturnsWithinExpectedTime() async {
+        // Verify the function actually returns promptly on timeout
+        // rather than blocking until the tool finishes.
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.executeDelay = .seconds(60)  // tool would take 60s
+
+        let handler = ToolDispatchHandler(toolService: mockToolService)
+
+        let start = ContinuousClock.now
+        let result = await handler.executeWithTimeout(
+            toolName: "test.blocking",
+            toolCallId: "tc-time",
+            arguments: [:],
+            timeout: 0.1
+        )
+        let elapsed = ContinuousClock.now - start
+
+        XCTAssertTrue(result.isError)
+        // Should return well within 2 seconds, not wait 60s for the tool
+        XCTAssertLessThan(elapsed, .seconds(2))
+    }
+
+    @MainActor
+    func testExecuteWithTimeout_ConcurrentCallsDoNotInterfere() async {
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.stubbedResult = ToolResult(toolCallId: "tc-conc", content: "concurrent ok")
+
+        let handler = ToolDispatchHandler(toolService: mockToolService)
+
+        // Launch multiple concurrent executeWithTimeout calls
+        async let r1 = handler.executeWithTimeout(
+            toolName: "tool.a", toolCallId: "tc-1", arguments: [:], timeout: 5
+        )
+        async let r2 = handler.executeWithTimeout(
+            toolName: "tool.b", toolCallId: "tc-2", arguments: [:], timeout: 5
+        )
+        async let r3 = handler.executeWithTimeout(
+            toolName: "tool.c", toolCallId: "tc-3", arguments: [:], timeout: 5
+        )
+
+        let results = await [r1, r2, r3]
+
+        // All should complete successfully (no cross-contamination)
+        for result in results {
+            XCTAssertFalse(result.isError)
+            XCTAssertEqual(result.content, "concurrent ok")
+        }
+        XCTAssertEqual(mockToolService.executeCallCount, 3)
+    }
 }
