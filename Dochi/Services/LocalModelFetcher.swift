@@ -39,22 +39,6 @@ enum OllamaModelFetcher {
         }
     }
 
-    /// Known model families that support tool/function calling in Ollama.
-    private static let toolSupportedFamilies: Set<String> = [
-        "llama", "mistral", "mixtral", "qwen", "qwen2", "qwen2.5",
-        "command-r", "firefunction", "hermes", "nous-hermes",
-    ]
-
-    /// Known model name patterns that indicate tool support.
-    private static let toolSupportedPatterns: [String] = [
-        "llama3", "llama3.1", "llama3.2", "llama3.3",
-        "mistral", "mixtral",
-        "qwen2", "qwen2.5",
-        "command-r",
-        "firefunction",
-        "hermes",
-    ]
-
     private static let retryDelaysNanoseconds: [UInt64] = [
         0,
         250_000_000,
@@ -100,14 +84,10 @@ enum OllamaModelFetcher {
 
     /// Detect whether a model likely supports tool/function calling.
     static func detectToolSupport(modelName: String, family: String?) -> Bool {
-        // Check family
-        if let family, toolSupportedFamilies.contains(family.lowercased()) {
-            return true
-        }
-
-        // Check model name patterns
-        let lowerName = modelName.lowercased()
-        return toolSupportedPatterns.contains { lowerName.contains($0) }
+        ProviderCapabilityMatrix.supportsLocalToolCalling(
+            model: modelName,
+            familyHint: family
+        )
     }
 
     /// Check if Ollama is running (with short retry/backoff).

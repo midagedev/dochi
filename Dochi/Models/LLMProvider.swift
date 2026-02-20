@@ -176,3 +176,84 @@ enum LocalServerStatus: String, Sendable {
     case disconnected
     case checking
 }
+
+// MARK: - Provider Capability Matrix
+
+/// Declarative capability set for a provider/model pair.
+struct ProviderCapabilities: Sendable, Equatable {
+    let supportsToolCalling: Bool
+    let supportsVision: Bool
+    let supportsJSONOutput: Bool
+    let supportsOutputTokenReporting: Bool
+    let supportsStreamUsage: Bool
+}
+
+/// Capability matrix used to validate requests and apply predictable fallback behavior.
+enum ProviderCapabilityMatrix {
+    private static let localToolSupportedFamilies: Set<String> = [
+        "llama", "mistral", "mixtral", "qwen", "qwen2", "qwen2.5",
+        "command-r", "firefunction", "hermes", "nous-hermes",
+    ]
+
+    private static let localToolSupportedPatterns: [String] = [
+        "llama3", "llama3.1", "llama3.2", "llama3.3",
+        "mistral", "mixtral",
+        "qwen2", "qwen2.5",
+        "command-r",
+        "firefunction",
+        "hermes",
+    ]
+
+    static func capabilities(
+        for provider: LLMProvider,
+        model: String,
+        familyHint: String? = nil
+    ) -> ProviderCapabilities {
+        switch provider {
+        case .openai:
+            return ProviderCapabilities(
+                supportsToolCalling: true,
+                supportsVision: provider.supportsVision(model: model),
+                supportsJSONOutput: true,
+                supportsOutputTokenReporting: true,
+                supportsStreamUsage: true
+            )
+        case .anthropic:
+            return ProviderCapabilities(
+                supportsToolCalling: true,
+                supportsVision: provider.supportsVision(model: model),
+                supportsJSONOutput: true,
+                supportsOutputTokenReporting: false,
+                supportsStreamUsage: false
+            )
+        case .zai:
+            return ProviderCapabilities(
+                supportsToolCalling: true,
+                supportsVision: provider.supportsVision(model: model),
+                supportsJSONOutput: true,
+                supportsOutputTokenReporting: true,
+                supportsStreamUsage: true
+            )
+        case .ollama, .lmStudio:
+            return ProviderCapabilities(
+                supportsToolCalling: supportsLocalToolCalling(
+                    model: model,
+                    familyHint: familyHint
+                ),
+                supportsVision: provider.supportsVision(model: model),
+                supportsJSONOutput: false,
+                supportsOutputTokenReporting: false,
+                supportsStreamUsage: false
+            )
+        }
+    }
+
+    static func supportsLocalToolCalling(model: String, familyHint: String? = nil) -> Bool {
+        if let familyHint,
+           localToolSupportedFamilies.contains(familyHint.lowercased()) {
+            return true
+        }
+        let lowerModel = model.lowercased()
+        return localToolSupportedPatterns.contains { lowerModel.contains($0) }
+    }
+}
