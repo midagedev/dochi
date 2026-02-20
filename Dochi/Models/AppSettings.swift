@@ -795,7 +795,7 @@ final class AppSettings {
     }
 
     /// Native agent loop execution path toggle.
-    /// When disabled, DochiViewModel falls back to SDK runtime session path.
+    /// When disabled, chat request execution is blocked with a user-facing error.
     var nativeAgentLoopEnabled: Bool = UserDefaults.standard.object(forKey: "nativeAgentLoopEnabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(nativeAgentLoopEnabled, forKey: "nativeAgentLoopEnabled") }
     }
