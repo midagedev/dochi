@@ -115,6 +115,71 @@ final class NativeSessionRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeRequestDropsToolsWhenCapabilityUnsupported() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+
+        let adapter = StubNativeProviderAdapter(
+            provider: .lmStudio,
+            eventsPerRequest: [[.done(text: "native-response")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedSchemas = [sampleToolSchema()]
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            provider: .lmStudio,
+            nativeLoopService: nativeService,
+            toolService: toolService,
+            model: "tinyllama"
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(220))
+
+        let request = try XCTUnwrap(adapter.receivedRequests.first)
+        XCTAssertTrue(request.tools.isEmpty)
+    }
+
+    @MainActor
+    func testNativeRequestKeepsToolsWhenCapabilitySupported() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+
+        let adapter = StubNativeProviderAdapter(
+            provider: .ollama,
+            eventsPerRequest: [[.done(text: "native-response")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedSchemas = [sampleToolSchema()]
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            provider: .ollama,
+            nativeLoopService: nativeService,
+            toolService: toolService,
+            model: "llama3.2"
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(220))
+
+        let request = try XCTUnwrap(adapter.receivedRequests.first)
+        XCTAssertEqual(request.tools.count, 1)
+        XCTAssertEqual(request.tools.first?.name, "calendar.create")
+    }
+
+    @MainActor
     func testTelegramMessageUsesNativeLoopAndSkipsRuntimeBridge() async {
         let bridge = MockRuntimeBridgeService()
         bridge.runtimeState = .ready
@@ -157,16 +222,19 @@ final class NativeSessionRoutingTests: XCTestCase {
         bridge: MockRuntimeBridgeService,
         provider: LLMProvider,
         nativeLoopService: NativeAgentLoopService,
-        telegramStreamReplies: Bool = false
+        telegramStreamReplies: Bool = false,
+        toolService: MockBuiltInToolService? = nil,
+        model: String? = nil
     ) -> DochiViewModel {
+        let resolvedToolService = toolService ?? MockBuiltInToolService()
         let settings = AppSettings()
         settings.nativeAgentLoopEnabled = true
         settings.llmProvider = provider.rawValue
-        settings.llmModel = provider.onboardingDefaultModel
+        settings.llmModel = model ?? provider.onboardingDefaultModel
         settings.telegramStreamReplies = telegramStreamReplies
 
         return DochiViewModel(
-            toolService: MockBuiltInToolService(),
+            toolService: resolvedToolService,
             contextService: MockContextService(),
             conversationService: MockConversationService(),
             keychainService: MockKeychainService(),
@@ -179,6 +247,24 @@ final class NativeSessionRoutingTests: XCTestCase {
             nativeAgentLoopService: nativeLoopService
         )
     }
+
+    func sampleToolSchema() -> [String: Any] {
+        [
+            "function": [
+                "name": "calendar.create",
+                "description": "create calendar event",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "title": [
+                            "type": "string"
+                        ]
+                    ],
+                    "required": ["title"]
+                ]
+            ]
+        ]
+    }
 }
 
 private final class StubNativeProviderAdapter: @unchecked Sendable, NativeLLMProviderAdapter {
@@ -186,6 +272,7 @@ private final class StubNativeProviderAdapter: @unchecked Sendable, NativeLLMPro
     private let eventsPerRequest: [[NativeLLMStreamEvent]]
     private let errorsPerRequest: [Error?]
     private(set) var callCount: Int = 0
+    private(set) var receivedRequests: [NativeLLMRequest] = []
 
     init(
         provider: LLMProvider,
@@ -197,11 +284,12 @@ private final class StubNativeProviderAdapter: @unchecked Sendable, NativeLLMPro
         self.errorsPerRequest = errorsPerRequest
     }
 
-    func stream(request _: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
+    func stream(request: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
         let index = min(callCount, max(0, eventsPerRequest.count - 1))
         let events = eventsPerRequest.isEmpty ? [] : eventsPerRequest[index]
         let error = errorsPerRequest.isEmpty ? nil : errorsPerRequest[min(index, errorsPerRequest.count - 1)]
         callCount += 1
+        receivedRequests.append(request)
 
         return AsyncThrowingStream { continuation in
             Task {

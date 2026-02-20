@@ -372,6 +372,61 @@ final class ModelTests: XCTestCase {
         XCTAssertNil(LLMProvider.provider(forModel: "unknown-model"))
     }
 
+    func testProviderCapabilityMatrixForOpenAIModel() {
+        let capabilities = ProviderCapabilityMatrix.capabilities(
+            for: .openai,
+            model: "gpt-4o-mini"
+        )
+
+        XCTAssertTrue(capabilities.supportsToolCalling)
+        XCTAssertTrue(capabilities.supportsVision)
+        XCTAssertTrue(capabilities.supportsJSONOutput)
+        XCTAssertTrue(capabilities.supportsOutputTokenReporting)
+        XCTAssertTrue(capabilities.supportsStreamUsage)
+    }
+
+    func testProviderCapabilityMatrixForAnthropicModel() {
+        let capabilities = ProviderCapabilityMatrix.capabilities(
+            for: .anthropic,
+            model: "claude-sonnet-4-5-20250514"
+        )
+
+        XCTAssertTrue(capabilities.supportsToolCalling)
+        XCTAssertTrue(capabilities.supportsVision)
+        XCTAssertTrue(capabilities.supportsJSONOutput)
+        XCTAssertFalse(capabilities.supportsOutputTokenReporting)
+        XCTAssertFalse(capabilities.supportsStreamUsage)
+    }
+
+    func testProviderCapabilityMatrixLocalToolHeuristic() {
+        let supported = ProviderCapabilityMatrix.capabilities(
+            for: .ollama,
+            model: "llama3.2"
+        )
+        let unsupported = ProviderCapabilityMatrix.capabilities(
+            for: .lmStudio,
+            model: "tinyllama"
+        )
+
+        XCTAssertTrue(supported.supportsToolCalling)
+        XCTAssertFalse(unsupported.supportsToolCalling)
+    }
+
+    func testProviderCapabilityMatrixLocalToolHeuristicUsesFamilyHint() {
+        XCTAssertTrue(
+            ProviderCapabilityMatrix.supportsLocalToolCalling(
+                model: "corp-model-v1",
+                familyHint: "mistral"
+            )
+        )
+        XCTAssertFalse(
+            ProviderCapabilityMatrix.supportsLocalToolCalling(
+                model: "corp-model-v1",
+                familyHint: "unknown-family"
+            )
+        )
+    }
+
     // MARK: - LLMProvider.onboardingDefaultModel
 
     func testOnboardingDefaultModelCloudProvidersUseModelListFirstEntry() {
@@ -565,4 +620,3 @@ final class TaskComplexityTests: XCTestCase {
         XCTAssertEqual(TaskComplexity.heavy.displayName, "고급")
     }
 }
-

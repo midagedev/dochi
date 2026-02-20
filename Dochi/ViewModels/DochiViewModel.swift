@@ -976,7 +976,11 @@ final class DochiViewModel {
         if hasImages {
             let provider = settings.currentProvider
             let model = settings.llmModel
-            if !provider.supportsVision(model: model) {
+            let capabilities = ProviderCapabilityMatrix.capabilities(
+                for: provider,
+                model: model
+            )
+            if !capabilities.supportsVision {
                 Log.app.warning("Vision not supported by \(model). Images will not be sent.")
                 if !visionWarningDismissed {
                     errorMessage = "현재 모델(\(model))은 이미지 입력을 지원하지 않습니다. 텍스트만 전송됩니다."
@@ -2809,6 +2813,18 @@ final class DochiViewModel {
         }
 
         let provider = settings.currentProvider
+        let model = settings.llmModel
+        let capabilities = ProviderCapabilityMatrix.capabilities(
+            for: provider,
+            model: model
+        )
+
+        if !capabilities.supportsOutputTokenReporting || !capabilities.supportsStreamUsage {
+            Log.runtime.debug(
+                "Capability note: token usage metrics may be partial for \(provider.rawValue)/\(model)"
+            )
+        }
+
         let rawMessages = buildNativeMessages(from: conversation.messages)
         if rawMessages.isEmpty {
             throw NativeLLMError(
@@ -2862,12 +2878,23 @@ final class DochiViewModel {
             metrics: compaction.metrics
         )
 
+        let requestedTools = buildNativeToolDefinitions()
+        let shouldDisableToolsForCapability = !capabilities.supportsToolCalling && !requestedTools.isEmpty
+
         var additionalSections: [String] = []
         if let summarySnapshot = compaction.summarySnapshot, !summarySnapshot.isEmpty {
             additionalSections.append("## 컨텍스트 요약 스냅샷\n\(summarySnapshot)")
         }
         if let channelMetadata, !channelMetadata.isEmpty {
             additionalSections.append("## 채널 메타데이터\n\(channelMetadata)")
+        }
+        if shouldDisableToolsForCapability {
+            additionalSections.append(
+                "## 런타임 제약\n현재 선택한 모델은 도구 호출을 지원하지 않아 텍스트 응답만 제공합니다."
+            )
+            Log.runtime.notice(
+                "Capability fallback applied: disabling tools for \(provider.rawValue)/\(model)"
+            )
         }
 
         let compactedSystemPrompt = composeSystemPrompt(
@@ -2891,11 +2918,11 @@ final class DochiViewModel {
 
         return NativeLLMRequest(
             provider: provider,
-            model: settings.llmModel,
+            model: model,
             apiKey: loadNativeAPIKey(for: provider),
             systemPrompt: compactedSystemPrompt,
             messages: compaction.messages,
-            tools: buildNativeToolDefinitions(),
+            tools: shouldDisableToolsForCapability ? [] : requestedTools,
             maxTokens: maxTokens,
             endpointURL: nativeEndpointURL(for: provider)
         )
