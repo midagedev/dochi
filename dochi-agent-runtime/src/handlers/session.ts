@@ -12,6 +12,7 @@ import {
   type SessionEntry,
   SESSION_NOT_FOUND,
   SESSION_ALREADY_CLOSED,
+  RpcError,
 } from "./types";
 
 // In-memory session store
@@ -63,10 +64,10 @@ export function handleSessionOpen(params: SessionOpenParams): SessionOpenResult 
 export function handleSessionRun(params: SessionRunParams): SessionRunResult {
   const entry = sessions.get(params.sessionId);
   if (!entry) {
-    throw { code: SESSION_NOT_FOUND, message: `Session not found: ${params.sessionId}` };
+    throw new RpcError(SESSION_NOT_FOUND, `Session not found: ${params.sessionId}`);
   }
   if (entry.status !== "active") {
-    throw { code: SESSION_ALREADY_CLOSED, message: `Session is ${entry.status}: ${params.sessionId}` };
+    throw new RpcError(SESSION_ALREADY_CLOSED, `Session is ${entry.status}: ${params.sessionId}`);
   }
 
   entry.lastActiveAt = new Date().toISOString();
@@ -78,7 +79,7 @@ export function handleSessionRun(params: SessionRunParams): SessionRunResult {
 export function handleSessionInterrupt(params: SessionInterruptParams): SessionInterruptResult {
   const entry = sessions.get(params.sessionId);
   if (!entry) {
-    throw { code: SESSION_NOT_FOUND, message: `Session not found: ${params.sessionId}` };
+    throw new RpcError(SESSION_NOT_FOUND, `Session not found: ${params.sessionId}`);
   }
 
   entry.status = "interrupted";
@@ -91,7 +92,7 @@ export function handleSessionInterrupt(params: SessionInterruptParams): SessionI
 export function handleSessionClose(params: SessionCloseParams): SessionCloseResult {
   const entry = sessions.get(params.sessionId);
   if (!entry) {
-    throw { code: SESSION_NOT_FOUND, message: `Session not found: ${params.sessionId}` };
+    throw new RpcError(SESSION_NOT_FOUND, `Session not found: ${params.sessionId}`);
   }
 
   entry.status = "closed";
