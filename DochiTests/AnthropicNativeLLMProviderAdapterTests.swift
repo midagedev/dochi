@@ -248,6 +248,29 @@ final class OpenAINativeLLMProviderAdapterTests: XCTestCase {
         }
     }
 
+    func testOpenAIAdapterMapsAuthenticationError() async {
+        let errorPayload = """
+        {"error":{"type":"authentication_error","message":"Invalid API key"}}
+        """
+        let httpClient = MockNativeLLMHTTPClient(
+            statusCode: 401,
+            headers: [:],
+            body: Data(errorPayload.utf8)
+        )
+        let adapter = OpenAINativeLLMProviderAdapter(httpClient: httpClient)
+        let request = makeRequest(provider: .openai, apiKey: "bad-openai-key")
+
+        do {
+            _ = try await collectEvents(from: adapter.stream(request: request))
+            XCTFail("Expected NativeLLMError")
+        } catch let error as NativeLLMError {
+            XCTAssertEqual(error.code, .authentication)
+            XCTAssertEqual(error.statusCode, 401)
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
     func testOpenAIAdapterMapsTimeoutError() async {
         let httpClient = MockNativeLLMHTTPClient(
             statusCode: 200,
