@@ -2,6 +2,26 @@ import XCTest
 @testable import Dochi
 
 final class ToolDispatchTests: XCTestCase {
+    @MainActor
+    private final class RecordingToolContextStore: ToolContextStoreProtocol {
+        private(set) var events: [ToolUsageEvent] = []
+
+        func record(_ event: ToolUsageEvent) async {
+            events.append(event)
+        }
+
+        func profile(workspaceId _: String, agentName _: String) async -> ToolContextProfile? {
+            nil
+        }
+
+        func userPreference(workspaceId _: String) async -> UserToolPreference {
+            UserToolPreference()
+        }
+
+        func updateUserPreference(_: UserToolPreference, workspaceId _: String) async {}
+
+        func flushToDisk() async {}
+    }
 
     // MARK: - Schema Types
 
@@ -163,6 +183,45 @@ final class ToolDispatchTests: XCTestCase {
         } else {
             XCTFail("Expected integer argument 'count'")
         }
+    }
+
+    @MainActor
+    func testToolDispatchHandlerRecordsUsageEvent() async throws {
+        let mockToolService = MockBuiltInToolService()
+        mockToolService.stubbedResult = ToolResult(
+            toolCallId: "tc-usage",
+            content: "ok"
+        )
+        let toolContextStore = RecordingToolContextStore()
+        let handler = ToolDispatchHandler(
+            toolService: mockToolService,
+            toolContextStore: toolContextStore
+        )
+
+        let event = BridgeEvent(
+            eventId: "e-usage",
+            timestamp: "2024-01-01T00:00:00Z",
+            sessionId: "s-1",
+            workspaceId: "ws-1",
+            agentId: "코디",
+            eventType: .toolDispatch,
+            payload: .object([
+                "toolCallId": .string("tc-usage"),
+                "toolName": .string("agent.list"),
+                "arguments": .object([:]),
+                "riskLevel": .string("safe"),
+            ])
+        )
+
+        handler.handleDispatch(event: event)
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(toolContextStore.events.count, 1)
+        XCTAssertEqual(toolContextStore.events.first?.workspaceId, "ws-1")
+        XCTAssertEqual(toolContextStore.events.first?.agentName, "코디")
+        XCTAssertEqual(toolContextStore.events.first?.toolName, "agent.list")
+        XCTAssertEqual(toolContextStore.events.first?.category, "agent")
+        XCTAssertEqual(toolContextStore.events.first?.decision, .allowed)
     }
 
     @MainActor
