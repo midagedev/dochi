@@ -22,6 +22,49 @@ extension NativeLLMHTTPClient {
     }
 }
 
+/// Byte-level async line iterator that preserves empty lines (unlike AsyncLineSequence/.lines which omits them).
+/// Empty lines are critical for SSE parsing as they delimit events.
+struct SSELineIterator: AsyncSequence {
+    typealias Element = String
+    let bytes: URLSession.AsyncBytes
+
+    struct AsyncIterator: AsyncIteratorProtocol {
+        var iterator: URLSession.AsyncBytes.AsyncIterator
+        private var buffer: [UInt8] = []
+        private var finished = false
+
+        init(bytes: URLSession.AsyncBytes) {
+            self.iterator = bytes.makeAsyncIterator()
+        }
+
+        mutating func next() async throws -> String? {
+            if finished { return nil }
+            while true {
+                guard let byte = try await iterator.next() else {
+                    finished = true
+                    if buffer.isEmpty { return nil }
+                    let line = String(decoding: buffer, as: UTF8.self)
+                    buffer.removeAll()
+                    return line
+                }
+                if byte == UInt8(ascii: "\n") {
+                    if !buffer.isEmpty && buffer.last == UInt8(ascii: "\r") {
+                        buffer.removeLast()
+                    }
+                    let line = String(decoding: buffer, as: UTF8.self)
+                    buffer.removeAll(keepingCapacity: true)
+                    return line
+                }
+                buffer.append(byte)
+            }
+        }
+    }
+
+    func makeAsyncIterator() -> AsyncIterator {
+        AsyncIterator(bytes: bytes)
+    }
+}
+
 struct URLSessionNativeLLMHTTPClient: NativeLLMHTTPClient {
     private let session: URLSession
 
@@ -56,9 +99,12 @@ struct URLSessionNativeLLMHTTPClient: NativeLLMHTTPClient {
         let lineStream = AsyncThrowingStream<String, Error> { continuation in
             let task = Task {
                 do {
-                    for try await line in bytes.lines {
+                    // Use SSELineIterator instead of bytes.lines because
+                    // AsyncLineSequence omits empty lines, which are critical SSE event delimiters.
+                    let sseLines = SSELineIterator(bytes: bytes)
+                    for try await line in sseLines {
                         try Task.checkCancellation()
-                        continuation.yield(line.replacingOccurrences(of: "\r", with: ""))
+                        continuation.yield(line)
                     }
                     continuation.finish()
                 } catch {

@@ -171,8 +171,10 @@ final class AnthropicNativeLLMProviderAdapterTests: XCTestCase {
         XCTAssertLessThan(firstLatency, totalLatency)
         XCTAssertGreaterThan(totalLatency - firstLatency, 0.05)
         XCTAssertEqual(second?.kind, .done)
-        XCTAssertEqual(await httpClient.sendStreamingCallCount, 1)
-        XCTAssertEqual(await httpClient.sendCallCount, 0)
+        let streamingCalls = await httpClient.sendStreamingCallCount
+        let sendCalls = await httpClient.sendCallCount
+        XCTAssertEqual(streamingCalls, 1)
+        XCTAssertEqual(sendCalls, 0)
     }
 
     func testAnthropicAdapterCancelsNetworkStreamWhenConsumerStopsEarly() async throws {
@@ -210,7 +212,124 @@ final class AnthropicNativeLLMProviderAdapterTests: XCTestCase {
         XCTAssertEqual(first?.text, "first")
 
         try await Task.sleep(nanoseconds: 80_000_000)
-        XCTAssertTrue(await httpClient.didCancelStream())
+        let cancelled = await httpClient.didCancelStream()
+        XCTAssertTrue(cancelled)
+    }
+
+    func testIncrementalSSEStreamParsesPartialJsonDelta() async throws {
+        let streamLines = [
+            "event: content_block_start",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_2\",\"name\":\"weather.get\",\"input\":{}}}",
+            "",
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"city\\\"\"}}",
+            "",
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\":\\\"Seoul\\\"}\"}}",
+            "",
+            "event: content_block_stop",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}",
+            "",
+            "event: message_stop",
+            "data: {\"type\":\"message_stop\"}",
+            "",
+        ]
+        let httpClient = MockNativeLLMHTTPClient(
+            statusCode: 200,
+            headers: [:],
+            body: Data(),
+            streamLines: streamLines
+        )
+        let adapter = AnthropicNativeLLMProviderAdapter(httpClient: httpClient)
+        let request = makeRequest(provider: .anthropic, apiKey: "test-key")
+
+        let events = try await collectEvents(from: adapter.stream(request: request))
+
+        let toolEvent = events.first(where: { $0.kind == .toolUse })
+        XCTAssertNotNil(toolEvent)
+        XCTAssertEqual(toolEvent?.toolCallId, "toolu_2")
+        XCTAssertEqual(toolEvent?.toolName, "weather.get")
+        XCTAssertTrue(toolEvent?.toolInputJSON?.contains("Seoul") ?? false)
+        XCTAssertEqual(events.last?.kind, .done)
+    }
+
+    func testIncrementalSSEStreamHandlesSSEErrorEvent() async {
+        let streamLines = [
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}",
+            "",
+            "event: error",
+            "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Server overloaded\"}}",
+            "",
+        ]
+        let httpClient = MockNativeLLMHTTPClient(
+            statusCode: 200,
+            headers: [:],
+            body: Data(),
+            streamLines: streamLines
+        )
+        let adapter = AnthropicNativeLLMProviderAdapter(httpClient: httpClient)
+        let request = makeRequest(provider: .anthropic, apiKey: "test-key")
+
+        do {
+            _ = try await collectEvents(from: adapter.stream(request: request))
+            XCTFail("Expected NativeLLMError to be thrown")
+        } catch let error as NativeLLMError {
+            XCTAssertEqual(error.code, .server)
+            XCTAssertTrue(error.message.contains("Server overloaded"))
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    func testIncrementalSSEStreamMultipleTextDeltas() async throws {
+        let streamLines = [
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}",
+            "",
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" World\"}}",
+            "",
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"!\"}}",
+            "",
+            "event: message_stop",
+            "data: {\"type\":\"message_stop\"}",
+            "",
+        ]
+        let httpClient = MockNativeLLMHTTPClient(
+            statusCode: 200,
+            headers: [:],
+            body: Data(),
+            streamLines: streamLines
+        )
+        let adapter = AnthropicNativeLLMProviderAdapter(httpClient: httpClient)
+        let request = makeRequest(provider: .anthropic, apiKey: "test-key")
+
+        let events = try await collectEvents(from: adapter.stream(request: request))
+
+        let partials = events.filter { $0.kind == .partial }
+        XCTAssertEqual(partials.count, 3)
+        XCTAssertEqual(partials[0].text, "Hello")
+        XCTAssertEqual(partials[1].text, " World")
+        XCTAssertEqual(partials[2].text, "!")
+        XCTAssertEqual(events.last?.kind, .done)
+    }
+
+    func testIncrementalSSEStreamEmptyBodyYieldsDone() async throws {
+        let httpClient = MockNativeLLMHTTPClient(
+            statusCode: 200,
+            headers: [:],
+            body: Data(),
+            streamLines: []
+        )
+        let adapter = AnthropicNativeLLMProviderAdapter(httpClient: httpClient)
+        let request = makeRequest(provider: .anthropic, apiKey: "test-key")
+
+        let events = try await collectEvents(from: adapter.stream(request: request))
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.kind, .done)
     }
 }
 
