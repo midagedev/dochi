@@ -282,13 +282,15 @@ final class ToolDispatchHandler {
         arguments: [String: Any],
         timeout: TimeInterval
     ) async -> ToolResult {
-        nonisolated(unsafe) let sendableArgs = arguments
-        nonisolated(unsafe) let sendableToolService = toolService
+        // Box non-Sendable captures so they satisfy TaskGroup's `sending` requirement.
+        // Safe because execute() hops to MainActor via protocol, and
+        // only one child task accesses these values.
+        let ctx = ToolExecutionContext(toolService: toolService, arguments: arguments)
 
         return await withTaskGroup(of: ToolResult.self) { group in
-            // Child 1 — tool execution (auto-hops to MainActor via protocol requirement)
+            // Child 1 — tool execution (hops to MainActor via protocol requirement)
             group.addTask {
-                await sendableToolService.execute(name: toolName, arguments: sendableArgs)
+                await ctx.toolService.execute(name: toolName, arguments: ctx.arguments)
             }
 
             // Child 2 — timeout sentinel
@@ -444,4 +446,14 @@ extension Dictionary where Key == String, Value == AnyCodableValue {
     func toNativeDict() -> [String: Any] {
         mapValues { $0.toNative() }
     }
+}
+
+// MARK: - Sendable Box for TaskGroup Captures
+
+/// Wraps non-Sendable values needed by TaskGroup child tasks.
+/// Safe because the wrapped tool service is @MainActor-isolated and
+/// the child task hops to MainActor before access.
+struct ToolExecutionContext: @unchecked Sendable {
+    let toolService: any BuiltInToolServiceProtocol
+    let arguments: [String: Any]
 }
