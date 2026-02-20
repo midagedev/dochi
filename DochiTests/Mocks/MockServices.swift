@@ -1888,3 +1888,55 @@ final class MockRegressionEvaluator: RegressionEvaluatorProtocol {
         return report
     }
 }
+
+// MARK: - MockShadowSubAgentOrchestrator (#280)
+
+@MainActor
+final class MockShadowSubAgentOrchestrator: ShadowSubAgentOrchestratorProtocol {
+    var config: ShadowSubAgentConfig = .forTesting
+    var currentState: ShadowPlannerState = .idle
+    var recentTraceEnvelopes: [TraceEnvelope] = []
+    var recentDebugBundles: [DebugBundle] = []
+
+    var shouldSpawnCallCount = 0
+    var runPlannerCallCount = 0
+    var mergeDecisionCallCount = 0
+    var updateConfigCallCount = 0
+    var resetStateCallCount = 0
+
+    var stubbedShouldSpawn: (spawn: Bool, triggerCode: ShadowTriggerCode?) = (false, nil)
+    var stubbedPlannerResult: ShadowPlannerResult = .error("Mock not configured")
+    var stubbedMergeResult: ShadowMergeResult?
+
+    func shouldSpawn(context: ShadowTriggerContext) -> (spawn: Bool, triggerCode: ShadowTriggerCode?) {
+        shouldSpawnCallCount += 1
+        return stubbedShouldSpawn
+    }
+
+    func runPlanner(input: ShadowPlannerInput) async -> ShadowPlannerResult {
+        runPlannerCallCount += 1
+        return stubbedPlannerResult
+    }
+
+    func mergeDecision(decision: ShadowDecision, traceEnvelopeId: UUID) -> ShadowMergeResult {
+        mergeDecisionCallCount += 1
+        if let stubbed = stubbedMergeResult { return stubbed }
+        return ShadowMergeResult(
+            selectedTool: decision.primaryTool,
+            alternatives: decision.alternatives,
+            reasonSummary: decision.reasonSummary,
+            accepted: decision.isValid && decision.confidence > 0.3,
+            traceEnvelopeId: traceEnvelopeId
+        )
+    }
+
+    func updateConfig(_ newConfig: ShadowSubAgentConfig) {
+        updateConfigCallCount += 1
+        config = newConfig
+    }
+
+    func resetState() {
+        resetStateCallCount += 1
+        currentState = .idle
+    }
+}
