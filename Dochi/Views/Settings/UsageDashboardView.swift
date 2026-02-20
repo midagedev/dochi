@@ -56,6 +56,11 @@ struct UsageDashboardView: View {
                     summaryCards(summary)
                         .padding(.horizontal)
 
+                    if let deviationReport = metricsCollector.tokenEstimationDeviationReport {
+                        tokenEstimatorHealthSection(deviationReport)
+                            .padding(.horizontal)
+                    }
+
                     // Chart
                     chartSection(summary)
                         .padding(.horizontal)
@@ -172,6 +177,55 @@ struct UsageDashboardView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
         .background(.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func tokenEstimatorHealthSection(_ report: TokenEstimationDeviationReport) -> some View {
+        let p95Percent = report.p95RelativeErrorRatio * 100
+        let thresholdPercent = report.thresholdRatio * 100
+        let meanPercent = report.meanRelativeErrorRatio * 100
+        let alertColor: Color = report.meetsThreshold ? .green : .orange
+        let headline = report.meetsThreshold
+            ? "토큰 추정 정확도 정상"
+            : "토큰 추정 drift 경고"
+        let detail = metricsCollector.tokenEstimationDriftAlertMessage ??
+            String(
+                format: "토큰 추정 p95 %.1f%% (임계 %.1f%%)",
+                p95Percent,
+                thresholdPercent
+            )
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(headline, systemImage: report.meetsThreshold ? "checkmark.circle" : "exclamationmark.triangle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(alertColor)
+                Spacer()
+                Text("샘플 \(report.sampleCount)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(detail)
+                .font(.system(size: 11))
+                .foregroundStyle(report.meetsThreshold ? Color.secondary : Color.orange)
+
+            HStack(spacing: 12) {
+                Text(String(format: "p95 %.1f%%", p95Percent))
+                    .font(.system(size: 10, design: .monospaced))
+                Text(String(format: "mean %.1f%%", meanPercent))
+                    .font(.system(size: 10, design: .monospaced))
+                Text(String(format: "max %.1f%%", report.maxRelativeErrorRatio * 100))
+                    .font(.system(size: 10, design: .monospaced))
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(.secondary.opacity(0.04))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(alertColor.opacity(0.25), lineWidth: report.meetsThreshold ? 0 : 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 

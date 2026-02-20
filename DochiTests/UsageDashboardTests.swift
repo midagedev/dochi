@@ -554,6 +554,45 @@ final class TokenEstimationDeviationTests: XCTestCase {
 
         XCTAssertEqual(collector.recentTokenEstimationDeviations.count, 100)
     }
+
+    func testDriftAlertMessageShownWhenThresholdExceeded() throws {
+        let collector = MetricsCollector()
+
+        collector.recordTokenEstimationDeviation(
+            provider: "openai",
+            model: "gpt-4o",
+            estimatedInputTokens: 150,
+            actualInputTokens: 100
+        )
+        collector.recordTokenEstimationDeviation(
+            provider: "openai",
+            model: "gpt-4o",
+            estimatedInputTokens: 140,
+            actualInputTokens: 100
+        )
+
+        let message = try XCTUnwrap(collector.tokenEstimationDriftAlertMessage)
+        XCTAssertTrue(message.contains("drift 경고"))
+    }
+
+    func testDriftAlertMessageHiddenWhenWithinThreshold() {
+        let collector = MetricsCollector()
+
+        collector.recordTokenEstimationDeviation(
+            provider: "openai",
+            model: "gpt-4o",
+            estimatedInputTokens: 107,
+            actualInputTokens: 100
+        )
+        collector.recordTokenEstimationDeviation(
+            provider: "openai",
+            model: "gpt-4o",
+            estimatedInputTokens: 108,
+            actualInputTokens: 100
+        )
+
+        XCTAssertNil(collector.tokenEstimationDriftAlertMessage)
+    }
 }
 
 // MARK: - DailyUsageRecord Tests

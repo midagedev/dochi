@@ -86,6 +86,19 @@ protocol ContextTokenizerStrategy: Sendable {
     func profile(for provider: LLMProvider, model: String) -> ContextTokenizerProfile
 }
 
+protocol ContextTokenizerPlugin: Sendable {
+    func estimateTokens(for text: String, provider: LLMProvider, model: String) -> Int?
+}
+
+struct ContextTokenizerCalibrationSnapshot: Sendable {
+    let provider: LLMProvider
+    let model: String
+    let sampleCount: Int
+    let multiplier: Double
+    let lastObservedRatio: Double
+    let updatedAt: Date
+}
+
 struct ProviderAwareContextTokenizerStrategy: ContextTokenizerStrategy {
     func profile(for provider: LLMProvider, model: String) -> ContextTokenizerProfile {
         let lowerModel = model.lowercased()
@@ -194,10 +207,71 @@ final class ContextCompactionService {
     private static let agentLayerRatio = 0.30
     private static let personalLayerRatio = 0.20
     private static let maxSummaryChars = 1_200
+    private static let defaultCalibrationSmoothing = 0.25
+    private static let minCalibrationRatio = 0.50
+    private static let maxCalibrationRatio = 2.00
     private let tokenizerStrategy: any ContextTokenizerStrategy
+    private let tokenizerPlugin: (any ContextTokenizerPlugin)?
+    private let calibrationSmoothing: Double
+    private var calibrationStates: [CalibrationKey: CalibrationState] = [:]
 
-    init(tokenizerStrategy: any ContextTokenizerStrategy = ProviderAwareContextTokenizerStrategy()) {
+    init(
+        tokenizerStrategy: any ContextTokenizerStrategy = ProviderAwareContextTokenizerStrategy(),
+        tokenizerPlugin: (any ContextTokenizerPlugin)? = nil,
+        calibrationSmoothing: Double = ContextCompactionService.defaultCalibrationSmoothing
+    ) {
         self.tokenizerStrategy = tokenizerStrategy
+        self.tokenizerPlugin = tokenizerPlugin
+        self.calibrationSmoothing = min(max(calibrationSmoothing, 0), 1)
+    }
+
+    func recordObservedInputTokens(
+        provider: LLMProvider,
+        model: String,
+        estimatedInputTokens: Int,
+        actualInputTokens: Int
+    ) {
+        guard estimatedInputTokens > 0, actualInputTokens > 0 else { return }
+
+        let key = CalibrationKey(provider: provider, model: model.lowercased())
+        let observedCorrectionRatio = Double(actualInputTokens) / Double(max(estimatedInputTokens, 1))
+        var state = calibrationStates[key] ?? CalibrationState(
+            multiplier: 1.0,
+            sampleCount: 0,
+            lastObservedRatio: 1.0,
+            updatedAt: Date()
+        )
+        let targetMultiplier = min(
+            max(state.multiplier * observedCorrectionRatio, Self.minCalibrationRatio),
+            Self.maxCalibrationRatio
+        )
+
+        if state.sampleCount == 0 {
+            state.multiplier = targetMultiplier
+        } else {
+            state.multiplier = ((1 - calibrationSmoothing) * state.multiplier) +
+                (calibrationSmoothing * targetMultiplier)
+        }
+        state.sampleCount += 1
+        state.lastObservedRatio = observedCorrectionRatio
+        state.updatedAt = Date()
+        calibrationStates[key] = state
+    }
+
+    func calibrationSnapshot(
+        for provider: LLMProvider,
+        model: String
+    ) -> ContextTokenizerCalibrationSnapshot? {
+        let key = CalibrationKey(provider: provider, model: model.lowercased())
+        guard let state = calibrationStates[key] else { return nil }
+        return ContextTokenizerCalibrationSnapshot(
+            provider: provider,
+            model: model,
+            sampleCount: state.sampleCount,
+            multiplier: state.multiplier,
+            lastObservedRatio: state.lastObservedRatio,
+            updatedAt: state.updatedAt
+        )
     }
 
     func estimateTokens(for text: String) -> Int {
@@ -214,7 +288,8 @@ final class ContextCompactionService {
         model: String
     ) -> Int {
         let profile = tokenizerStrategy.profile(for: provider, model: model)
-        return estimateTextTokens(for: text, profile: profile)
+        let base = estimateTextTokens(for: text, provider: provider, model: model, profile: profile)
+        return applyCalibration(base, provider: provider, model: model)
     }
 
     func estimateSystemPromptTokens(
@@ -223,8 +298,9 @@ final class ContextCompactionService {
         model: String
     ) -> Int {
         let profile = tokenizerStrategy.profile(for: provider, model: model)
-        let textTokens = estimateTextTokens(for: text, profile: profile)
-        return textTokens == 0 ? 0 : textTokens + profile.systemPromptOverhead
+        let textTokens = estimateTextTokens(for: text, provider: provider, model: model, profile: profile)
+        let base = textTokens == 0 ? 0 : textTokens + profile.systemPromptOverhead
+        return applyCalibration(base, provider: provider, model: model)
     }
 
     func estimateTokens(for messages: [NativeLLMMessage]) -> Int {
@@ -241,7 +317,8 @@ final class ContextCompactionService {
         model: String
     ) -> Int {
         let profile = tokenizerStrategy.profile(for: provider, model: model)
-        return estimateTokens(for: messages, profile: profile)
+        let base = estimateTokens(for: messages, provider: provider, model: model, profile: profile)
+        return applyCalibration(base, provider: provider, model: model)
     }
 
     func estimateTokens(for message: NativeLLMMessage) -> Int {
@@ -258,7 +335,8 @@ final class ContextCompactionService {
         model: String
     ) -> Int {
         let profile = tokenizerStrategy.profile(for: provider, model: model)
-        return estimateTokens(for: message, profile: profile)
+        let base = estimateTokens(for: message, provider: provider, model: model, profile: profile)
+        return applyCalibration(base, provider: provider, model: model)
     }
 
     func estimateTokens(
@@ -268,13 +346,29 @@ final class ContextCompactionService {
     ) -> Int {
         guard !tools.isEmpty else { return 0 }
         let profile = tokenizerStrategy.profile(for: provider, model: model)
-        return tools.reduce(into: 0) { total, tool in
+        let base = tools.reduce(into: 0) { total, tool in
             let schemaJSONString = serializedJSON(jsonObject(from: tool.inputSchema))
             total += profile.perToolDefinitionOverhead
-            total += estimateTextTokens(for: tool.name, profile: profile)
-            total += estimateTextTokens(for: tool.description, profile: profile)
-            total += estimateTextTokens(for: schemaJSONString, profile: profile)
+            total += estimateTextTokens(
+                for: tool.name,
+                provider: provider,
+                model: model,
+                profile: profile
+            )
+            total += estimateTextTokens(
+                for: tool.description,
+                provider: provider,
+                model: model,
+                profile: profile
+            )
+            total += estimateTextTokens(
+                for: schemaJSONString,
+                provider: provider,
+                model: model,
+                profile: profile
+            )
         }
+        return applyCalibration(base, provider: provider, model: model)
     }
 
     func estimateRequestInputTokens(
@@ -284,22 +378,28 @@ final class ContextCompactionService {
         provider: LLMProvider,
         model: String
     ) -> Int {
-        let promptTokens = estimateSystemPromptTokens(
+        let profile = tokenizerStrategy.profile(for: provider, model: model)
+        let promptTextTokens = estimateTextTokens(
             for: systemPrompt ?? "",
             provider: provider,
-            model: model
+            model: model,
+            profile: profile
         )
+        let promptTokens = promptTextTokens == 0 ? 0 : promptTextTokens + profile.systemPromptOverhead
         let messageTokens = estimateTokens(
             for: messages,
             provider: provider,
-            model: model
+            model: model,
+            profile: profile
         )
         let toolTokens = estimateTokens(
             for: tools,
             provider: provider,
-            model: model
+            model: model,
+            profile: profile
         )
-        return promptTokens + messageTokens + toolTokens
+        let base = promptTokens + messageTokens + toolTokens
+        return applyCalibration(base, provider: provider, model: model)
     }
 
     func compact(request: ContextCompactionRequest) -> ContextCompactionResult {
@@ -442,6 +542,19 @@ final class ContextCompactionService {
         )
     }
 
+    private func estimateTextTokens(
+        for text: String,
+        provider: LLMProvider,
+        model: String,
+        profile: ContextTokenizerProfile
+    ) -> Int {
+        if let pluginTokens = tokenizerPlugin?.estimateTokens(for: text, provider: provider, model: model),
+           pluginTokens > 0 {
+            return pluginTokens
+        }
+        return estimateTextTokens(for: text, profile: profile)
+    }
+
     private func estimateTextTokens(for text: String, profile: ContextTokenizerProfile) -> Int {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return 0 }
@@ -471,6 +584,67 @@ final class ContextCompactionService {
         return max(Int(ceil(estimated)), 1)
     }
 
+    private func estimateTokens(
+        for tools: [NativeLLMToolDefinition],
+        provider: LLMProvider,
+        model: String,
+        profile: ContextTokenizerProfile
+    ) -> Int {
+        tools.reduce(into: 0) { total, tool in
+            let schemaJSONString = serializedJSON(jsonObject(from: tool.inputSchema))
+            total += profile.perToolDefinitionOverhead
+            total += estimateTextTokens(for: tool.name, provider: provider, model: model, profile: profile)
+            total += estimateTextTokens(for: tool.description, provider: provider, model: model, profile: profile)
+            total += estimateTextTokens(
+                for: schemaJSONString,
+                provider: provider,
+                model: model,
+                profile: profile
+            )
+        }
+    }
+
+    private func estimateTokens(
+        for messages: [NativeLLMMessage],
+        provider: LLMProvider,
+        model: String,
+        profile: ContextTokenizerProfile
+    ) -> Int {
+        messages.reduce(into: 0) { total, message in
+            total += estimateTokens(
+                for: message,
+                provider: provider,
+                model: model,
+                profile: profile
+            )
+        }
+    }
+
+    private func estimateTokens(
+        for message: NativeLLMMessage,
+        provider: LLMProvider,
+        model: String,
+        profile: ContextTokenizerProfile
+    ) -> Int {
+        var total = profile.perMessageOverhead
+        for content in message.contents {
+            switch content {
+            case .text(let text):
+                total += estimateTextTokens(for: text, provider: provider, model: model, profile: profile)
+            case .toolUse(let toolCallId, let name, let inputJSON):
+                total += profile.perToolUseOverhead
+                total += estimateTextTokens(for: toolCallId, provider: provider, model: model, profile: profile)
+                total += estimateTextTokens(for: name, provider: provider, model: model, profile: profile)
+                total += estimateTextTokens(for: inputJSON, provider: provider, model: model, profile: profile)
+            case .toolResult(let toolCallId, let content, _):
+                total += profile.perToolResultOverhead
+                total += estimateTextTokens(for: toolCallId, provider: provider, model: model, profile: profile)
+                total += estimateTextTokens(for: content, provider: provider, model: model, profile: profile)
+            }
+        }
+        return total
+    }
+
     private func estimateTokens(for messages: [NativeLLMMessage], profile: ContextTokenizerProfile) -> Int {
         messages.reduce(into: 0) { total, message in
             total += estimateTokens(for: message, profile: profile)
@@ -495,6 +669,20 @@ final class ContextCompactionService {
             }
         }
         return total
+    }
+
+    private func calibrationMultiplier(for provider: LLMProvider, model: String) -> Double {
+        let key = CalibrationKey(provider: provider, model: model.lowercased())
+        return calibrationStates[key]?.multiplier ?? 1.0
+    }
+
+    private func applyCalibration(
+        _ tokens: Int,
+        provider: LLMProvider,
+        model: String
+    ) -> Int {
+        let multiplier = calibrationMultiplier(for: provider, model: model)
+        return max(Int((Double(tokens) * multiplier).rounded(.up)), 0)
     }
 
     private func isCJK(_ scalar: Unicode.Scalar) -> Bool {
@@ -552,6 +740,18 @@ final class ContextCompactionService {
         case .object(let object):
             return object.mapValues(jsonValue)
         }
+    }
+
+    private struct CalibrationKey: Hashable {
+        let provider: LLMProvider
+        let model: String
+    }
+
+    private struct CalibrationState {
+        var multiplier: Double
+        var sampleCount: Int
+        var lastObservedRatio: Double
+        var updatedAt: Date
     }
 }
 

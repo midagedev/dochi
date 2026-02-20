@@ -110,6 +110,99 @@ final class ContextCompactionServiceTests: XCTestCase {
         XCTAssertEqual(messageTokens, 1 + profile.perMessageOverhead)
     }
 
+    func testTokenizerPluginCanBeInjected() {
+        let plugin = FixedPluginTokenizer(tokens: 42, provider: .openai, model: "gpt-4o")
+        let customService = ContextCompactionService(tokenizerPlugin: plugin)
+
+        let textTokens = customService.estimateTokens(
+            for: "plugin override text",
+            provider: .openai,
+            model: "gpt-4o"
+        )
+        XCTAssertEqual(textTokens, 42)
+
+        let fallbackTokens = customService.estimateTokens(
+            for: "plugin fallback",
+            provider: .anthropic,
+            model: "claude-sonnet-4-5-20250514"
+        )
+        XCTAssertNotEqual(fallbackTokens, 42)
+    }
+
+    func testRuntimeCalibrationAdjustsEstimatorTowardObservedUsage() {
+        let model = "gpt-4o"
+        let requestMessages = [NativeLLMMessage(role: .user, text: String(repeating: "a", count: 320))]
+        let before = service.estimateRequestInputTokens(
+            systemPrompt: "You are a helpful assistant.",
+            messages: requestMessages,
+            tools: [],
+            provider: .openai,
+            model: model
+        )
+
+        for _ in 0..<4 {
+            service.recordObservedInputTokens(
+                provider: .openai,
+                model: model,
+                estimatedInputTokens: before,
+                actualInputTokens: before * 2
+            )
+        }
+
+        let after = service.estimateRequestInputTokens(
+            systemPrompt: "You are a helpful assistant.",
+            messages: requestMessages,
+            tools: [],
+            provider: .openai,
+            model: model
+        )
+
+        let snapshot = try? XCTUnwrap(service.calibrationSnapshot(for: .openai, model: model))
+        XCTAssertGreaterThan(after, before)
+        XCTAssertGreaterThan(after, Int(Double(before) * 1.6))
+        XCTAssertEqual(snapshot?.sampleCount, 4)
+        XCTAssertGreaterThan(snapshot?.multiplier ?? 1.0, 1.0)
+    }
+
+    func testRuntimeCalibrationDoesNotDriftBackAfterConvergence() throws {
+        let model = "gpt-4o"
+        let requestMessages = [NativeLLMMessage(role: .user, text: String(repeating: "b", count: 320))]
+        let baselineEstimate = service.estimateRequestInputTokens(
+            systemPrompt: "You are a helpful assistant.",
+            messages: requestMessages,
+            tools: [],
+            provider: .openai,
+            model: model
+        )
+        let observedActual = baselineEstimate * 2
+
+        service.recordObservedInputTokens(
+            provider: .openai,
+            model: model,
+            estimatedInputTokens: baselineEstimate,
+            actualInputTokens: observedActual
+        )
+
+        let calibratedEstimate = service.estimateRequestInputTokens(
+            systemPrompt: "You are a helpful assistant.",
+            messages: requestMessages,
+            tools: [],
+            provider: .openai,
+            model: model
+        )
+
+        service.recordObservedInputTokens(
+            provider: .openai,
+            model: model,
+            estimatedInputTokens: calibratedEstimate,
+            actualInputTokens: observedActual
+        )
+
+        let snapshot = try XCTUnwrap(service.calibrationSnapshot(for: .openai, model: model))
+        XCTAssertEqual(snapshot.sampleCount, 2)
+        XCTAssertGreaterThan(snapshot.multiplier, 1.9)
+    }
+
     func testEstimatorCountsMessageAndTextTokens() {
         let messages = [
             NativeLLMMessage(role: .user, text: String(repeating: "u", count: 120)),
@@ -271,6 +364,21 @@ final class ContextCompactionServiceTests: XCTestCase {
 
         func profile(for _: LLMProvider, model _: String) -> ContextTokenizerProfile {
             profile
+        }
+    }
+
+    private struct FixedPluginTokenizer: ContextTokenizerPlugin {
+        let tokens: Int
+        let provider: LLMProvider
+        let model: String
+
+        func estimateTokens(for text: String, provider: LLMProvider, model: String) -> Int? {
+            guard provider == self.provider,
+                  model.lowercased() == self.model.lowercased(),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+            return tokens
         }
     }
 }
