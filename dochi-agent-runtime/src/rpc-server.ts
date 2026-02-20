@@ -1,14 +1,13 @@
 import * as net from "net";
 import * as fs from "fs";
 import * as crypto from "crypto";
+import type { JsonRpcRequest, JsonRpcResponse } from "./handlers/types";
 import {
-  type JsonRpcRequest,
-  type JsonRpcResponse,
+  RpcError,
   METHOD_NOT_FOUND,
   PARSE_ERROR,
   INTERNAL_ERROR,
-  RpcError,
-} from "./handlers/types";
+} from "./errors/rpc-error";
 import {
   handleInitialize,
   handleHealth,
@@ -43,9 +42,11 @@ import {
   handleContextPush,
   handleContextResolve,
 } from "./handlers/context";
-import {
-  TOOL_HOOK_BLOCKED,
-} from "./handlers/types";
+import type {
+  ContextPushParams,
+  ContextResolveParams,
+} from "./handlers/context";
+import { TOOL_HOOK_BLOCKED } from "./errors/rpc-error";
 import type {
   SessionOpenParams,
   SessionRunParams,
@@ -53,8 +54,6 @@ import type {
   SessionCloseParams,
   ToolResultParams,
   ApprovalResolveParams,
-  ContextPushParams,
-  ContextResolveParams,
 } from "./handlers/types";
 
 type Handler = (params?: Record<string, unknown>) => unknown;

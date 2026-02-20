@@ -179,53 +179,27 @@ export interface ApprovalResolveAck {
   approvalId: string;
 }
 
-// JSON-RPC error codes (standard)
-export const PARSE_ERROR = -32700;
-export const INVALID_REQUEST = -32600;
-export const METHOD_NOT_FOUND = -32601;
-export const INVALID_PARAMS = -32602;
-export const INTERNAL_ERROR = -32603;
-
-// Dochi-specific error codes
-export const SESSION_NOT_FOUND = -32001;
-export const SESSION_ALREADY_CLOSED = -32002;
-export const RUNTIME_NOT_READY = -32003;
-export const SESSION_LIMIT_EXCEEDED = -32004;
-export const TOOL_NOT_FOUND = -32010;
-export const TOOL_EXECUTION_FAILED = -32011;
-export const TOOL_TIMEOUT = -32012;
-export const TOOL_PERMISSION_DENIED = -32013;
-export const TOOL_HOOK_BLOCKED = -32014;
-
-/**
- * Structured RPC error class for type-safe error handling in handlers.
- *
- * Throw `new RpcError(code, message)` from any handler to produce a
- * well-formed JSON-RPC error response. The `rpc-server` catches these
- * via `instanceof RpcError` and maps them directly to {@link JsonRpcError}.
- */
-export class RpcError extends Error {
-  readonly code: number;
-  readonly data?: unknown;
-
-  constructor(code: number, message: string, data?: unknown) {
-    super(message);
-    this.name = "RpcError";
-    this.code = code;
-    this.data = data;
-    // Restore prototype chain broken by extending built-in Error
-    Object.setPrototypeOf(this, RpcError.prototype);
-  }
-
-  /** Convert to the JSON-RPC error envelope shape. */
-  toJsonRpcError(): JsonRpcError {
-    const err: JsonRpcError = { code: this.code, message: this.message };
-    if (this.data !== undefined) {
-      err.data = this.data;
-    }
-    return err;
-  }
-}
+// Re-export RpcError class and all error codes from the canonical module.
+// Handlers may import from either location; the errors module is the source of truth.
+export {
+  RpcError,
+  PARSE_ERROR,
+  INVALID_REQUEST,
+  METHOD_NOT_FOUND,
+  INVALID_PARAMS,
+  INTERNAL_ERROR,
+  SESSION_NOT_FOUND,
+  SESSION_ALREADY_CLOSED,
+  RUNTIME_NOT_READY,
+  SESSION_LIMIT_EXCEEDED,
+  TOOL_NOT_FOUND,
+  TOOL_EXECUTION_FAILED,
+  TOOL_TIMEOUT,
+  TOOL_PERMISSION_DENIED,
+  TOOL_HOOK_BLOCKED,
+  APPROVAL_NOT_FOUND,
+  CONTEXT_NOT_FOUND,
+} from "../errors/rpc-error";
 
 // Context snapshot types
 

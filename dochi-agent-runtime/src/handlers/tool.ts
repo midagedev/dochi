@@ -5,7 +5,7 @@ import type {
   ToolResultParams,
   ToolResultAck,
 } from "./types";
-import { TOOL_TIMEOUT } from "./types";
+import { TOOL_TIMEOUT, TOOL_NOT_FOUND, RpcError } from "../errors/rpc-error";
 
 /** Tracks a pending tool dispatch awaiting a result from the app. */
 interface PendingToolDispatch {
@@ -93,8 +93,11 @@ export function dispatchToolToApp(
 export function handleToolResult(params: ToolResultParams): ToolResultAck {
   const pending = pendingDispatches.get(params.toolCallId);
   if (!pending) {
-    console.error(`[tool] received result for unknown toolCallId: ${params.toolCallId}`);
-    return { received: false, toolCallId: params.toolCallId };
+    throw new RpcError(
+      TOOL_NOT_FOUND,
+      `No pending tool dispatch for toolCallId: ${params.toolCallId}`,
+      { toolCallId: params.toolCallId },
+    );
   }
 
   clearTimeout(pending.timer);

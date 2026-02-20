@@ -1,24 +1,34 @@
 import * as crypto from "crypto";
+import type {
+  SessionOpenParams,
+  SessionOpenResult,
+  SessionRunParams,
+  SessionRunResult,
+  SessionInterruptParams,
+  SessionInterruptResult,
+  SessionCloseParams,
+  SessionCloseResult,
+  SessionListResult,
+  SessionEntry,
+} from "./types";
 import {
-  type SessionOpenParams,
-  type SessionOpenResult,
-  type SessionRunParams,
-  type SessionRunResult,
-  type SessionInterruptParams,
-  type SessionInterruptResult,
-  type SessionCloseParams,
-  type SessionCloseResult,
-  type SessionListResult,
-  type SessionEntry,
+  RpcError,
   SESSION_NOT_FOUND,
   SESSION_ALREADY_CLOSED,
-  RpcError,
-} from "./types";
+  INVALID_PARAMS,
+} from "../errors/rpc-error";
 
 // In-memory session store
 const sessions = new Map<string, SessionEntry>();
 
 export function handleSessionOpen(params: SessionOpenParams): SessionOpenResult {
+  if (!params.workspaceId || !params.agentId || !params.conversationId || !params.userId) {
+    throw new RpcError(
+      INVALID_PARAMS,
+      "session.open requires workspaceId, agentId, conversationId, and userId",
+    );
+  }
+
   // Build lookup key (deviceId excluded for cross-device resume — Issue #291)
   // Uses `:` separator — must match Swift SessionResumeService.normalizeSessionKey
   const lookupKey = `${params.workspaceId}:${params.agentId}:${params.conversationId}`;
