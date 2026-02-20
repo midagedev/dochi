@@ -7,6 +7,7 @@ typealias ToolApprovalHandler = @MainActor (ApprovalRequestParams) async -> (app
 
 /// Handles `tool.dispatch` and `approval.required` notifications from the runtime
 /// by executing local tools and sending results/decisions back.
+@available(*, deprecated, message: "Legacy SDK sidecar dispatch path. Native loop uses in-process tool dispatch.")
 @MainActor
 final class ToolDispatchHandler {
 

@@ -331,7 +331,7 @@ final class ToolDispatchTests: XCTestCase {
     // MARK: - Tool Dispatch Flow (Integration with Mock)
 
     @MainActor
-    func testToolDispatchEventRoutedToHandler() async throws {
+    func testToolDispatchEventsAreIgnoredByPrimarySendPath() async throws {
         let bridge = MockRuntimeBridgeService()
         bridge.runtimeState = .ready
 
@@ -393,15 +393,13 @@ final class ToolDispatchTests: XCTestCase {
 
         try await Task.sleep(for: .milliseconds(200))
 
-        XCTAssertEqual(bridge.runCallCount, 1)
+        XCTAssertEqual(bridge.runCallCount, 0)
         XCTAssertEqual(viewModel.interactionState, .idle)
-
-        if let conversation = viewModel.currentConversation {
-            let assistantMessages = conversation.messages.filter { $0.role == .assistant }
-            XCTAssertEqual(
-                assistantMessages.last?.content,
-                "Here are your reminders: Buy groceries, Walk the dog"
-            )
-        }
+        XCTAssertNotNil(viewModel.errorMessage)
+        let assistantMessage = viewModel.currentConversation?
+            .messages
+            .last(where: { $0.role == .assistant })?
+            .content
+        XCTAssertNil(assistantMessage)
     }
 }

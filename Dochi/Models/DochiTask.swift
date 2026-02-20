@@ -226,7 +226,7 @@ final class TaskQueueManager {
 
     func markFailed(taskId: UUID, error: String) -> Bool {
         guard var task = tasks[taskId],
-              task.status == .running || task.status == .assigned else { return false }
+              task.status == .running || task.status == .assigned || task.status == .pending else { return false }
         task.retryCount += 1
         task.errorMessage = error
         task.updatedAt = Date()
