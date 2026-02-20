@@ -71,6 +71,7 @@ struct ContentView: View {
         mainContent
             .onAppear {
                 viewModel.loadConversations()
+                viewModel.restoreNativeSessionIfNeeded()
             }
             // H-3: Handle notification-driven navigation
             .onChange(of: viewModel.notificationRequestedSection) { _, newValue in

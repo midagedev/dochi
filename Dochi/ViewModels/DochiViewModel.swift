@@ -222,6 +222,7 @@ final class DochiViewModel {
     let sessionContext: SessionContext
     let metricsCollector: MetricsCollector
     private let nativeAgentLoopService: NativeAgentLoopService
+    private let nativeSessionStore: NativeSessionStore
 
     /// Optional runtime bridge for SDK session path.
     /// When available and in `.ready` state, input is routed through the SDK session.
@@ -280,7 +281,8 @@ final class DochiViewModel {
         sessionContext: SessionContext,
         metricsCollector: MetricsCollector = MetricsCollector(),
         runtimeBridge: (any RuntimeBridgeProtocol)? = nil,
-        nativeAgentLoopService: NativeAgentLoopService? = nil
+        nativeAgentLoopService: NativeAgentLoopService? = nil,
+        nativeSessionStore: NativeSessionStore? = nil
     ) {
         self.toolService = toolService
         self.contextService = contextService
@@ -297,6 +299,7 @@ final class DochiViewModel {
             adapters: [AnthropicNativeLLMProviderAdapter()],
             toolService: toolService
         )
+        self.nativeSessionStore = nativeSessionStore ?? NativeSessionStore()
 
         // Wire TTS completion callback
         self.ttsService.onComplete = { [weak self] in
@@ -991,6 +994,7 @@ final class DochiViewModel {
         if imagesToProcess.isEmpty {
             // No images — send immediately
             appendUserMessage(finalText, imageData: nil)
+            markCurrentNativeSessionActive()
             transition(to: .processing)
             processingSubState = .streaming
 
@@ -1020,6 +1024,7 @@ final class DochiViewModel {
                     Log.app.info("Attached \(imageContents.count) image(s) to message")
                 }
                 appendUserMessage(finalText, imageData: imageContents.isEmpty ? nil : imageContents)
+                markCurrentNativeSessionActive()
                 await processPrimaryLLMPath(input: finalText, includesImages: !imageContents.isEmpty)
             }
         }
@@ -1226,6 +1231,7 @@ final class DochiViewModel {
         ttsService.stopAndClear()
         sentenceChunker = SentenceChunker()
         interruptSDKSession()
+        markCurrentNativeSessionInterrupted()
 
         // Preserve partial streaming text as assistant message
         if !streamingText.isEmpty {
@@ -1540,6 +1546,50 @@ final class DochiViewModel {
         Log.app.debug("Loaded \(self.conversations.count) conversations")
     }
 
+    func restoreNativeSessionIfNeeded() {
+        guard currentConversation == nil else { return }
+        guard let userId = normalizedUserId(sessionContext.currentUserId) else {
+            Log.app.debug("Skipping native session restore: current user is not set")
+            return
+        }
+        let records = nativeSessionStore.latestRecords(
+            workspaceId: sessionContext.workspaceId,
+            agentId: settings.activeAgentName,
+            userId: userId
+        )
+
+        for record in records {
+            guard let conversationId = UUID(uuidString: record.conversationId) else {
+                continue
+            }
+
+            guard let conversation = conversationService.load(id: conversationId) else {
+                nativeSessionStore.remove(
+                    workspaceId: sessionContext.workspaceId,
+                    agentId: settings.activeAgentName,
+                    conversationId: conversationId
+                )
+                continue
+            }
+
+            guard normalizedUserId(conversation.userId) == userId else {
+                continue
+            }
+
+            currentConversation = conversation
+            if record.status == .interrupted {
+                _ = nativeSessionStore.recoverIfInterrupted(
+                    workspaceId: sessionContext.workspaceId,
+                    agentId: settings.activeAgentName,
+                    conversationId: conversation.id,
+                    userId: userId
+                )
+            }
+            Log.app.info("Restored native session conversation: \(conversation.id)")
+            return
+        }
+    }
+
     func selectConversation(id: UUID) {
         guard interactionState == .idle else { return }
         recordUserActivity()
@@ -1552,6 +1602,7 @@ final class DochiViewModel {
             streamingText = ""
             errorMessage = nil
             toolService.resetRegistry()
+            markCurrentNativeSessionActive()
             Log.app.info("Selected conversation: \(id)")
         }
     }
@@ -1639,6 +1690,11 @@ final class DochiViewModel {
 
     func deleteConversation(id: UUID) {
         conversationService.delete(id: id)
+        nativeSessionStore.remove(
+            workspaceId: sessionContext.workspaceId,
+            agentId: settings.activeAgentName,
+            conversationId: id
+        )
         spotlightIndexer?.removeConversation(id: id)
         if currentConversation?.id == id {
             currentConversation = nil
@@ -2192,6 +2248,7 @@ final class DochiViewModel {
 
         ensureConversation()
         appendUserMessage(cleanedText)
+        markCurrentNativeSessionActive()
 
         transition(to: .processing)
         processingSubState = .streaming
@@ -3023,6 +3080,7 @@ final class DochiViewModel {
         if currentConversation == nil {
             currentConversation = Conversation(userId: sessionContext.currentUserId)
         }
+        markCurrentNativeSessionActive()
     }
 
     private func appendUserMessage(_ text: String, imageData: [ImageContent]? = nil) {
@@ -3075,6 +3133,7 @@ final class DochiViewModel {
 
     private func saveConversation() {
         guard let conversation = currentConversation else { return }
+        markCurrentNativeSessionActive()
 
         if conversation.title == "새 대화",
            let firstUser = conversation.messages.first(where: { $0.role == .user }) {
@@ -3086,6 +3145,48 @@ final class DochiViewModel {
         loadConversations()
         indexCurrentConversationIfNeeded()
         Log.app.debug("Conversation saved: \(conversation.id)")
+    }
+
+    private func markCurrentNativeSessionActive() {
+        guard let conversation = currentConversation else { return }
+        let workspaceId = sessionContext.workspaceId
+        let agentId = settings.activeAgentName
+        let ownerUserId = normalizedUserId(conversation.userId) ?? normalizedUserId(sessionContext.currentUserId)
+
+        if nativeSessionStore.recoverIfInterrupted(
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: conversation.id,
+            userId: ownerUserId
+        ) != nil {
+            return
+        }
+
+        _ = nativeSessionStore.activate(
+            workspaceId: workspaceId,
+            agentId: agentId,
+            conversationId: conversation.id,
+            userId: ownerUserId
+        )
+    }
+
+    private func markCurrentNativeSessionInterrupted() {
+        guard let conversation = currentConversation else { return }
+        let ownerUserId = normalizedUserId(conversation.userId) ?? normalizedUserId(sessionContext.currentUserId)
+        _ = nativeSessionStore.interrupt(
+            workspaceId: sessionContext.workspaceId,
+            agentId: settings.activeAgentName,
+            conversationId: conversation.id,
+            userId: ownerUserId
+        )
+    }
+
+    private func normalizedUserId(_ userId: String?) -> String? {
+        guard let trimmed = userId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
     }
 
 
