@@ -5,6 +5,7 @@ struct IntegrationsSettingsView: View {
     var telegramService: TelegramServiceProtocol?
     var mcpService: MCPServiceProtocol?
     var settings: AppSettings
+    var sessionContext: SessionContext?
 
     // Telegram state
     @State private var botToken = ""
@@ -19,6 +20,12 @@ struct IntegrationsSettingsView: View {
     @State private var editingServer: MCPServerConfig?
     @State private var serverToDelete: UUID?
     @State private var showDeleteConfirmation = false
+
+    // Git repo path state
+    @State private var repoPathInput = ""
+    @State private var repoPathStatus: String?
+    @State private var repoPathIsError = false
+    @State private var isSyncingRepoPath = false
 
     // Telegram mapping state
     @State private var chatMappings: [TelegramChatMapping] = []
@@ -395,6 +402,158 @@ struct IntegrationsSettingsView: View {
                 }
             }
             Button("취소", role: .cancel) {}
+        }
+
+        codingGitRepoSection
+    }
+
+    // MARK: - Coding-Git Repo Section
+
+    @ViewBuilder
+    private var codingGitRepoSection: some View {
+        let gitProfile = mcpService?.listServers().first(where: { $0.isCodingGitProfile })
+
+        if gitProfile != nil {
+            Section {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Git 저장소 경로")
+                            .font(.system(size: 13, weight: .medium))
+
+                        if let currentPath = gitProfile?.codingGitRepoPath, !currentPath.isEmpty {
+                            Text(currentPath)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        } else {
+                            Text("설정되지 않음")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
+                    Spacer()
+
+                    if gitProfile?.isEnabled == true {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 6, height: 6)
+                            .help("coding-git 활성")
+                    } else {
+                        Circle()
+                            .fill(.orange)
+                            .frame(width: 6, height: 6)
+                            .help("coding-git 비활성 (경로 미설정)")
+                    }
+                }
+
+                HStack {
+                    TextField("저장소 경로", text: $repoPathInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+
+                    Button {
+                        selectRepoFolder()
+                    } label: {
+                        Image(systemName: "folder")
+                            .font(.system(size: 12))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("폴더 선택")
+
+                    Button {
+                        applyRepoPath()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if isSyncingRepoPath {
+                                ProgressView()
+                                    .scaleEffect(0.5)
+                            }
+                            Text("적용")
+                        }
+                    }
+                    .disabled(repoPathInput.trimmingCharacters(in: .whitespaces).isEmpty || isSyncingRepoPath)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                if let status = repoPathStatus {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(repoPathIsError ? .red : .secondary)
+                }
+            } header: {
+                SettingsSectionHeader(
+                    title: "코딩 Git 프로파일",
+                    helpContent: "coding-git MCP 프로파일의 Git 저장소 경로를 설정합니다. 대화 중 repo 컨텍스트가 확정되면 자동 동기화됩니다."
+                )
+            }
+            .onAppear {
+                repoPathInput = gitProfile?.codingGitRepoPath ?? ""
+            }
+        }
+    }
+
+    private func selectRepoFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Git 저장소 폴더를 선택하세요"
+        panel.prompt = "선택"
+
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                repoPathInput = url.path
+            }
+        }
+    }
+
+    private func applyRepoPath() {
+        let trimmed = repoPathInput.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        let normalized = NSString(string: trimmed).expandingTildeInPath
+
+        guard MCPServerConfig.isValidGitRepository(at: normalized) else {
+            repoPathStatus = "유효하지 않은 Git 저장소입니다. .git 폴더가 있는 디렉토리를 선택해주세요."
+            repoPathIsError = true
+            return
+        }
+
+        guard let mcpService else { return }
+
+        isSyncingRepoPath = true
+        repoPathStatus = nil
+        repoPathIsError = false
+
+        let syncService = MCPRepoSyncService(mcpService: mcpService, settings: settings)
+
+        Task {
+            let result = await syncService.syncRepoPath(normalized)
+
+            switch result {
+            case .updated(_, let newPath):
+                repoPathStatus = "Git 저장소 경로를 '\(newPath)'(으)로 업데이트했습니다."
+                repoPathIsError = false
+                repoPathInput = newPath
+                // Also update session context if available
+                sessionContext?.currentRepoPath = newPath
+            case .alreadyInSync:
+                repoPathStatus = "이미 동일한 경로로 설정되어 있습니다."
+                repoPathIsError = false
+            case .invalidPath(let path):
+                repoPathStatus = "경로 '\(path)'을(를) 적용할 수 없습니다."
+                repoPathIsError = true
+            case .profileNotFound:
+                repoPathStatus = "coding-git 프로파일을 찾을 수 없습니다."
+                repoPathIsError = true
+            }
+
+            isSyncingRepoPath = false
         }
     }
 

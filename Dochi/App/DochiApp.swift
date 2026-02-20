@@ -322,6 +322,23 @@ struct DochiApp: App {
         // Restore MCP servers from AppStorage (or bootstrap coding defaults on first run)
         restoreMCPServers(mcpService: mcpService, settings: settings)
 
+        // Wire repo path sync: when SessionContext.currentRepoPath changes,
+        // auto-update the coding-git MCP profile's --repository argument.
+        let repoSyncService = MCPRepoSyncService(mcpService: mcpService, settings: settings)
+        sessionContext.onRepoPathChanged = { [repoSyncService] newPath in
+            let result = await repoSyncService.syncRepoPath(newPath)
+            switch result {
+            case .updated(let oldPath, let newPath):
+                Log.mcp.info("coding-git repo synced: \(oldPath ?? "nil") -> \(newPath)")
+            case .alreadyInSync:
+                break
+            case .invalidPath(let path):
+                Log.mcp.warning("coding-git repo sync skipped: invalid path '\(path)'")
+            case .profileNotFound:
+                Log.mcp.warning("coding-git repo sync skipped: profile not found")
+            }
+        }
+
         // Configure Supabase if previously set
         if !settings.supabaseURL.isEmpty, !settings.supabaseAnonKey.isEmpty,
            let url = URL(string: settings.supabaseURL) {

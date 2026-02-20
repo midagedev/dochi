@@ -144,10 +144,65 @@ extension MCPServerConfig {
         return nil
     }
 
-    private static func normalizePath(_ rawPath: String?) -> String {
+    static func normalizePath(_ rawPath: String?) -> String {
         guard let rawPath else { return "" }
         let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         return NSString(string: trimmed).expandingTildeInPath
+    }
+
+    // MARK: - Coding-Git Repo Path Helpers
+
+    /// Whether this config is a coding-git profile.
+    var isCodingGitProfile: Bool {
+        name == "coding-git"
+    }
+
+    /// Extracts the `--repository` value from arguments, if present.
+    var codingGitRepoPath: String? {
+        guard isCodingGitProfile else { return nil }
+        guard let idx = arguments.firstIndex(of: "--repository"),
+              arguments.index(after: idx) < arguments.endIndex else { return nil }
+        let path = arguments[arguments.index(after: idx)]
+        return path.isEmpty ? nil : path
+    }
+
+    /// Returns a new config with the `--repository` argument updated to `newPath`.
+    /// If `--repository` is not found in arguments, appends it.
+    /// Enables the profile if it was previously disabled.
+    func withUpdatedRepoPath(_ newPath: String) -> MCPServerConfig {
+        let normalized = Self.normalizePath(newPath)
+        guard !normalized.isEmpty else { return self }
+
+        var newArgs = arguments
+        if let idx = newArgs.firstIndex(of: "--repository"),
+           newArgs.index(after: idx) < newArgs.endIndex {
+            newArgs[newArgs.index(after: idx)] = normalized
+        } else {
+            newArgs.append("--repository")
+            newArgs.append(normalized)
+        }
+
+        return MCPServerConfig(
+            id: id,
+            name: name,
+            command: command,
+            arguments: newArgs,
+            environment: environment,
+            isEnabled: true
+        )
+    }
+
+    /// Validates that a path is a directory containing a `.git` subfolder.
+    static func isValidGitRepository(at path: String) -> Bool {
+        let normalized = normalizePath(path)
+        guard !normalized.isEmpty else { return false }
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: normalized, isDirectory: &isDir), isDir.boolValue else {
+            return false
+        }
+        let gitPath = URL(fileURLWithPath: normalized).appendingPathComponent(".git").path
+        return fm.fileExists(atPath: gitPath)
     }
 }
