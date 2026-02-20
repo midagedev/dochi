@@ -223,6 +223,7 @@ final class DochiViewModel {
     let metricsCollector: MetricsCollector
     private let nativeAgentLoopService: NativeAgentLoopService
     private let nativeSessionStore: NativeSessionStore
+    private let contextCompactionService: ContextCompactionService
 
     /// Optional runtime bridge for SDK session path.
     /// When available and in `.ready` state, input is routed through the SDK session.
@@ -282,7 +283,8 @@ final class DochiViewModel {
         metricsCollector: MetricsCollector = MetricsCollector(),
         runtimeBridge: (any RuntimeBridgeProtocol)? = nil,
         nativeAgentLoopService: NativeAgentLoopService? = nil,
-        nativeSessionStore: NativeSessionStore? = nil
+        nativeSessionStore: NativeSessionStore? = nil,
+        contextCompactionService: ContextCompactionService? = nil
     ) {
         self.toolService = toolService
         self.contextService = contextService
@@ -300,6 +302,7 @@ final class DochiViewModel {
             toolService: toolService
         )
         self.nativeSessionStore = nativeSessionStore ?? NativeSessionStore()
+        self.contextCompactionService = contextCompactionService ?? ContextCompactionService()
 
         // Wire TTS completion callback
         self.ttsService.onComplete = { [weak self] in
@@ -2710,7 +2713,12 @@ final class DochiViewModel {
 
     // MARK: - Context Composition
 
-    private func composeSystemPrompt() -> String {
+    private func composeSystemPrompt(
+        workspaceMemoryOverride: String? = nil,
+        agentMemoryOverride: String? = nil,
+        personalMemoryOverride: String? = nil,
+        additionalSections: [String] = []
+    ) -> String {
         var parts: [String] = []
 
         // 1. Base system prompt
@@ -2742,18 +2750,29 @@ final class DochiViewModel {
         }
 
         // 5. Workspace memory
-        if let wsMem = contextService.loadWorkspaceMemory(workspaceId: wsId), !wsMem.isEmpty {
+        let workspaceMemory = workspaceMemoryOverride ?? (contextService.loadWorkspaceMemory(workspaceId: wsId) ?? "")
+        if !workspaceMemory.isEmpty {
+            let wsMem = workspaceMemory
             parts.append("## 워크스페이스 메모리\n\(wsMem)")
         }
 
         // 6. Agent memory
-        if let agentMem = contextService.loadAgentMemory(workspaceId: wsId, agentName: agentName), !agentMem.isEmpty {
+        let agentMemory = agentMemoryOverride ?? (
+            contextService.loadAgentMemory(workspaceId: wsId, agentName: agentName) ?? ""
+        )
+        if !agentMemory.isEmpty {
+            let agentMem = agentMemory
             parts.append("## 에이전트 메모리\n\(agentMem)")
         }
 
         // 7. Personal memory
-        if let userId = sessionContext.currentUserId,
-           let personalMem = contextService.loadUserMemory(userId: userId), !personalMem.isEmpty {
+        let personalMemory: String = {
+            if let override = personalMemoryOverride { return override }
+            guard let userId = sessionContext.currentUserId else { return "" }
+            return contextService.loadUserMemory(userId: userId) ?? ""
+        }()
+        if !personalMemory.isEmpty {
+            let personalMem = personalMemory
             parts.append("## 개인 메모리\n\(personalMem)")
         }
 
@@ -2774,7 +2793,12 @@ final class DochiViewModel {
             }
         }
 
-        // 10. Tool behavior hints
+        // 10. Summary snapshot fallback (context compaction)
+        if !additionalSections.isEmpty {
+            parts.append(contentsOf: additionalSections)
+        }
+
+        // 11. Tool behavior hints
         parts.append(
             """
             ## 도구 사용 규칙
@@ -2783,7 +2807,7 @@ final class DochiViewModel {
             """
         )
 
-        // 11. Non-baseline tool listing for LLM awareness
+        // 12. Non-baseline tool listing for LLM awareness
         let nonBaseline = toolService.nonBaselineToolSummaries
         if !nonBaseline.isEmpty {
             var lines: [String] = ["## 추가 도구", "필요 시 tools.enable으로 활성화할 수 있는 도구:"]
@@ -2809,8 +2833,8 @@ final class DochiViewModel {
         }
 
         let provider = settings.currentProvider
-        let messages = buildNativeMessages(from: conversation.messages)
-        if messages.isEmpty {
+        let rawMessages = buildNativeMessages(from: conversation.messages)
+        if rawMessages.isEmpty {
             throw NativeLLMError(
                 code: .invalidResponse,
                 message: "네이티브 요청에 포함할 대화 메시지가 없습니다.",
@@ -2819,15 +2843,106 @@ final class DochiViewModel {
             )
         }
 
+        let workspaceMemory = contextService.loadWorkspaceMemory(workspaceId: sessionContext.workspaceId) ?? ""
+        let agentMemory = contextService.loadAgentMemory(
+            workspaceId: sessionContext.workspaceId,
+            agentName: settings.activeAgentName
+        ) ?? ""
+        let personalMemory: String = {
+            guard let userId = normalizedUserId(sessionContext.currentUserId) else { return "" }
+            return contextService.loadUserMemory(userId: userId) ?? ""
+        }()
+
+        let contextWindow = settings.currentProvider.contextWindowTokens(for: settings.llmModel)
+        let reservedOutputTokens = min(4_096, max(contextWindow / 5, 1_024))
+        let configuredBudget = max(settings.contextMaxSize, 1_024)
+        let tokenBudget = max(1_024, min(contextWindow - reservedOutputTokens, configuredBudget))
+
+        let fixedPrompt = composeSystemPrompt(
+            workspaceMemoryOverride: "",
+            agentMemoryOverride: "",
+            personalMemoryOverride: ""
+        )
+        let fixedPromptTokens = contextCompactionService.estimateTokens(for: fixedPrompt)
+
+        let compaction = contextCompactionService.compact(
+            request: ContextCompactionRequest(
+                workspaceMemory: workspaceMemory,
+                agentMemory: agentMemory,
+                personalMemory: personalMemory,
+                messages: rawMessages,
+                tokenBudget: tokenBudget,
+                fixedPromptTokens: fixedPromptTokens,
+                autoCompactEnabled: settings.contextAutoCompress,
+                conversationSummary: conversation.summary
+            )
+        )
+        metricsCollector.recordContextCompaction(compaction.metrics)
+        persistContextSnapshotsIfCompacted(
+            workspaceMemory: workspaceMemory,
+            agentMemory: agentMemory,
+            personalMemory: personalMemory,
+            metrics: compaction.metrics
+        )
+
+        var additionalSections: [String] = []
+        if let summarySnapshot = compaction.summarySnapshot, !summarySnapshot.isEmpty {
+            additionalSections.append("## 컨텍스트 요약 스냅샷\n\(summarySnapshot)")
+        }
+
+        let compactedSystemPrompt = composeSystemPrompt(
+            workspaceMemoryOverride: compaction.layers.workspaceMemory,
+            agentMemoryOverride: compaction.layers.agentMemory,
+            personalMemoryOverride: compaction.layers.personalMemory,
+            additionalSections: additionalSections
+        )
+        let compactedInputTokens = contextCompactionService.estimateTokens(for: compactedSystemPrompt) +
+            contextCompactionService.estimateTokens(for: compaction.messages)
+        let maxTokens = max(256, min(4_096, contextWindow - compactedInputTokens - 512))
+
         return NativeLLMRequest(
             provider: provider,
             model: settings.llmModel,
             apiKey: loadNativeAPIKey(for: provider),
-            systemPrompt: composeSystemPrompt(),
-            messages: messages,
+            systemPrompt: compactedSystemPrompt,
+            messages: compaction.messages,
             tools: buildNativeToolDefinitions(),
+            maxTokens: maxTokens,
             endpointURL: nativeEndpointURL(for: provider)
         )
+    }
+
+    private func persistContextSnapshotsIfCompacted(
+        workspaceMemory: String,
+        agentMemory: String,
+        personalMemory: String,
+        metrics: ContextCompactionMetrics
+    ) {
+        guard metrics.didCompact else { return }
+
+        if metrics.truncatedWorkspaceMemory, !workspaceMemory.isEmpty {
+            contextService.saveWorkspaceMemorySnapshot(
+                workspaceId: sessionContext.workspaceId,
+                content: workspaceMemory
+            )
+        }
+
+        if metrics.truncatedAgentMemory, !agentMemory.isEmpty {
+            contextService.saveAgentMemorySnapshot(
+                workspaceId: sessionContext.workspaceId,
+                agentName: settings.activeAgentName,
+                content: agentMemory
+            )
+        }
+
+        if metrics.truncatedPersonalMemory,
+           let userId = normalizedUserId(sessionContext.currentUserId),
+           !personalMemory.isEmpty {
+            contextService.saveUserMemorySnapshot(
+                userId: userId,
+                content: personalMemory
+            )
+        }
     }
 
     private func buildNativeMessages(from messages: [Message]) -> [NativeLLMMessage] {

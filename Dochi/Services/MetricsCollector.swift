@@ -9,6 +9,8 @@ final class MetricsCollector {
     /// Recent exchange metrics (ring buffer, capped at `maxEntries`).
     private(set) var recentMetrics: [ExchangeMetrics] = []
     private static let maxEntries = 100
+    /// Recent context compaction metrics (ring buffer, capped at `maxEntries`).
+    private(set) var recentContextCompactions: [ContextCompactionMetrics] = []
 
     /// Persistent usage store for historical tracking.
     var usageStore: UsageStoreProtocol?
@@ -45,6 +47,18 @@ final class MetricsCollector {
                 await checkBudget()
             }
         }
+    }
+
+    /// Record context compaction telemetry for native request preparation.
+    func recordContextCompaction(_ metrics: ContextCompactionMetrics) {
+        recentContextCompactions.append(metrics)
+        if recentContextCompactions.count > Self.maxEntries {
+            recentContextCompactions.removeFirst(recentContextCompactions.count - Self.maxEntries)
+        }
+
+        Log.llm.info(
+            "Context compaction metrics: before=\(metrics.estimatedInputTokensBefore), after=\(metrics.estimatedInputTokensAfter), dropped=\(metrics.droppedMessageCount), fallback=\(metrics.usedSummaryFallback)"
+        )
     }
 
     /// Aggregate stats for the current session.
