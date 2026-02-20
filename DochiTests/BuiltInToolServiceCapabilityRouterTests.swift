@@ -35,6 +35,32 @@ private final class MockMCPServiceForCapabilityTests: MCPServiceProtocol {
 }
 
 @MainActor
+private final class MockToolContextStoreForCapabilityTests: ToolContextStoreProtocol {
+    var context: ToolRankingContext = .empty
+    private(set) var recordedEvents: [ToolUsageEvent] = []
+
+    func record(_ event: ToolUsageEvent) async {
+        recordedEvents.append(event)
+    }
+
+    func profile(workspaceId _: String, agentName _: String) async -> ToolContextProfile? {
+        nil
+    }
+
+    func userPreference(workspaceId _: String) async -> UserToolPreference {
+        UserToolPreference()
+    }
+
+    func rankingContext(workspaceId _: String, agentName _: String) -> ToolRankingContext {
+        context
+    }
+
+    func updateUserPreference(_: UserToolPreference, workspaceId _: String) async {}
+
+    func flushToDisk() async {}
+}
+
+@MainActor
 final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
     private static let flagKey = "capabilityRouterV2Enabled"
 
@@ -100,6 +126,66 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
         let names = orderedSchemaNames(from: schemas)
 
         XCTAssertEqual(names.first, "open_url")
+    }
+
+    func testRankingContextBoostsPreferredAndHighUsageTools() {
+        let contextStore = MockToolContextStoreForCapabilityTests()
+        contextStore.context = ToolRankingContext(
+            categoryScores: ["agent": 1.2],
+            toolScores: ["agent.list": 2.5],
+            preferredCategories: ["agent"],
+            suppressedCategories: ["finder"]
+        )
+
+        let service = makeService(
+            routerEnabled: false,
+            toolContextStore: contextStore
+        )
+        service.enableTools(names: ["agent.list", "coding.sessions"])
+
+        let schemas = service.availableToolSchemas(
+            for: ["safe", "sensitive"],
+            preferredToolGroups: [],
+            intentHint: nil
+        )
+        let names = orderedSchemaNames(from: schemas)
+
+        XCTAssertLessThan(index(of: "agent-_-list", in: names), index(of: "finder-_-list_dir", in: names))
+    }
+
+    func testCodingAgentIntentBoostPrioritizesAgentAndSessionTools() {
+        let contextStore = MockToolContextStoreForCapabilityTests()
+        let service = makeService(
+            routerEnabled: false,
+            toolContextStore: contextStore
+        )
+        service.enableTools(names: ["agent.list", "coding.sessions"])
+
+        let schemas = service.availableToolSchemas(
+            for: ["safe", "sensitive"],
+            preferredToolGroups: [],
+            intentHint: "코딩 에이전트 목록 확인해줘"
+        )
+        let names = orderedSchemaNames(from: schemas)
+
+        let agentIndex = index(of: "agent-_-list", in: names)
+        let sessionIndex = index(of: "coding-_-sessions", in: names)
+        let finderIndex = index(of: "finder-_-list_dir", in: names)
+        XCTAssertLessThan(agentIndex, finderIndex)
+        XCTAssertLessThan(sessionIndex, finderIndex)
+    }
+
+    func testColdStartWithoutSignalsRemainsAlphabetical() {
+        let service = makeService(routerEnabled: false)
+        service.enableTools(names: ["open_url"])
+
+        let schemas = service.availableToolSchemas(
+            for: ["safe", "sensitive"],
+            preferredToolGroups: [],
+            intentHint: nil
+        )
+        let names = orderedSchemaNames(from: schemas)
+        XCTAssertEqual(names, names.sorted())
     }
 
     func testExecuteMCPToolReturnsFallbackMessageWhenServerUnavailable() async {
@@ -198,7 +284,8 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
 
     private func makeService(
         routerEnabled: Bool,
-        mcpService: MCPServiceProtocol = MockMCPServiceForCapabilityTests()
+        mcpService: MCPServiceProtocol = MockMCPServiceForCapabilityTests(),
+        toolContextStore: (any ToolContextStoreProtocol)? = nil
     ) -> BuiltInToolService {
         let settings = AppSettings()
         settings.capabilityRouterV2Enabled = routerEnabled
@@ -211,7 +298,8 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
             settings: settings,
             supabaseService: MockSupabaseService(),
             telegramService: MockTelegramService(),
-            mcpService: mcpService
+            mcpService: mcpService,
+            toolContextStore: toolContextStore
         )
     }
 
@@ -232,5 +320,9 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
             guard let function = schema["function"] as? [String: Any] else { return nil }
             return function["name"] as? String
         }
+    }
+
+    private func index(of name: String, in names: [String]) -> Int {
+        names.firstIndex(of: name) ?? Int.max
     }
 }

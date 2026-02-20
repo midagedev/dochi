@@ -121,6 +121,35 @@ final class ToolContextStoreTests: XCTestCase {
         XCTAssertEqual(savedPreference.suppressedCategories, ["calendar"])
     }
 
+    func testRankingContextAggregatesProfileAndPreferenceSignals() async throws {
+        let tempDir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let store = ToolContextStore(baseURL: tempDir)
+        await store.record(ToolUsageEvent(
+            toolName: "agent.list",
+            category: "agent",
+            decision: .allowed,
+            latencyMs: 10,
+            agentName: "코디",
+            workspaceId: "ws-1",
+            timestamp: Date()
+        ))
+        await store.updateUserPreference(
+            UserToolPreference(
+                preferredCategories: ["Agent", " coding "],
+                suppressedCategories: ["finder", "coding"]
+            ),
+            workspaceId: "ws-1"
+        )
+
+        let context = store.rankingContext(workspaceId: "ws-1", agentName: "코디")
+        XCTAssertEqual(context.preferredCategories, ["agent", "coding"])
+        XCTAssertEqual(context.suppressedCategories, ["finder"])
+        XCTAssertEqual(context.toolScores["agent.list"] ?? 0, 1.0, accuracy: 0.001)
+        XCTAssertEqual(context.categoryScores["agent"] ?? 0, 1.0, accuracy: 0.001)
+    }
+
     func testMalformedJSONFallsBackToEmptyStore() async throws {
         let tempDir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: tempDir) }

@@ -2862,7 +2862,9 @@ final class DochiViewModel {
             guard let userId = normalizedUserId(sessionContext.currentUserId) else { return "" }
             return contextService.loadUserMemory(userId: userId) ?? ""
         }()
-        let requestedTools = buildNativeToolDefinitions()
+        let requestedTools = buildNativeToolDefinitions(
+            intentHint: latestUserIntentHint(in: conversation)
+        )
         let shouldDisableToolsForCapability = !capabilities.supportsToolCalling && !requestedTools.isEmpty
         let enabledTools = shouldDisableToolsForCapability ? [] : requestedTools
 
@@ -3017,10 +3019,11 @@ final class DochiViewModel {
         }
     }
 
-    private func buildNativeToolDefinitions() -> [NativeLLMToolDefinition] {
+    private func buildNativeToolDefinitions(intentHint: String?) -> [NativeLLMToolDefinition] {
         let schemas = toolService.availableToolSchemas(
             for: currentAgentPermissions(),
-            preferredToolGroups: currentAgentPreferredToolGroups()
+            preferredToolGroups: currentAgentPreferredToolGroups(),
+            intentHint: intentHint
         )
         selectedCapabilityLabel = toolService.selectedCapabilityLabel
 
@@ -3039,6 +3042,17 @@ final class DochiViewModel {
                 inputSchema: inputSchema
             )
         }
+    }
+
+    private func latestUserIntentHint(in conversation: Conversation) -> String? {
+        for message in conversation.messages.reversed() {
+            guard message.role == .user else { continue }
+            let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
     }
 
     private func nativeEndpointURL(for provider: LLMProvider) -> URL? {

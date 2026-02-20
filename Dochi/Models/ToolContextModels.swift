@@ -102,3 +102,17 @@ struct ToolContextFile: Codable, Sendable {
         recentEvents: []
     )
 }
+
+struct ToolRankingContext: Sendable, Equatable {
+    var categoryScores: [String: Double]
+    var toolScores: [String: Double]
+    var preferredCategories: [String]
+    var suppressedCategories: [String]
+
+    static let empty = ToolRankingContext(
+        categoryScores: [:],
+        toolScores: [:],
+        preferredCategories: [],
+        suppressedCategories: []
+    )
+}
