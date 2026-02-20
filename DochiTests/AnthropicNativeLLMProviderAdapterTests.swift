@@ -473,6 +473,29 @@ final class ZAINativeLLMProviderAdapterTests: XCTestCase {
             XCTFail("Unexpected error type: \(error)")
         }
     }
+
+    func testZAIAdapterRejectsNonZAIProviderRequest() async {
+        let adapter = ZAINativeLLMProviderAdapter(httpClient: MockNativeLLMHTTPClient(
+            statusCode: 200,
+            headers: [:],
+            body: Data()
+        ))
+        let wrongRequest = NativeLLMRequest(
+            provider: .openai,
+            model: "gpt-4o-mini",
+            apiKey: "test-key",
+            messages: [.init(role: .user, text: "hello")]
+        )
+
+        do {
+            _ = try await collectEvents(from: adapter.stream(request: wrongRequest))
+            XCTFail("Expected NativeLLMError")
+        } catch let error as NativeLLMError {
+            XCTAssertEqual(error.code, .unsupportedProvider)
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
 }
 
 private extension AnthropicNativeLLMProviderAdapterTests {
