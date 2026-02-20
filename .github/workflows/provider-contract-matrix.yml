@@ -24,6 +24,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare Supabase Config Placeholder
+        run: |
+          if [[ ! -f Dochi/Resources/SupabaseConfig.plist ]]; then
+            mkdir -p Dochi/Resources
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0">' \
+              '<dict/>' \
+              '</plist>' > Dochi/Resources/SupabaseConfig.plist
+          fi
+
       - name: Install XcodeGen
         run: |
           if ! command -v xcodegen >/dev/null 2>&1; then
