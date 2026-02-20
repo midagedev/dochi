@@ -325,6 +325,57 @@ final class NativeAgentLoopServiceTests: XCTestCase {
         XCTAssertEqual(candidate.source, .toolResult)
     }
 
+    func testNativeAgentLoopServiceHandlesOutOfRangeUnsignedArguments() async throws {
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(toolCallId: "", content: "ok")
+        toolService.allToolInfos = [
+            ToolInfo(
+                name: "calculator",
+                description: "calculate",
+                category: .safe,
+                isBaseline: true,
+                isEnabled: true,
+                parameters: []
+            ),
+        ]
+
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.done(text: "done")]
+            }
+            return [
+                .toolUse(
+                    toolCallId: "tool_1",
+                    toolName: "calculator",
+                    toolInputJSON: "{\"n\":18446744073709551615}"
+                ),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "native-session-5",
+                    workspaceId: "workspace-5",
+                    agentId: "도치"
+                )
+            )
+        )
+
+        XCTAssertEqual(toolService.executeCallCount, 1)
+        guard let audit = service.auditLog.first else {
+            return XCTFail("Expected audit event for out-of-range integer argument")
+        }
+        XCTAssertFalse(audit.argumentsHash.isEmpty)
+    }
+
     func testNativeAgentLoopServiceRunsSessionCloseAndStopHooks() async throws {
         let spyHook = SpyLifecycleHook()
         let hookPipeline = HookPipeline()

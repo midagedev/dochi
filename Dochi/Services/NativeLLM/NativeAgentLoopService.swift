@@ -416,31 +416,31 @@ private extension NativeAgentLoopService {
             return .int(int)
 
         case let int8 as Int8:
-            return .int(Int(int8))
+            return makeSafeIntegerCodable(int8)
 
         case let int16 as Int16:
-            return .int(Int(int16))
+            return makeSafeIntegerCodable(int16)
 
         case let int32 as Int32:
-            return .int(Int(int32))
+            return makeSafeIntegerCodable(int32)
 
         case let int64 as Int64:
-            return .int(Int(int64))
+            return makeSafeIntegerCodable(int64)
 
         case let uint as UInt:
-            return .int(Int(uint))
+            return makeSafeIntegerCodable(uint)
 
         case let uint8 as UInt8:
-            return .int(Int(uint8))
+            return makeSafeIntegerCodable(uint8)
 
         case let uint16 as UInt16:
-            return .int(Int(uint16))
+            return makeSafeIntegerCodable(uint16)
 
         case let uint32 as UInt32:
-            return .int(Int(uint32))
+            return makeSafeIntegerCodable(uint32)
 
         case let uint64 as UInt64:
-            return .int(Int(uint64))
+            return makeSafeIntegerCodable(uint64)
 
         case let double as Double:
             return .double(double)
@@ -453,8 +453,10 @@ private extension NativeAgentLoopService {
                 return .bool(number.boolValue)
             }
             let doubleValue = number.doubleValue
-            if floor(doubleValue) == doubleValue {
-                return .int(number.intValue)
+            if floor(doubleValue) == doubleValue,
+               let exactInt = Int(exactly: number.int64Value),
+               Double(exactInt) == doubleValue {
+                return .int(exactInt)
             }
             return .double(doubleValue)
 
@@ -470,6 +472,13 @@ private extension NativeAgentLoopService {
         default:
             return .string(String(describing: value))
         }
+    }
+
+    private static func makeSafeIntegerCodable<T: BinaryInteger>(_ value: T) -> AnyCodableValue {
+        if let exact = Int(exactly: value) {
+            return .int(exact)
+        }
+        return .double(Double(value))
     }
 
     private static func parseToolArguments(from rawInputJSON: String) throws -> [String: Any] {
