@@ -215,17 +215,20 @@ final class SessionMappingTests: XCTestCase {
         XCTAssertEqual(service.activeMappings[0].sessionId, "s-1")
     }
 
-    // MARK: - Persistence
+    // MARK: - Persistence (async I/O -- Issue #298)
 
     @MainActor
-    func testPersistenceRoundTrip() {
+    func testPersistenceRoundTrip() async {
         // Insert with first service instance
         let service1 = SessionMappingService(baseURL: tempDir)
         service1.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1"))
         service1.insert(makeMapping(sessionId: "s-2", sdkSessionId: "sdk-2",
                                     conversationId: "c-2"))
 
-        // Create second instance — should load from file
+        // Flush the coalesced background save before reading from disk
+        await service1.flushPendingSave()
+
+        // Create second instance -- should load from file
         let service2 = SessionMappingService(baseURL: tempDir)
         XCTAssertEqual(service2.allMappings.count, 2)
         XCTAssertNotNil(service2.findBySessionId("s-1"))
@@ -233,10 +236,12 @@ final class SessionMappingTests: XCTestCase {
     }
 
     @MainActor
-    func testPersistenceAfterStatusUpdate() {
+    func testPersistenceAfterStatusUpdate() async {
         let service1 = SessionMappingService(baseURL: tempDir)
         service1.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1"))
         service1.updateStatus(sessionId: "s-1", status: .closed)
+
+        await service1.flushPendingSave()
 
         let service2 = SessionMappingService(baseURL: tempDir)
         let mapping = service2.findBySessionId("s-1")
@@ -278,7 +283,7 @@ final class SessionMappingTests: XCTestCase {
         service.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1"))
         service.updateStatus(sessionId: "s-1", status: .closed)
 
-        // Same key but session is closed — should not reuse
+        // Same key but session is closed -- should not reuse
         let found = service.findActive(
             workspaceId: "ws-1", agentId: "a-1",
             conversationId: "c-1"
@@ -303,10 +308,12 @@ final class SessionMappingTests: XCTestCase {
     }
 
     @MainActor
-    func testUpdateDeviceIdPersists() {
+    func testUpdateDeviceIdPersists() async {
         let service1 = SessionMappingService(baseURL: tempDir)
         service1.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", deviceId: "device-A"))
         service1.updateDeviceId(sessionId: "s-1", newDeviceId: "device-B")
+
+        await service1.flushPendingSave()
 
         // Reload from disk
         let service2 = SessionMappingService(baseURL: tempDir)
@@ -319,7 +326,7 @@ final class SessionMappingTests: XCTestCase {
         let service = SessionMappingService(baseURL: tempDir)
         service.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1", deviceId: "device-A"))
 
-        // Update nonexistent session — should be a no-op
+        // Update nonexistent session -- should be a no-op
         service.updateDeviceId(sessionId: "nonexistent", newDeviceId: "device-B")
 
         let mapping = service.findBySessionId("s-1")
@@ -356,6 +363,113 @@ final class SessionMappingTests: XCTestCase {
 
         // Active sessions are never pruned
         XCTAssertEqual(service.allMappings.count, 1)
+    }
+
+    // MARK: - Async Factory (Issue #298)
+
+    @MainActor
+    func testAsyncCreateLoadsFromDisk() async {
+        // Seed data using sync init
+        let seeder = SessionMappingService(baseURL: tempDir)
+        seeder.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1"))
+        seeder.insert(makeMapping(sessionId: "s-2", sdkSessionId: "sdk-2",
+                                  conversationId: "c-2"))
+        await seeder.flushPendingSave()
+
+        // Load via async factory -- file I/O runs on background actor
+        let service = await SessionMappingService.create(baseURL: tempDir)
+        XCTAssertEqual(service.allMappings.count, 2)
+        XCTAssertNotNil(service.findBySessionId("s-1"))
+        XCTAssertNotNil(service.findBySessionId("s-2"))
+    }
+
+    @MainActor
+    func testAsyncCreateEmptyDirectory() async {
+        let emptyDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SessionMappingTests-empty-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: emptyDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: emptyDir) }
+
+        let service = await SessionMappingService.create(baseURL: emptyDir)
+        XCTAssertEqual(service.allMappings.count, 0)
+    }
+
+    @MainActor
+    func testAsyncCreateHandlesCorruptFile() async {
+        // Write corrupt data to the expected file path
+        let fileURL = tempDir.appendingPathComponent("session_mappings.json")
+        try? "not valid json".data(using: .utf8)?.write(to: fileURL)
+
+        // Should gracefully fall back to empty store
+        let service = await SessionMappingService.create(baseURL: tempDir)
+        XCTAssertEqual(service.allMappings.count, 0)
+    }
+
+    // MARK: - Coalesced Save (Issue #298)
+
+    @MainActor
+    func testCoalescedSaveWritesLatestSnapshot() async {
+        let service = SessionMappingService(baseURL: tempDir)
+
+        // Rapid mutations -- only the final state should be persisted
+        service.insert(makeMapping(sessionId: "s-1", sdkSessionId: "sdk-1"))
+        service.insert(makeMapping(sessionId: "s-2", sdkSessionId: "sdk-2",
+                                   conversationId: "c-2"))
+        service.updateStatus(sessionId: "s-1", status: .closed)
+
+        await service.flushPendingSave()
+
+        // Verify on-disk state matches final in-memory state
+        let reloaded = SessionMappingService(baseURL: tempDir)
+        XCTAssertEqual(reloaded.allMappings.count, 2)
+
+        let m1 = reloaded.findBySessionId("s-1")
+        XCTAssertEqual(m1?.status, .closed)
+
+        let m2 = reloaded.findBySessionId("s-2")
+        XCTAssertEqual(m2?.status, .active)
+    }
+
+    @MainActor
+    func testFlushPendingSaveIsNoOpWhenNoPending() async {
+        let service = SessionMappingService(baseURL: tempDir)
+        // Should not crash or hang when there is nothing to flush
+        await service.flushPendingSave()
+    }
+
+    // MARK: - SessionMappingIO Actor (Issue #298)
+
+    func testIOActorReadWriteRoundTrip() async throws {
+        let fileURL = tempDir.appendingPathComponent("io_test.json")
+        let io = SessionMappingIO(fileURL: fileURL)
+
+        // Initially nil (file does not exist)
+        let initial = try await io.read()
+        XCTAssertNil(initial)
+
+        // Write a store
+        let mapping = makeMapping(sessionId: "s-io", sdkSessionId: "sdk-io")
+        let store = SessionMappingStore(mappings: [mapping], version: 1)
+        try await io.write(store)
+
+        // Read it back
+        let loaded = try await io.read()
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.mappings.count, 1)
+        XCTAssertEqual(loaded?.mappings[0].sessionId, "s-io")
+    }
+
+    func testIOActorCreatesIntermediateDirectories() async throws {
+        let nestedDir = tempDir
+            .appendingPathComponent("nested")
+            .appendingPathComponent("deep")
+        let fileURL = nestedDir.appendingPathComponent("session_mappings.json")
+        let io = SessionMappingIO(fileURL: fileURL)
+
+        let store = SessionMappingStore(mappings: [], version: 1)
+        try await io.write(store)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
     // MARK: - Helpers

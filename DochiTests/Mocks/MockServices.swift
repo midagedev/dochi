@@ -2041,4 +2041,8 @@ final class MockSessionMappingService: SessionMappingServiceProtocol {
             mapping.status != .active && mapping.lastActiveAt < cutoff
         }
     }
+
+    func flushPendingSave() async {
+        // No-op for mock -- in-memory only, no pending saves.
+    }
 }
