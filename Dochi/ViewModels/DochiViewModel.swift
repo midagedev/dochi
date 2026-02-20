@@ -106,7 +106,6 @@ final class DochiViewModel {
     var currentToolName: String?
     var partialTranscript: String = ""
     var pendingToolConfirmation: ToolConfirmation?
-    var pendingSDKApproval: SDKToolApproval?
     var userProfiles: [UserProfile] = []
     var currentUserName: String = "(사용자 없음)"
     var selectedCapabilityLabel: String?
@@ -227,19 +226,11 @@ final class DochiViewModel {
     private let memoryPipeline: any MemoryPipelineProtocol
     @ObservationIgnored private var modelRouterV2: ModelRouterV2
 
-    /// Optional runtime bridge for SDK session path.
-    /// When available and in `.ready` state, input is routed through the SDK session.
-    private var runtimeBridge: (any RuntimeBridgeProtocol)?
-
-    /// Active SDK session ID for the current conversation.
-    private(set) var activeSDKSessionId: String?
-
     // MARK: - Internal
 
     private var processingTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var confirmationTimeoutTask: Task<Void, Never>?
-    private var sdkApprovalTimeoutTask: Task<Void, Never>?
     private var localServerMonitorTask: Task<Void, Never>?
     private var sentenceChunker = SentenceChunker()
     private static let sessionEndingTimeout: TimeInterval = 10
@@ -283,7 +274,6 @@ final class DochiViewModel {
         settings: AppSettings,
         sessionContext: SessionContext,
         metricsCollector: MetricsCollector = MetricsCollector(),
-        runtimeBridge: (any RuntimeBridgeProtocol)? = nil,
         nativeAgentLoopService: NativeAgentLoopService? = nil,
         nativeSessionStore: NativeSessionStore? = nil,
         contextCompactionService: ContextCompactionService? = nil,
@@ -300,7 +290,6 @@ final class DochiViewModel {
         self.settings = settings
         self.sessionContext = sessionContext
         self.metricsCollector = metricsCollector
-        self.runtimeBridge = runtimeBridge
         let resolvedMemoryPipeline = memoryPipeline ?? MemoryPipelineService(contextService: contextService)
         self.memoryPipeline = resolvedMemoryPipeline
         let resolvedNativeAgentLoopService: NativeAgentLoopService
@@ -1320,24 +1309,6 @@ final class DochiViewModel {
         Log.app.info("Request cancelled by user")
     }
 
-    // MARK: - Legacy SDK Session Bridge
-
-    /// Legacy runtime bridge availability. Native loop is now the default execution path.
-    var isSDKSessionAvailable: Bool {
-        runtimeBridge?.runtimeState == .ready
-    }
-
-    /// Configures the legacy runtime bridge.
-    func configureRuntimeBridge(_ bridge: any RuntimeBridgeProtocol) {
-        self.runtimeBridge = bridge
-        bridge.configureToolDispatch(toolService: toolService)
-        bridge.configureContextSnapshot(contextService: contextService)
-        bridge.setApprovalHandler { [weak self] params in
-            guard let self else { return (approved: false, scope: .once) }
-            return await self.requestSDKToolApproval(params: params)
-        }
-    }
-
     private enum NativeLoopAttemptResult {
         case success
         case failure(reason: String)
@@ -1578,134 +1549,6 @@ final class DochiViewModel {
             wasFallback: wasFallback
         )
         return .success
-    }
-
-    /// Process user input through the SDK runtime session.
-    /// Opens a session if needed, sends input via `session.run`, and maps
-    /// streaming events to UI state updates.
-    private func processSDKSession(input: String) async {
-        guard let bridge = runtimeBridge else {
-            Log.runtime.error("SDK session requested but no runtime bridge available")
-            errorMessage = "런타임이 연결되지 않았습니다."
-            transition(to: .idle)
-            return
-        }
-
-        do {
-            // Open or reuse session
-            if activeSDKSessionId == nil {
-                let conversationId = currentConversation?.id.uuidString ?? UUID().uuidString
-                let openResult = try await bridge.openSession(params: SessionOpenParams(
-                    workspaceId: sessionContext.workspaceId.uuidString,
-                    agentId: settings.activeAgentName,
-                    conversationId: conversationId,
-                    userId: sessionContext.currentUserId ?? "anonymous",
-                    deviceId: nil,
-                    sdkSessionId: nil
-                ))
-                activeSDKSessionId = openResult.sessionId
-                Log.runtime.info("SDK session opened: \(openResult.sessionId) (created: \(openResult.created))")
-            }
-
-            guard let sessionId = activeSDKSessionId else { return }
-
-            // Build context snapshot before session run
-            let snapshotRef = bridge.buildContextSnapshot(
-                workspaceId: sessionContext.workspaceId,
-                agentId: settings.activeAgentName,
-                userId: sessionContext.currentUserId,
-                channelMetadata: nil,
-                tokenBudget: ContextSnapshotBuilder.defaultTokenBudget
-            )
-
-            // Start session run
-            let runParams = SessionRunParams(
-                sessionId: sessionId,
-                input: input,
-                contextSnapshotRef: snapshotRef,
-                permissionMode: nil
-            )
-
-            streamingText = ""
-            var accumulatedText = ""
-
-            for try await event in bridge.runSession(params: runParams) {
-                guard !Task.isCancelled else { break }
-
-                switch event.eventType {
-                case .sessionPartial:
-                    processingSubState = .streaming
-                    if let delta = extractPayloadString(event.payload, key: "delta") {
-                        accumulatedText += delta
-                        streamingText = accumulatedText
-                    }
-
-                case .sessionToolCall:
-                    processingSubState = .toolCalling
-                    if let toolName = extractPayloadString(event.payload, key: "toolName") {
-                        currentToolName = toolName
-                    }
-
-                case .sessionToolResult:
-                    // Tool result received — loop continues for more events
-                    processingSubState = .streaming
-                    currentToolName = nil
-
-                case .sessionCompleted:
-                    let finalText = extractPayloadString(event.payload, key: "text") ?? accumulatedText
-                    if !finalText.isEmpty {
-                        appendAssistantMessage(finalText)
-                    }
-                    streamingText = ""
-                    processingSubState = .complete
-                    saveConversation()
-                    Log.runtime.info("SDK session run completed")
-
-                case .sessionFailed:
-                    let reason = extractPayloadString(event.payload, key: "error") ?? "알 수 없는 오류"
-                    errorMessage = "런타임 오류: \(reason)"
-                    streamingText = ""
-                    Log.runtime.error("SDK session run failed: \(reason)")
-
-                default:
-                    Log.runtime.debug("Unhandled event type: \(event.eventType.rawValue)")
-                }
-            }
-        } catch {
-            Log.runtime.error("SDK session error: \(error.localizedDescription)")
-            errorMessage = "런타임 세션 오류: \(error.localizedDescription)"
-        }
-
-        // Clean up
-        if !streamingText.isEmpty {
-            appendAssistantMessage(streamingText)
-            streamingText = ""
-        }
-        processingSubState = nil
-        currentToolName = nil
-        transition(to: .idle)
-    }
-
-    /// Interrupt the active SDK session.
-    func interruptSDKSession() {
-        guard let bridge = runtimeBridge,
-              let sessionId = activeSDKSessionId else { return }
-
-        Task {
-            do {
-                _ = try await bridge.interruptSession(sessionId: sessionId)
-                Log.runtime.info("SDK session interrupted: \(sessionId)")
-            } catch {
-                Log.runtime.error("Failed to interrupt SDK session: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    /// Extract a string value from a BridgeEvent payload.
-    private func extractPayloadString(_ payload: AnyCodableValue?, key: String) -> String? {
-        guard case .object(let dict) = payload,
-              case .string(let value) = dict[key] else { return nil }
-        return value
     }
 
     func newConversation() {
@@ -2309,39 +2152,6 @@ final class DochiViewModel {
         pendingToolConfirmation = nil
         confirmation.continuation.resume(returning: approved)
         Log.tool.info("Tool confirmation \(approved ? "approved" : "denied"): \(confirmation.toolName)")
-    }
-
-    // MARK: - SDK Tool Approval
-
-    /// Show approval UI for a runtime-dispatched sensitive/restricted tool
-    /// and wait for user decision with scope selection.
-    private func requestSDKToolApproval(params: ApprovalRequestParams) async -> (approved: Bool, scope: ApprovalScope) {
-        return await withCheckedContinuation { continuation in
-            self.pendingSDKApproval = SDKToolApproval(
-                params: params,
-                continuation: continuation
-            )
-
-            self.sdkApprovalTimeoutTask?.cancel()
-            self.sdkApprovalTimeoutTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(Self.toolConfirmationTimeout + 5))
-                guard !Task.isCancelled else { return }
-                if self?.pendingSDKApproval?.params.toolName == params.toolName {
-                    Log.runtime.warning("SDK tool approval safety-net timeout: \(params.toolName)")
-                    self?.respondToSDKApproval(approved: false)
-                }
-            }
-        }
-    }
-
-    /// Called by UI when user responds to an SDK tool approval request.
-    func respondToSDKApproval(approved: Bool, scope: ApprovalScope = .once) {
-        guard let approval = pendingSDKApproval else { return }
-        sdkApprovalTimeoutTask?.cancel()
-        sdkApprovalTimeoutTask = nil
-        pendingSDKApproval = nil
-        approval.continuation.resume(returning: (approved: approved, scope: scope))
-        Log.runtime.info("SDK tool approval \(approved ? "approved(\(scope.rawValue))" : "denied"): \(approval.params.toolName)")
     }
 
     /// End the voice session manually.

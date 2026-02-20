@@ -5,20 +5,6 @@ final class NativeSessionRoutingTests: XCTestCase {
 
     @MainActor
     func testNativeLoopEnabledRoutesToNativePath() async throws {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-        bridge.stubbedSessionEvents = [
-            BridgeEvent(
-                eventId: UUID().uuidString,
-                timestamp: "2024-01-01T00:00:00Z",
-                sessionId: "mock-session",
-                workspaceId: nil,
-                agentId: nil,
-                eventType: .sessionCompleted,
-                payload: .object(["text": .string("legacy-sdk-response")])
-            ),
-        ]
-
         let adapter = StubNativeProviderAdapter(
             provider: .anthropic,
             eventsPerRequest: [[.done(text: "native-response")]]
@@ -29,7 +15,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         )
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .anthropic,
             nativeLoopService: nativeService
         )
@@ -39,7 +24,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(220))
 
         XCTAssertEqual(adapter.callCount, 1)
-        XCTAssertEqual(bridge.runCallCount, 0)
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.interactionState, .idle)
         let assistant = viewModel.currentConversation?.messages.last(where: { $0.role == .assistant })?.content
@@ -48,9 +32,6 @@ final class NativeSessionRoutingTests: XCTestCase {
 
     @MainActor
     func testNativeLoopUnsupportedProviderSetsErrorWithoutSDKFallback() async throws {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-
         let adapter = StubNativeProviderAdapter(
             provider: .anthropic,
             eventsPerRequest: [[.done(text: "native-response")]]
@@ -61,7 +42,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         )
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .openai,
             nativeLoopService: nativeService
         )
@@ -71,16 +51,12 @@ final class NativeSessionRoutingTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(160))
 
         XCTAssertEqual(adapter.callCount, 0)
-        XCTAssertEqual(bridge.runCallCount, 0)
         XCTAssertEqual(viewModel.interactionState, .idle)
         XCTAssertTrue(viewModel.errorMessage?.contains("사용 가능한 네이티브 provider") == true)
     }
 
     @MainActor
     func testNativeLoopFailureSetsErrorWithoutSDKFallback() async throws {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-
         let adapter = StubNativeProviderAdapter(
             provider: .anthropic,
             eventsPerRequest: [[]],
@@ -97,7 +73,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         )
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .anthropic,
             nativeLoopService: nativeService
         )
@@ -107,7 +82,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(220))
 
         XCTAssertEqual(adapter.callCount, 1)
-        XCTAssertEqual(bridge.runCallCount, 0)
         XCTAssertEqual(viewModel.interactionState, .idle)
         XCTAssertTrue(viewModel.errorMessage?.contains("network down") == true)
         let assistant = viewModel.currentConversation?.messages.last(where: { $0.role == .assistant })?.content
@@ -116,9 +90,6 @@ final class NativeSessionRoutingTests: XCTestCase {
 
     @MainActor
     func testNativeRequestDropsToolsWhenCapabilityUnsupported() async throws {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-
         let adapter = StubNativeProviderAdapter(
             provider: .lmStudio,
             eventsPerRequest: [[.done(text: "native-response")]]
@@ -131,7 +102,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         toolService.stubbedSchemas = [sampleToolSchema()]
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .lmStudio,
             nativeLoopService: nativeService,
             toolService: toolService,
@@ -148,9 +118,6 @@ final class NativeSessionRoutingTests: XCTestCase {
 
     @MainActor
     func testNativeRequestKeepsToolsWhenCapabilitySupported() async throws {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-
         let adapter = StubNativeProviderAdapter(
             provider: .ollama,
             eventsPerRequest: [[.done(text: "native-response")]]
@@ -163,7 +130,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         toolService.stubbedSchemas = [sampleToolSchema()]
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .ollama,
             nativeLoopService: nativeService,
             toolService: toolService,
@@ -181,9 +147,6 @@ final class NativeSessionRoutingTests: XCTestCase {
 
     @MainActor
     func testNativeLoopFallsBackToConfiguredProviderWhenPrimaryFails() async throws {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-
         let primaryAdapter = StubNativeProviderAdapter(
             provider: .anthropic,
             eventsPerRequest: [[]],
@@ -208,7 +171,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         keychain.store[LLMProvider.openai.keychainAccount] = "openai-test-key"
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .anthropic,
             nativeLoopService: nativeService,
             keychainService: keychain,
@@ -232,9 +194,6 @@ final class NativeSessionRoutingTests: XCTestCase {
 
     @MainActor
     func testNativeLoopCancelledDoesNotTriggerFallbackRetry() async throws {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-
         let primaryAdapter = StubNativeProviderAdapter(
             provider: .anthropic,
             eventsPerRequest: [[]],
@@ -259,7 +218,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         keychain.store[LLMProvider.openai.keychainAccount] = "openai-test-key"
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .anthropic,
             nativeLoopService: nativeService,
             keychainService: keychain,
@@ -283,9 +241,6 @@ final class NativeSessionRoutingTests: XCTestCase {
 
     @MainActor
     func testNativeLoopRecordsUsageMetricsFromDoneEvent() async throws {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-
         let adapter = StubNativeProviderAdapter(
             provider: .openai,
             eventsPerRequest: [[.done(text: "usage-response", inputTokens: 21, outputTokens: 8)]]
@@ -302,7 +257,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         metricsCollector.usageStore = usageStore
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .openai,
             nativeLoopService: nativeService,
             keychainService: keychain,
@@ -329,9 +283,6 @@ final class NativeSessionRoutingTests: XCTestCase {
 
     @MainActor
     func testNativeLoopRecordsNilUsageWhenProviderDoesNotReturnUsage() async throws {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-
         let adapter = StubNativeProviderAdapter(
             provider: .ollama,
             eventsPerRequest: [[.done(text: "no-usage-response")]]
@@ -346,7 +297,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         metricsCollector.usageStore = usageStore
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .ollama,
             nativeLoopService: nativeService,
             metricsCollector: metricsCollector
@@ -368,10 +318,7 @@ final class NativeSessionRoutingTests: XCTestCase {
     }
 
     @MainActor
-    func testTelegramMessageUsesNativeLoopAndSkipsRuntimeBridge() async {
-        let bridge = MockRuntimeBridgeService()
-        bridge.runtimeState = .ready
-
+    func testTelegramMessageUsesNativeLoop() async {
         let adapter = StubNativeProviderAdapter(
             provider: .anthropic,
             eventsPerRequest: [[.done(text: "telegram-native-response")]]
@@ -382,7 +329,6 @@ final class NativeSessionRoutingTests: XCTestCase {
         )
 
         let viewModel = makeViewModel(
-            bridge: bridge,
             provider: .anthropic,
             nativeLoopService: nativeService,
             telegramStreamReplies: false
@@ -399,15 +345,12 @@ final class NativeSessionRoutingTests: XCTestCase {
         ))
 
         XCTAssertEqual(adapter.callCount, 1)
-        XCTAssertEqual(bridge.openCallCount, 0)
-        XCTAssertEqual(bridge.runCallCount, 0)
         XCTAssertEqual(telegram.sentMessages.last?.chatId, 123_456)
         XCTAssertEqual(telegram.sentMessages.last?.text, "telegram-native-response")
     }
 
     @MainActor
     private func makeViewModel(
-        bridge: MockRuntimeBridgeService,
         provider: LLMProvider,
         nativeLoopService: NativeAgentLoopService,
         telegramStreamReplies: Bool = false,
@@ -445,7 +388,6 @@ final class NativeSessionRoutingTests: XCTestCase {
             settings: settings,
             sessionContext: SessionContext(workspaceId: UUID()),
             metricsCollector: resolvedMetricsCollector,
-            runtimeBridge: bridge,
             nativeAgentLoopService: nativeLoopService,
             modelRouter: router
         )
