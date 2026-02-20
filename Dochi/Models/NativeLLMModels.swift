@@ -16,6 +16,8 @@ struct NativeLLMStreamEvent: Sendable {
     let toolInputJSON: String?
     let toolResultText: String?
     let isToolResultError: Bool?
+    let inputTokens: Int?
+    let outputTokens: Int?
     let error: NativeLLMError?
 
     static func partial(_ delta: String) -> NativeLLMStreamEvent {
@@ -27,6 +29,8 @@ struct NativeLLMStreamEvent: Sendable {
             toolInputJSON: nil,
             toolResultText: nil,
             isToolResultError: nil,
+            inputTokens: nil,
+            outputTokens: nil,
             error: nil
         )
     }
@@ -40,6 +44,8 @@ struct NativeLLMStreamEvent: Sendable {
             toolInputJSON: toolInputJSON,
             toolResultText: nil,
             isToolResultError: nil,
+            inputTokens: nil,
+            outputTokens: nil,
             error: nil
         )
     }
@@ -53,11 +59,13 @@ struct NativeLLMStreamEvent: Sendable {
             toolInputJSON: nil,
             toolResultText: content,
             isToolResultError: isError,
+            inputTokens: nil,
+            outputTokens: nil,
             error: nil
         )
     }
 
-    static func done(text: String?) -> NativeLLMStreamEvent {
+    static func done(text: String?, inputTokens: Int? = nil, outputTokens: Int? = nil) -> NativeLLMStreamEvent {
         NativeLLMStreamEvent(
             kind: .done,
             text: text,
@@ -66,6 +74,8 @@ struct NativeLLMStreamEvent: Sendable {
             toolInputJSON: nil,
             toolResultText: nil,
             isToolResultError: nil,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
             error: nil
         )
     }
@@ -79,6 +89,8 @@ struct NativeLLMStreamEvent: Sendable {
             toolInputJSON: nil,
             toolResultText: nil,
             isToolResultError: nil,
+            inputTokens: nil,
+            outputTokens: nil,
             error: error
         )
     }

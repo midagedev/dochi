@@ -302,7 +302,10 @@ final class DochiViewModel {
         let resolvedMemoryPipeline = memoryPipeline ?? MemoryPipelineService(contextService: contextService)
         self.memoryPipeline = resolvedMemoryPipeline
         self.nativeAgentLoopService = nativeAgentLoopService ?? NativeAgentLoopService(
-            adapters: [AnthropicNativeLLMProviderAdapter()],
+            adapters: [
+                AnthropicNativeLLMProviderAdapter(),
+                OpenAINativeLLMProviderAdapter()
+            ],
             toolService: toolService,
             memoryPipeline: resolvedMemoryPipeline
         )

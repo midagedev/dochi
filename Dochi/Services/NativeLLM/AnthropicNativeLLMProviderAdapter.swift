@@ -95,6 +95,653 @@ struct AnthropicNativeLLMProviderAdapter: NativeLLMProviderAdapter {
     }
 }
 
+struct OpenAINativeLLMProviderAdapter: NativeLLMProviderAdapter {
+    let provider: LLMProvider = .openai
+
+    private let httpClient: any NativeLLMHTTPClient
+
+    init(httpClient: any NativeLLMHTTPClient = URLSessionNativeLLMHTTPClient()) {
+        self.httpClient = httpClient
+    }
+
+    func stream(request: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let urlRequest = try Self.makeURLRequest(from: request)
+                    let (data, response) = try await httpClient.send(urlRequest)
+
+                    guard (200...299).contains(response.statusCode) else {
+                        let mappedError = Self.mapHTTPError(
+                            statusCode: response.statusCode,
+                            data: data,
+                            headers: response.allHeaderFields
+                        )
+                        continuation.yield(.error(mappedError))
+                        throw mappedError
+                    }
+
+                    let events = try Self.parseStreamEvents(from: data)
+                    var emittedDone = false
+                    for event in events {
+                        continuation.yield(event)
+                        if event.kind == .done {
+                            emittedDone = true
+                        }
+                        if event.kind == .error, let error = event.error {
+                            throw error
+                        }
+                    }
+
+                    if !emittedDone {
+                        continuation.yield(.done(text: nil))
+                    }
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish(throwing: NativeLLMError(
+                        code: .cancelled,
+                        message: "OpenAI request cancelled",
+                        statusCode: nil,
+                        retryAfterSeconds: nil
+                    ))
+                } catch let error as NativeLLMError {
+                    continuation.finish(throwing: error)
+                } catch let error as URLError {
+                    continuation.finish(throwing: Self.mapURLError(error))
+                } catch {
+                    continuation.finish(throwing: NativeLLMError(
+                        code: .unknown,
+                        message: error.localizedDescription,
+                        statusCode: nil,
+                        retryAfterSeconds: nil
+                    ))
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+}
+
+private extension OpenAINativeLLMProviderAdapter {
+    struct OpenAIRequestPayload: Encodable {
+        let model: String
+        let messages: [OpenAIMessage]
+        let tools: [OpenAITool]?
+        let stream: Bool
+        let streamOptions: OpenAIStreamOptions?
+        let maxTokens: Int
+        let temperature: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case model
+            case messages
+            case tools
+            case stream
+            case streamOptions = "stream_options"
+            case maxTokens = "max_tokens"
+            case temperature
+        }
+    }
+
+    struct OpenAIStreamOptions: Encodable {
+        let includeUsage: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case includeUsage = "include_usage"
+        }
+    }
+
+    enum OpenAIMessage: Encodable {
+        case chat(role: String, content: String?, toolCalls: [OpenAIToolCall]?)
+        case tool(toolCallId: String, content: String)
+
+        enum CodingKeys: String, CodingKey {
+            case role
+            case content
+            case toolCalls = "tool_calls"
+            case toolCallId = "tool_call_id"
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case let .chat(role, content, toolCalls):
+                try container.encode(role, forKey: .role)
+                if let content {
+                    try container.encode(content, forKey: .content)
+                } else {
+                    try container.encodeNil(forKey: .content)
+                }
+                if let toolCalls, !toolCalls.isEmpty {
+                    try container.encode(toolCalls, forKey: .toolCalls)
+                }
+            case let .tool(toolCallId, content):
+                try container.encode("tool", forKey: .role)
+                try container.encode(toolCallId, forKey: .toolCallId)
+                try container.encode(content, forKey: .content)
+            }
+        }
+    }
+
+    struct OpenAIToolCall: Encodable {
+        let id: String
+        let type: String = "function"
+        let function: OpenAIFunctionCall
+    }
+
+    struct OpenAIFunctionCall: Encodable {
+        let name: String
+        let arguments: String
+    }
+
+    struct OpenAITool: Encodable {
+        let type: String = "function"
+        let function: OpenAIFunctionDefinition
+    }
+
+    struct OpenAIFunctionDefinition: Encodable {
+        let name: String
+        let description: String
+        let parameters: [String: AnyCodableValue]
+    }
+
+    struct OpenAISSEEvent {
+        let data: String
+    }
+
+    struct OpenAISSEEventAccumulator {
+        private(set) var dataLines: [String] = []
+
+        mutating func append(line: String) -> OpenAISSEEvent? {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedLine.isEmpty {
+                return flush()
+            }
+
+            if trimmedLine.hasPrefix(":") {
+                return nil
+            }
+
+            if let value = trimmedLine.removing(prefix: "data:") {
+                dataLines.append(value.trimmingCharacters(in: .whitespaces))
+            }
+
+            return nil
+        }
+
+        mutating func flush() -> OpenAISSEEvent? {
+            guard !dataLines.isEmpty else { return nil }
+            defer { dataLines.removeAll(keepingCapacity: true) }
+            return OpenAISSEEvent(data: dataLines.joined(separator: "\n"))
+        }
+    }
+
+    struct OpenAIChunkEnvelope: Decodable {
+        let choices: [OpenAIChoice]?
+        let usage: OpenAIUsage?
+    }
+
+    struct OpenAIUsage: Decodable {
+        let promptTokens: Int?
+        let completionTokens: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case promptTokens = "prompt_tokens"
+            case completionTokens = "completion_tokens"
+        }
+    }
+
+    struct OpenAIChoice: Decodable {
+        let delta: OpenAIDelta?
+        let finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case delta
+            case finishReason = "finish_reason"
+        }
+    }
+
+    struct OpenAIDelta: Decodable {
+        let content: String?
+        let toolCalls: [OpenAIToolCallDelta]?
+
+        enum CodingKeys: String, CodingKey {
+            case content
+            case toolCalls = "tool_calls"
+        }
+    }
+
+    struct OpenAIToolCallDelta: Decodable {
+        let index: Int?
+        let id: String?
+        let function: OpenAIFunctionDelta?
+    }
+
+    struct OpenAIFunctionDelta: Decodable {
+        let name: String?
+        let arguments: String?
+    }
+
+    struct OpenAIErrorEnvelope: Decodable {
+        let error: OpenAIErrorBody
+    }
+
+    struct OpenAIErrorBody: Decodable {
+        let message: String
+        let type: String?
+        let code: String?
+    }
+
+    struct ToolCallBuffer {
+        var toolCallId: String?
+        var toolName: String?
+        var arguments: String
+    }
+
+    static func makeURLRequest(from request: NativeLLMRequest) throws -> URLRequest {
+        guard request.provider == .openai else {
+            throw NativeLLMError(
+                code: .unsupportedProvider,
+                message: "OpenAI adapter cannot handle provider: \(request.provider.rawValue)",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        guard let apiKey = request.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !apiKey.isEmpty else {
+            throw NativeLLMError(
+                code: .authentication,
+                message: "OpenAI API key is required",
+                statusCode: 401,
+                retryAfterSeconds: nil
+            )
+        }
+
+        guard request.maxTokens > 0 else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "maxTokens must be greater than 0",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        let endpoint = request.endpointURL ?? request.provider.apiURL
+        var urlRequest = URLRequest(url: endpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.timeoutInterval = request.timeoutSeconds
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let payload = OpenAIRequestPayload(
+            model: request.model,
+            messages: convertMessages(from: request),
+            tools: request.tools.isEmpty ? nil : request.tools.map { tool in
+                OpenAITool(function: OpenAIFunctionDefinition(
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.inputSchema
+                ))
+            },
+            stream: true,
+            streamOptions: OpenAIStreamOptions(includeUsage: true),
+            maxTokens: request.maxTokens,
+            temperature: request.temperature
+        )
+
+        urlRequest.httpBody = try JSONEncoder().encode(payload)
+        return urlRequest
+    }
+
+    static func convertMessages(from request: NativeLLMRequest) -> [OpenAIMessage] {
+        var converted: [OpenAIMessage] = []
+
+        if let systemPrompt = request.systemPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !systemPrompt.isEmpty {
+            converted.append(.chat(role: "system", content: systemPrompt, toolCalls: nil))
+        }
+
+        for message in request.messages {
+            var textParts: [String] = []
+            var toolCalls: [OpenAIToolCall] = []
+            var toolMessages: [OpenAIMessage] = []
+
+            for content in message.contents {
+                switch content {
+                case .text(let text):
+                    if !text.isEmpty {
+                        textParts.append(text)
+                    }
+                case .toolUse(let toolCallId, let name, let inputJSON):
+                    toolCalls.append(OpenAIToolCall(
+                        id: toolCallId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? UUID().uuidString : toolCallId,
+                        function: OpenAIFunctionCall(
+                            name: name,
+                            arguments: normalizeToolArgumentsJSON(inputJSON)
+                        )
+                    ))
+                case .toolResult(let toolCallId, let content, _):
+                    toolMessages.append(.tool(
+                        toolCallId: toolCallId,
+                        content: content
+                    ))
+                }
+            }
+
+            let text = textParts.joined(separator: "\n")
+            if !text.isEmpty || !toolCalls.isEmpty {
+                converted.append(.chat(
+                    role: message.role.rawValue,
+                    content: text.isEmpty ? nil : text,
+                    toolCalls: toolCalls.isEmpty ? nil : toolCalls
+                ))
+            }
+
+            converted.append(contentsOf: toolMessages)
+        }
+
+        return converted
+    }
+
+    static func parseStreamEvents(from data: Data) throws -> [NativeLLMStreamEvent] {
+        guard let payload = String(data: data, encoding: .utf8) else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "OpenAI response body is not valid UTF-8",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        var accumulator = OpenAISSEEventAccumulator()
+        var toolBuffers: [Int: ToolCallBuffer] = [:]
+        var latestUsage: OpenAIUsage?
+        var events: [NativeLLMStreamEvent] = []
+        var hasDone = false
+
+        let lines = payload.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        for line in lines {
+            if let event = accumulator.append(line: line.replacingOccurrences(of: "\r", with: "")) {
+                let mapped = try mapSSEPayload(
+                    event.data,
+                    toolBuffers: &toolBuffers,
+                    latestUsage: &latestUsage
+                )
+                events.append(contentsOf: mapped)
+                if mapped.contains(where: { $0.kind == .done }) {
+                    hasDone = true
+                }
+            }
+        }
+
+        if let pending = accumulator.flush() {
+            let mapped = try mapSSEPayload(
+                pending.data,
+                toolBuffers: &toolBuffers,
+                latestUsage: &latestUsage
+            )
+            events.append(contentsOf: mapped)
+            if mapped.contains(where: { $0.kind == .done }) {
+                hasDone = true
+            }
+        }
+
+        if !toolBuffers.isEmpty {
+            for index in toolBuffers.keys.sorted() {
+                if let buffer = toolBuffers[index] {
+                    events.append(.toolUse(
+                        toolCallId: buffer.toolCallId ?? UUID().uuidString,
+                        toolName: (buffer.toolName?.isEmpty == false ? buffer.toolName! : "unknown_tool"),
+                        toolInputJSON: normalizeToolArgumentsJSON(buffer.arguments)
+                    ))
+                }
+            }
+        }
+
+        if !hasDone {
+            events.append(.done(
+                text: nil,
+                inputTokens: latestUsage?.promptTokens,
+                outputTokens: latestUsage?.completionTokens
+            ))
+        }
+
+        return events
+    }
+
+    static func mapSSEPayload(
+        _ data: String,
+        toolBuffers: inout [Int: ToolCallBuffer],
+        latestUsage: inout OpenAIUsage?
+    ) throws -> [NativeLLMStreamEvent] {
+        if data == "[DONE]" {
+            return [.done(
+                text: nil,
+                inputTokens: latestUsage?.promptTokens,
+                outputTokens: latestUsage?.completionTokens
+            )]
+        }
+
+        if let streamError: OpenAIErrorEnvelope = try? decode(data) {
+            return [.error(mapStreamError(
+                type: streamError.error.type,
+                code: streamError.error.code,
+                message: streamError.error.message
+            ))]
+        }
+
+        let chunk: OpenAIChunkEnvelope = try decode(data)
+        var events: [NativeLLMStreamEvent] = []
+
+        if let usage = chunk.usage {
+            latestUsage = usage
+        }
+
+        for choice in chunk.choices ?? [] {
+            if let delta = choice.delta {
+                if let content = delta.content, !content.isEmpty {
+                    events.append(.partial(content))
+                }
+
+                for toolCall in delta.toolCalls ?? [] {
+                    let index = toolCall.index ?? 0
+                    var buffer = toolBuffers[index] ?? ToolCallBuffer(
+                        toolCallId: nil,
+                        toolName: nil,
+                        arguments: ""
+                    )
+
+                    if let id = toolCall.id, !id.isEmpty {
+                        buffer.toolCallId = id
+                    }
+
+                    if let namePart = toolCall.function?.name, !namePart.isEmpty {
+                        if let existingName = buffer.toolName, !existingName.isEmpty {
+                            buffer.toolName = existingName + namePart
+                        } else {
+                            buffer.toolName = namePart
+                        }
+                    }
+
+                    if let argumentPart = toolCall.function?.arguments, !argumentPart.isEmpty {
+                        buffer.arguments += argumentPart
+                    }
+
+                    toolBuffers[index] = buffer
+                }
+            }
+
+            if let finishReason = choice.finishReason {
+                if finishReason == "tool_calls" {
+                    for index in toolBuffers.keys.sorted() {
+                        if let buffer = toolBuffers.removeValue(forKey: index) {
+                            events.append(.toolUse(
+                                toolCallId: buffer.toolCallId ?? UUID().uuidString,
+                                toolName: (buffer.toolName?.isEmpty == false ? buffer.toolName! : "unknown_tool"),
+                                toolInputJSON: normalizeToolArgumentsJSON(buffer.arguments)
+                            ))
+                        }
+                    }
+                } else if finishReason == "stop" || finishReason == "length" || finishReason == "content_filter" {
+                    events.append(.done(
+                        text: nil,
+                        inputTokens: latestUsage?.promptTokens,
+                        outputTokens: latestUsage?.completionTokens
+                    ))
+                }
+            }
+        }
+
+        return events
+    }
+
+    static func decode<T: Decodable>(_ raw: String) throws -> T {
+        guard let data = raw.data(using: .utf8) else {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "Failed to decode OpenAI SSE JSON payload",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw NativeLLMError(
+                code: .invalidResponse,
+                message: "Failed to parse OpenAI SSE payload: \(error.localizedDescription)",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )
+        }
+    }
+
+    static func normalizeToolArgumentsJSON(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else {
+            return "{}"
+        }
+        guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
+            return "{}"
+        }
+        return trimmed
+    }
+
+    static func mapHTTPError(
+        statusCode: Int,
+        data: Data,
+        headers: [AnyHashable: Any]
+    ) -> NativeLLMError {
+        let message = extractErrorMessage(from: data) ?? "OpenAI API request failed"
+        let retryAfter = parseRetryAfter(headers: headers)
+
+        let code: NativeLLMErrorCode
+        switch statusCode {
+        case 401, 403:
+            code = .authentication
+        case 404:
+            code = .modelNotFound
+        case 429:
+            code = .rateLimited
+        case 500...599:
+            code = .server
+        default:
+            code = .invalidResponse
+        }
+
+        return NativeLLMError(
+            code: code,
+            message: message,
+            statusCode: statusCode,
+            retryAfterSeconds: retryAfter
+        )
+    }
+
+    static func mapURLError(_ error: URLError) -> NativeLLMError {
+        let code: NativeLLMErrorCode
+        switch error.code {
+        case .timedOut:
+            code = .timeout
+        case .cancelled:
+            code = .cancelled
+        case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+            code = .network
+        default:
+            code = .unknown
+        }
+
+        return NativeLLMError(
+            code: code,
+            message: error.localizedDescription,
+            statusCode: nil,
+            retryAfterSeconds: nil
+        )
+    }
+
+    static func mapStreamError(type: String?, code: String?, message: String) -> NativeLLMError {
+        let normalizedType = (type ?? "").lowercased()
+        let normalizedCode = (code ?? "").lowercased()
+        let loweredMessage = message.lowercased()
+
+        let mapped: NativeLLMErrorCode
+        if normalizedType.contains("rate_limit") || normalizedCode.contains("rate_limit") {
+            mapped = .rateLimited
+        } else if normalizedType.contains("auth") || normalizedCode.contains("auth") || normalizedCode == "invalid_api_key" {
+            mapped = .authentication
+        } else if normalizedCode.contains("model_not_found") || (loweredMessage.contains("model") && loweredMessage.contains("not found")) {
+            mapped = .modelNotFound
+        } else if normalizedType.contains("server") || normalizedType.contains("api_error") {
+            mapped = .server
+        } else {
+            mapped = .unknown
+        }
+
+        return NativeLLMError(
+            code: mapped,
+            message: message,
+            statusCode: nil,
+            retryAfterSeconds: nil
+        )
+    }
+
+    static func parseRetryAfter(headers: [AnyHashable: Any]) -> TimeInterval? {
+        for (key, value) in headers {
+            if String(describing: key).caseInsensitiveCompare("Retry-After") == .orderedSame {
+                if let seconds = TimeInterval(String(describing: value)) {
+                    return seconds
+                }
+            }
+        }
+        return nil
+    }
+
+    static func extractErrorMessage(from data: Data) -> String? {
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let errorObject = object["error"] as? [String: Any],
+               let message = errorObject["message"] as? String,
+               !message.isEmpty {
+                return message
+            }
+            if let message = object["message"] as? String, !message.isEmpty {
+                return message
+            }
+        }
+
+        if let plain = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !plain.isEmpty {
+            return plain
+        }
+        return nil
+    }
+}
+
 private extension AnthropicNativeLLMProviderAdapter {
     struct AnthropicRequestPayload: Encodable {
         let model: String
