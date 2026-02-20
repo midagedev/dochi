@@ -247,6 +247,10 @@ final class NativeAgentLoopService {
             }
         }
     }
+
+    func supports(provider: LLMProvider) -> Bool {
+        adapters[provider] != nil
+    }
 }
 
 private extension NativeAgentLoopService {

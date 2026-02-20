@@ -368,6 +368,160 @@ final class SessionStreamingTests: XCTestCase {
         XCTAssertEqual(bridge.closeCallCount, 1)
     }
 
+    @MainActor
+    func testNativeLoopEnabledRoutesToNativePath() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+        bridge.stubbedSessionEvents = [
+            makeEvent(type: .sessionCompleted, payload: ["text": .string("sdk-response")]),
+        ]
+
+        let settings = AppSettings()
+        settings.nativeAgentLoopEnabled = true
+        settings.llmProvider = LLMProvider.anthropic.rawValue
+        settings.llmModel = "claude-sonnet-4-5-20250514"
+
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.partial("native"), .done(text: "native")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            settings: settings,
+            nativeLoopService: nativeService
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(adapter.callCount, 1)
+        XCTAssertEqual(bridge.runCallCount, 0)
+        XCTAssertEqual(viewModel.interactionState, .idle)
+        let assistant = viewModel.currentConversation?.messages.last(where: { $0.role == .assistant })?.content
+        XCTAssertEqual(assistant, "native")
+    }
+
+    @MainActor
+    func testNativeLoopDisabledFallsBackToSDKPath() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+        bridge.stubbedSessionEvents = [
+            makeEvent(type: .sessionCompleted, payload: ["text": .string("sdk-response")]),
+        ]
+
+        let settings = AppSettings()
+        settings.nativeAgentLoopEnabled = false
+        settings.llmProvider = LLMProvider.anthropic.rawValue
+        settings.llmModel = "claude-sonnet-4-5-20250514"
+
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.done(text: "native-response")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            settings: settings,
+            nativeLoopService: nativeService
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(adapter.callCount, 0)
+        XCTAssertEqual(bridge.runCallCount, 1)
+        let assistant = viewModel.currentConversation?.messages.last(where: { $0.role == .assistant })?.content
+        XCTAssertEqual(assistant, "sdk-response")
+    }
+
+    @MainActor
+    func testNativeLoopStreamingStateTransitionHasNoRegression() async throws {
+        let settings = AppSettings()
+        settings.nativeAgentLoopEnabled = true
+        settings.llmProvider = LLMProvider.anthropic.rawValue
+        settings.llmModel = "claude-sonnet-4-5-20250514"
+
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.partial("stream"), .done(text: "stream")]],
+            eventDelayNanos: 300_000_000
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let viewModel = makeViewModel(
+            bridge: nil,
+            settings: settings,
+            nativeLoopService: nativeService
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        XCTAssertEqual(viewModel.interactionState, .processing)
+        XCTAssertEqual(viewModel.processingSubState, .streaming)
+
+        try await Task.sleep(for: .milliseconds(220))
+        XCTAssertEqual(adapter.callCount, 1)
+        XCTAssertEqual(viewModel.interactionState, .processing)
+        XCTAssertEqual(viewModel.streamingText, "stream")
+
+        try await Task.sleep(for: .milliseconds(180))
+        XCTAssertEqual(viewModel.interactionState, .idle)
+        let assistant = viewModel.currentConversation?.messages.last(where: { $0.role == .assistant })?.content
+        XCTAssertEqual(assistant, "stream")
+    }
+
+    @MainActor
+    func testNativeLoopUnsupportedProviderFallsBackToSDKPath() async throws {
+        let bridge = MockRuntimeBridgeService()
+        bridge.runtimeState = .ready
+        bridge.stubbedSessionEvents = [
+            makeEvent(type: .sessionCompleted, payload: ["text": .string("sdk-response")]),
+        ]
+
+        let settings = AppSettings()
+        settings.nativeAgentLoopEnabled = true
+        settings.llmProvider = LLMProvider.openai.rawValue
+        settings.llmModel = "gpt-4o"
+
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.done(text: "native-response")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let viewModel = makeViewModel(
+            bridge: bridge,
+            settings: settings,
+            nativeLoopService: nativeService
+        )
+        viewModel.inputText = "hello"
+        viewModel.sendMessage()
+
+        try await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(adapter.callCount, 0)
+        XCTAssertEqual(bridge.runCallCount, 1)
+        let assistant = viewModel.currentConversation?.messages.last(where: { $0.role == .assistant })?.content
+        XCTAssertEqual(assistant, "sdk-response")
+    }
+
     // MARK: - Helpers
 
     private func makeEvent(
@@ -387,8 +541,21 @@ final class SessionStreamingTests: XCTestCase {
     }
 
     @MainActor
-    private func makeViewModel(bridge: MockRuntimeBridgeService) -> DochiViewModel {
-        DochiViewModel(
+    private func makeViewModel(
+        bridge: MockRuntimeBridgeService?,
+        settings: AppSettings? = nil,
+        nativeLoopService: NativeAgentLoopService? = nil
+    ) -> DochiViewModel {
+        let resolvedSettings: AppSettings = {
+            if let settings { return settings }
+            let defaults = AppSettings()
+            defaults.nativeAgentLoopEnabled = false
+            defaults.llmProvider = LLMProvider.openai.rawValue
+            defaults.llmModel = "gpt-4o"
+            return defaults
+        }()
+
+        return DochiViewModel(
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -396,9 +563,45 @@ final class SessionStreamingTests: XCTestCase {
             speechService: MockSpeechService(),
             ttsService: MockTTSService(),
             soundService: MockSoundService(),
-            settings: AppSettings(),
+            settings: resolvedSettings,
             sessionContext: SessionContext(workspaceId: UUID()),
-            runtimeBridge: bridge
+            runtimeBridge: bridge,
+            nativeAgentLoopService: nativeLoopService
         )
+    }
+}
+
+private final class StubNativeProviderAdapter: @unchecked Sendable, NativeLLMProviderAdapter {
+    let provider: LLMProvider
+    private let eventsPerRequest: [[NativeLLMStreamEvent]]
+    private let eventDelayNanos: UInt64
+    private(set) var callCount: Int = 0
+
+    init(
+        provider: LLMProvider,
+        eventsPerRequest: [[NativeLLMStreamEvent]],
+        eventDelayNanos: UInt64 = 0
+    ) {
+        self.provider = provider
+        self.eventsPerRequest = eventsPerRequest
+        self.eventDelayNanos = eventDelayNanos
+    }
+
+    func stream(request _: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
+        let index = min(callCount, max(0, eventsPerRequest.count - 1))
+        let events = eventsPerRequest.isEmpty ? [] : eventsPerRequest[index]
+        callCount += 1
+
+        return AsyncThrowingStream { continuation in
+            Task {
+                for (index, event) in events.enumerated() {
+                    continuation.yield(event)
+                    if eventDelayNanos > 0, index < events.count - 1 {
+                        try? await Task.sleep(nanoseconds: eventDelayNanos)
+                    }
+                }
+                continuation.finish()
+            }
+        }
     }
 }
