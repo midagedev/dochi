@@ -32,7 +32,8 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
     private var nextRequestId = 1
 
     /// Active session event stream continuations, keyed by sessionId.
-    private var sessionContinuations: [String: AsyncThrowingStream<BridgeEvent, Error>.Continuation] = [:]
+    /// Internal (not private) for @testable access in unit tests.
+    var sessionContinuations: [String: AsyncThrowingStream<BridgeEvent, Error>.Continuation] = [:]
 
     /// Handler for tool dispatch requests from the runtime.
     private(set) var toolDispatchHandler: ToolDispatchHandler?
@@ -213,40 +214,47 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
 
     func runSession(params: SessionRunParams) -> AsyncThrowingStream<BridgeEvent, Error> {
         let sessionId = params.sessionId
-        return AsyncThrowingStream { continuation in
+
+        // Use makeStream so the continuation is available synchronously.
+        // Register it in sessionContinuations **before** any RPC is sent,
+        // eliminating the race where an early notification from the runtime
+        // arrives before the continuation was stored (issue #301).
+        let (stream, continuation) = AsyncThrowingStream<BridgeEvent, Error>.makeStream()
+
+        sessionContinuations[sessionId] = continuation
+        continuation.onTermination = { @Sendable _ in
             Task { @MainActor [weak self] in
-                guard let self else {
-                    continuation.finish()
-                    return
-                }
-
-                self.sessionContinuations[sessionId] = continuation
-                continuation.onTermination = { @Sendable _ in
-                    Task { @MainActor [weak self] in
-                        self?.sessionContinuations.removeValue(forKey: sessionId)
-                    }
-                }
-
-                do {
-                    // Push context snapshot to runtime before session.run
-                    if let ref = params.contextSnapshotRef,
-                       let snapshot = self.snapshotStore.resolve(ref) {
-                        try await self.pushContextSnapshot(snapshot: snapshot, ref: ref)
-                    }
-
-                    let rpcParams: [String: AnyCodableValue] = [
-                        "sessionId": .string(params.sessionId),
-                        "input": .string(params.input),
-                        "contextSnapshotRef": params.contextSnapshotRef.map { .string($0) } ?? .null,
-                        "permissionMode": params.permissionMode.map { .string($0) } ?? .null,
-                    ]
-                    let _: SessionRunResult = try await self.sendRpc(method: "session.run", params: rpcParams)
-                    // Ack received — events will arrive via UDS notifications
-                } catch {
-                    continuation.finish(throwing: error)
-                }
+                self?.sessionContinuations.removeValue(forKey: sessionId)
             }
         }
+
+        Task { @MainActor [weak self] in
+            guard let self else {
+                continuation.finish()
+                return
+            }
+
+            do {
+                // Push context snapshot to runtime before session.run
+                if let ref = params.contextSnapshotRef,
+                   let snapshot = self.snapshotStore.resolve(ref) {
+                    try await self.pushContextSnapshot(snapshot: snapshot, ref: ref)
+                }
+
+                let rpcParams: [String: AnyCodableValue] = [
+                    "sessionId": .string(params.sessionId),
+                    "input": .string(params.input),
+                    "contextSnapshotRef": params.contextSnapshotRef.map { .string($0) } ?? .null,
+                    "permissionMode": params.permissionMode.map { .string($0) } ?? .null,
+                ]
+                let _: SessionRunResult = try await self.sendRpc(method: "session.run", params: rpcParams)
+                // Ack received -- events will arrive via UDS notifications
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+
+        return stream
     }
 
     func interruptSession(sessionId: String) async throws -> SessionInterruptResult {
@@ -470,7 +478,9 @@ final class RuntimeBridgeService: RuntimeBridgeProtocol {
 
     // MARK: - Notification Handling
 
-    private func handleNotification(_ notification: JsonRpcNotification) {
+    /// Route a JSON-RPC notification to the appropriate handler.
+    /// Internal (not private) for @testable access in unit tests.
+    func handleNotification(_ notification: JsonRpcNotification) {
         guard notification.method == "bridge.event",
               let params = notification.params else { return }
 

@@ -614,6 +614,9 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
             case .serverNotFound, .executionFailed:
                 break
+
+            case .serverUnavailable(let serverName, _):
+                return "MCP server '\(serverName)' is unavailable."
             }
         }
 
