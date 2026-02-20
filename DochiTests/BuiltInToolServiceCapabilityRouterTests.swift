@@ -3,6 +3,10 @@ import XCTest
 
 @MainActor
 private final class MockMCPServiceForCapabilityTests: MCPServiceProtocol {
+    var tools: [MCPToolInfo] = []
+    var callToolError: Error?
+    var callToolResult = MCPToolResult(content: "ok", isError: false)
+
     func addServer(config: MCPServerConfig) {}
     func removeServer(id: UUID) {}
     func connect(serverId: UUID) async throws {}
@@ -10,9 +14,12 @@ private final class MockMCPServiceForCapabilityTests: MCPServiceProtocol {
     func disconnectAll() {}
     func listServers() -> [MCPServerConfig] { [] }
     func getServer(id: UUID) -> MCPServerConfig? { nil }
-    func listTools() -> [MCPToolInfo] { [] }
+    func listTools() -> [MCPToolInfo] { tools }
     func callTool(name: String, arguments: [String: Any]) async throws -> MCPToolResult {
-        MCPToolResult(content: "ok", isError: false)
+        if let callToolError {
+            throw callToolError
+        }
+        return callToolResult
     }
 }
 
@@ -84,9 +91,35 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
         XCTAssertEqual(names.first, "open_url")
     }
 
+    func testExecuteMCPToolReturnsFallbackMessageWhenServerUnavailable() async {
+        let mcpService = MockMCPServiceForCapabilityTests()
+        mcpService.tools = [
+            MCPToolInfo(
+                serverName: "coding-shell",
+                name: "shell_execute",
+                description: "execute shell command",
+                inputSchema: [:]
+            ),
+        ]
+        mcpService.callToolError = MCPServiceError.notConnected
+
+        let service = makeService(routerEnabled: false, mcpService: mcpService)
+        let result = await service.execute(
+            name: "mcp_coding-shell_shell_execute",
+            arguments: ["command": "pwd"]
+        )
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.content.contains("MCP 서버가 현재 비가용 상태입니다"))
+        XCTAssertTrue(result.content.contains("terminal.run"))
+    }
+
     // MARK: - Helpers
 
-    private func makeService(routerEnabled: Bool) -> BuiltInToolService {
+    private func makeService(
+        routerEnabled: Bool,
+        mcpService: MCPServiceProtocol = MockMCPServiceForCapabilityTests()
+    ) -> BuiltInToolService {
         let settings = AppSettings()
         settings.capabilityRouterV2Enabled = routerEnabled
         settings.appGuideEnabled = false
@@ -98,7 +131,7 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
             settings: settings,
             supabaseService: MockSupabaseService(),
             telegramService: MockTelegramService(),
-            mcpService: MockMCPServiceForCapabilityTests()
+            mcpService: mcpService
         )
     }
 

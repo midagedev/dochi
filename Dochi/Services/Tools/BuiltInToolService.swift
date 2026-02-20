@@ -475,9 +475,30 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
             Log.tool.error("MCP tool execution failed: \(name) — \(error.localizedDescription)")
             return ToolResult(
                 toolCallId: "",
-                content: "MCP 도구 실행 실패: \(error.localizedDescription)",
+                content: mcpFallbackMessage(for: name, error: error),
                 isError: true
             )
         }
+    }
+
+    private func mcpFallbackMessage(for toolName: String, error: Error) -> String {
+        if let mcpError = error as? MCPServiceError {
+            switch mcpError {
+            case .notConnected, .connectionFailed:
+                return """
+                MCP 서버가 현재 비가용 상태입니다.
+                설정 > 통합 > MCP에서 서버 상태를 확인한 뒤 다시 시도해주세요.
+                필요하면 내장 도구(terminal.run, git.*)로 임시 진행할 수 있습니다.
+                """
+
+            case .toolNotFound:
+                return "오류: MCP 도구 '\(toolName)'을(를) 찾을 수 없습니다."
+
+            case .serverNotFound, .executionFailed:
+                break
+            }
+        }
+
+        return "MCP 도구 실행 실패: \(error.localizedDescription)"
     }
 }
