@@ -1951,3 +1951,94 @@ final class MockShadowSubAgentOrchestrator: ShadowSubAgentOrchestratorProtocol {
         currentState = .idle
     }
 }
+
+// MARK: - MockSessionMappingService (#297)
+
+@MainActor
+final class MockSessionMappingService: SessionMappingServiceProtocol {
+    var mappings: [SessionMapping] = []
+
+    var findActiveCallCount = 0
+    var findBySessionIdCallCount = 0
+    var insertCallCount = 0
+    var updateStatusCallCount = 0
+    var updateDeviceIdCallCount = 0
+    var touchCallCount = 0
+    var pruneStaleCallCount = 0
+
+    var lastInsertedMapping: SessionMapping?
+    var lastUpdatedSessionId: String?
+    var lastUpdatedStatus: SessionMappingStatus?
+    var lastUpdatedDeviceId: String?
+    var lastTouchedSessionId: String?
+    var lastPruneInterval: TimeInterval?
+
+    func findActive(
+        workspaceId: String,
+        agentId: String,
+        conversationId: String
+    ) -> SessionMapping? {
+        findActiveCallCount += 1
+        return mappings.first { mapping in
+            mapping.workspaceId == workspaceId
+            && mapping.agentId == agentId
+            && mapping.conversationId == conversationId
+            && mapping.status == .active
+        }
+    }
+
+    func findBySessionId(_ sessionId: String) -> SessionMapping? {
+        findBySessionIdCallCount += 1
+        return mappings.first { $0.sessionId == sessionId }
+    }
+
+    func insert(_ mapping: SessionMapping) {
+        insertCallCount += 1
+        lastInsertedMapping = mapping
+        mappings.append(mapping)
+    }
+
+    func updateStatus(sessionId: String, status: SessionMappingStatus) {
+        updateStatusCallCount += 1
+        lastUpdatedSessionId = sessionId
+        lastUpdatedStatus = status
+        if let idx = mappings.firstIndex(where: { $0.sessionId == sessionId }) {
+            mappings[idx].status = status
+            mappings[idx].lastActiveAt = Date()
+        }
+    }
+
+    func updateDeviceId(sessionId: String, newDeviceId: String) {
+        updateDeviceIdCallCount += 1
+        lastUpdatedDeviceId = newDeviceId
+        if let idx = mappings.firstIndex(where: { $0.sessionId == sessionId }) {
+            mappings[idx].deviceId = newDeviceId
+            mappings[idx].lastActiveAt = Date()
+        }
+    }
+
+    func touch(sessionId: String) {
+        touchCallCount += 1
+        lastTouchedSessionId = sessionId
+        if let idx = mappings.firstIndex(where: { $0.sessionId == sessionId }) {
+            mappings[idx].lastActiveAt = Date()
+        }
+    }
+
+    var allMappings: [SessionMapping] {
+        mappings
+    }
+
+    var activeMappings: [SessionMapping] {
+        mappings.filter { $0.status == .active }
+    }
+
+    func pruneStale(olderThan interval: TimeInterval) {
+        pruneStaleCallCount += 1
+        lastPruneInterval = interval
+        let cutoff = Date().addingTimeInterval(-interval)
+        mappings.removeAll { mapping in
+            mapping.status != .active && mapping.lastActiveAt < cutoff
+        }
+    }
+}

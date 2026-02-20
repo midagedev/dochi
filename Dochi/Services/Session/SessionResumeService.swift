@@ -22,14 +22,14 @@ final class SessionResumeService: SessionResumeServiceProtocol {
 
     // MARK: - Dependencies
 
-    private let sessionMappingService: SessionMappingService
+    private let sessionMappingService: any SessionMappingServiceProtocol
     private let leaseService: any ExecutionLeaseServiceProtocol
     private let channelMapper: ChannelSessionMapper
 
     // MARK: - Init
 
     init(
-        sessionMappingService: SessionMappingService,
+        sessionMappingService: any SessionMappingServiceProtocol,
         leaseService: any ExecutionLeaseServiceProtocol,
         channelMapper: ChannelSessionMapper
     ) {
