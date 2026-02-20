@@ -24,6 +24,20 @@ final class HookPipeline {
         lifecycleHooks.append(AuditFlushHook())
     }
 
+    // MARK: - Registration
+
+    func registerPreHook(_ hook: any PreToolUseHook) {
+        preHooks.append(hook)
+    }
+
+    func registerPostHook(_ hook: any PostToolUseHook) {
+        postHooks.append(hook)
+    }
+
+    func registerLifecycleHook(_ hook: any SessionLifecycleHook) {
+        lifecycleHooks.append(hook)
+    }
+
     // MARK: - Pre-Tool Hooks
 
     /// Run all pre-tool hooks in order. First blocking decision wins.
@@ -282,7 +296,9 @@ final class AuditFlushHook: SessionLifecycleHook {
         let allowed = sessionEvents.filter { $0.decision == .allowed }.count
         let approved = sessionEvents.filter { $0.decision == .approved }.count
         let denied = sessionEvents.filter { $0.decision == .denied }.count
-        let blocked = sessionEvents.filter { $0.decision == .policyBlocked }.count
+        let blocked = sessionEvents.filter {
+            $0.decision == .policyBlocked || $0.decision == .hookBlocked
+        }.count
         let avgLatency = sessionEvents.isEmpty ? 0 : sessionEvents.map(\.latencyMs).reduce(0, +) / sessionEvents.count
 
         Log.runtime.info(

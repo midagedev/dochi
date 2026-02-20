@@ -12,6 +12,12 @@ struct NativeAgentLoopGuardPolicy: Sendable {
     static let `default` = NativeAgentLoopGuardPolicy()
 }
 
+struct NativeAgentLoopHookContext: Sendable {
+    let sessionId: String
+    let workspaceId: String
+    let agentId: String?
+}
+
 @MainActor
 final class NativeAgentLoopService {
     private struct PendingToolUse: Sendable {
@@ -26,13 +32,20 @@ final class NativeAgentLoopService {
         let isError: Bool
     }
 
+    private static let maxAuditEntries = 200
+
     private let adapters: [LLMProvider: any NativeLLMProviderAdapter]
     private let toolService: (any BuiltInToolServiceProtocol)?
+    private let hookPipeline: HookPipeline
     private let guardPolicy: NativeAgentLoopGuardPolicy
+    private var memoryPipeline: (any MemoryPipelineProtocol)?
+    private(set) var auditLog: [ToolAuditEvent] = []
 
     init(
         adapters: [any NativeLLMProviderAdapter],
         toolService: (any BuiltInToolServiceProtocol)? = nil,
+        hookPipeline: HookPipeline = HookPipeline(),
+        memoryPipeline: (any MemoryPipelineProtocol)? = nil,
         guardPolicy: NativeAgentLoopGuardPolicy = .default
     ) {
         var map: [LLMProvider: any NativeLLMProviderAdapter] = [:]
@@ -41,10 +54,23 @@ final class NativeAgentLoopService {
         }
         self.adapters = map
         self.toolService = toolService
+        self.hookPipeline = hookPipeline
+        self.memoryPipeline = memoryPipeline
         self.guardPolicy = guardPolicy
     }
 
-    func run(request: NativeLLMRequest) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
+    func setMemoryPipeline(_ memoryPipeline: (any MemoryPipelineProtocol)?) {
+        self.memoryPipeline = memoryPipeline
+    }
+
+    func runStopHooks() {
+        hookPipeline.runStopHooks(auditLog: auditLog)
+    }
+
+    func run(
+        request: NativeLLMRequest,
+        hookContext: NativeAgentLoopHookContext? = nil
+    ) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
         guard let adapter = adapters[request.provider] else {
             return AsyncThrowingStream { continuation in
                 continuation.finish(throwing: NativeLLMError(
@@ -57,7 +83,19 @@ final class NativeAgentLoopService {
         }
 
         return AsyncThrowingStream { continuation in
-            let task = Task { @MainActor [guardPolicy, toolService] in
+            let task = Task { @MainActor [self, guardPolicy, toolService] in
+                let resolvedHookContext = Self.normalizedHookContext(hookContext)
+                if let memoryPipeline, !resolvedHookContext.workspaceId.isEmpty {
+                    hookPipeline.attachMemoryPipeline(memoryPipeline, workspaceId: resolvedHookContext.workspaceId)
+                }
+
+                defer {
+                    hookPipeline.runSessionCloseHooks(
+                        sessionId: resolvedHookContext.sessionId,
+                        auditLog: auditLog
+                    )
+                }
+
                 do {
                     var currentRequest = request
                     var iteration = 0
@@ -168,6 +206,8 @@ final class NativeAgentLoopService {
                         }
 
                         for pending in pendingToolUses {
+                            let startTime = Date()
+                            let riskLevel = riskLevel(for: pending.name)
                             let arguments: [String: Any]
                             do {
                                 arguments = try Self.parseToolArguments(from: pending.inputJSON)
@@ -178,6 +218,18 @@ final class NativeAgentLoopService {
                                     content: message,
                                     isError: true
                                 ))
+                                recordAudit(
+                                    toolCallId: pending.toolCallId,
+                                    sessionId: resolvedHookContext.sessionId,
+                                    agentId: resolvedHookContext.agentId,
+                                    toolName: pending.name,
+                                    argumentsHash: "",
+                                    riskLevel: riskLevel,
+                                    decision: .policyBlocked,
+                                    hookName: nil,
+                                    startTime: startTime,
+                                    resultCode: BridgeErrorCode.toolExecutionFailed.rawValue
+                                )
                                 throw NativeLLMError(
                                     code: .toolExecutionFailed,
                                     message: message,
@@ -186,12 +238,80 @@ final class NativeAgentLoopService {
                                 )
                             }
 
-                            let result = await toolService.execute(name: pending.name, arguments: arguments)
+                            let codableArguments = Self.makeCodableArguments(from: arguments)
+                            let argsHash = HookPipeline.argumentsHash(codableArguments)
+                            let toolHookContext = ToolHookContext(
+                                toolCallId: pending.toolCallId,
+                                sessionId: resolvedHookContext.sessionId,
+                                agentId: resolvedHookContext.agentId,
+                                toolName: pending.name,
+                                arguments: codableArguments,
+                                riskLevel: riskLevel
+                            )
+
+                            let preResult = hookPipeline.runPreHooks(context: toolHookContext)
+                            let effectiveArguments: [String: Any]
+                            switch preResult.decision {
+                            case .block(let reason):
+                                let blockedMessage = "도구 '\(pending.name)' 실행이 정책에 의해 차단되었습니다: \(reason)"
+                                continuation.yield(.toolResult(
+                                    toolCallId: pending.toolCallId,
+                                    content: blockedMessage,
+                                    isError: true
+                                ))
+                                recordAudit(
+                                    toolCallId: pending.toolCallId,
+                                    sessionId: resolvedHookContext.sessionId,
+                                    agentId: resolvedHookContext.agentId,
+                                    toolName: pending.name,
+                                    argumentsHash: argsHash,
+                                    riskLevel: riskLevel,
+                                    decision: .hookBlocked,
+                                    hookName: preResult.hookName,
+                                    startTime: startTime,
+                                    resultCode: BridgeErrorCode.toolPermissionDenied.rawValue
+                                )
+                                throw NativeLLMError(
+                                    code: .toolExecutionFailed,
+                                    message: blockedMessage,
+                                    statusCode: nil,
+                                    retryAfterSeconds: nil
+                                )
+
+                            case .mask(let maskedArguments):
+                                effectiveArguments = maskedArguments.toNativeDict()
+
+                            case .allow:
+                                effectiveArguments = arguments
+                            }
+
+                            let result = await toolService.execute(name: pending.name, arguments: effectiveArguments)
                             continuation.yield(.toolResult(
                                 toolCallId: pending.toolCallId,
                                 content: result.content,
                                 isError: result.isError
                             ))
+
+                            let latencyMs = Int(Date().timeIntervalSince(startTime) * 1000)
+                            _ = hookPipeline.runPostHooks(
+                                context: toolHookContext,
+                                result: result,
+                                latencyMs: latencyMs
+                            )
+
+                            let decision: ToolAuditDecision = riskLevel == ToolCategory.safe.rawValue ? .allowed : .approved
+                            recordAudit(
+                                toolCallId: pending.toolCallId,
+                                sessionId: resolvedHookContext.sessionId,
+                                agentId: resolvedHookContext.agentId,
+                                toolName: pending.name,
+                                argumentsHash: argsHash,
+                                riskLevel: riskLevel,
+                                decision: result.isError ? .policyBlocked : decision,
+                                hookName: nil,
+                                startTime: startTime,
+                                resultCode: result.isError ? BridgeErrorCode.toolExecutionFailed.rawValue : nil
+                            )
 
                             executedToolResults.append(ExecutedToolResult(
                                 toolCallId: pending.toolCallId,
@@ -254,10 +374,102 @@ final class NativeAgentLoopService {
 }
 
 private extension NativeAgentLoopService {
+    private static func normalizedHookContext(_ context: NativeAgentLoopHookContext?) -> NativeAgentLoopHookContext {
+        guard let context else {
+            return NativeAgentLoopHookContext(
+                sessionId: UUID().uuidString,
+                workspaceId: "",
+                agentId: nil
+            )
+        }
+
+        let sessionId = context.sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let workspaceId = context.workspaceId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return NativeAgentLoopHookContext(
+            sessionId: sessionId.isEmpty ? UUID().uuidString : sessionId,
+            workspaceId: workspaceId,
+            agentId: context.agentId
+        )
+    }
+
     private static func makeToolSignature(for toolUses: [PendingToolUse]) -> String {
         toolUses
             .map { "\($0.name)|\($0.inputJSON)" }
             .joined(separator: "||")
+    }
+
+    private static func makeCodableArguments(from arguments: [String: Any]) -> [String: AnyCodableValue] {
+        arguments.reduce(into: [String: AnyCodableValue]()) { result, entry in
+            result[entry.key] = makeCodableValue(entry.value)
+        }
+    }
+
+    private static func makeCodableValue(_ value: Any) -> AnyCodableValue {
+        switch value {
+        case let string as String:
+            return .string(string)
+
+        case let bool as Bool:
+            return .bool(bool)
+
+        case let int as Int:
+            return .int(int)
+
+        case let int8 as Int8:
+            return .int(Int(int8))
+
+        case let int16 as Int16:
+            return .int(Int(int16))
+
+        case let int32 as Int32:
+            return .int(Int(int32))
+
+        case let int64 as Int64:
+            return .int(Int(int64))
+
+        case let uint as UInt:
+            return .int(Int(uint))
+
+        case let uint8 as UInt8:
+            return .int(Int(uint8))
+
+        case let uint16 as UInt16:
+            return .int(Int(uint16))
+
+        case let uint32 as UInt32:
+            return .int(Int(uint32))
+
+        case let uint64 as UInt64:
+            return .int(Int(uint64))
+
+        case let double as Double:
+            return .double(double)
+
+        case let float as Float:
+            return .double(Double(float))
+
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return .bool(number.boolValue)
+            }
+            let doubleValue = number.doubleValue
+            if floor(doubleValue) == doubleValue {
+                return .int(number.intValue)
+            }
+            return .double(doubleValue)
+
+        case let dictionary as [String: Any]:
+            return .object(makeCodableArguments(from: dictionary))
+
+        case let array as [Any]:
+            return .array(array.map(makeCodableValue))
+
+        case _ as NSNull:
+            return .null
+
+        default:
+            return .string(String(describing: value))
+        }
     }
 
     private static func parseToolArguments(from rawInputJSON: String) throws -> [String: Any] {
@@ -295,6 +507,44 @@ private extension NativeAgentLoopService {
         }
 
         return dictionary
+    }
+
+    func riskLevel(for toolName: String) -> String {
+        toolService?.toolInfo(named: toolName)?.category.rawValue ?? ToolCategory.safe.rawValue
+    }
+
+    func recordAudit(
+        toolCallId: String,
+        sessionId: String,
+        agentId: String?,
+        toolName: String,
+        argumentsHash: String,
+        riskLevel: String,
+        decision: ToolAuditDecision,
+        hookName: String?,
+        startTime: Date,
+        resultCode: Int?
+    ) {
+        let latencyMs = Int(Date().timeIntervalSince(startTime) * 1000)
+        let event = ToolAuditEvent(
+            toolCallId: toolCallId,
+            sessionId: sessionId,
+            agentId: agentId,
+            toolName: toolName,
+            argumentsHash: argumentsHash,
+            riskLevel: riskLevel,
+            decision: decision,
+            hookName: hookName,
+            latencyMs: latencyMs,
+            resultCode: resultCode,
+            timestamp: Date()
+        )
+
+        auditLog.append(event)
+        if auditLog.count > Self.maxAuditEntries {
+            auditLog.removeFirst(auditLog.count - Self.maxAuditEntries)
+        }
+        Log.runtime.info("Native audit: \(toolName) → \(decision.rawValue) (\(latencyMs)ms)")
     }
 
     private static func makeFollowUpRequest(
