@@ -63,6 +63,115 @@ final class NativeAgentLoopServiceTests: XCTestCase {
         }
     }
 
+    func testNativeAgentLoopServiceRecordsFirstPartialLatencyMetric() async throws {
+        let runtimeMetrics = MockRuntimeMetrics()
+        let adapter = StaticNativeLLMProviderAdapter(
+            provider: .anthropic,
+            events: [.partial("hello"), .done(text: "hello")]
+        )
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            runtimeMetrics: runtimeMetrics
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "session-metric-1",
+                    workspaceId: "workspace-1",
+                    agentId: "도치"
+                )
+            )
+        )
+
+        let keys = runtimeMetrics.histogramValues.keys.filter { $0.hasPrefix(MetricName.firstPartialLatencyMs) }
+        XCTAssertEqual(keys.count, 1)
+        let key = try XCTUnwrap(keys.first)
+        XCTAssertTrue(key.contains("provider=anthropic"))
+        XCTAssertTrue(key.contains("session=session-metric-1"))
+        XCTAssertFalse(key.contains("tool="))
+    }
+
+    func testNativeAgentLoopServiceRecordsToolLatencyMetricWithStandardLabels() async throws {
+        let runtimeMetrics = MockRuntimeMetrics()
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(toolCallId: "", content: "ok")
+
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.done(text: "done")]
+            }
+            return [
+                .toolUse(toolCallId: "tool_1", toolName: "calendar.create", toolInputJSON: "{\"title\":\"회의\"}"),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService,
+            runtimeMetrics: runtimeMetrics
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "session-metric-2",
+                    workspaceId: "workspace-2",
+                    agentId: "도치"
+                )
+            )
+        )
+
+        let keys = runtimeMetrics.histogramValues.keys.filter { $0.hasPrefix(MetricName.toolLatencyMs) }
+        XCTAssertEqual(keys.count, 1)
+        let key = try XCTUnwrap(keys.first)
+        XCTAssertTrue(key.contains("provider=anthropic"))
+        XCTAssertTrue(key.contains("session=session-metric-2"))
+        XCTAssertTrue(key.contains("tool=calendar.create"))
+    }
+
+    func testNativeAgentLoopServiceLiveMetricsAppearInSnapshotForGate() async throws {
+        let runtimeMetrics = RuntimeMetrics()
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(toolCallId: "", content: "created")
+
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.partial("완료"), .done(text: "완료")]
+            }
+            return [
+                .toolUse(toolCallId: "tool_1", toolName: "calendar.create", toolInputJSON: "{\"title\":\"회의\"}"),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService,
+            runtimeMetrics: runtimeMetrics
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "session-metric-3",
+                    workspaceId: "workspace-3",
+                    agentId: "도치"
+                )
+            )
+        )
+
+        let snapshot = runtimeMetrics.snapshot()
+        let firstPartialHistograms = snapshot.histograms.values.filter { $0.name == MetricName.firstPartialLatencyMs }
+        let toolLatencyHistograms = snapshot.histograms.values.filter { $0.name == MetricName.toolLatencyMs }
+        XCTAssertFalse(firstPartialHistograms.isEmpty)
+        XCTAssertFalse(toolLatencyHistograms.isEmpty)
+    }
+
     func testNativeAgentLoopServiceExecutesToolAndReruns() async throws {
         let toolService = MockBuiltInToolService()
         toolService.stubbedResult = ToolResult(toolCallId: "", content: "created")
