@@ -24,6 +24,14 @@ private final class MockMCPServiceForCapabilityTests: MCPServiceProtocol {
         }
         return callToolResult
     }
+
+    func activateProfile(_ profile: MCPServerProfile) async {}
+    func deactivateProfile(_ profile: MCPServerProfile) {}
+    func serverStatus(for serverId: UUID) -> MCPServerStatus { .disconnected }
+    func healthReport(for profile: MCPServerProfile) -> MCPProfileHealthReport {
+        MCPProfileHealthReport(profileName: profile.displayName, serverStatuses: [])
+    }
+    func fallbackMessage(for toolName: String) -> String { "" }
 }
 
 @MainActor

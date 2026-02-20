@@ -31,6 +31,7 @@ enum MCPServiceError: Error, LocalizedError, Sendable {
     case connectionFailed(String)
     case toolNotFound
     case executionFailed(String)
+    case serverUnavailable(serverName: String, toolName: String)
 
     var errorDescription: String? {
         switch self {
@@ -44,6 +45,8 @@ enum MCPServiceError: Error, LocalizedError, Sendable {
             "MCP 도구를 찾을 수 없습니다."
         case .executionFailed(let reason):
             "MCP 도구 실행 실패: \(reason)"
+        case .serverUnavailable(let serverName, let toolName):
+            "MCP 서버 '\(serverName)'이(가) 사용 불가하여 도구 '\(toolName)'을(를) 실행할 수 없습니다. 서버 상태를 확인해 주세요."
         }
     }
 }
@@ -270,6 +273,15 @@ final class MCPService: MCPServiceProtocol {
 
     private let healthCheckIntervalNs: UInt64
 
+    /// Restart trackers per server ID.
+    private var restartTrackers: [UUID: MCPRestartTracker] = [:]
+
+    /// Currently active profiles keyed by profile ID.
+    private var activeProfiles: [UUID: MCPServerProfile] = [:]
+
+    /// Maps server ID to profile ID for reverse lookup.
+    private var serverProfileMap: [UUID: UUID] = [:]
+
     // MARK: - Init
 
     init(healthCheckIntervalSeconds: UInt64 = 8) {
@@ -286,6 +298,9 @@ final class MCPService: MCPServiceProtocol {
     func addServer(config: MCPServerConfig) {
         configs[config.id] = config
         states[config.id] = .disconnected
+        if restartTrackers[config.id] == nil {
+            restartTrackers[config.id] = MCPRestartTracker(maxAttempts: 3)
+        }
         Log.mcp.info("Server added: \(config.name) (id: \(config.id))")
     }
 
@@ -297,6 +312,8 @@ final class MCPService: MCPServiceProtocol {
         let name = configs[id]?.name ?? "unknown"
         configs.removeValue(forKey: id)
         states.removeValue(forKey: id)
+        restartTrackers.removeValue(forKey: id)
+        serverProfileMap.removeValue(forKey: id)
         Log.mcp.info("Server removed: \(name) (id: \(id))")
     }
 
@@ -366,6 +383,9 @@ final class MCPService: MCPServiceProtocol {
                 toolServerMap[tool.name] = serverId
                 Log.mcp.debug("Registered tool: \(tool.name) from server: \(config.name)")
             }
+
+            // Reset restart tracker on successful connection
+            restartTrackers[serverId]?.reset()
 
             Log.mcp.info(
                 "Server '\(config.name)' ready with \(discoveredTools.count) tool(s)"
@@ -609,6 +629,13 @@ final class MCPService: MCPServiceProtocol {
             return false
         }
 
+        // Check restart tracker limit
+        guard restartTrackers[serverId]?.canRestart ?? true else {
+            Log.mcp.warning("Recovery skipped: restart limit reached for '\(config.name)'")
+            return false
+        }
+        restartTrackers[serverId]?.recordAttempt()
+
         do {
             try await connect(serverId: serverId)
             Log.mcp.info("Recovered server connection: \(config.name)")
@@ -746,5 +773,84 @@ final class MCPService: MCPServiceProtocol {
             }
             return "[resource: \(uri), \(mimeType)]"
         }
+    }
+
+    // MARK: - Profile Lifecycle
+
+    func activateProfile(_ profile: MCPServerProfile) async {
+        activeProfiles[profile.id] = profile
+        Log.mcp.info("Activating profile: \(profile.displayName) (\(profile.servers.count) servers)")
+
+        for server in profile.servers {
+            serverProfileMap[server.id] = profile.id
+            restartTrackers[server.id] = MCPRestartTracker(maxAttempts: profile.maxRestartAttempts)
+            addServer(config: server)
+
+            if server.isEnabled {
+                do {
+                    try await connect(serverId: server.id)
+                } catch {
+                    Log.mcp.error("Failed to connect server '\(server.name)' in profile '\(profile.name)': \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    func deactivateProfile(_ profile: MCPServerProfile) {
+        Log.mcp.info("Deactivating profile: \(profile.displayName)")
+        for server in profile.servers {
+            removeServer(id: server.id)
+        }
+        activeProfiles.removeValue(forKey: profile.id)
+    }
+
+    // MARK: - Health Monitoring
+
+    func serverStatus(for serverId: UUID) -> MCPServerStatus {
+        guard let state = states[serverId] else { return .disconnected }
+        switch state {
+        case .connected:
+            return .connected
+        case .disconnected:
+            return .disconnected
+        case .connecting:
+            return .restarting
+        case .error(let msg):
+            return .error(msg)
+        }
+    }
+
+    func healthReport(for profile: MCPServerProfile) -> MCPProfileHealthReport {
+        let statuses = profile.servers.map { server in
+            (serverName: server.name, status: serverStatus(for: server.id))
+        }
+        return MCPProfileHealthReport(
+            profileName: profile.displayName,
+            serverStatuses: statuses
+        )
+    }
+
+    // MARK: - Fallback Messages
+
+    private static let toolFallbackMap: [String: String] = [
+        "shell": "terminal.run",
+        "execute": "terminal.run",
+        "command": "terminal.run",
+        "filesystem": "finder.reveal",
+        "file": "finder.reveal",
+        "git": "terminal.run",
+        "read_file": "finder.reveal",
+        "write_file": "finder.reveal",
+        "list_directory": "finder.reveal",
+    ]
+
+    func fallbackMessage(for toolName: String) -> String {
+        let lowered = toolName.lowercased()
+        let suggestion = Self.toolFallbackMap.first { lowered.contains($0.key) }?.value
+
+        if let suggestion {
+            return "MCP 서버가 현재 비가용 상태입니다. 대신 내장 도구 '\(suggestion)'을(를) 사용해 보세요."
+        }
+        return "MCP 서버가 현재 비가용 상태입니다. 잠시 후 다시 시도해 주세요."
     }
 }

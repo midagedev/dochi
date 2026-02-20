@@ -279,8 +279,9 @@ final class ToolDispatchHandler {
         arguments: [String: Any],
         timeout: TimeInterval
     ) async -> ToolResult {
-        let executionTask = Task { @MainActor in
-            await self.toolService.execute(name: toolName, arguments: arguments)
+        nonisolated(unsafe) let sendableArgs = arguments
+        let executionTask = Task { @MainActor [toolService] in
+            await toolService.execute(name: toolName, arguments: sendableArgs)
         }
 
         let timeoutTask = Task {
