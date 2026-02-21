@@ -1194,6 +1194,23 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             distribution[session.activityState.rawValue, default: 0] += 1
         }
         sessionKPICounters.activityStateDistribution = distribution
+
+        let clientKindSampleCount = sessions.filter {
+            Self.hasClientMetadata(originator: $0.originator, sessionSource: $0.sessionSource)
+        }.count
+        let clientKindUnknownCount = sessions.filter {
+            Self.hasClientMetadata(originator: $0.originator, sessionSource: $0.sessionSource) &&
+                $0.clientKind == "unknown"
+        }.count
+        sessionKPICounters.clientKindSampleCount = min(Self.kpiCounterCap, clientKindSampleCount)
+        sessionKPICounters.clientKindUnknownCount = min(Self.kpiCounterCap, clientKindUnknownCount)
+
+        var clientKindDistribution: [String: Int] = [:]
+        for session in sessions {
+            let kind = session.clientKind ?? "unset"
+            clientKindDistribution[kind, default: 0] += 1
+        }
+        sessionKPICounters.clientKindDistribution = clientKindDistribution
     }
 
     private func incrementKPICounter(
@@ -1239,6 +1256,12 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         } else {
             activityAccuracy = nil
         }
+        let clientKindUnknownRate: Double?
+        if counters.clientKindSampleCount > 0 {
+            clientKindUnknownRate = ratio(counters.clientKindUnknownCount, counters.clientKindSampleCount)
+        } else {
+            clientKindUnknownRate = nil
+        }
 
         return SessionManagementKPIReport(
             generatedAt: now,
@@ -1247,6 +1270,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             activityClassificationAccuracy: activityAccuracy,
             sessionSelectionFailureRate: selectionFailureRate,
             historySearchHitRate: searchHitRate,
+            clientKindUnknownRate: clientKindUnknownRate,
             counters: counters
         )
     }
@@ -1254,6 +1278,21 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     nonisolated private static func ratio(_ numerator: Int, _ denominator: Int) -> Double {
         guard denominator > 0 else { return 0 }
         return Double(numerator) / Double(denominator)
+    }
+
+    nonisolated private static func hasClientMetadata(
+        originator: String?,
+        sessionSource: String?
+    ) -> Bool {
+        if let originator {
+            let trimmedOriginator = originator.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedOriginator.isEmpty { return true }
+        }
+        if let sessionSource {
+            let trimmedSource = sessionSource.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedSource.isEmpty { return true }
+        }
+        return false
     }
 
     nonisolated static func evaluateOrchestrationExecutionGuard(
@@ -3353,6 +3392,68 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         return String(data: data, encoding: .utf8)
     }
 
+    private struct SessionClientTaxonomy {
+        let desktopSourceAliases: Set<String>
+        let cliSourceAliases: Set<String>
+        let desktopOriginatorKeywords: Set<String>
+        let cliOriginatorKeywords: Set<String>
+    }
+
+    // Keep provider-specific source normalization in one place so new source values
+    // can be added without changing parser/merge flow logic.
+    nonisolated private static let providerClientTaxonomy: [String: SessionClientTaxonomy] = [
+        "codex": SessionClientTaxonomy(
+            desktopSourceAliases: [
+                "desktop",
+                "vscode",
+                "vscodeinsiders",
+                "cursor",
+                "cursorapp",
+                "windsurf",
+                "zed",
+                "jetbrains",
+                "intellij",
+                "pycharm",
+                "xcode",
+            ],
+            cliSourceAliases: [
+                "cli",
+                "terminal",
+                "shell",
+                "tty",
+                "iterm",
+                "iterm2",
+                "tmux",
+                "zsh",
+                "bash",
+                "fish",
+                "pwsh",
+                "powershell",
+                "cmd",
+            ],
+            desktopOriginatorKeywords: [
+                "desktop",
+                "vscode",
+                "cursor",
+                "windsurf",
+                "zed",
+                "jetbrains",
+            ],
+            cliOriginatorKeywords: [
+                "cli",
+                "terminal",
+                "shell",
+                "tty",
+                "iterm",
+                "tmux",
+                "zsh",
+                "bash",
+                "fish",
+                "pwsh",
+            ]
+        ),
+    ]
+
     nonisolated private static func parseCodexSessionMeta(
         fromFirstLine line: String?
     ) -> (
@@ -3379,7 +3480,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let cwd = payload["cwd"] as? String
         let originator = normalizedSessionText(payload["originator"], maxLength: 80)
         let sessionSource = normalizedSessionText(payload["source"], maxLength: 40)
-        let clientKind = codexClientKind(originator: originator, sessionSource: sessionSource)
+        let clientKind = classifySessionClientKind(
+            provider: "codex",
+            originator: originator,
+            sessionSource: sessionSource
+        )
         return (
             id: id,
             cwd: cwd,
@@ -3393,27 +3498,66 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         )
     }
 
-    nonisolated private static func codexClientKind(
+    nonisolated private static func classifySessionClientKind(
+        provider: String,
         originator: String?,
         sessionSource: String?
     ) -> String? {
-        let normalizedOriginator = originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let normalizedSource = sessionSource?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let providerKey = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let taxonomy = providerClientTaxonomy[providerKey]
+        let normalizedOriginator = normalizedSessionTaxonomyKey(originator)
+        let normalizedSource = normalizedSessionTaxonomyKey(sessionSource)
 
-        if normalizedOriginator?.contains("desktop") == true ||
-            normalizedSource == "vscode" ||
-            normalizedSource == "desktop" {
-            return "desktop"
+        if let taxonomy {
+            if let normalizedSource {
+                if taxonomy.desktopSourceAliases.contains(normalizedSource) {
+                    return "desktop"
+                }
+                if taxonomy.cliSourceAliases.contains(normalizedSource) {
+                    return "cli"
+                }
+            }
+
+            if let normalizedOriginator {
+                if containsTaxonomyKeyword(
+                    in: normalizedOriginator,
+                    keywords: taxonomy.desktopOriginatorKeywords
+                ) {
+                    return "desktop"
+                }
+                if containsTaxonomyKeyword(
+                    in: normalizedOriginator,
+                    keywords: taxonomy.cliOriginatorKeywords
+                ) {
+                    return "cli"
+                }
+            }
         }
-        if normalizedOriginator?.contains("cli") == true ||
-            normalizedSource == "cli" ||
-            normalizedSource == "terminal" {
-            return "cli"
-        }
+
         if normalizedOriginator != nil || normalizedSource != nil {
             return "unknown"
         }
         return nil
+    }
+
+    nonisolated private static func normalizedSessionTaxonomyKey(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lowercased = trimmed.lowercased()
+        let filteredScalars = lowercased.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+        guard !filteredScalars.isEmpty else { return nil }
+        return String(String.UnicodeScalarView(filteredScalars))
+    }
+
+    nonisolated private static func containsTaxonomyKeyword(
+        in normalizedValue: String,
+        keywords: Set<String>
+    ) -> Bool {
+        for keyword in keywords where normalizedValue.contains(keyword) {
+            return true
+        }
+        return false
     }
 
     nonisolated private static func parseClaudeSessionMeta(
@@ -3520,7 +3664,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             let mergedSessionSource = runtime.sessionSource ?? matched.session.sessionSource
             let mergedClientKind = runtime.clientKind
                 ?? matched.session.clientKind
-                ?? codexClientKind(originator: mergedOriginator, sessionSource: mergedSessionSource)
+                ?? classifySessionClientKind(
+                    provider: runtime.provider,
+                    originator: mergedOriginator,
+                    sessionSource: mergedSessionSource
+                )
 
             return RuntimeSessionSnapshot(
                 provider: runtime.provider,

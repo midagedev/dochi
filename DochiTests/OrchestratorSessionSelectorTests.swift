@@ -332,6 +332,7 @@ final class DochiAppOrchestratorBridgeFlowTests: XCTestCase {
             activityClassificationAccuracy: 0.5,
             sessionSelectionFailureRate: 0.25,
             historySearchHitRate: 0.6,
+            clientKindUnknownRate: 0.25,
             counters: SessionManagementKPICounters(
                 repositoryAssignedCount: 3,
                 repositoryTotalCount: 4,
@@ -343,7 +344,10 @@ final class DochiAppOrchestratorBridgeFlowTests: XCTestCase {
                 historySearchHitCount: 3,
                 activityFeedbackSampleCount: 4,
                 activityFeedbackMatchedCount: 2,
-                activityStateDistribution: ["active": 2]
+                activityStateDistribution: ["active": 2],
+                clientKindSampleCount: 4,
+                clientKindUnknownCount: 1,
+                clientKindDistribution: ["desktop": 1, "cli": 2, "unknown": 1]
             )
         )
 
@@ -354,6 +358,7 @@ final class DochiAppOrchestratorBridgeFlowTests: XCTestCase {
         XCTAssertEqual(metrics["repository_assignment_success_rate"] as? Double, 0.75)
         XCTAssertEqual(metrics["session_selection_failure_rate"] as? Double, 0.25)
         XCTAssertEqual(metrics["history_search_hit_rate"] as? Double, 0.6)
+        XCTAssertEqual(metrics["client_kind_unknown_rate"] as? Double, 0.25)
 
         let summary = result.result["summary"] as? String
         XCTAssertTrue(summary?.contains("selection_failure_rate") == true)

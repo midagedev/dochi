@@ -750,6 +750,92 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertEqual(cli.clientKind, "cli")
     }
 
+    func testDiscoverLocalCodingSessionsNormalizesCodexSourceTaxonomy() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-codex-taxonomy-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexRoot = tempRoot.appendingPathComponent("codex", isDirectory: true)
+        let claudeRoot = tempRoot.appendingPathComponent("claude", isDirectory: true)
+        let dayDirectory = codexRoot.appendingPathComponent("2026/02/21", isDirectory: true)
+        try FileManager.default.createDirectory(at: dayDirectory, withIntermediateDirectories: true)
+
+        func writeSessionMeta(
+            fileName: String,
+            sessionId: String,
+            originator: String?,
+            source: String?
+        ) throws {
+            var payload: [String: Any] = [
+                "id": sessionId,
+                "cwd": "/Users/hckim/repo/dochi",
+            ]
+            if let originator {
+                payload["originator"] = originator
+            }
+            if let source {
+                payload["source"] = source
+            }
+            let event: [String: Any] = [
+                "timestamp": "2026-02-21T12:00:00Z",
+                "type": "session_meta",
+                "payload": payload,
+            ]
+            let eventData = try JSONSerialization.data(withJSONObject: event, options: [])
+            let eventLine = String(data: eventData, encoding: .utf8) ?? "{}"
+            let content = """
+            \(eventLine)
+            {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"ping"}]}}
+            """
+            let fileURL = dayDirectory.appendingPathComponent(fileName)
+            try content.data(using: .utf8)?.write(to: fileURL, options: .atomic)
+        }
+
+        try writeSessionMeta(
+            fileName: "desktop-vscode.jsonl",
+            sessionId: "desktop-vscode",
+            originator: "Codex Desktop",
+            source: "VS Code"
+        )
+        try writeSessionMeta(
+            fileName: "desktop-cursor.jsonl",
+            sessionId: "desktop-cursor",
+            originator: "Codex Desktop",
+            source: "cursor-app"
+        )
+        try writeSessionMeta(
+            fileName: "cli-iterm.jsonl",
+            sessionId: "cli-iterm",
+            originator: "Codex CLI",
+            source: "iTerm2"
+        )
+        try writeSessionMeta(
+            fileName: "cli-originator.jsonl",
+            sessionId: "cli-originator",
+            originator: "Codex CLI Terminal",
+            source: nil
+        )
+        try writeSessionMeta(
+            fileName: "unknown-source.jsonl",
+            sessionId: "unknown-source",
+            originator: "Codex Agent",
+            source: "mystery-ui"
+        )
+
+        let discovered = ExternalToolSessionManager.discoverLocalCodingSessions(
+            codexSessionsRoot: codexRoot,
+            claudeProjectsRoot: claudeRoot,
+            limit: 50,
+            now: Date(timeIntervalSince1970: 1_771_636_000)
+        )
+
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "desktop-vscode" })?.clientKind, "desktop")
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "desktop-cursor" })?.clientKind, "desktop")
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "cli-iterm" })?.clientKind, "cli")
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "cli-originator" })?.clientKind, "cli")
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "unknown-source" })?.clientKind, "unknown")
+    }
+
     func testEnrichRuntimeSessionMetadataMatchesByWorkingDirectory() {
         let now = Date(timeIntervalSince1970: 1_771_636_000)
         let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
