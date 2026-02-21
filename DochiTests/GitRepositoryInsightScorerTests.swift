@@ -317,6 +317,7 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshots.count, 2)
+        XCTAssertFalse(snapshots.contains(where: { $0.runtimeSessionId == "3333" }))
 
         let codex = snapshots.first(where: { $0.runtimeSessionId == "1234" })
         XCTAssertEqual(codex?.provider, "codex")
@@ -355,5 +356,12 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertNil(
             ExternalToolSessionManager.processProvider(fromCommandLine: "/usr/bin/vim main.swift")
         )
+    }
+
+    func testProcessControllabilityTierTreatsUnknownTTYAsT3() {
+        XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "ttys002"), .t1Attach)
+        XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "??"), .t3Unknown)
+        XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "-"), .t3Unknown)
+        XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "   "), .t3Unknown)
     }
 }
