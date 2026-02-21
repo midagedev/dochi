@@ -794,8 +794,14 @@ enum DochiCLI {
                 contains: contains
             )
 
-        case .chatStream(let prompt):
-            return handleDevChatStream(client: client, outputMode: outputMode, prompt: prompt)
+        case .chatStream(let prompt, let secretMode, let secretAllowedTools):
+            return handleDevChatStream(
+                client: client,
+                outputMode: outputMode,
+                prompt: prompt,
+                secretMode: secretMode,
+                secretAllowedTools: secretAllowedTools
+            )
 
         case .tool(let name, let argumentsJSON):
             do {
@@ -1183,10 +1189,20 @@ enum DochiCLI {
     private static func handleDevChatStream(
         client: CLIControlPlaneClient,
         outputMode: CLIOutputMode,
-        prompt: String
+        prompt: String,
+        secretMode: Bool,
+        secretAllowedTools: [String]
     ) -> CLIResult {
         do {
-            let openResult = try client.call(method: "chat.stream.open", params: ["prompt": prompt])
+            var openParams: [String: Any] = ["prompt": prompt]
+            if secretMode {
+                openParams["secret_mode"] = true
+                if !secretAllowedTools.isEmpty {
+                    openParams["secret_allowed_tools"] = secretAllowedTools
+                }
+            }
+
+            let openResult = try client.call(method: "chat.stream.open", params: openParams)
             guard let streamId = openResult["stream_id"] as? String, !streamId.isEmpty else {
                 return CLIResult(exitCode: .runtimeError, command: "dev.chat.stream", message: "chat.stream.open 응답에 stream_id가 없습니다.")
             }
@@ -1558,7 +1574,7 @@ enum DochiCLI {
           dochi dev tool <name> [arguments_json]
           dochi dev log recent [--minutes N]
           dochi dev log tail [--seconds N] [--category C] [--level L] [--contains K]
-          dochi dev chat stream <prompt>
+          dochi dev chat stream [--secret] [--secret-allow-tool <name>]... <prompt>
           dochi dev bridge open [agent] [--profile NAME] [--cwd DIR] [--force-working-directory]
           dochi dev bridge roots [--limit N] [--path DIR]...
           dochi dev bridge status [session_id]

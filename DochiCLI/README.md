@@ -67,6 +67,7 @@ dochi dev tool conversation.search '{"query":"회의","limit":5}'
 dochi dev log recent --minutes 15
 dochi dev log tail --seconds 30 --category App --level info
 dochi dev chat stream "최근 대화 3개를 요약해줘"
+dochi dev chat stream --secret --secret-allow-tool datetime "현재 시각만 알려줘"
 dochi dev bridge open codex --cwd ~/repo/dochi
 dochi dev bridge open codex --profile "Dochi Bridge Codex" --cwd ~/work/app --force-working-directory
 dochi dev bridge roots --limit 10
@@ -76,6 +77,9 @@ dochi dev bridge send <session_id> "pwd"
 dochi dev bridge read <session_id> 120
 dochi doctor
 ```
+
+- `dev chat stream --secret`은 secret 모드 플래그를 앱 control-plane에 전달합니다.
+- `--secret-allow-tool <name>`를 반복해서 전달하면 허용 도구 후보를 함께 전달합니다.
 
 ## 4) JSON 출력
 
