@@ -406,6 +406,103 @@ final class NativeSessionRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testTelegramBridgeRootsCommandBypassesNativeLoopAndListsRoots() async throws {
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.done(text: "native-should-not-run")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+        let viewModel = makeViewModel(
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            telegramStreamReplies: false
+        )
+
+        let manager = MockExternalToolSessionManager()
+        manager.mockGitRepositoryInsights = [
+            GitRepositoryInsight(
+                workDomain: "dochi",
+                workDomainConfidence: 0.95,
+                workDomainReason: "matched owner",
+                path: "/tmp/project-alpha",
+                name: "project-alpha",
+                branch: "main",
+                originURL: "git@github.com:org/project-alpha.git",
+                remoteHost: "github.com",
+                remoteOwner: "org",
+                remoteRepository: "project-alpha",
+                lastCommitEpoch: 1_700_000_000,
+                lastCommitISO8601: "2023-11-14T00:00:00Z",
+                lastCommitRelative: "1h ago",
+                upstreamLastCommitEpoch: 1_700_000_000,
+                upstreamLastCommitISO8601: "2023-11-14T00:00:00Z",
+                upstreamLastCommitRelative: "1h ago",
+                daysSinceLastCommit: 0,
+                recentCommitCount30d: 20,
+                changedFileCount: 3,
+                untrackedFileCount: 1,
+                aheadCount: 0,
+                behindCount: 0,
+                score: 88
+            ),
+        ]
+        viewModel.configureExternalToolManager(manager)
+
+        let telegram = MockTelegramService()
+        viewModel.setTelegramService(telegram)
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 2,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "/bridge roots --limit 1"
+        ))
+
+        XCTAssertEqual(adapter.callCount, 0)
+        XCTAssertEqual(telegram.sentMessages.last?.chatId, 123_456)
+        XCTAssertTrue(telegram.sentMessages.last?.text.contains("/tmp/project-alpha") == true)
+    }
+
+    @MainActor
+    func testTelegramBridgeRepoInitCommandBypassesNativeLoop() async throws {
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.done(text: "native-should-not-run")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+        let viewModel = makeViewModel(
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            telegramStreamReplies: false
+        )
+
+        let manager = MockExternalToolSessionManager()
+        viewModel.configureExternalToolManager(manager)
+
+        let telegram = MockTelegramService()
+        viewModel.setTelegramService(telegram)
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 3,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "/bridge repo init /tmp/new-repo --branch develop --readme --gitignore"
+        ))
+
+        XCTAssertEqual(adapter.callCount, 0)
+        XCTAssertEqual(manager.initializeRepositoryCallCount, 1)
+        XCTAssertTrue(telegram.sentMessages.last?.text.contains("default_branch: develop") == true)
+    }
+
+    @MainActor
     func testTelegramOrchestratorApprovalFlowConsumesTokenOnce() async throws {
         let adapter = StubNativeProviderAdapter(
             provider: .anthropic,

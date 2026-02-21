@@ -1504,7 +1504,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeRoots(
+    nonisolated static func handleBridgeRoots(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -2020,7 +2020,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorInterrupt(
+    nonisolated static func handleBridgeOrchestratorInterrupt(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -2100,7 +2100,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeRepositoryList(
+    nonisolated static func handleBridgeRepositoryList(
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
         let repositories = await MainActor.run {
@@ -2115,7 +2115,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeRepositoryInit(
+    nonisolated static func handleBridgeRepositoryInit(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -2142,7 +2142,7 @@ struct DochiApp: App {
         }
     }
 
-    nonisolated private static func handleBridgeRepositoryClone(
+    nonisolated static func handleBridgeRepositoryClone(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -2169,7 +2169,7 @@ struct DochiApp: App {
         }
     }
 
-    nonisolated private static func handleBridgeRepositoryAttach(
+    nonisolated static func handleBridgeRepositoryAttach(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -2188,7 +2188,7 @@ struct DochiApp: App {
         }
     }
 
-    nonisolated private static func handleBridgeRepositoryRemove(
+    nonisolated static func handleBridgeRepositoryRemove(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {

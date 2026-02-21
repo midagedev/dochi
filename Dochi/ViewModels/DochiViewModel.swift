@@ -2935,6 +2935,16 @@ final class DochiViewModel {
                 externalToolManager: manager
             )
 
+        case .bridgeRoots(let limit, let searchPaths):
+            var params: [String: Any] = ["limit": limit]
+            if !searchPaths.isEmpty {
+                params["search_paths"] = searchPaths
+            }
+            result = await DochiApp.handleBridgeRoots(
+                params: params,
+                externalToolManager: manager
+            )
+
         case .bridgeStatus(let sessionId):
             var params: [String: Any] = [:]
             if let sessionId {
@@ -2960,6 +2970,60 @@ final class DochiViewModel {
                     "session_id": sessionId,
                     "lines": lines,
                 ],
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoList:
+            result = await DochiApp.handleBridgeRepositoryList(
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoInit(let path, let defaultBranch, let createReadme, let createGitignore):
+            result = await DochiApp.handleBridgeRepositoryInit(
+                params: [
+                    "path": path,
+                    "default_branch": defaultBranch,
+                    "create_readme": createReadme,
+                    "create_gitignore": createGitignore,
+                ],
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoClone(let remoteURL, let destinationPath, let branch):
+            var params: [String: Any] = [
+                "remote_url": remoteURL,
+                "destination_path": destinationPath,
+            ]
+            if let branch {
+                params["branch"] = branch
+            }
+            result = await DochiApp.handleBridgeRepositoryClone(
+                params: params,
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoAttach(let path):
+            result = await DochiApp.handleBridgeRepositoryAttach(
+                params: ["path": path],
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoRemove(let repositoryId, let deleteDirectory):
+            result = await DochiApp.handleBridgeRepositoryRemove(
+                params: [
+                    "repository_id": repositoryId,
+                    "delete_directory": deleteDirectory,
+                ],
+                externalToolManager: manager
+            )
+
+        case .orchSelect(let repositoryRoot):
+            var params: [String: Any] = [:]
+            if let repositoryRoot {
+                params["repository_root"] = repositoryRoot
+            }
+            result = await DochiApp.handleBridgeOrchestratorSelectSession(
+                params: params,
                 externalToolManager: manager
             )
 
@@ -3015,6 +3079,33 @@ final class DochiViewModel {
                 externalToolManager: manager,
                 orchestrationSummaryService: telegramOrchestrationSummaryService
             )
+
+        case .orchInterrupt(let repositoryRoot, let sessionId):
+            var params: [String: Any] = [:]
+            if let repositoryRoot {
+                params["repository_root"] = repositoryRoot
+            }
+            if let sessionId {
+                params["session_id"] = sessionId
+            }
+            result = await DochiApp.handleBridgeOrchestratorInterrupt(
+                params: params,
+                externalToolManager: manager
+            )
+
+        case .orchSummarize(let repositoryRoot, let sessionId, let lines):
+            var params: [String: Any] = ["lines": lines]
+            if let repositoryRoot {
+                params["repository_root"] = repositoryRoot
+            }
+            if let sessionId {
+                params["session_id"] = sessionId
+            }
+            result = await DochiApp.handleBridgeOrchestratorSummarize(
+                params: params,
+                externalToolManager: manager,
+                orchestrationSummaryService: telegramOrchestrationSummaryService
+            )
         }
 
         let replyText = formatTelegramBridgeCommandResult(command: command, result: result)
@@ -3055,6 +3146,19 @@ final class DochiViewModel {
             - detail: \(detail)
             """
 
+        case .bridgeRoots:
+            let roots = result.result["roots"] as? [[String: Any]] ?? []
+            if roots.isEmpty {
+                return "발견된 Git 루트가 없습니다."
+            }
+            let lines = roots.prefix(10).map { root in
+                let path = root["path"] as? String ?? "-"
+                let branch = root["branch"] as? String ?? "-"
+                let score = root["score"] as? Int ?? 0
+                return "- \(path) (branch: \(branch), score: \(score))"
+            }
+            return lines.joined(separator: "\n")
+
         case .bridgeStatus:
             if let sessions = result.result["sessions"] as? [[String: Any]] {
                 if sessions.isEmpty {
@@ -3094,6 +3198,62 @@ final class DochiViewModel {
                 return "(출력 없음)"
             }
             return lines.joined(separator: "\n")
+
+        case .bridgeRepoList:
+            let repositories = result.result["repositories"] as? [[String: Any]] ?? []
+            if repositories.isEmpty {
+                return "관리 중인 리포지토리가 없습니다."
+            }
+            return repositories.prefix(20).map { repository in
+                let name = repository["name"] as? String ?? "-"
+                let rootPath = repository["root_path"] as? String ?? "-"
+                let source = repository["source"] as? String ?? "-"
+                let repositoryId = repository["repository_id"] as? String ?? "-"
+                return "- \(name) [\(source)] \(rootPath) (\(repositoryId))"
+            }.joined(separator: "\n")
+
+        case .bridgeRepoInit:
+            return formatTelegramRepositoryMutationResult(
+                title: "리포지토리를 초기화했습니다.",
+                result: result
+            )
+
+        case .bridgeRepoClone:
+            return formatTelegramRepositoryMutationResult(
+                title: "리포지토리를 클론했습니다.",
+                result: result
+            )
+
+        case .bridgeRepoAttach:
+            return formatTelegramRepositoryMutationResult(
+                title: "리포지토리를 연결했습니다.",
+                result: result
+            )
+
+        case .bridgeRepoRemove:
+            let repositoryId = result.result["repository_id"] as? String ?? "-"
+            let deleteDirectory = result.result["delete_directory"] as? Bool ?? false
+            return """
+            리포지토리를 제거했습니다.
+            - repository_id: \(repositoryId)
+            - delete_directory: \(deleteDirectory)
+            """
+
+        case .orchSelect:
+            let action = result.result["action"] as? String ?? "-"
+            let reason = result.result["reason"] as? String ?? "-"
+            let selected = result.result["selected_session"] as? [String: Any]
+            let sessionId = selected?["runtime_session_id"] as? String ?? (selected?["native_session_id"] as? String ?? "-")
+            let tier = selected?["controllability_tier"] as? String ?? "-"
+            let workingDirectory = selected?["working_directory"] as? String ?? "-"
+            return """
+            오케스트레이션 세션 선택 결과
+            - action: \(action)
+            - reason: \(reason)
+            - session_id: \(sessionId)
+            - tier: \(tier)
+            - working_directory: \(workingDirectory)
+            """
 
         case .orchRequest:
             let approvalId = result.result["approval_id"] as? String ?? "-"
@@ -3146,7 +3306,49 @@ final class DochiViewModel {
             }
             let highlightsText = highlights.prefix(5).map { "- \($0)" }.joined(separator: "\n")
             return "orchestrator.status kind=\(kind)\n\(summary)\n\(highlightsText)"
+
+        case .orchInterrupt:
+            let status = result.result["status"] as? String ?? "interrupted"
+            let session = result.result["session"] as? [String: Any]
+            let sessionId = session?["session_id"] as? String ?? "-"
+            let profile = session?["profile_name"] as? String ?? "-"
+            return """
+            오케스트레이터 세션 중단 완료
+            - status: \(status)
+            - profile: \(profile)
+            - session_id: \(sessionId)
+            """
+
+        case .orchSummarize:
+            let kind = result.result["result_kind"] as? String ?? "unknown"
+            let summary = result.result["summary"] as? String ?? "(요약 없음)"
+            let highlights = result.result["highlights"] as? [String] ?? []
+            if highlights.isEmpty {
+                return "orchestrator.summarize kind=\(kind)\n\(summary)"
+            }
+            let highlightsText = highlights.prefix(5).map { "- \($0)" }.joined(separator: "\n")
+            return "orchestrator.summarize kind=\(kind)\n\(summary)\n\(highlightsText)"
         }
+    }
+
+    private func formatTelegramRepositoryMutationResult(
+        title: String,
+        result: LocalControlPlaneMethodResult
+    ) -> String {
+        let repository = result.result["repository"] as? [String: Any]
+        let repositoryId = repository?["repository_id"] as? String ?? "-"
+        let name = repository?["name"] as? String ?? "-"
+        let rootPath = repository?["root_path"] as? String ?? "-"
+        let source = repository?["source"] as? String ?? "-"
+        let branch = repository?["default_branch"] as? String ?? "-"
+        return """
+        \(title)
+        - repository_id: \(repositoryId)
+        - name: \(name)
+        - root_path: \(rootPath)
+        - source: \(source)
+        - default_branch: \(branch)
+        """
     }
 
     private func formatTelegramBridgeCommandError(code: String, message: String) -> String {
