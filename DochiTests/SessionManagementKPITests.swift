@@ -3,7 +3,7 @@ import XCTest
 
 final class SessionManagementKPITests: XCTestCase {
 
-    func testBuildSessionManagementKPIReportCalculatesAllFiveMetrics() {
+    func testBuildSessionManagementKPIReportCalculatesAllMetricsIncludingClientKindUnknownRate() {
         let counters = SessionManagementKPICounters(
             repositoryAssignedCount: 9,
             repositoryTotalCount: 12,
@@ -15,7 +15,10 @@ final class SessionManagementKPITests: XCTestCase {
             historySearchHitCount: 7,
             activityFeedbackSampleCount: 6,
             activityFeedbackMatchedCount: 5,
-            activityStateDistribution: ["active": 4, "idle": 3, "stale": 2, "dead": 1]
+            activityStateDistribution: ["active": 4, "idle": 3, "stale": 2, "dead": 1],
+            clientKindSampleCount: 5,
+            clientKindUnknownCount: 2,
+            clientKindDistribution: ["desktop": 2, "cli": 1, "unknown": 2]
         )
 
         let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -28,7 +31,9 @@ final class SessionManagementKPITests: XCTestCase {
         XCTAssertEqual(report.activityClassificationAccuracy ?? 0, 5.0 / 6.0, accuracy: 0.0001)
         XCTAssertEqual(report.sessionSelectionFailureRate, 0.25, accuracy: 0.0001)
         XCTAssertEqual(report.historySearchHitRate, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(report.clientKindUnknownRate ?? 0, 0.4, accuracy: 0.0001)
         XCTAssertEqual(report.counters.activityStateDistribution["active"], 4)
+        XCTAssertEqual(report.counters.clientKindDistribution["unknown"], 2)
     }
 
     func testBuildSessionManagementKPIReportAllowsNilActivityAccuracyWithoutFeedback() {
@@ -43,12 +48,16 @@ final class SessionManagementKPITests: XCTestCase {
             historySearchHitCount: 0,
             activityFeedbackSampleCount: 0,
             activityFeedbackMatchedCount: 0,
-            activityStateDistribution: [:]
+            activityStateDistribution: [:],
+            clientKindSampleCount: 0,
+            clientKindUnknownCount: 0,
+            clientKindDistribution: [:]
         )
 
         let report = ExternalToolSessionManager.buildSessionManagementKPIReport(from: counters)
 
         XCTAssertNil(report.activityClassificationAccuracy)
+        XCTAssertNil(report.clientKindUnknownRate)
         XCTAssertEqual(report.repositoryAssignmentSuccessRate, 0)
         XCTAssertEqual(report.dedupCorrectionRate, 0)
         XCTAssertEqual(report.sessionSelectionFailureRate, 0)

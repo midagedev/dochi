@@ -404,6 +404,9 @@ struct SessionManagementKPICounters: Sendable, Equatable {
     var activityFeedbackSampleCount: Int = 0
     var activityFeedbackMatchedCount: Int = 0
     var activityStateDistribution: [String: Int] = [:]
+    var clientKindSampleCount: Int = 0
+    var clientKindUnknownCount: Int = 0
+    var clientKindDistribution: [String: Int] = [:]
 }
 
 struct SessionManagementKPIReport: Sendable, Equatable {
@@ -413,7 +416,28 @@ struct SessionManagementKPIReport: Sendable, Equatable {
     let activityClassificationAccuracy: Double?
     let sessionSelectionFailureRate: Double
     let historySearchHitRate: Double
+    let clientKindUnknownRate: Double?
     let counters: SessionManagementKPICounters
+
+    init(
+        generatedAt: Date,
+        repositoryAssignmentSuccessRate: Double,
+        dedupCorrectionRate: Double,
+        activityClassificationAccuracy: Double?,
+        sessionSelectionFailureRate: Double,
+        historySearchHitRate: Double,
+        clientKindUnknownRate: Double? = nil,
+        counters: SessionManagementKPICounters
+    ) {
+        self.generatedAt = generatedAt
+        self.repositoryAssignmentSuccessRate = repositoryAssignmentSuccessRate
+        self.dedupCorrectionRate = dedupCorrectionRate
+        self.activityClassificationAccuracy = activityClassificationAccuracy
+        self.sessionSelectionFailureRate = sessionSelectionFailureRate
+        self.historySearchHitRate = historySearchHitRate
+        self.clientKindUnknownRate = clientKindUnknownRate
+        self.counters = counters
+    }
 }
 
 enum OrchestrationRunState: String, Codable, Sendable {

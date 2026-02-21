@@ -1611,6 +1611,7 @@ struct DochiApp: App {
                 "activity_classification_accuracy": report.activityClassificationAccuracy ?? NSNull(),
                 "session_selection_failure_rate": report.sessionSelectionFailureRate,
                 "history_search_hit_rate": report.historySearchHitRate,
+                "client_kind_unknown_rate": report.clientKindUnknownRate ?? NSNull(),
             ] as [String: Any],
             "counters": [
                 "repository_assigned_count": report.counters.repositoryAssignedCount,
@@ -1624,6 +1625,9 @@ struct DochiApp: App {
                 "activity_feedback_sample_count": report.counters.activityFeedbackSampleCount,
                 "activity_feedback_matched_count": report.counters.activityFeedbackMatchedCount,
                 "activity_state_distribution": report.counters.activityStateDistribution,
+                "client_kind_sample_count": report.counters.clientKindSampleCount,
+                "client_kind_unknown_count": report.counters.clientKindUnknownCount,
+                "client_kind_distribution": report.counters.clientKindDistribution,
             ] as [String: Any],
             "summary": formatSessionManagementKPISummary(report),
         ])
@@ -2159,6 +2163,12 @@ struct DochiApp: App {
         } else {
             activityAccuracy = "n/a"
         }
+        let clientKindUnknownRate: String
+        if let unknownRate = report.clientKindUnknownRate {
+            clientKindUnknownRate = percentageString(unknownRate)
+        } else {
+            clientKindUnknownRate = "n/a"
+        }
         let lines = [
             "session_management_kpi",
             "generated_at=\(isoTimestamp(report.generatedAt))",
@@ -2168,6 +2178,8 @@ struct DochiApp: App {
             "selection_failure_rate=\(percentageString(report.sessionSelectionFailureRate)) (\(report.counters.selectionFailureCount)/\(report.counters.selectionAttemptCount))",
             "history_search_hit_rate=\(percentageString(report.historySearchHitRate)) (\(report.counters.historySearchHitCount)/\(report.counters.historySearchQueryCount))",
             "activity_state_distribution=\(report.counters.activityStateDistribution)",
+            "client_kind_unknown_rate=\(clientKindUnknownRate) (\(report.counters.clientKindUnknownCount)/\(report.counters.clientKindSampleCount))",
+            "client_kind_distribution=\(report.counters.clientKindDistribution)",
         ]
         return lines.joined(separator: "\n")
     }
