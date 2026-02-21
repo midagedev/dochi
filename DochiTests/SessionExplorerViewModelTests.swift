@@ -80,6 +80,89 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(filtered.first?.nativeSessionId, "t0-active")
     }
 
+    func testRepositoryGroupsExcludeUnassignedAndNormalizePath() {
+        let now = Date()
+        let sessions = [
+            makeSession(
+                provider: "codex",
+                nativeId: "repo-a-1",
+                repo: "/tmp/repo-a",
+                tier: .t1Attach,
+                state: .active,
+                score: 81,
+                updatedAt: now
+            ),
+            makeSession(
+                provider: "claude",
+                nativeId: "repo-a-2",
+                repo: "/tmp/repo-a/../repo-a",
+                tier: .t2Observe,
+                state: .stale,
+                score: 30,
+                updatedAt: now.addingTimeInterval(-60)
+            ),
+            makeSession(
+                provider: "codex",
+                nativeId: "repo-b-1",
+                repo: "/tmp/repo-b",
+                tier: .t0Full,
+                state: .idle,
+                score: 71,
+                updatedAt: now.addingTimeInterval(-20)
+            ),
+            makeSession(
+                provider: "aider",
+                nativeId: "unassigned",
+                repo: nil,
+                tier: .t3Unknown,
+                state: .dead,
+                score: 0,
+                updatedAt: now.addingTimeInterval(-30)
+            ),
+        ]
+
+        let groups = SessionExplorerViewStateBuilder.repositoryGroups(
+            sessions: sessions,
+            sort: .activity
+        )
+
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups.first?.repositoryRoot, "/tmp/repo-a")
+        XCTAssertEqual(groups.first?.sessionCount, 2)
+        XCTAssertEqual(groups.first?.activeSessionCount, 1)
+        XCTAssertEqual(groups.first?.errorSessionCount, 0)
+        XCTAssertFalse(groups.contains(where: { $0.repositoryRoot == "unassigned" }))
+    }
+
+    func testRepositoryGroupsSortSessionsWithProviderOption() {
+        let sessions = [
+            makeSession(
+                provider: "zai",
+                nativeId: "z",
+                repo: "/tmp/repo-z",
+                tier: .t0Full,
+                state: .active,
+                score: 77
+            ),
+            makeSession(
+                provider: "anthropic",
+                nativeId: "a",
+                repo: "/tmp/repo-z",
+                tier: .t1Attach,
+                state: .active,
+                score: 68
+            ),
+        ]
+
+        let groups = SessionExplorerViewStateBuilder.repositoryGroups(
+            sessions: sessions,
+            sort: .provider
+        )
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].sessions.map(\.provider), ["anthropic", "zai"])
+    }
+
     func testFilteredSessionsNormalizesRepositoryRootComparison() {
         let sessions = [
             makeSession(
