@@ -118,6 +118,7 @@ struct DochiApp: App {
     private let deviceHeartbeatService: DeviceHeartbeatService
     private let controlPlaneService: LocalControlPlaneService
     private let controlPlaneTokenManager: ControlPlaneTokenManager
+    private let orchestrationApprovalStore: OrchestrationExecutionApprovalStore
 
     init() {
         let settings = AppSettings()
@@ -274,6 +275,8 @@ struct DochiApp: App {
 
         let controlPlaneTokenManager = ControlPlaneTokenManager()
         self.controlPlaneTokenManager = controlPlaneTokenManager
+        let orchestrationApprovalStore = OrchestrationExecutionApprovalStore()
+        self.orchestrationApprovalStore = orchestrationApprovalStore
         let orchestrationSummaryService = OrchestrationSummaryService()
         self.controlPlaneService = LocalControlPlaneService(
             methodHandler: { method, params in
@@ -284,7 +287,8 @@ struct DochiApp: App {
                     toolService: toolService,
                     externalToolManager: externalToolManager,
                     tokenManager: controlPlaneTokenManager,
-                    orchestrationSummaryService: orchestrationSummaryService
+                    orchestrationSummaryService: orchestrationSummaryService,
+                    orchestrationApprovalStore: orchestrationApprovalStore
                 )
             },
             authTokenProvider: { controlPlaneTokenManager.currentToken() }
@@ -767,7 +771,8 @@ struct DochiApp: App {
         toolService: BuiltInToolService,
         externalToolManager: ExternalToolSessionManagerProtocol,
         tokenManager: ControlPlaneTokenManager,
-        orchestrationSummaryService: any OrchestrationSummaryServiceProtocol
+        orchestrationSummaryService: any OrchestrationSummaryServiceProtocol,
+        orchestrationApprovalStore: OrchestrationExecutionApprovalStore
     ) async -> LocalControlPlaneMethodResult {
         switch method {
         case "app.ping":
@@ -952,8 +957,24 @@ struct DochiApp: App {
         case "bridge.orchestrator.guard_command":
             return await handleBridgeOrchestratorGuardCommand(params: params, externalToolManager: externalToolManager)
 
+        case "bridge.orchestrator.request":
+            return await handleBridgeOrchestratorRequest(
+                params: params,
+                orchestrationApprovalStore: orchestrationApprovalStore
+            )
+
+        case "bridge.orchestrator.approve":
+            return await handleBridgeOrchestratorApprove(
+                params: params,
+                orchestrationApprovalStore: orchestrationApprovalStore
+            )
+
         case "bridge.orchestrator.execute":
-            return await handleBridgeOrchestratorExecute(params: params, externalToolManager: externalToolManager)
+            return await handleBridgeOrchestratorExecute(
+                params: params,
+                externalToolManager: externalToolManager,
+                orchestrationApprovalStore: orchestrationApprovalStore
+            )
 
         case "bridge.orchestrator.status":
             return await handleBridgeOrchestratorStatus(
@@ -1660,6 +1681,73 @@ struct DochiApp: App {
         ])
     }
 
+    nonisolated private static func handleBridgeOrchestratorRequest(
+        params: [String: Any],
+        orchestrationApprovalStore: OrchestrationExecutionApprovalStore
+    ) async -> LocalControlPlaneMethodResult {
+        guard let command = nonEmptyString(params["command"]) else {
+            return .failure(code: "missing_command", message: "command가 필요합니다.")
+        }
+        let repositoryRoot = nonEmptyString(params["repository_root"])
+        let ttlSeconds = intValue(params["ttl_seconds"])
+
+        let challenge = await orchestrationApprovalStore.create(
+            command: command,
+            repositoryRoot: repositoryRoot,
+            ttlSeconds: ttlSeconds
+        )
+        let snapshot = challenge.snapshot
+        Log.runtime.info(
+            "ControlPlane approval request created: id=\(snapshot.approvalId), expires=\(isoTimestamp(snapshot.expiresAt))"
+        )
+
+        return .ok([
+            "approval_id": snapshot.approvalId,
+            "challenge_code": snapshot.challengeCode,
+            "status": snapshot.status.rawValue,
+            "command": snapshot.command,
+            "repository_root": snapshot.repositoryRoot ?? NSNull(),
+            "created_at": isoTimestamp(snapshot.createdAt),
+            "expires_at": isoTimestamp(snapshot.expiresAt),
+        ])
+    }
+
+    nonisolated private static func handleBridgeOrchestratorApprove(
+        params: [String: Any],
+        orchestrationApprovalStore: OrchestrationExecutionApprovalStore
+    ) async -> LocalControlPlaneMethodResult {
+        guard let approvalId = nonEmptyString(params["approval_id"]) else {
+            return .failure(code: "missing_approval_id", message: "approval_id가 필요합니다.")
+        }
+        guard let challengeCode = nonEmptyString(params["challenge_code"]) else {
+            return .failure(code: "missing_challenge_code", message: "challenge_code가 필요합니다.")
+        }
+
+        let decision = await orchestrationApprovalStore.approve(
+            approvalId: approvalId,
+            challengeCode: challengeCode
+        )
+
+        guard decision.isAllowed else {
+            return .failure(
+                code: decision.failureCode?.rawValue ?? "approval_failed",
+                message: decision.message
+            )
+        }
+
+        guard let snapshot = decision.snapshot else {
+            return .failure(code: "approval_missing_snapshot", message: "승인 상태를 확인할 수 없습니다.")
+        }
+        Log.runtime.info("ControlPlane approval confirmed: id=\(snapshot.approvalId)")
+
+        return .ok([
+            "approval_id": snapshot.approvalId,
+            "status": snapshot.status.rawValue,
+            "approved_at": snapshot.approvedAt.map(isoTimestamp(_:)) ?? NSNull(),
+            "expires_at": isoTimestamp(snapshot.expiresAt),
+        ])
+    }
+
     nonisolated static func handleBridgeOrchestratorSelectSession(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
@@ -1727,13 +1815,21 @@ struct DochiApp: App {
 
     nonisolated static func handleBridgeOrchestratorExecute(
         params: [String: Any],
-        externalToolManager: ExternalToolSessionManagerProtocol
+        externalToolManager: ExternalToolSessionManagerProtocol,
+        orchestrationApprovalStore: OrchestrationExecutionApprovalStore
     ) async -> LocalControlPlaneMethodResult {
         guard let command = nonEmptyString(params["command"]) else {
             return .failure(code: "missing_command", message: "command가 필요합니다.")
         }
         let repositoryRoot = nonEmptyString(params["repository_root"])
         let confirmed = boolValue(params["confirmed"]) ?? false
+        let approvalId = nonEmptyString(params["approval_id"])
+        if !confirmed, approvalId == nil {
+            return .failure(
+                code: "approval_required",
+                message: "실행 전 승인 요청이 필요합니다. bridge.orchestrator.request/approve를 먼저 호출하거나 confirmed=true를 사용하세요."
+            )
+        }
         let selection = await externalToolManager.selectSessionForOrchestration(repositoryRoot: repositoryRoot)
 
         switch selection.action {
@@ -1751,13 +1847,39 @@ struct DochiApp: App {
             if decision.kind == .denied {
                 return .failure(code: decision.policyCode.rawValue, message: decision.reason)
             }
-            if decision.kind == .confirmationRequired, !confirmed {
+            if decision.kind == .confirmationRequired, !confirmed, approvalId == nil {
                 return .failure(code: decision.policyCode.rawValue, message: decision.reason)
             }
 
             guard let runtimeSessionId = session.runtimeSessionId,
                   let runtimeUUID = UUID(uuidString: runtimeSessionId) else {
                 return .failure(code: "runtime_session_missing", message: "실행 가능한 runtime_session_id를 찾을 수 없습니다.")
+            }
+
+            var approvalPayload: [String: Any] = [
+                "mode": confirmed ? "legacy_confirmed" : "challenge_required"
+            ]
+            if let approvalId {
+                let approvalDecision = await orchestrationApprovalStore.consumeExecution(
+                    approvalId: approvalId,
+                    command: command,
+                    repositoryRoot: repositoryRoot
+                )
+                guard approvalDecision.isAllowed else {
+                    return .failure(
+                        code: approvalDecision.failureCode?.rawValue ?? "approval_failed",
+                        message: approvalDecision.message
+                    )
+                }
+                if let snapshot = approvalDecision.snapshot {
+                    approvalPayload = [
+                        "mode": "challenge",
+                        "approval_id": snapshot.approvalId,
+                        "status": snapshot.status.rawValue,
+                        "consumed_at": snapshot.consumedAt.map(isoTimestamp(_:)) ?? NSNull(),
+                        "expires_at": isoTimestamp(snapshot.expiresAt),
+                    ]
+                }
             }
 
             do {
@@ -1773,6 +1895,7 @@ struct DochiApp: App {
                         "reason": decision.reason,
                         "is_destructive_command": decision.isDestructiveCommand,
                     ],
+                    "approval": approvalPayload,
                 ])
             } catch {
                 return .failure(code: "bridge_send_failed", message: error.localizedDescription)
@@ -2237,6 +2360,19 @@ struct DochiApp: App {
             default:
                 return nil
             }
+        default:
+            return nil
+        }
+    }
+
+    nonisolated private static func intValue(_ value: Any?) -> Int? {
+        switch value {
+        case let int as Int:
+            return int
+        case let number as NSNumber:
+            return number.intValue
+        case let string as String:
+            return Int(string.trimmingCharacters(in: .whitespacesAndNewlines))
         default:
             return nil
         }

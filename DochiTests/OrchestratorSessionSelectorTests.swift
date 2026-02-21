@@ -244,8 +244,10 @@ final class DochiAppOrchestratorBridgeFlowTests: XCTestCase {
             params: [
                 "repository_root": "/tmp/repo",
                 "command": "git status",
+                "confirmed": true,
             ],
-            externalToolManager: manager
+            externalToolManager: manager,
+            orchestrationApprovalStore: OrchestrationExecutionApprovalStore()
         )
 
         XCTAssertTrue(result.success)
@@ -259,6 +261,144 @@ final class DochiAppOrchestratorBridgeFlowTests: XCTestCase {
         let guardPayload = try XCTUnwrap(result.result["guard"] as? [String: Any])
         XCTAssertEqual(guardPayload["decision"] as? String, "allowed")
         XCTAssertEqual(guardPayload["policy_code"] as? String, "policy_t1_allow_non_destructive")
+    }
+
+    func testHandleBridgeOrchestratorExecuteRequiresApprovalWithoutConfirmed() async throws {
+        let manager = MockExternalToolSessionManager()
+        let profile = ExternalToolProfile(
+            name: "Codex",
+            command: "codex",
+            workingDirectory: "/tmp/repo"
+        )
+        manager.saveProfile(profile)
+
+        let runtimeSessionId = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        manager.sessions = [
+            ExternalToolSession(
+                id: runtimeSessionId,
+                profileId: profile.id,
+                tmuxSessionName: "mock-session",
+                status: .idle,
+                startedAt: Date()
+            ),
+        ]
+
+        manager.mockOrchestrationSelection = OrchestrationSessionSelection(
+            action: .attachT1,
+            reason: "attach path",
+            repositoryRoot: "/tmp/repo",
+            selectedSession: makeUnifiedSession(
+                provider: "codex",
+                nativeSessionId: "sess-approval-required",
+                runtimeSessionId: runtimeSessionId.uuidString,
+                tier: .t1Attach,
+                state: .active,
+                repositoryRoot: "/tmp/repo"
+            )
+        )
+        manager.mockOrchestrationDecision = OrchestrationExecutionDecision(
+            kind: .allowed,
+            policyCode: .t1AllowNonDestructive,
+            commandClass: .nonDestructive,
+            reason: "allowed",
+            isDestructiveCommand: false
+        )
+
+        let result = await DochiApp.handleBridgeOrchestratorExecute(
+            params: [
+                "repository_root": "/tmp/repo",
+                "command": "git status",
+            ],
+            externalToolManager: manager,
+            orchestrationApprovalStore: OrchestrationExecutionApprovalStore()
+        )
+
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.errorCode, "approval_required")
+        XCTAssertEqual(manager.sendCommandCallCount, 0)
+    }
+
+    func testHandleBridgeOrchestratorExecuteConsumesChallengeApproval() async throws {
+        let manager = MockExternalToolSessionManager()
+        let profile = ExternalToolProfile(
+            name: "Codex",
+            command: "codex",
+            workingDirectory: "/tmp/repo"
+        )
+        manager.saveProfile(profile)
+
+        let runtimeSessionId = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        manager.sessions = [
+            ExternalToolSession(
+                id: runtimeSessionId,
+                profileId: profile.id,
+                tmuxSessionName: "mock-session",
+                status: .idle,
+                startedAt: Date()
+            ),
+        ]
+
+        manager.mockOrchestrationSelection = OrchestrationSessionSelection(
+            action: .attachT1,
+            reason: "attach path",
+            repositoryRoot: "/tmp/repo",
+            selectedSession: makeUnifiedSession(
+                provider: "codex",
+                nativeSessionId: "sess-challenge",
+                runtimeSessionId: runtimeSessionId.uuidString,
+                tier: .t1Attach,
+                state: .active,
+                repositoryRoot: "/tmp/repo"
+            )
+        )
+        manager.mockOrchestrationDecision = OrchestrationExecutionDecision(
+            kind: .allowed,
+            policyCode: .t1AllowNonDestructive,
+            commandClass: .nonDestructive,
+            reason: "allowed",
+            isDestructiveCommand: false
+        )
+
+        let approvalStore = OrchestrationExecutionApprovalStore()
+        let challenge = await approvalStore.create(
+            command: "git status",
+            repositoryRoot: "/tmp/repo",
+            ttlSeconds: 120
+        )
+        _ = await approvalStore.approve(
+            approvalId: challenge.snapshot.approvalId,
+            challengeCode: challenge.snapshot.challengeCode
+        )
+
+        let firstResult = await DochiApp.handleBridgeOrchestratorExecute(
+            params: [
+                "repository_root": "/tmp/repo",
+                "command": "git status",
+                "approval_id": challenge.snapshot.approvalId,
+            ],
+            externalToolManager: manager,
+            orchestrationApprovalStore: approvalStore
+        )
+
+        XCTAssertTrue(firstResult.success)
+        XCTAssertEqual(manager.sendCommandCallCount, 1)
+        let approval = try XCTUnwrap(firstResult.result["approval"] as? [String: Any])
+        XCTAssertEqual(approval["mode"] as? String, "challenge")
+        XCTAssertEqual(approval["status"] as? String, "consumed")
+
+        let secondResult = await DochiApp.handleBridgeOrchestratorExecute(
+            params: [
+                "repository_root": "/tmp/repo",
+                "command": "git status",
+                "approval_id": challenge.snapshot.approvalId,
+            ],
+            externalToolManager: manager,
+            orchestrationApprovalStore: approvalStore
+        )
+
+        XCTAssertFalse(secondResult.success)
+        XCTAssertEqual(secondResult.errorCode, "approval_already_consumed")
+        XCTAssertEqual(manager.sendCommandCallCount, 1)
     }
 
     func testHandleBridgeOrchestratorStatusBuildsSummaryContract() async throws {
