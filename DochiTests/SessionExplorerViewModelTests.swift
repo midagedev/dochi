@@ -197,6 +197,42 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(mapped.first?.repositoryRoot, "/tmp/repo-a")
     }
 
+    func testApplyManualRepositoryBindingsPrefersExactMatchOverHeuristic() {
+        let session = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "codex",
+            nativeSessionId: "sess-exact",
+            runtimeSessionId: nil,
+            workingDirectory: nil,
+            repositoryRoot: nil,
+            path: "/tmp/.codex/sessions/2026/02/19/exact.jsonl",
+            updatedAt: Date(),
+            isActive: true
+        )
+        let exactKey = ExternalToolSessionManager.sessionBindingKey(
+            provider: "codex",
+            nativeSessionId: "sess-exact",
+            path: "/tmp/.codex/sessions/2026/02/19/exact.jsonl"
+        )
+        let heuristicKey = ExternalToolSessionManager.sessionBindingKey(
+            provider: "codex",
+            nativeSessionId: "sess-template",
+            path: "/tmp/.codex/sessions/2026/02/19/template.jsonl"
+        )
+
+        let mapped = ExternalToolSessionManager.applyManualRepositoryBindings(
+            [session],
+            manualBindings: [
+                heuristicKey: "/tmp/repo-heuristic",
+                exactKey: "/tmp/repo-exact",
+            ]
+        )
+
+        XCTAssertEqual(mapped.first?.repositoryRoot, "/tmp/repo-exact")
+    }
+
     func testApplyManualRepositoryBindingsDoesNotOverrideAssignedRepoWithoutExactMatch() {
         let session = UnifiedCodingSession(
             source: "file",
