@@ -18,6 +18,13 @@ struct NativeAgentLoopHookContext: Sendable {
     let agentId: String?
 }
 
+struct NativeAgentLoopToolRefreshContext: Sendable {
+    let permissions: [String]
+    let preferredToolGroups: [String]
+    let intentHint: String?
+    let supportsToolCalling: Bool
+}
+
 @MainActor
 final class NativeAgentLoopService {
     private struct PendingToolUse: Sendable {
@@ -72,7 +79,8 @@ final class NativeAgentLoopService {
 
     func run(
         request: NativeLLMRequest,
-        hookContext: NativeAgentLoopHookContext? = nil
+        hookContext: NativeAgentLoopHookContext? = nil,
+        toolRefreshContext: NativeAgentLoopToolRefreshContext? = nil
     ) -> AsyncThrowingStream<NativeLLMStreamEvent, Error> {
         guard let adapter = adapters[request.provider] else {
             return AsyncThrowingStream { continuation in
@@ -355,11 +363,17 @@ final class NativeAgentLoopService {
                             }
                         }
 
+                        let refreshedTools = Self.resolveFollowUpTools(
+                            currentRequest: currentRequest,
+                            toolRefreshContext: toolRefreshContext,
+                            toolService: toolService
+                        )
                         currentRequest = Self.makeFollowUpRequest(
                             from: currentRequest,
                             assistantText: accumulatedAssistantText,
                             toolUses: pendingToolUses,
-                            toolResults: executedToolResults
+                            toolResults: executedToolResults,
+                            tools: refreshedTools
                         )
                     }
 
@@ -601,7 +615,8 @@ private extension NativeAgentLoopService {
         from request: NativeLLMRequest,
         assistantText: String,
         toolUses: [PendingToolUse],
-        toolResults: [ExecutedToolResult]
+        toolResults: [ExecutedToolResult],
+        tools: [NativeLLMToolDefinition]
     ) -> NativeLLMRequest {
         var messages = request.messages
 
@@ -633,12 +648,57 @@ private extension NativeAgentLoopService {
             apiKey: request.apiKey,
             systemPrompt: request.systemPrompt,
             messages: messages,
-            tools: request.tools,
+            tools: tools,
             maxTokens: request.maxTokens,
             temperature: request.temperature,
             endpointURL: request.endpointURL,
             timeoutSeconds: request.timeoutSeconds,
             anthropicVersion: request.anthropicVersion
         )
+    }
+
+    private static func resolveFollowUpTools(
+        currentRequest: NativeLLMRequest,
+        toolRefreshContext: NativeAgentLoopToolRefreshContext?,
+        toolService: (any BuiltInToolServiceProtocol)?
+    ) -> [NativeLLMToolDefinition] {
+        guard let toolRefreshContext else {
+            return currentRequest.tools
+        }
+
+        guard toolRefreshContext.supportsToolCalling else {
+            return []
+        }
+
+        guard let toolService else {
+            return currentRequest.tools
+        }
+
+        let schemas = toolService.availableToolSchemas(
+            for: toolRefreshContext.permissions,
+            preferredToolGroups: toolRefreshContext.preferredToolGroups,
+            intentHint: toolRefreshContext.intentHint
+        )
+        return makeNativeToolDefinitions(from: schemas)
+    }
+
+    private static func makeNativeToolDefinitions(
+        from schemas: [[String: Any]]
+    ) -> [NativeLLMToolDefinition] {
+        schemas.compactMap { schema in
+            guard let function = schema["function"] as? [String: Any],
+                  let name = function["name"] as? String,
+                  let description = function["description"] as? String,
+                  let rawInputSchema = function["parameters"] as? [String: Any] else {
+                return nil
+            }
+
+            let inputSchema = rawInputSchema.compactMapValues { makeCodableValue($0) }
+            return NativeLLMToolDefinition(
+                name: name,
+                description: description,
+                inputSchema: inputSchema
+            )
+        }
     }
 }
