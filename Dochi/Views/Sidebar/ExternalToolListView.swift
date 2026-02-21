@@ -64,6 +64,26 @@ struct ExternalToolListView: View {
     )
     @State private var isHistoryIndexing = false
     @State private var isHistorySearching = false
+    @State private var kpiReport = SessionManagementKPIReport(
+        generatedAt: Date(timeIntervalSince1970: 0),
+        repositoryAssignmentSuccessRate: 0,
+        dedupCorrectionRate: 0,
+        activityClassificationAccuracy: nil,
+        sessionSelectionFailureRate: 0,
+        historySearchHitRate: 0,
+        counters: SessionManagementKPICounters()
+    )
+    @State private var orchestrationRepositoryRoot: String?
+    @State private var orchestrationCommandText = ""
+    @State private var orchestrationRequireConfirmation = false
+    @State private var orchestrationSelection: OrchestrationSessionSelection?
+    @State private var orchestrationGuardDecision: OrchestrationExecutionDecision?
+    @State private var orchestrationStatusContract: OrchestrationStatusContractPayload?
+    @State private var orchestrationSummarizeContract: OrchestrationSummarizeContractPayload?
+    @State private var orchestrationOutputLines: [String] = []
+    @State private var orchestrationBusy = false
+    @State private var orchestrationErrorMessage: String?
+    private let orchestrationSummaryService = OrchestrationSummaryService()
     private static let relativeDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -214,6 +234,7 @@ struct ExternalToolListView: View {
         .task {
             await refreshUnifiedSessions()
             refreshHistoryIndexStatus()
+            refreshKPIReport()
         }
     }
 
@@ -249,6 +270,7 @@ struct ExternalToolListView: View {
                 observabilitySectionHeader
                 repoDashboardSection
                 sessionExplorerSection
+                orchestrationLoopSection
                 unassignedQueueSection
                 sessionHistorySection
 
@@ -355,6 +377,26 @@ struct ExternalToolListView: View {
             }
             .padding(.bottom, 4)
         }
+
+        HStack(spacing: 8) {
+            kpiBadge(
+                title: "Repo Assignment",
+                value: percentString(kpiReport.repositoryAssignmentSuccessRate),
+                detail: "\(kpiReport.counters.repositoryAssignedCount)/\(max(1, kpiReport.counters.repositoryTotalCount))"
+            )
+            kpiBadge(
+                title: "Selection Failure",
+                value: percentString(kpiReport.sessionSelectionFailureRate),
+                detail: "\(kpiReport.counters.selectionFailureCount)/\(max(1, kpiReport.counters.selectionAttemptCount))"
+            )
+            kpiBadge(
+                title: "History Hit",
+                value: percentString(kpiReport.historySearchHitRate),
+                detail: "\(kpiReport.counters.historySearchHitCount)/\(max(1, kpiReport.counters.historySearchQueryCount))"
+            )
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -421,6 +463,121 @@ struct ExternalToolListView: View {
                 repositoryGroupRow(group)
             }
         }
+    }
+
+    @ViewBuilder
+    private var orchestrationLoopSection: some View {
+        sectionHeader("Orchestration Loop")
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Menu(orchestrationRepositoryRoot ?? "repo") {
+                    Button("전체") { orchestrationRepositoryRoot = nil }
+                    ForEach(repositoryFilterOptions, id: \.self) { root in
+                        Button(root) { orchestrationRepositoryRoot = root }
+                    }
+                }
+                TextField("실행 명령", text: $orchestrationCommandText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+            }
+
+            HStack(spacing: 6) {
+                Toggle("파괴적 명령 확인 완료", isOn: $orchestrationRequireConfirmation)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 10))
+                Spacer()
+                if orchestrationBusy {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                Button("선택") {
+                    Task { await orchestrationSelectFromUI() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(orchestrationBusy)
+
+                Button("실행") {
+                    Task { await orchestrationExecuteFromUI() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .disabled(orchestrationBusy)
+
+                Button("상태") {
+                    Task { await orchestrationStatusFromUI() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(orchestrationBusy)
+
+                Button("요약") {
+                    Task { await orchestrationSummarizeFromUI() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(orchestrationBusy)
+            }
+
+            if let selection = orchestrationSelection {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("action \(selection.action.rawValue)")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(selection.reason)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    if let selected = selection.selectedSession {
+                        Text("[\(selected.provider)] \(selected.nativeSessionId) · tier \(selected.controllabilityTier.rawValue) · state \(selected.activityState.rawValue)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            if let guardDecision = orchestrationGuardDecision {
+                Text("guard \(guardDecision.kind.rawValue) · \(guardDecision.policyCode.rawValue) · \(guardDecision.reason)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(guardDecision.kind == .denied ? .red : .secondary)
+                    .lineLimit(2)
+            }
+
+            if let status = orchestrationStatusContract {
+                Text("status \(status.resultKind): \(status.summary)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            if let summarized = orchestrationSummarizeContract {
+                Text("summary \(summarized.resultKind): \(summarized.summary)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if !summarized.highlights.isEmpty {
+                    Text(summarized.highlights.joined(separator: " | "))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
+            }
+
+            if !orchestrationOutputLines.isEmpty {
+                Text(orchestrationOutputLines.suffix(3).joined(separator: " ⏎ "))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+
+            if let orchestrationErrorMessage {
+                Text(orchestrationErrorMessage)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -879,7 +1036,11 @@ struct ExternalToolListView: View {
         if let repositoryRoot = explorerFilter.repositoryRoot {
             explorerFilter.repositoryRoot = normalizedRepositoryPath(repositoryRoot)
         }
+        if let repositoryRoot = orchestrationRepositoryRoot {
+            orchestrationRepositoryRoot = normalizedRepositoryPath(repositoryRoot)
+        }
         syncExpandedRepositoryGroups()
+        refreshKPIReport()
         isRefreshingUnified = false
     }
 
@@ -929,6 +1090,8 @@ struct ExternalToolListView: View {
         let selection = await manager.selectSessionForOrchestration(repositoryRoot: repositoryRoot)
         explorerFilter.repositoryRoot = repositoryRoot
         explorerFilter.activeOnly = true
+        orchestrationRepositoryRoot = repositoryRoot
+        orchestrationSelection = selection
         switch selection.action {
         case .reuseT0Active, .attachT1, .analyzeOnly:
             if let selected = selection.selectedSession {
@@ -942,6 +1105,149 @@ struct ExternalToolListView: View {
         case .none:
             mappingNotice = selection.reason
         }
+        refreshKPIReport()
+    }
+
+    @MainActor
+    private func orchestrationSelectFromUI() async {
+        guard !orchestrationBusy else { return }
+        orchestrationBusy = true
+        defer { orchestrationBusy = false }
+
+        let selection = await manager.selectSessionForOrchestration(repositoryRoot: orchestrationRepositoryRoot)
+        orchestrationSelection = selection
+        orchestrationStatusContract = nil
+        orchestrationSummarizeContract = nil
+        orchestrationOutputLines = []
+        orchestrationErrorMessage = nil
+        orchestrationGuardDecision = nil
+
+        if let selected = selection.selectedSession,
+           let command = nonEmptyOrchestrationCommand() {
+            orchestrationGuardDecision = manager.evaluateOrchestrationExecutionGuard(
+                tier: selected.controllabilityTier,
+                command: command
+            )
+        }
+
+        refreshKPIReport()
+    }
+
+    @MainActor
+    private func orchestrationExecuteFromUI() async {
+        guard !orchestrationBusy else { return }
+        guard let command = nonEmptyOrchestrationCommand() else {
+            orchestrationErrorMessage = "실행 명령을 입력해주세요."
+            return
+        }
+
+        orchestrationBusy = true
+        defer { orchestrationBusy = false }
+        orchestrationErrorMessage = nil
+
+        if orchestrationSelection == nil {
+            let selection = await manager.selectSessionForOrchestration(repositoryRoot: orchestrationRepositoryRoot)
+            orchestrationSelection = selection
+            refreshKPIReport()
+        }
+        guard let selection = orchestrationSelection else {
+            orchestrationErrorMessage = "세션 선택에 실패했습니다."
+            return
+        }
+
+        switch selection.action {
+        case .reuseT0Active, .attachT1:
+            guard let selected = selection.selectedSession else {
+                orchestrationErrorMessage = "선택된 세션을 찾지 못했습니다."
+                return
+            }
+            let decision = manager.evaluateOrchestrationExecutionGuard(
+                tier: selected.controllabilityTier,
+                command: command
+            )
+            orchestrationGuardDecision = decision
+            if decision.kind == .denied {
+                orchestrationErrorMessage = decision.reason
+                refreshKPIReport()
+                return
+            }
+            if decision.kind == .confirmationRequired, !orchestrationRequireConfirmation {
+                orchestrationErrorMessage = "\(decision.reason) (체크박스를 켜고 다시 실행하세요.)"
+                refreshKPIReport()
+                return
+            }
+
+            guard let runtimeSessionId = selected.runtimeSessionId,
+                  let sessionId = UUID(uuidString: runtimeSessionId) else {
+                orchestrationErrorMessage = "실행 가능한 runtime session이 없습니다."
+                return
+            }
+
+            do {
+                try await manager.sendCommand(sessionId: sessionId, command: command)
+                let output = await manager.captureOutput(sessionId: sessionId, lines: 120)
+                orchestrationOutputLines = output
+                orchestrationStatusContract = orchestrationSummaryService.makeStatusContract(outputLines: output)
+                refreshKPIReport()
+            } catch {
+                orchestrationErrorMessage = error.localizedDescription
+            }
+        case .createT0, .analyzeOnly, .none:
+            orchestrationErrorMessage = selection.reason
+            refreshKPIReport()
+        }
+    }
+
+    @MainActor
+    private func orchestrationStatusFromUI() async {
+        guard !orchestrationBusy else { return }
+        orchestrationBusy = true
+        defer { orchestrationBusy = false }
+        orchestrationErrorMessage = nil
+
+        guard let sessionId = await resolveOrchestrationRuntimeSessionId() else {
+            orchestrationErrorMessage = "상태 조회 대상 세션이 없습니다."
+            return
+        }
+
+        let output = await manager.captureOutput(sessionId: sessionId, lines: 120)
+        orchestrationOutputLines = output
+        orchestrationStatusContract = orchestrationSummaryService.makeStatusContract(outputLines: output)
+    }
+
+    @MainActor
+    private func orchestrationSummarizeFromUI() async {
+        guard !orchestrationBusy else { return }
+        orchestrationBusy = true
+        defer { orchestrationBusy = false }
+        orchestrationErrorMessage = nil
+
+        guard let sessionId = await resolveOrchestrationRuntimeSessionId() else {
+            orchestrationErrorMessage = "요약 대상 세션이 없습니다."
+            return
+        }
+
+        let output = await manager.captureOutput(sessionId: sessionId, lines: 160)
+        orchestrationOutputLines = output
+        orchestrationSummarizeContract = orchestrationSummaryService.makeSummarizeContract(outputLines: output)
+    }
+
+    @MainActor
+    private func resolveOrchestrationRuntimeSessionId() async -> UUID? {
+        if orchestrationSelection == nil {
+            let selection = await manager.selectSessionForOrchestration(repositoryRoot: orchestrationRepositoryRoot)
+            orchestrationSelection = selection
+            refreshKPIReport()
+        }
+        guard let runtimeSessionId = orchestrationSelection?.selectedSession?.runtimeSessionId else {
+            return nil
+        }
+        return UUID(uuidString: runtimeSessionId)
+    }
+
+    private func nonEmptyOrchestrationCommand() -> String? {
+        let trimmed = orchestrationCommandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     @MainActor
@@ -950,6 +1256,7 @@ struct ExternalToolListView: View {
         isHistoryIndexing = true
         let chunkCount = await manager.rebuildSessionHistoryIndex(limit: max(100, historyLimit * 20))
         refreshHistoryIndexStatus()
+        refreshKPIReport()
         isHistoryIndexing = false
         mappingNotice = "세션 히스토리 인덱스를 재구축했습니다. (chunks: \(chunkCount))"
     }
@@ -977,6 +1284,7 @@ struct ExternalToolListView: View {
         )
         historyResults = results
         refreshHistoryIndexStatus()
+        refreshKPIReport()
         isHistorySearching = false
     }
 
@@ -992,6 +1300,11 @@ struct ExternalToolListView: View {
     @MainActor
     private func refreshHistoryIndexStatus() {
         historyIndexStatus = manager.sessionHistoryIndexStatus()
+    }
+
+    @MainActor
+    private func refreshKPIReport() {
+        kpiReport = manager.sessionManagementKPIReport()
     }
 
     private func startableProfiles(for repositoryRoot: String) -> [ExternalToolProfile] {
@@ -1063,6 +1376,31 @@ struct ExternalToolListView: View {
         case .dead:
             return .gray
         }
+    }
+
+    @ViewBuilder
+    private func kpiBadge(title: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 11, weight: .semibold))
+            Text(detail)
+                .font(.system(size: 8))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+    }
+
+    private func percentString(_ value: Double) -> String {
+        "\(Int((value * 100).rounded()))%"
     }
 }
 

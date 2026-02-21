@@ -221,6 +221,109 @@ final class HeartbeatServiceTests: XCTestCase {
         XCTAssertTrue(service.lastTickResult?.gitContextSummary?.contains("[company] work") == true)
     }
 
+    func testTickRefreshesSessionHistoryIndexWhenStale() async throws {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatIntervalMinutes = 0
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+
+        let service = HeartbeatService(settings: settings)
+        let externalToolManager = MockExternalToolSessionManager()
+        externalToolManager.mockSessionHistoryIndexStatus = SessionHistoryIndexStatus(
+            chunkCount: 0,
+            lastIndexedAt: nil,
+            latestChunkEndAt: nil
+        )
+        service.setExternalToolManager(externalToolManager)
+
+        service.start()
+        defer { service.stop() }
+
+        let timeout = Date().addingTimeInterval(0.5)
+        while service.lastTickDate == nil && Date() < timeout {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertNotNil(service.lastTickDate)
+        XCTAssertGreaterThanOrEqual(externalToolManager.rebuildSessionHistoryIndexCallCount, 1)
+    }
+
+    func testTickDetectsOrchestrationOpportunityUsingObservabilityListing() async throws {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatIntervalMinutes = 0
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+
+        let service = HeartbeatService(settings: settings)
+        let externalToolManager = MockExternalToolSessionManager()
+        externalToolManager.mockGitRepositoryInsights = [
+            GitRepositoryInsight(
+                workDomain: "company",
+                workDomainConfidence: 0.9,
+                workDomainReason: "test",
+                path: "/tmp/repo-opportunity",
+                name: "repo-opportunity",
+                branch: "main",
+                originURL: nil,
+                remoteHost: nil,
+                remoteOwner: nil,
+                remoteRepository: nil,
+                lastCommitEpoch: nil,
+                lastCommitISO8601: nil,
+                lastCommitRelative: "-",
+                upstreamLastCommitEpoch: nil,
+                upstreamLastCommitISO8601: nil,
+                upstreamLastCommitRelative: "-",
+                daysSinceLastCommit: nil,
+                recentCommitCount30d: 0,
+                changedFileCount: 0,
+                untrackedFileCount: 0,
+                aheadCount: nil,
+                behindCount: nil,
+                score: 50
+            ),
+        ]
+        externalToolManager.mockUnifiedCodingSessions = [
+            UnifiedCodingSession(
+                source: "test",
+                runtimeType: .tmux,
+                controllabilityTier: .t0Full,
+                provider: "codex",
+                nativeSessionId: "sess-1",
+                runtimeSessionId: UUID().uuidString,
+                workingDirectory: "/tmp/repo-opportunity",
+                repositoryRoot: "/tmp/repo-opportunity",
+                path: "/tmp/repo-opportunity/.codex/sessions/a.jsonl",
+                updatedAt: Date(),
+                isActive: true,
+                activityScore: 92,
+                activityState: .active
+            ),
+        ]
+        service.setExternalToolManager(externalToolManager)
+
+        service.start()
+        defer { service.stop() }
+
+        let timeout = Date().addingTimeInterval(0.5)
+        while service.lastTickDate == nil && Date() < timeout {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertNotNil(service.lastTickDate)
+        XCTAssertGreaterThanOrEqual(externalToolManager.listUnifiedCodingSessionsForObservabilityCallCount, 1)
+        XCTAssertEqual(externalToolManager.selectSessionForOrchestrationCallCount, 0)
+        XCTAssertTrue(service.lastTickResult?.orchestrationOpportunitySummary?.contains("reuse_t0_active") == true)
+    }
+
     func testTickTriggersResourceAutoTaskPipelineWhenEnabled() async throws {
         let settings = AppSettings()
         settings.heartbeatEnabled = true
