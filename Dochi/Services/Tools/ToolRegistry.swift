@@ -164,7 +164,7 @@ enum ToolGroupResolver {
         case "save_memory", "update_memory": return "memory"
         case "set_current_user": return "profile"
         case "list_calendar_events", "create_calendar_event", "delete_calendar_event": return "calendar"
-        case "web_search": return "search"
+        case "web", "web_search": return "search"
         case "generate_image": return "image"
         case "print_image": return "image"
         case "open_url": return "url"
@@ -207,7 +207,7 @@ enum ToolGroupCatalog {
         "workspace": Meta(icon: "building.2", displayName: "워크스페이스"),
         "telegram": Meta(icon: "paperplane", displayName: "텔레그램"),
         "workflow": Meta(icon: "arrow.triangle.2.circlepath", displayName: "워크플로우"),
-        "coding": Meta(icon: "chevron.left.forwardslash.chevron.right", displayName: "코딩"),
+        "coding": Meta(icon: "chevron.left.forwardslash.chevron.right", displayName: "코딩 에이전트"),
         "finder": Meta(icon: "folder", displayName: "Finder"),
         "url": Meta(icon: "link", displayName: "URL 열기"),
         "mcp": Meta(icon: "server.rack", displayName: "MCP 서버"),
