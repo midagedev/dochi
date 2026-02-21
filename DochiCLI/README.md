@@ -198,3 +198,79 @@ open "$APP_BIN"
 - `interaction_busy`:
   - 앱이 다른 요청 처리 중인 상태
   - 잠시 후 재시도하거나 UI에서 현재 작업 완료 후 재검증
+
+## 11) 신규 도구 추가 검증 플레이북 (LLM 호출/E2E 스모크)
+
+이 절차는 "LLM이 새 도구를 올바르게 호출하는지"를 빠르게 확인하기 위한 표준 루틴입니다.
+실제 도구 동작 검증은 별도 테스트로 분리합니다.
+
+### 11-1. 검증 범위 분리
+
+- `dev chat stream --secret`:
+  - 목적: LLM의 `tool_call` 발생 여부 + control-plane 스트림 연결 검증
+  - 특징: 도구는 mock 실행, 대화/메모리 저장은 생략됨
+  - 용도: 라이브 E2E 스모크
+- `dev tool <name>` + XCTest:
+  - 목적: 실제 도구 구현 동작 검증
+  - 특징: 시스템에 실제 영향을 줄 수 있으므로 안전한 입력/임시 경로 필수
+
+### 11-2. 사전 점검
+
+```bash
+dochi --mode app doctor
+```
+
+- `app_running`, `control_plane_socket`, `control_plane_ping`이 모두 `OK`여야 합니다.
+
+### 11-3. 신규 도구 호출 스모크 (PC 영향 없음)
+
+```bash
+TOOL_NAME="datetime"
+PROMPT="반드시 ${TOOL_NAME} 도구를 1회 호출한 뒤 결과를 한 줄로 요약해."
+
+RESULT="$(dochi --mode app --json dev chat stream --secret --secret-allow-tool "$TOOL_NAME" "$PROMPT")"
+echo "$RESULT"
+```
+
+권장 판정(`jq`):
+
+```bash
+echo "$RESULT" | jq -e --arg t "$TOOL_NAME" '
+  .status == "ok"
+  and any(.data.events[]?; .type == "tool_call" and .tool_name == $t)
+  and any(.data.events[]?; .type == "tool_result")
+  and any(.data.events[]?; .type == "done")
+'
+```
+
+추가 확인 포인트:
+
+- `tool_result.text`에 `secret-mock tool`이 포함되면 mock 경로를 탄 것입니다.
+- 최종 메시지에 `chat.stream 완료`가 포함되어야 합니다.
+
+### 11-4. secret 모드 가드레일 점검
+
+```bash
+dochi --mode app --json dev chat stream --secret "테스트"
+```
+
+- 기대 결과: 실패
+- 실패 코드: `missing_secret_allowed_tools`
+
+### 11-5. 실제 도구 동작 검증 (별도)
+
+1. 단위 테스트 추가: 새 도구의 성공/실패/입력 검증 케이스
+2. 필요 시 `dochi --mode app dev tool <tool_name> <args_json>`로 수동 확인
+3. 파일/명령/시스템 변경 가능 도구는 반드시 임시 디렉토리/테스트 전용 데이터로만 검증
+4. 회귀 확인:
+
+```bash
+xcodebuild test -project Dochi.xcodeproj -scheme Dochi -destination 'platform=macOS' -only-testing:DochiTests/NativeAgentLoopServiceTests -only-testing:DochiTests/SessionStreamingTests
+```
+
+### 11-6. PR 체크리스트
+
+- [ ] `spec/tools.md`에 새 도구 스키마 반영
+- [ ] secret smoke에서 `tool_call` 이벤트 확인
+- [ ] 실제 도구 동작 단위 테스트 추가
+- [ ] 시스템 영향 가능 도구는 안전한 테스트 경로/데이터 사용 증빙 포함
