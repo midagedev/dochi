@@ -244,11 +244,15 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private var sessionHistoryChunks: [SessionHistoryChunk] = []
     private var sessionKPICounters = SessionManagementKPICounters()
 
-    init(settings: AppSettings) {
+    init(
+        settings: AppSettings,
+        appSupportDirectory: URL? = nil
+    ) {
         self.settings = settings
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Dochi")
+        let defaultAppSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Dochi", isDirectory: true)
+        let appSupport = (appSupportDirectory ?? defaultAppSupport).standardizedFileURL
         self.profilesDir = appSupport.appendingPathComponent("external-tools/profiles")
         self.repositoriesFile = appSupport.appendingPathComponent("external-tools/repositories.json")
         self.manualBindingsFile = appSupport.appendingPathComponent("external-tools/session-manual-bindings.json")
