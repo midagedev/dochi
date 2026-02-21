@@ -658,4 +658,201 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
 
         XCTAssertEqual(selected, [101, 202])
     }
+
+    func testDiscoverLocalCodingSessionsParsesClaudeIndexTitleMetadata() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-claude-index-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexRoot = tempRoot.appendingPathComponent("codex", isDirectory: true)
+        let claudeRoot = tempRoot.appendingPathComponent("claude", isDirectory: true)
+        let projectDir = claudeRoot.appendingPathComponent("-Users-hckim-repo-dochi", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+        let indexURL = projectDir.appendingPathComponent("sessions-index.json")
+        let entry: [String: Any] = [
+            "sessionId": "claude-session-123",
+            "projectPath": "/Users/hckim/repo/dochi",
+            "fullPath": "/Users/hckim/.claude/projects/-Users-hckim-repo-dochi/claude-session-123.jsonl",
+            "modified": "2026-02-21T01:02:03Z",
+            "summary": "Repo dashboard 정리 및 세션 인덱스 개선",
+            "firstPrompt": "세션 title과 summary를 인덱싱해줘",
+        ]
+        let payload: [String: Any] = ["entries": [entry]]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        try data.write(to: indexURL, options: .atomic)
+
+        let now = Date(timeIntervalSince1970: 1_771_636_000)
+        let discovered = ExternalToolSessionManager.discoverLocalCodingSessions(
+            codexSessionsRoot: codexRoot,
+            claudeProjectsRoot: claudeRoot,
+            limit: 20,
+            now: now
+        )
+
+        let claude = try XCTUnwrap(discovered.first(where: { $0.provider == "claude" && $0.sessionId == "claude-session-123" }))
+        XCTAssertEqual(claude.title, "Repo dashboard 정리 및 세션 인덱스 개선")
+        XCTAssertEqual(claude.summary, "Repo dashboard 정리 및 세션 인덱스 개선")
+        XCTAssertEqual(claude.titleSource, "claude_sessions_index")
+        XCTAssertNotNil(claude.titleConfidence)
+        if let confidence = claude.titleConfidence {
+            XCTAssertEqual(confidence, 0.9, accuracy: 0.0001)
+        }
+    }
+
+    func testEnrichRuntimeSessionMetadataMatchesByWorkingDirectory() {
+        let now = Date(timeIntervalSince1970: 1_771_636_000)
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "claude",
+            nativeSessionId: "pid-31415",
+            runtimeSessionId: "31415",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "process://31415",
+            updatedAt: now,
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .claudeProjectFile,
+            provider: "claude",
+            sessionId: "claude-session-xyz",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "/tmp/claude-session-xyz.jsonl",
+            updatedAt: now,
+            isActive: true,
+            title: "Dochi 브리지 세션 상태 정비",
+            summary: "bridge.status payload 개선",
+            titleSource: "claude_sessions_index",
+            titleConfidence: 0.9
+        )
+
+        let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered]
+        )
+
+        guard let item = enriched.first else {
+            return XCTFail("Expected enriched runtime session")
+        }
+        XCTAssertEqual(item.title, "Dochi 브리지 세션 상태 정비")
+        XCTAssertEqual(item.summary, "bridge.status payload 개선")
+        XCTAssertEqual(item.titleSource, "claude_sessions_index_cwd_match")
+        XCTAssertNotNil(item.titleConfidence)
+        if let confidence = item.titleConfidence {
+            XCTAssertEqual(confidence, 0.81, accuracy: 0.0001)
+        }
+    }
+
+    func testExtractLatestTerminalTitleParsesOscSequences() {
+        let esc = "\u{001B}"
+        let bel = "\u{0007}"
+        let lines = [
+            "prompt>",
+            "\(esc)]2;Repo: dochi #414\(bel)",
+            "running...",
+            "\(esc)]0;Fix title indexing\(esc)\\",
+        ]
+
+        let parsed = ExternalToolSessionManager.extractLatestTerminalTitle(fromLines: lines)
+        XCTAssertEqual(parsed, "Fix title indexing")
+    }
+
+    func testEnrichRuntimeSessionMetadataSkipsProviderOnlyMatch() {
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "claude",
+            nativeSessionId: "pid-99999",
+            runtimeSessionId: "99999",
+            workingDirectory: nil,
+            path: "process://99999",
+            updatedAt: Date(),
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .claudeProjectFile,
+            provider: "claude",
+            sessionId: "claude-unrelated",
+            workingDirectory: "/Users/hckim/repo/other",
+            path: "/tmp/claude-unrelated.jsonl",
+            updatedAt: Date(),
+            isActive: true,
+            title: "다른 세션 제목",
+            summary: "다른 세션 요약",
+            titleSource: "claude_sessions_index",
+            titleConfidence: 0.9
+        )
+
+        let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered]
+        )
+
+        guard let item = enriched.first else {
+            return XCTFail("Expected runtime session")
+        }
+        XCTAssertNil(item.title)
+        XCTAssertNil(item.summary)
+        XCTAssertNil(item.titleSource)
+        XCTAssertNil(item.titleConfidence)
+    }
+
+    func testEnrichRuntimeSessionMetadataKeepsSessionIdReasonPriority() {
+        let now = Date()
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "claude",
+            nativeSessionId: "claude-session-priority",
+            runtimeSessionId: "12345",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "process://12345",
+            updatedAt: now,
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .claudeProjectFile,
+            provider: "claude",
+            sessionId: "claude-session-priority",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "/tmp/claude-session-priority.jsonl",
+            updatedAt: now,
+            isActive: true,
+            title: "session id 우선",
+            summary: "same cwd but id should win",
+            titleSource: "claude_sessions_index",
+            titleConfidence: 0.9
+        )
+
+        let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered]
+        )
+
+        guard let item = enriched.first else {
+            return XCTFail("Expected runtime session")
+        }
+        XCTAssertEqual(item.title, "session id 우선")
+        XCTAssertEqual(item.titleSource, "claude_sessions_index_session_id_match")
+        XCTAssertNotNil(item.titleConfidence)
+        if let confidence = item.titleConfidence {
+            XCTAssertEqual(confidence, 0.9, accuracy: 0.0001)
+        }
+    }
 }

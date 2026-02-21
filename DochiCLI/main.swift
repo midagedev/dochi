@@ -955,6 +955,18 @@ enum DochiCLI {
                 }
                 var result = try client.call(method: "bridge.status", params: params)
                 if let sessions = result["sessions"] as? [[String: Any]] {
+                    let normalizeTitleForList: (String?) -> String? = { raw in
+                        guard let raw else { return nil }
+                        let normalized = raw
+                            .components(separatedBy: .whitespacesAndNewlines)
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " ")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !normalized.isEmpty else { return nil }
+                        let clipped = String(normalized.prefix(100))
+                        return clipped.replacingOccurrences(of: "\"", with: "'")
+                    }
+
                     var lines = sessions.map { session -> String in
                         let id = session["session_id"] as? String ?? "-"
                         let profile = session["profile_name"] as? String ?? "-"
@@ -979,7 +991,9 @@ enum DochiCLI {
                             let state = item["activity_state"] as? String ?? ((item["is_active"] as? Bool == true) ? "active" : "inactive")
                             let score = item["activity_score"] as? Int ?? 0
                             let repositoryRoot = item["repository_root"] as? String ?? "(unassigned)"
-                            lines.append("- [\(provider)] \(nativeSessionId) state=\(state) score=\(score) tier=\(tier) runtime=\(runtimeType) repo=\(repositoryRoot)")
+                            let title = normalizeTitleForList((item["title"] as? String) ?? (item["summary"] as? String))
+                            let titleSegment = title.map { " title=\"\($0)\"" } ?? ""
+                            lines.append("- [\(provider)] \(nativeSessionId)\(titleSegment) state=\(state) score=\(score) tier=\(tier) runtime=\(runtimeType) repo=\(repositoryRoot)")
                         }
                         if unified.count > 30 {
                             lines.append("... \(unified.count - 30)개 추가")
@@ -994,7 +1008,9 @@ enum DochiCLI {
                             let sessionId = item["session_id"] as? String ?? "-"
                             let active = (item["is_active"] as? Bool == true) ? "active" : "inactive"
                             let path = item["path"] as? String ?? "-"
-                            lines.append("- [\(provider)] \(sessionId) \(active) @ \(path)")
+                            let title = normalizeTitleForList((item["title"] as? String) ?? (item["summary"] as? String))
+                            let titleSegment = title.map { " \"\($0)\"" } ?? ""
+                            lines.append("- [\(provider)] \(sessionId)\(titleSegment) \(active) @ \(path)")
                         }
                         if discovered.count > 20 {
                             lines.append("... \(discovered.count - 20)개 추가")

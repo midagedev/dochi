@@ -1358,6 +1358,7 @@ struct DochiApp: App {
                     "status": session.status.rawValue,
                     "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
                     "last_activity": session.lastActivityText ?? NSNull(),
+                    "terminal_title": session.lastTerminalTitle ?? NSNull(),
                 ]
             }
             return UncheckedJSONArray(value: sessions)
@@ -1373,6 +1374,10 @@ struct DochiApp: App {
                 "path": session.path,
                 "updated_at": isoTimestamp(session.updatedAt),
                 "is_active": session.isActive,
+                "title": session.title ?? NSNull(),
+                "summary": session.summary ?? NSNull(),
+                "title_source": session.titleSource ?? NSNull(),
+                "title_confidence": session.titleConfidence ?? NSNull(),
             ]
         }
         let unifiedSessions = await externalToolManager.listUnifiedCodingSessions(limit: 120)
@@ -1399,6 +1404,10 @@ struct DochiApp: App {
                 "updated_at": isoTimestamp(session.updatedAt),
                 "is_active": session.isActive,
                 "is_unassigned": session.isUnassigned,
+                "title": session.title ?? NSNull(),
+                "summary": session.summary ?? NSNull(),
+                "title_source": session.titleSource ?? NSNull(),
+                "title_confidence": session.titleConfidence ?? NSNull(),
             ]
         }
         let unassignedCount = unifiedSessions.filter(\.isUnassigned).count
@@ -2083,6 +2092,7 @@ struct DochiApp: App {
             "status": session.status.rawValue,
             "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
             "last_activity": session.lastActivityText ?? NSNull(),
+            "terminal_title": session.lastTerminalTitle ?? NSNull(),
         ]
     }
 
@@ -2108,6 +2118,10 @@ struct DochiApp: App {
                 "activity_score": selected.activityScore,
                 "path": selected.path,
                 "updated_at": isoTimestamp(selected.updatedAt),
+                "title": selected.title ?? NSNull(),
+                "summary": selected.summary ?? NSNull(),
+                "title_source": selected.titleSource ?? NSNull(),
+                "title_confidence": selected.titleConfidence ?? NSNull(),
             ] as [String: Any]
         } else {
             payload["selected_session"] = NSNull()
@@ -2160,6 +2174,7 @@ struct DochiApp: App {
             "status": session.status.rawValue,
             "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
             "last_activity": session.lastActivityText ?? NSNull(),
+            "terminal_title": session.lastTerminalTitle ?? NSNull(),
         ]
     }
 
