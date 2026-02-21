@@ -269,6 +269,12 @@ struct SessionHistorySearchResult: Identifiable, Sendable, Equatable {
     let tags: [String]
 }
 
+struct SessionHistoryIndexStatus: Sendable, Equatable {
+    let chunkCount: Int
+    let lastIndexedAt: Date?
+    let latestChunkEndAt: Date?
+}
+
 enum OrchestrationSessionSelectionAction: String, Codable, Sendable {
     case reuseT0Active = "reuse_t0_active"
     case attachT1 = "attach_t1"

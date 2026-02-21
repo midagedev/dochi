@@ -76,6 +76,7 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
         observed: CodingSessionActivityState
     )
     func sessionManagementKPIReport() -> SessionManagementKPIReport
+    func sessionHistoryIndexStatus() -> SessionHistoryIndexStatus
     func rebuildSessionHistoryIndex(limit: Int) async -> Int
     func searchSessionHistory(query: SessionHistorySearchQuery) async -> [SessionHistorySearchResult]
 }
@@ -173,6 +174,14 @@ extension ExternalToolSessionManagerProtocol {
         )
     }
 
+    func sessionHistoryIndexStatus() -> SessionHistoryIndexStatus {
+        SessionHistoryIndexStatus(
+            chunkCount: 0,
+            lastIndexedAt: nil,
+            latestChunkEndAt: nil
+        )
+    }
+
     func rebuildSessionHistoryIndex(limit _: Int) async -> Int {
         0
     }
@@ -242,6 +251,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private var localDiscoveryCacheDate: Date?
     private var manualRepositoryBindings: [String: String] = [:]
     private var sessionHistoryChunks: [SessionHistoryChunk] = []
+    private var sessionHistoryIndexedAt: Date?
     private var sessionKPICounters = SessionManagementKPICounters()
 
     init(
@@ -403,6 +413,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private func loadSessionHistoryIndex() {
         guard let data = try? Data(contentsOf: sessionHistoryFile) else {
             sessionHistoryChunks = []
+            sessionHistoryIndexedAt = nil
             return
         }
 
@@ -410,9 +421,16 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         decoder.dateDecodingStrategy = .iso8601
         guard let decoded = try? decoder.decode([SessionHistoryChunk].self, from: data) else {
             sessionHistoryChunks = []
+            sessionHistoryIndexedAt = nil
             return
         }
         sessionHistoryChunks = decoded.sorted(by: { $0.endAt > $1.endAt })
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: sessionHistoryFile.path),
+           let modifiedAt = attributes[.modificationDate] as? Date {
+            sessionHistoryIndexedAt = modifiedAt
+        } else {
+            sessionHistoryIndexedAt = nil
+        }
     }
 
     private func persistSessionHistoryIndex() {
@@ -422,6 +440,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         do {
             let data = try encoder.encode(sessionHistoryChunks)
             try data.write(to: sessionHistoryFile, options: .atomic)
+            sessionHistoryIndexedAt = Date()
         } catch {
             Log.app.error("Failed to persist session history index: \(error.localizedDescription)")
         }
@@ -1000,6 +1019,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     func sessionManagementKPIReport() -> SessionManagementKPIReport {
         Self.buildSessionManagementKPIReport(from: sessionKPICounters, now: Date())
+    }
+
+    func sessionHistoryIndexStatus() -> SessionHistoryIndexStatus {
+        SessionHistoryIndexStatus(
+            chunkCount: sessionHistoryChunks.count,
+            lastIndexedAt: sessionHistoryIndexedAt,
+            latestChunkEndAt: sessionHistoryChunks.map(\.endAt).max()
+        )
     }
 
     func rebuildSessionHistoryIndex(limit: Int) async -> Int {
