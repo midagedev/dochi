@@ -1,0 +1,70 @@
+name: Provider Contract Full Matrix
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 17 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - "Dochi/Services/NativeLLM/**"
+      - "DochiTests/ProviderContractMatrixTests.swift"
+      - "DochiTests/Fixtures/ProviderContract/**"
+      - "scripts/provider_contract_matrix.sh"
+      - ".github/workflows/provider-contract-full.yml"
+
+concurrency:
+  group: provider-contract-full
+  cancel-in-progress: false
+
+jobs:
+  provider-contract-full:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Supabase Config Placeholder
+        run: |
+          if [[ ! -f Dochi/Resources/SupabaseConfig.plist ]]; then
+            mkdir -p Dochi/Resources
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0">' \
+              '<dict/>' \
+              '</plist>' > Dochi/Resources/SupabaseConfig.plist
+          fi
+
+      - name: Generate Xcode Project
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen generate
+
+      - name: Run Provider Contract Full Matrix
+        run: bash scripts/provider_contract_matrix.sh "$GITHUB_WORKSPACE/.artifacts/provider-contract-full"
+
+      - name: Upload Provider Contract Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-contract-full-${{ github.run_id }}
+          path: ${{ github.workspace }}/.artifacts/provider-contract-full
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Failure Alert Policy Summary
+        if: failure()
+        run: |
+          {
+            echo "## Provider Contract Full Matrix Failed"
+            echo "- Artifact: provider-contract-full-${{ github.run_id }}"
+            echo "- Alert policy: GitHub Actions failure notifications are sent to repository watchers and workflow subscribers."
+            echo "- Next action: download artifact and inspect JSON/MD report plus per-provider logs."
+          } >> "$GITHUB_STEP_SUMMARY"
