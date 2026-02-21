@@ -164,6 +164,8 @@ final class HeartbeatService: Observable {
         var detectedChanges: [HeartbeatChangeEvent] = []
 
         do {
+            try Task.checkCancellation()
+
             // 1. Calendar -- upcoming events
             if settings.heartbeatCheckCalendar {
                 checksPerformed.append("calendar")
@@ -247,6 +249,8 @@ final class HeartbeatService: Observable {
             }
 
             consecutiveErrors = 0
+        } catch is CancellationError {
+            return
         } catch {
             consecutiveErrors += 1
             errorMessage = error.localizedDescription
