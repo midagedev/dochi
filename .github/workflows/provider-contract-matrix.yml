@@ -36,6 +36,13 @@ jobs:
               '</plist>' > Dochi/Resources/SupabaseConfig.plist
           fi
 
+      - name: Generate Xcode Project
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen generate
+
       - name: Run Provider Contract Smoke
         run: |
           xcodebuild test \
