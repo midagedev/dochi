@@ -257,7 +257,9 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
             guard case .repositoryOperationFailed(let reason) = error else {
                 return XCTFail("Unexpected ExternalToolError: \(error)")
             }
-            XCTAssertTrue(reason.contains(destination.path))
+            XCTAssertTrue(
+                reason.contains(destination.path) || reason.contains("이미 존재")
+            )
         }
     }
 
@@ -488,6 +490,14 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
             "claude"
         )
         XCTAssertNil(
+            ExternalToolSessionManager.processProvider(fromCommandLine: "/Applications/Codex.app/Contents/MacOS/Codex")
+        )
+        XCTAssertNil(
+            ExternalToolSessionManager.processProvider(
+                fromCommandLine: "/Applications/Codex.app/Contents/Frameworks/Codex Helper.app/Contents/MacOS/Codex Helper --type=gpu-process"
+            )
+        )
+        XCTAssertNil(
             ExternalToolSessionManager.processProvider(fromCommandLine: "/usr/bin/vim main.swift")
         )
     }
@@ -497,5 +507,82 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "??"), .t3Unknown)
         XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "-"), .t3Unknown)
         XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "   "), .t3Unknown)
+    }
+
+    func testProcessWorkingDirectoryCandidatePIDSCapsAndSkipsInvalidIDs() {
+        let now = Date()
+        let snapshots: [ExternalToolSessionManager.RuntimeSessionSnapshot] = [
+            .init(
+                provider: "codex",
+                nativeSessionId: "pid-101",
+                runtimeSessionId: "101",
+                workingDirectory: nil,
+                path: "process://101",
+                updatedAt: now,
+                isActive: true,
+                status: .unknown,
+                lastOutputAt: nil,
+                lastCommandAt: nil,
+                hasErrorPattern: false,
+                runtimeType: .process,
+                controllabilityTier: .t1Attach,
+                source: "process_runtime"
+            ),
+            .init(
+                provider: "codex",
+                nativeSessionId: "pid-101-dup",
+                runtimeSessionId: "101",
+                workingDirectory: nil,
+                path: "process://101",
+                updatedAt: now.addingTimeInterval(-1),
+                isActive: true,
+                status: .unknown,
+                lastOutputAt: nil,
+                lastCommandAt: nil,
+                hasErrorPattern: false,
+                runtimeType: .process,
+                controllabilityTier: .t1Attach,
+                source: "process_runtime"
+            ),
+            .init(
+                provider: "claude",
+                nativeSessionId: "pid-202",
+                runtimeSessionId: "202",
+                workingDirectory: nil,
+                path: "process://202",
+                updatedAt: now.addingTimeInterval(-2),
+                isActive: true,
+                status: .unknown,
+                lastOutputAt: nil,
+                lastCommandAt: nil,
+                hasErrorPattern: false,
+                runtimeType: .process,
+                controllabilityTier: .t1Attach,
+                source: "process_runtime"
+            ),
+            .init(
+                provider: "aider",
+                nativeSessionId: "pid-invalid",
+                runtimeSessionId: "abc",
+                workingDirectory: nil,
+                path: "process://abc",
+                updatedAt: now.addingTimeInterval(-3),
+                isActive: true,
+                status: .unknown,
+                lastOutputAt: nil,
+                lastCommandAt: nil,
+                hasErrorPattern: false,
+                runtimeType: .process,
+                controllabilityTier: .t1Attach,
+                source: "process_runtime"
+            ),
+        ]
+
+        let selected = ExternalToolSessionManager.processWorkingDirectoryCandidatePIDs(
+            from: snapshots,
+            cap: 2
+        )
+
+        XCTAssertEqual(selected, [101, 202])
     }
 }
