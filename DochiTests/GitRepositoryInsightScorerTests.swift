@@ -399,6 +399,79 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertLessThan(dead.score, stale.score)
     }
 
+    func testMergeUnifiedCodingSessionsScoresAttachableProcessAsIdle() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "codex",
+            nativeSessionId: "pid-9001",
+            runtimeSessionId: "9001",
+            workingDirectory: "/tmp/repo-a",
+            path: "process://9001",
+            updatedAt: now.addingTimeInterval(-3 * 24 * 60 * 60),
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+
+        let merged = ExternalToolSessionManager.mergeUnifiedCodingSessions(
+            runtimeSessions: [runtime],
+            discoveredSessions: [],
+            managedRepositoryRoots: ["/tmp/repo-a"],
+            limit: 10,
+            now: now,
+            config: .standard
+        )
+
+        guard let session = merged.first else {
+            return XCTFail("Expected merged session")
+        }
+        XCTAssertEqual(session.activityState, .idle)
+        XCTAssertGreaterThanOrEqual(
+            session.activityScore,
+            CodingSessionActivityScoringConfig.standard.idleThreshold
+        )
+    }
+
+    func testMergeUnifiedCodingSessionsKeepsUnknownProcessAsStale() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "codex",
+            nativeSessionId: "pid-9002",
+            runtimeSessionId: "9002",
+            workingDirectory: nil,
+            path: "process://9002",
+            updatedAt: now.addingTimeInterval(-3 * 24 * 60 * 60),
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t3Unknown,
+            source: "process_runtime"
+        )
+
+        let merged = ExternalToolSessionManager.mergeUnifiedCodingSessions(
+            runtimeSessions: [runtime],
+            discoveredSessions: [],
+            managedRepositoryRoots: [],
+            limit: 10,
+            now: now,
+            config: .standard
+        )
+
+        guard let session = merged.first else {
+            return XCTFail("Expected merged session")
+        }
+        XCTAssertEqual(session.activityState, .stale)
+        XCTAssertEqual(session.activityScore, CodingSessionActivityScoringConfig.standard.runtimeAliveWeight)
+    }
+
     func testUnifiedSessionOrderingIsDeterministicWhenTimestampsTie() {
         let tiedTime = Date(timeIntervalSince1970: 1_700_000_000)
         let later = UnifiedCodingSession(
