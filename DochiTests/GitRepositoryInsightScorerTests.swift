@@ -562,12 +562,29 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
             ExternalToolSessionManager.processProvider(fromCommandLine: "/usr/local/bin/claude --continue"),
             "claude"
         )
+        XCTAssertEqual(
+            ExternalToolSessionManager.processProvider(
+                fromCommandLine: "node /Users/me/.nvm/versions/node/v20.10.0/lib/node_modules/@anthropic-ai/claude-code/dist/cli.js --resume"
+            ),
+            "claude"
+        )
+        XCTAssertEqual(
+            ExternalToolSessionManager.processProvider(
+                fromCommandLine: "bun '/tmp/work/node_modules/@anthropic-ai/claude-code/dist/cli.mjs' --print"
+            ),
+            "claude"
+        )
         XCTAssertNil(
             ExternalToolSessionManager.processProvider(fromCommandLine: "/Applications/Codex.app/Contents/MacOS/Codex")
         )
         XCTAssertNil(
             ExternalToolSessionManager.processProvider(
                 fromCommandLine: "/Applications/Codex.app/Contents/Frameworks/Codex Helper.app/Contents/MacOS/Codex Helper --type=gpu-process"
+            )
+        )
+        XCTAssertNil(
+            ExternalToolSessionManager.processProvider(
+                fromCommandLine: "/bin/zsh -c source /Users/me/.claude/shell-snapshots/snapshot.sh && tail -f /private/tmp/claude-501/task.output"
             )
         )
         XCTAssertNil(

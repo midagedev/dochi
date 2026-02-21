@@ -2626,7 +2626,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             return nil
         }
 
-        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map { raw in
+            raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        }
         guard !tokens.isEmpty else { return nil }
         let normalizedTokens = tokens.map { token in
             URL(fileURLWithPath: token).lastPathComponent.lowercased()
@@ -2646,6 +2648,13 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
            normalizedTokens.indices.contains(moduleIndex + 1),
            normalizedTokens[moduleIndex + 1] == "aider" {
             return "aider"
+        }
+
+        // Claude Code is often launched via node wrappers where the executable is `node`
+        // and only module path reveals the provider.
+        if lower.contains("@anthropic-ai/claude-code") ||
+            lower.contains("/claude-code/") {
+            return "claude"
         }
         return nil
     }
