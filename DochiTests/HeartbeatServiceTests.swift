@@ -3,6 +3,22 @@ import XCTest
 
 @MainActor
 final class HeartbeatServiceTests: XCTestCase {
+    private final class MockHeartbeatChangeJournal: HeartbeatChangeJournalProtocol {
+        private(set) var entries: [ChangeJournalEntry] = []
+        private(set) var appendCallCount = 0
+
+        func append(events: [HeartbeatChangeEvent]) {
+            appendCallCount += 1
+            entries.append(contentsOf: events.map { ChangeJournalEntry(event: $0) })
+        }
+
+        func recentEntries(limit: Int, source: HeartbeatChangeSource?) -> [ChangeJournalEntry] {
+            let filtered = source.map { source in
+                entries.filter { $0.event.source == source }
+            } ?? entries
+            return Array(filtered.suffix(max(0, limit)).reversed())
+        }
+    }
 
     private func makeViewModelForOpportunityTests() -> DochiViewModel {
         let contextService = MockContextService()
@@ -394,6 +410,40 @@ final class HeartbeatServiceTests: XCTestCase {
 
         XCTAssertTrue(hasSessionEvent)
         XCTAssertGreaterThan(externalToolManager.listUnifiedCodingSessionsCallCount, 0)
+    }
+
+    func testTickPersistsDetectedChangesIntoJournalService() async {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+
+        let service = HeartbeatService(settings: settings)
+        let externalToolManager = MockExternalToolSessionManager()
+        let journal = MockHeartbeatChangeJournal()
+        service.setChangeJournalService(journal)
+
+        externalToolManager.mockGitRepositoryInsights = [makeGitInsight(path: "/tmp/repo-a")]
+        externalToolManager.mockUnifiedCodingSessions = [
+            makeUnifiedSession(
+                nativeSessionId: "session-1",
+                path: "tmux://session-1",
+                repositoryRoot: "/tmp/repo-a",
+                activityState: .active
+            ),
+        ]
+        service.setExternalToolManager(externalToolManager)
+
+        await service.runTickForTesting() // baseline
+
+        externalToolManager.mockUnifiedCodingSessions = []
+        await service.runTickForTesting() // session end event
+
+        XCTAssertGreaterThan(journal.appendCallCount, 0)
+        XCTAssertTrue(journal.entries.contains { $0.event.eventType == .codingSessionEnded })
     }
 
     func testTickRefreshesSessionHistoryIndexWhenStale() async throws {

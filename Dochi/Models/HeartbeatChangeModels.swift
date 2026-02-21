@@ -62,3 +62,22 @@ struct HeartbeatChangeEvent: Identifiable, Codable, Equatable, Sendable {
         "\(source.rawValue)|\(eventType.rawValue)|\(targetId)"
     }
 }
+
+struct ChangeJournalEntry: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    let event: HeartbeatChangeEvent
+    let recordedAt: Date
+    let dedupeKey: String
+
+    init(
+        id: UUID = UUID(),
+        event: HeartbeatChangeEvent,
+        recordedAt: Date = Date(),
+        dedupeKey: String? = nil
+    ) {
+        self.id = id
+        self.event = event
+        self.recordedAt = recordedAt
+        self.dedupeKey = dedupeKey ?? event.dedupeKey
+    }
+}
