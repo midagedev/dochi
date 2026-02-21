@@ -84,6 +84,9 @@ struct ExternalToolListView: View {
     @State private var orchestrationBusy = false
     @State private var orchestrationErrorMessage: String?
     private let orchestrationSummaryService = OrchestrationSummaryService()
+    private static let orchestrationStatusCaptureLines = 120
+    private static let orchestrationSummarizeCaptureLines = 160
+    private static let orchestrationOutputPreviewLines = 3
     private static let relativeDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -563,7 +566,7 @@ struct ExternalToolListView: View {
             }
 
             if !orchestrationOutputLines.isEmpty {
-                Text(orchestrationOutputLines.suffix(3).joined(separator: " ⏎ "))
+                Text(orchestrationOutputLines.suffix(Self.orchestrationOutputPreviewLines).joined(separator: " ⏎ "))
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
@@ -1185,7 +1188,7 @@ struct ExternalToolListView: View {
 
             do {
                 try await manager.sendCommand(sessionId: sessionId, command: command)
-                let output = await manager.captureOutput(sessionId: sessionId, lines: 120)
+                let output = await manager.captureOutput(sessionId: sessionId, lines: Self.orchestrationStatusCaptureLines)
                 orchestrationOutputLines = output
                 orchestrationStatusContract = orchestrationSummaryService.makeStatusContract(outputLines: output)
                 refreshKPIReport()
@@ -1210,7 +1213,7 @@ struct ExternalToolListView: View {
             return
         }
 
-        let output = await manager.captureOutput(sessionId: sessionId, lines: 120)
+        let output = await manager.captureOutput(sessionId: sessionId, lines: Self.orchestrationStatusCaptureLines)
         orchestrationOutputLines = output
         orchestrationStatusContract = orchestrationSummaryService.makeStatusContract(outputLines: output)
     }
@@ -1227,7 +1230,7 @@ struct ExternalToolListView: View {
             return
         }
 
-        let output = await manager.captureOutput(sessionId: sessionId, lines: 160)
+        let output = await manager.captureOutput(sessionId: sessionId, lines: Self.orchestrationSummarizeCaptureLines)
         orchestrationOutputLines = output
         orchestrationSummarizeContract = orchestrationSummaryService.makeSummarizeContract(outputLines: output)
     }
