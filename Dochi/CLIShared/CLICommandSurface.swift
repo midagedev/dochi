@@ -45,7 +45,7 @@ enum CLIDevAction: Equatable, Sendable {
     case tool(name: String, argumentsJSON: String?)
     case logRecent(minutes: Int)
     case logTail(seconds: Int, category: String?, level: String?, contains: String?)
-    case chatStream(prompt: String)
+    case chatStream(prompt: String, secretMode: Bool, secretAllowedTools: [String])
     case bridgeOpen(agent: String, profileName: String?, workingDirectory: String?, forceWorkingDirectory: Bool)
     case bridgeRoots(limit: Int, searchPaths: [String])
     case bridgeStatus(sessionId: String?)
@@ -427,11 +427,62 @@ enum CLICommandParser {
             guard sub == "stream" else {
                 throw CLIParseError.invalidUsage("dev chat 하위 명령은 stream만 지원합니다.")
             }
-            let prompt = args.dropFirst(2).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let streamArgs = Array(args.dropFirst(2))
+            var secretMode = false
+            var secretAllowedTools: [String] = []
+            var promptParts: [String] = []
+            var index = 0
+
+            while index < streamArgs.count {
+                let token = streamArgs[index]
+                if promptParts.isEmpty {
+                    switch token {
+                    case "--secret":
+                        secretMode = true
+                        index += 1
+                        continue
+                    case "--secret-allow-tool", "--allow-tool":
+                        guard index + 1 < streamArgs.count else {
+                            throw CLIParseError.invalidUsage("dev chat stream --secret-allow-tool <tool_name> 형식이 필요합니다.")
+                        }
+                        secretAllowedTools.append(streamArgs[index + 1])
+                        index += 2
+                        continue
+                    case "--":
+                        promptParts.append(contentsOf: streamArgs.dropFirst(index + 1))
+                        index = streamArgs.count
+                        continue
+                    default:
+                        if token.hasPrefix("--") {
+                            throw CLIParseError.invalidUsage("dev chat stream의 알 수 없는 옵션입니다: \(token)")
+                        }
+                    }
+                }
+
+                promptParts.append(contentsOf: streamArgs.dropFirst(index))
+                break
+            }
+
+            let prompt = promptParts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !prompt.isEmpty else {
                 throw CLIParseError.invalidUsage("dev chat stream <prompt> 형식이 필요합니다.")
             }
-            return .dev(.chatStream(prompt: prompt))
+
+            let normalizedAllowedTools = secretAllowedTools
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .reduce(into: [String]()) { result, value in
+                    if !result.contains(value) {
+                        result.append(value)
+                    }
+                }
+
+            return .dev(.chatStream(
+                prompt: prompt,
+                secretMode: secretMode,
+                secretAllowedTools: normalizedAllowedTools
+            ))
 
         case "bridge":
             let sub = args.dropFirst().first ?? "status"

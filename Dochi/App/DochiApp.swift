@@ -996,6 +996,11 @@ struct DochiApp: App {
             return .failure(code: "empty_prompt", message: "prompt가 필요합니다.")
         }
 
+        let secretMode = params["secret_mode"] as? Bool ?? false
+        let secretAllowedTools = (params["secret_allowed_tools"] as? [String] ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
         let timeoutSeconds = max(5, min(300, params["timeout_seconds"] as? Int ?? 120))
         let correlationId = nonEmptyString(params["correlation_id"]) ?? UUID().uuidString
         let streamId = await streamRegistry.createChatSession(correlationId: correlationId)
@@ -1029,11 +1034,16 @@ struct DochiApp: App {
         }
 
         await streamRegistry.attachChatTask(streamId: streamId, task: task)
-        return .ok([
+        var payload: [String: Any] = [
             "stream_id": streamId,
             "correlation_id": correlationId,
             "status": "started",
-        ])
+            "secret_mode": secretMode,
+        ]
+        if !secretAllowedTools.isEmpty {
+            payload["secret_allowed_tools"] = secretAllowedTools
+        }
+        return .ok(payload)
     }
 
     nonisolated private static func handleChatStreamRead(

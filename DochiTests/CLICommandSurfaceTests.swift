@@ -283,7 +283,53 @@ final class CLICommandSurfaceTests: XCTestCase {
 
     func testParseDevChatStream() throws {
         let invocation = try CLICommandParser.parse(["dev", "chat", "stream", "실시간", "테스트"])
-        XCTAssertEqual(invocation.command, .dev(.chatStream(prompt: "실시간 테스트")))
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.chatStream(prompt: "실시간 테스트", secretMode: false, secretAllowedTools: []))
+        )
+    }
+
+    func testParseDevChatStreamSecretOptions() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "chat", "stream",
+            "--secret",
+            "--secret-allow-tool", "datetime",
+            "--secret-allow-tool", "calculator",
+            "툴 호출 테스트"
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.chatStream(
+                prompt: "툴 호출 테스트",
+                secretMode: true,
+                secretAllowedTools: ["datetime", "calculator"]
+            ))
+        )
+    }
+
+    func testParseDevChatStreamAllowToolAliasAndDeduplicate() throws {
+        let invocation = try CLICommandParser.parse([
+            "dev", "chat", "stream",
+            "--allow-tool", "datetime",
+            "--allow-tool", "datetime",
+            "테스트"
+        ])
+        XCTAssertEqual(
+            invocation.command,
+            .dev(.chatStream(
+                prompt: "테스트",
+                secretMode: false,
+                secretAllowedTools: ["datetime"]
+            ))
+        )
+    }
+
+    func testParseDevChatStreamUnknownOptionThrows() {
+        XCTAssertThrowsError(try CLICommandParser.parse([
+            "dev", "chat", "stream", "--dry-run", "테스트"
+        ])) { error in
+            XCTAssertTrue(error.localizedDescription.contains("알 수 없는 옵션"))
+        }
     }
 
     func testParseDevToolWithDottedBuiltInToolName() throws {
