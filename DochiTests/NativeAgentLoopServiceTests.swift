@@ -203,6 +203,83 @@ final class NativeAgentLoopServiceTests: XCTestCase {
         XCTAssertTrue(adapter.capturedRequests[1].messages.containsToolResult(toolCallId: "tool_1"))
     }
 
+    func testNativeAgentLoopServiceSecretMockExecutesWithoutRealToolInvocation() async throws {
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(toolCallId: "", content: "real-executed")
+
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.done(text: "done")]
+            }
+            return [
+                .toolUse(toolCallId: "tool_1", toolName: "calendar.create", toolInputJSON: "{\"title\":\"회의\"}"),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService
+        )
+
+        let events = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "native-secret-1",
+                    workspaceId: "workspace-secret-1",
+                    agentId: "도치",
+                    toolExecutionMode: .mock(allowedToolNames: ["calendar.create"])
+                )
+            )
+        )
+
+        XCTAssertEqual(events.map(\.kind), [.toolUse, .toolResult, .done])
+        XCTAssertEqual(toolService.executeCallCount, 0)
+        let toolResultText = events.first(where: { $0.kind == .toolResult })?.toolResultText ?? ""
+        XCTAssertTrue(toolResultText.contains("secret-mock tool"))
+    }
+
+    func testNativeAgentLoopServiceSecretMockFailsClosedForUnlistedTool() async {
+        let toolService = MockBuiltInToolService()
+
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.done(text: "done")]
+            }
+            return [
+                .toolUse(toolCallId: "tool_1", toolName: "calendar.create", toolInputJSON: "{\"title\":\"회의\"}"),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService
+        )
+
+        let result = await collectEventsAndError(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "native-secret-2",
+                    workspaceId: "workspace-secret-2",
+                    agentId: "도치",
+                    toolExecutionMode: .mock(allowedToolNames: ["datetime"])
+                )
+            )
+        )
+
+        XCTAssertEqual(result.events.map(\.kind), [.toolUse, .toolResult])
+        XCTAssertEqual(toolService.executeCallCount, 0)
+        guard let error = result.error as? NativeLLMError else {
+            return XCTFail("Expected NativeLLMError")
+        }
+        XCTAssertEqual(error.code, .toolExecutionFailed)
+        let toolResultText = result.events.first(where: { $0.kind == .toolResult })?.toolResultText ?? ""
+        XCTAssertTrue(toolResultText.contains("secret mock 모드 차단"))
+    }
+
     func testNativeAgentLoopServiceRefreshesToolsForFollowUpRequest() async throws {
         let toolService = MockBuiltInToolService()
         toolService.stubbedResult = ToolResult(toolCallId: "", content: "enabled")
@@ -516,6 +593,56 @@ final class NativeAgentLoopServiceTests: XCTestCase {
         XCTAssertEqual(candidate.workspaceId, "workspace-3")
         XCTAssertEqual(candidate.agentId, "도치")
         XCTAssertEqual(candidate.source, .toolResult)
+    }
+
+    func testNativeAgentLoopServiceSkipsMemoryMutationWhenDisabled() async throws {
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(
+            toolCallId: "",
+            content: "오늘 일정: 14시 제품 리뷰 미팅, 16시 디자인 동기화"
+        )
+        toolService.allToolInfos = [
+            ToolInfo(
+                name: "calendar.today",
+                description: "today",
+                category: .safe,
+                isBaseline: true,
+                isEnabled: true,
+                parameters: []
+            ),
+        ]
+
+        let memoryPipeline = MockMemoryPipelineService()
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.done(text: "done")]
+            }
+            return [
+                .toolUse(toolCallId: "tool_1", toolName: "calendar.today", toolInputJSON: "{}"),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService,
+            memoryPipeline: memoryPipeline
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: makeRequest(provider: .anthropic),
+                hookContext: NativeAgentLoopHookContext(
+                    sessionId: "native-session-4",
+                    workspaceId: "workspace-4",
+                    agentId: "도치",
+                    allowMemoryMutation: false
+                )
+            )
+        )
+        try await Task.sleep(for: .milliseconds(30))
+
+        XCTAssertEqual(memoryPipeline.submitCallCount, 0)
     }
 
     func testNativeAgentLoopServiceHandlesOutOfRangeUnsignedArguments() async throws {

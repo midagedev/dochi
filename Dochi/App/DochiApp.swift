@@ -1000,6 +1000,15 @@ struct DochiApp: App {
         let secretAllowedTools = (params["secret_allowed_tools"] as? [String] ?? [])
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        if secretMode && secretAllowedTools.isEmpty {
+            return .failure(
+                code: "missing_secret_allowed_tools",
+                message: "secret_mode에서는 secret_allowed_tools가 1개 이상 필요합니다."
+            )
+        }
+        let executionMode: DochiViewModel.ControlPlaneExecutionMode = secretMode
+            ? .secret(DochiViewModel.ControlPlaneSecretOptions(allowedToolNames: secretAllowedTools))
+            : .standard
 
         let timeoutSeconds = max(5, min(300, params["timeout_seconds"] as? Int ?? 120))
         let correlationId = nonEmptyString(params["correlation_id"]) ?? UUID().uuidString
@@ -1011,7 +1020,8 @@ struct DochiApp: App {
                 _ = try await uncheckedViewModel.value.runControlPlaneChatStream(
                     prompt: prompt,
                     correlationId: correlationId,
-                    timeoutSeconds: timeoutSeconds
+                    timeoutSeconds: timeoutSeconds,
+                    executionMode: executionMode
                 ) { event in
                     await streamRegistry.appendChatEvent(
                         streamId: streamId,
