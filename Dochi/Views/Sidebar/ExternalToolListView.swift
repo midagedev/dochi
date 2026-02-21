@@ -92,6 +92,7 @@ struct ExternalToolListView: View {
         formatter.unitsStyle = .abbreviated
         return formatter
     }()
+    @State private var unifiedAutoRefreshTask: Task<Void, Never>?
 
     private var runningSessions: [ExternalToolSession] {
         manager.sessions.filter { $0.status != .dead }
@@ -241,6 +242,16 @@ struct ExternalToolListView: View {
             await refreshUnifiedSessions()
             refreshHistoryIndexStatus()
             refreshKPIReport()
+        }
+        .onAppear {
+            startUnifiedAutoRefreshLoop()
+        }
+        .onDisappear {
+            unifiedAutoRefreshTask?.cancel()
+            unifiedAutoRefreshTask = nil
+        }
+        .onChange(of: explorerFilter.activeOnly) { _, _ in
+            Task { await refreshUnifiedSessions() }
         }
     }
 
@@ -1055,6 +1066,17 @@ struct ExternalToolListView: View {
         syncExpandedRepositoryGroups()
         refreshKPIReport()
         isRefreshingUnified = false
+    }
+
+    private func startUnifiedAutoRefreshLoop() {
+        guard unifiedAutoRefreshTask == nil else { return }
+        unifiedAutoRefreshTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 12_000_000_000)
+                if Task.isCancelled { break }
+                await refreshUnifiedSessions()
+            }
+        }
     }
 
     @MainActor
