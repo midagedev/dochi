@@ -189,6 +189,63 @@ final class SessionStreamingTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(adapter.capturedRequests.count, 2)
         XCTAssertFalse(adapter.capturedRequests[0].messages.containsToolResult(callId: "tool_1"))
         XCTAssertTrue(adapter.capturedRequests[1].messages.containsToolResult(callId: "tool_1"))
+        XCTAssertTrue(events.contains(where: { $0.kind == .toolCall && $0.toolName == "calendar.create" }))
+        XCTAssertTrue(events.contains(where: { $0.kind == .toolResult && $0.toolName == "calendar.create" }))
+        XCTAssertTrue(events.contains(where: { $0.kind == .done }))
+    }
+
+    @MainActor
+    func testControlPlaneSecretModeDeterministicFallbackWhenProviderFails() async throws {
+        let toolService = MockBuiltInToolService()
+        let adapter = StubStreamAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[]],
+            errorsPerRequest: [NativeLLMError(
+                code: .authentication,
+                message: "API 키가 설정되지 않았습니다.",
+                statusCode: nil,
+                retryAfterSeconds: nil
+            )]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService
+        )
+
+        let viewModel = makeViewModel(
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            toolService: toolService
+        )
+
+        actor EventCollector {
+            private var events: [DochiViewModel.ControlPlaneStreamEvent] = []
+
+            func append(_ event: DochiViewModel.ControlPlaneStreamEvent) {
+                events.append(event)
+            }
+
+            func all() -> [DochiViewModel.ControlPlaneStreamEvent] {
+                events
+            }
+        }
+        let collector = EventCollector()
+
+        let response = try await viewModel.runControlPlaneChatStream(
+            prompt: "반드시 datetime 도구를 호출해",
+            correlationId: "secret-fallback-cid",
+            timeoutSeconds: 5,
+            executionMode: .secret(.init(allowedToolNames: ["datetime"]))
+        ) { event in
+            await collector.append(event)
+        }
+        let events = await collector.all()
+
+        XCTAssertEqual(adapter.callCount, 1)
+        XCTAssertEqual(toolService.executeCallCount, 0)
+        XCTAssertTrue(response.assistantMessage.contains("secret-mock llm fallback"))
+        XCTAssertTrue(events.contains(where: { $0.kind == .toolCall && $0.toolName == "datetime" }))
+        XCTAssertTrue(events.contains(where: { $0.kind == .toolResult && ($0.text?.contains("secret-mock tool 'datetime'") ?? false) }))
         XCTAssertTrue(events.contains(where: { $0.kind == .done }))
     }
 

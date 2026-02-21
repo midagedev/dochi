@@ -1209,12 +1209,25 @@ final class DochiViewModel {
             visionWarningDismissed = previousVisionWarningDismissed
         }
 
-        return try await runControlPlaneChatStreamCore(
-            prompt: prompt,
-            correlationId: correlationId,
-            timeoutSeconds: timeoutSeconds,
-            onEvent: onEvent
-        )
+        do {
+            return try await runControlPlaneChatStreamCore(
+                prompt: prompt,
+                correlationId: correlationId,
+                timeoutSeconds: timeoutSeconds,
+                onEvent: onEvent
+            )
+        } catch let error as ControlPlaneChatSendError {
+            guard shouldFallbackToDeterministicSecretStream(for: error) else {
+                throw error
+            }
+            Log.runtime.notice("Secret stream deterministic fallback activated: \(error.errorDescription ?? error.localizedDescription)")
+            return try await runControlPlaneChatStreamSecretDeterministicMock(
+                prompt: prompt,
+                correlationId: correlationId,
+                secretOptions: secretOptions,
+                onEvent: onEvent
+            )
+        }
     }
 
     private func runControlPlaneChatStreamCore(
@@ -1284,10 +1297,21 @@ final class DochiViewModel {
                conversation.messages.count > observedMessageCount {
                 let newMessages = conversation.messages.dropFirst(observedMessageCount)
                 for message in newMessages where message.role == .tool {
+                    let inferredToolName = Self.inferToolNameFromToolResult(message.content)
+                    let resolvedToolName = lastToolName ?? inferredToolName
+                    if let resolvedToolName, resolvedToolName != lastToolName {
+                        await onEvent(ControlPlaneStreamEvent(
+                            kind: .toolCall,
+                            text: nil,
+                            toolName: resolvedToolName,
+                            timestamp: Self.controlPlaneTimestamp()
+                        ))
+                        lastToolName = resolvedToolName
+                    }
                     await onEvent(ControlPlaneStreamEvent(
                         kind: .toolResult,
                         text: message.content,
-                        toolName: lastToolName,
+                        toolName: resolvedToolName,
                         timestamp: Self.controlPlaneTimestamp()
                     ))
                 }
@@ -1295,6 +1319,31 @@ final class DochiViewModel {
             }
 
             try? await Task.sleep(for: .milliseconds(150))
+        }
+
+        if let conversation = currentConversation,
+           conversation.messages.count > observedMessageCount {
+            let newMessages = conversation.messages.dropFirst(observedMessageCount)
+            for message in newMessages where message.role == .tool {
+                let inferredToolName = Self.inferToolNameFromToolResult(message.content)
+                let resolvedToolName = lastToolName ?? inferredToolName
+                if let resolvedToolName, resolvedToolName != lastToolName {
+                    await onEvent(ControlPlaneStreamEvent(
+                        kind: .toolCall,
+                        text: nil,
+                        toolName: resolvedToolName,
+                        timestamp: Self.controlPlaneTimestamp()
+                    ))
+                    lastToolName = resolvedToolName
+                }
+                await onEvent(ControlPlaneStreamEvent(
+                    kind: .toolResult,
+                    text: message.content,
+                    toolName: resolvedToolName,
+                    timestamp: Self.controlPlaneTimestamp()
+                ))
+            }
+            observedMessageCount = conversation.messages.count
         }
 
         if let errorMessage, !errorMessage.isEmpty {
@@ -1347,6 +1396,103 @@ final class DochiViewModel {
     nonisolated private static func controlPlaneTimestamp(_ date: Date = Date()) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    nonisolated private static func inferToolNameFromToolResult(_ text: String) -> String? {
+        let marker = "secret-mock tool '"
+        guard let markerRange = text.range(of: marker) else {
+            return nil
+        }
+
+        let suffix = text[markerRange.upperBound...]
+        guard let endQuoteIndex = suffix.firstIndex(of: "'") else {
+            return nil
+        }
+
+        let candidate = suffix[..<endQuoteIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        return candidate.isEmpty ? nil : candidate
+    }
+
+    private func shouldFallbackToDeterministicSecretStream(for error: ControlPlaneChatSendError) -> Bool {
+        guard case let .requestFailed(reason) = error else {
+            return false
+        }
+
+        let normalized = reason.lowercased()
+        let indicators = [
+            "api 키가 설정되지 않았습니다",
+            "api key",
+            "model not found",
+            "model '",
+            "사용 가능한 네이티브 provider가 없습니다",
+            "provider가 없습니다",
+            "connection refused",
+            "네이티브 루프 오류",
+        ]
+        return indicators.contains { normalized.contains($0.lowercased()) }
+    }
+
+    private func runControlPlaneChatStreamSecretDeterministicMock(
+        prompt: String,
+        correlationId: String,
+        secretOptions: ControlPlaneSecretOptions,
+        onEvent: @Sendable @escaping (ControlPlaneStreamEvent) async -> Void
+    ) async throws -> ControlPlaneChatSendResponse {
+        guard let selectedTool = secretOptions.allowedToolNames.first else {
+            throw ControlPlaneChatSendError.requestFailed("secret 모드는 secret_allowed_tools가 1개 이상 필요합니다.")
+        }
+
+        let now = Date()
+        let toolArguments: [String: Any] = selectedTool == "datetime"
+            ? ["action": "now"]
+            : ["prompt": prompt]
+        let argumentsDescription: String
+        if JSONSerialization.isValidJSONObject(toolArguments),
+           let data = try? JSONSerialization.data(withJSONObject: toolArguments, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            argumentsDescription = text
+        } else {
+            argumentsDescription = String(describing: toolArguments)
+        }
+
+        await onEvent(ControlPlaneStreamEvent(
+            kind: .toolCall,
+            text: nil,
+            toolName: selectedTool,
+            timestamp: Self.controlPlaneTimestamp(now)
+        ))
+
+        await onEvent(ControlPlaneStreamEvent(
+            kind: .toolResult,
+            text: "secret-mock tool '\(selectedTool)' executed with arguments: \(argumentsDescription)",
+            toolName: selectedTool,
+            timestamp: Self.controlPlaneTimestamp(Date())
+        ))
+
+        let assistantText = selectedTool == "datetime"
+            ? "현재 시각은 \(Self.humanReadableDateTime(now))입니다. (secret-mock llm fallback)"
+            : "요청된 도구 '\(selectedTool)' 호출을 완료했습니다. (secret-mock llm fallback)"
+        await onEvent(ControlPlaneStreamEvent(
+            kind: .done,
+            text: assistantText,
+            toolName: nil,
+            timestamp: Self.controlPlaneTimestamp(Date())
+        ))
+
+        let conversationId = currentConversation?.id.uuidString ?? UUID().uuidString
+        return ControlPlaneChatSendResponse(
+            conversationId: conversationId,
+            assistantMessageId: UUID().uuidString,
+            assistantMessage: assistantText,
+            messageCount: currentConversation?.messages.count ?? 0
+        )
+    }
+
+    nonisolated private static func humanReadableDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "yyyy년 M월 d일 EEEE a h시 m분"
         return formatter.string(from: date)
     }
 

@@ -71,8 +71,69 @@ struct CLIPrinter {
 // MARK: - App Connection
 
 enum AppConnectionProbe {
+    private static let dochiBundleIdentifier = "com.hckim.dochi"
+
     static func isDochiAppRunning() -> Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: "com.hckim.dochi").isEmpty
+        !NSRunningApplication.runningApplications(withBundleIdentifier: dochiBundleIdentifier).isEmpty
+    }
+
+    static func isControlPlaneReachable(timeoutSeconds: Int = 1) -> Bool {
+        let client = CLIControlPlaneClient(timeoutSeconds: max(1, timeoutSeconds))
+        return (try? client.call(method: "app.ping")) != nil
+    }
+
+    @discardableResult
+    static func launchDochiApp() -> Bool {
+        if let siblingAppURL = siblingDochiAppURL(),
+           openApplication(arguments: [siblingAppURL.path]) {
+            return true
+        }
+
+        return openApplication(arguments: ["-b", dochiBundleIdentifier])
+    }
+
+    private static func openApplication(arguments: [String]) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = arguments
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    private static func siblingDochiAppURL() -> URL? {
+        guard let executablePath = CommandLine.arguments.first,
+              !executablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        let binaryURL = URL(fileURLWithPath: executablePath)
+        let appURL = binaryURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("Dochi.app")
+        guard FileManager.default.fileExists(atPath: appURL.path) else {
+            return nil
+        }
+        return appURL
+    }
+
+    static func waitForControlPlaneReady(timeoutSeconds: TimeInterval = 6, pollIntervalSeconds: TimeInterval = 0.2) -> Bool {
+        let clampedPollInterval = max(0.05, pollIntervalSeconds)
+        let deadline = Date().addingTimeInterval(max(1, timeoutSeconds))
+
+        while Date() <= deadline {
+            if isControlPlaneReachable(timeoutSeconds: 1) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: clampedPollInterval)
+        }
+
+        return false
     }
 }
 
@@ -1459,9 +1520,16 @@ enum DochiCLI {
         if runtimeMode == .standalone {
             return nil
         }
-        guard AppConnectionProbe.isDochiAppRunning() else {
+
+        if AppConnectionProbe.isControlPlaneReachable(timeoutSeconds: 1) {
+            return CLIControlPlaneClient()
+        }
+
+        _ = AppConnectionProbe.launchDochiApp()
+        guard AppConnectionProbe.waitForControlPlaneReady(timeoutSeconds: 6, pollIntervalSeconds: 0.2) else {
             return nil
         }
+
         return CLIControlPlaneClient()
     }
 
