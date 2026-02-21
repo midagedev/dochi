@@ -3,6 +3,14 @@ import os
 
 @MainActor
 final class BuiltInToolService: BuiltInToolServiceProtocol {
+    private static let intentScopedActivationThreshold = 1.8
+    private static let intentScopedRelativeThreshold = 0.30
+    private static let intentScopedMaxToolCount = 24
+    private static let intentScopedMinTokenLength = 2
+    private static let intentScopedRankingBoost = 240.0
+    private static let intentScopedAlwaysAllowedToolNames: Set<String> = ["tools.enable"]
+    private static let intentScopedDirectOnlyToolNames: Set<String> = ["tools.list"]
+
     private let registry = ToolRegistry()
     private let sessionContext: SessionContext
     private let settings: AppSettings
@@ -330,13 +338,21 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         }
 
         let rankingContext = currentToolRankingContext()
+        let intentScopeContext = buildIntentScopeContext(
+            tools: tools,
+            intentHint: intentHint
+        )
         let orderedTools = orderedToolsByPreference(
             tools,
             preferredToolGroups: preferredToolGroups,
             rankingContext: rankingContext,
-            intentHint: intentHint
+            intentScopeContext: intentScopeContext
         )
-        for tool in orderedTools {
+        let scopedTools = scopedToolsByIntent(
+            orderedTools,
+            intentScopeContext: intentScopeContext
+        )
+        for tool in scopedTools {
             // OpenAI requires tool names to match ^[a-zA-Z0-9_-]+$
             let sanitizedName = Self.sanitizeToolName(tool.name)
             schemas.append([
@@ -370,7 +386,7 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         _ tools: [any BuiltInToolProtocol],
         preferredToolGroups: [String],
         rankingContext: ToolRankingContext,
-        intentHint: String?
+        intentScopeContext: IntentScopeContext
     ) -> [any BuiltInToolProtocol] {
         var orderedGroups: [String] = []
         var seen: Set<String> = []
@@ -395,14 +411,14 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
                 group: lhsGroup,
                 priority: lhsPriority,
                 rankingContext: rankingContext,
-                intentHint: intentHint
+                intentScopeContext: intentScopeContext
             )
             let rhsScore = rankingScore(
                 for: rhs,
                 group: rhsGroup,
                 priority: rhsPriority,
                 rankingContext: rankingContext,
-                intentHint: intentHint
+                intentScopeContext: intentScopeContext
             )
 
             if lhsScore != rhsScore { return lhsScore > rhsScore }
@@ -411,12 +427,187 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
         }
     }
 
+    private func scopedToolsByIntent(
+        _ orderedTools: [any BuiltInToolProtocol],
+        intentScopeContext: IntentScopeContext
+    ) -> [any BuiltInToolProtocol] {
+        guard intentScopeContext.hasStrongSignal else {
+            return orderedTools
+        }
+
+        let relevanceByTool = intentScopeContext.relevanceByTool
+        let maxRelevance = intentScopeContext.maxRelevance
+        let minimumRelevance = max(
+            Self.intentScopedActivationThreshold * 0.5,
+            maxRelevance * Self.intentScopedRelativeThreshold
+        )
+        var filtered = orderedTools.filter { tool in
+            if Self.intentScopedAlwaysAllowedToolNames.contains(tool.name) {
+                return true
+            }
+            if Self.intentScopedDirectOnlyToolNames.contains(tool.name) {
+                let relevance = relevanceByTool[tool.name] ?? 0
+                let isDirectIntent = maxRelevance > 0 && relevance >= (maxRelevance * 0.95)
+                if !isDirectIntent {
+                    return false
+                }
+            }
+            return (relevanceByTool[tool.name] ?? 0) >= minimumRelevance
+        }
+
+        if filtered.isEmpty {
+            return orderedTools
+        }
+
+        if filtered.count > Self.intentScopedMaxToolCount {
+            filtered = Array(filtered.prefix(Self.intentScopedMaxToolCount))
+        }
+
+        if !filtered.contains(where: { $0.name == "tools.enable" }),
+           let enableTool = orderedTools.first(where: { $0.name == "tools.enable" }) {
+            filtered.insert(enableTool, at: 0)
+        }
+
+        return filtered
+    }
+
+    private struct IntentScopeContext {
+        let relevanceByTool: [String: Double]
+        let maxRelevance: Double
+        let hasStrongSignal: Bool
+
+        static let empty = IntentScopeContext(
+            relevanceByTool: [:],
+            maxRelevance: 0,
+            hasStrongSignal: false
+        )
+    }
+
+    private func buildIntentScopeContext(
+        tools: [any BuiltInToolProtocol],
+        intentHint: String?
+    ) -> IntentScopeContext {
+        guard let intentHint else { return .empty }
+        let trimmed = intentHint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .empty }
+
+        let relevanceByTool = semanticRelevanceByTool(
+            tools: tools,
+            intentHint: trimmed
+        )
+        guard let maxRelevance = relevanceByTool.values.max(),
+              maxRelevance > 0 else {
+            return .empty
+        }
+
+        return IntentScopeContext(
+            relevanceByTool: relevanceByTool,
+            maxRelevance: maxRelevance,
+            hasStrongSignal: maxRelevance >= Self.intentScopedActivationThreshold
+        )
+    }
+
+    private func semanticRelevanceByTool(
+        tools: [any BuiltInToolProtocol],
+        intentHint: String
+    ) -> [String: Double] {
+        let intentTokens = intentTokensForMatching(from: intentHint)
+        guard !intentTokens.isEmpty else { return [:] }
+
+        var toolTokensByName: [String: Set<String>] = [:]
+        var documentFrequency: [String: Int] = [:]
+        for tool in tools {
+            var toolTokens = normalizedIntentTokens(from: tool.name)
+            toolTokens.formUnion(normalizedIntentTokens(from: tool.description))
+            toolTokens.formUnion(normalizedIntentTokens(from: ToolGroupResolver.group(forToolName: tool.name)))
+            toolTokensByName[tool.name] = toolTokens
+
+            for token in toolTokens {
+                documentFrequency[token, default: 0] += 1
+            }
+        }
+
+        let totalTools = Double(max(tools.count, 1))
+        var relevanceByTool: [String: Double] = [:]
+        for tool in tools {
+            guard let toolTokens = toolTokensByName[tool.name], !toolTokens.isEmpty else {
+                continue
+            }
+
+            var score = 0.0
+            for token in intentTokens {
+                if toolTokens.contains(token) {
+                    score += inverseDocumentFrequency(
+                        token: token,
+                        documentFrequency: documentFrequency,
+                        totalDocuments: totalTools
+                    )
+                }
+            }
+
+            if score > 0 {
+                relevanceByTool[tool.name] = score
+            }
+        }
+
+        return relevanceByTool
+    }
+
+    private func intentTokensForMatching(from text: String) -> Set<String> {
+        let baseTokens = normalizedIntentTokens(from: text)
+        guard !baseTokens.isEmpty else { return [] }
+
+        var expanded = baseTokens
+        for token in baseTokens where token.count >= 4 {
+            let characters = Array(token)
+            let maxNGramLength = min(4, characters.count)
+            for length in 2...maxNGramLength {
+                guard characters.count >= length else { continue }
+                for start in 0...(characters.count - length) {
+                    let ngram = String(characters[start..<(start + length)])
+                    if ngram.count >= Self.intentScopedMinTokenLength {
+                        expanded.insert(ngram)
+                    }
+                }
+            }
+        }
+
+        return expanded
+    }
+
+    private func normalizedIntentTokens(from text: String) -> Set<String> {
+        let normalized = text
+            .lowercased()
+            .replacingOccurrences(of: "-_-", with: " ")
+            .replacingOccurrences(of: ".", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "/", with: " ")
+        let rawTokens = normalized.components(separatedBy: CharacterSet.alphanumerics.inverted)
+        var tokens: Set<String> = []
+        tokens.reserveCapacity(rawTokens.count)
+        for raw in rawTokens {
+            let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard token.count >= Self.intentScopedMinTokenLength else { continue }
+            tokens.insert(token)
+        }
+        return tokens
+    }
+
+    private func inverseDocumentFrequency(
+        token: String,
+        documentFrequency: [String: Int],
+        totalDocuments: Double
+    ) -> Double {
+        let docFreq = Double(documentFrequency[token] ?? 0)
+        return log((totalDocuments + 1.0) / (docFreq + 1.0)) + 1.0
+    }
+
     private func rankingScore(
         for tool: any BuiltInToolProtocol,
         group: String,
         priority: Int,
         rankingContext: ToolRankingContext,
-        intentHint: String?
+        intentScopeContext: IntentScopeContext
     ) -> Double {
         var score = 0.0
 
@@ -435,42 +626,23 @@ final class BuiltInToolService: BuiltInToolServiceProtocol {
 
         score += (rankingContext.categoryScores[group] ?? 0.0) * 24.0
         score += (rankingContext.toolScores[tool.name] ?? 0.0) * 32.0
-        score += intentBoost(toolName: tool.name, group: group, hint: intentHint)
+        score += intentSemanticBoost(toolName: tool.name, intentScopeContext: intentScopeContext)
 
         return score
     }
 
-    private func intentBoost(toolName: String, group: String, hint: String?) -> Double {
-        guard let hint else { return 0 }
-        let normalized = hint.lowercased()
-        let codingAgentKeywords = [
-            "코딩 에이전트",
-            "에이전트 목록",
-            "에이전트 상태",
-            "코딩 세션",
-            "세션 목록",
-            "coding agent",
-            "agent list",
-            "agent status",
-            "coding session",
-            "session list",
-            "sessions"
-        ]
-        guard codingAgentKeywords.contains(where: { normalized.contains($0) }) else {
+    private func intentSemanticBoost(
+        toolName: String,
+        intentScopeContext: IntentScopeContext
+    ) -> Double {
+        guard intentScopeContext.hasStrongSignal,
+              intentScopeContext.maxRelevance > 0 else {
             return 0
         }
-
-        switch toolName {
-        case "agent.list", "coding.sessions":
-            return 240.0
-        case "agent.check_status", "agent.delegation_status", "coding.session_pause", "coding.session_end":
-            return 180.0
-        default:
-            if group == "agent" || group == "coding" {
-                return 100.0
-            }
-            return 0.0
-        }
+        let relevance = intentScopeContext.relevanceByTool[toolName] ?? 0
+        guard relevance > 0 else { return 0 }
+        let normalizedRelevance = min(1.0, relevance / intentScopeContext.maxRelevance)
+        return normalizedRelevance * Self.intentScopedRankingBoost
     }
 
     private func currentToolRankingContext() -> ToolRankingContext {
