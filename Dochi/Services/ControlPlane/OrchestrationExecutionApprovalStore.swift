@@ -4,6 +4,7 @@ enum OrchestrationExecutionApprovalFailureCode: String, Sendable {
     case approvalNotFound = "approval_not_found"
     case approvalExpired = "approval_expired"
     case approvalCodeMismatch = "approval_code_mismatch"
+    case approvalLocked = "approval_locked"
     case approvalNotApproved = "approval_not_approved"
     case approvalAlreadyConsumed = "approval_already_consumed"
     case approvalContextMismatch = "approval_context_mismatch"
@@ -13,6 +14,7 @@ struct OrchestrationExecutionApprovalSnapshot: Sendable {
     enum Status: String, Sendable {
         case pending
         case approved
+        case locked
         case expired
         case consumed
     }
@@ -26,6 +28,9 @@ struct OrchestrationExecutionApprovalSnapshot: Sendable {
     let expiresAt: Date
     let approvedAt: Date?
     let consumedAt: Date?
+    let failedAttemptCount: Int
+    let maxAttemptCount: Int
+    let lockedUntil: Date?
 }
 
 struct OrchestrationExecutionApprovalChallenge: Sendable {
@@ -69,6 +74,7 @@ actor OrchestrationExecutionApprovalStore {
         enum Status: Sendable {
             case pending
             case approved
+            case locked
             case expired
             case consumed
         }
@@ -82,21 +88,29 @@ actor OrchestrationExecutionApprovalStore {
         let expiresAt: Date
         var approvedAt: Date?
         var consumedAt: Date?
+        var failedAttemptCount: Int
+        var lockedUntil: Date?
     }
 
     private let defaultTTLSeconds: Int
     private let minTTLSeconds: Int
     private let maxTTLSeconds: Int
+    private let maxApproveAttempts: Int
+    private let lockoutSeconds: Int
     private var entries: [String: Entry] = [:]
 
     init(
         defaultTTLSeconds: Int = 120,
         minTTLSeconds: Int = 30,
-        maxTTLSeconds: Int = 900
+        maxTTLSeconds: Int = 900,
+        maxApproveAttempts: Int = 5,
+        lockoutSeconds: Int = 120
     ) {
         self.defaultTTLSeconds = max(1, defaultTTLSeconds)
         self.minTTLSeconds = max(1, minTTLSeconds)
         self.maxTTLSeconds = max(self.minTTLSeconds, maxTTLSeconds)
+        self.maxApproveAttempts = max(1, maxApproveAttempts)
+        self.lockoutSeconds = max(1, lockoutSeconds)
     }
 
     func create(
@@ -123,7 +137,9 @@ actor OrchestrationExecutionApprovalStore {
             createdAt: now,
             expiresAt: now.addingTimeInterval(TimeInterval(effectiveTTL)),
             approvedAt: nil,
-            consumedAt: nil
+            consumedAt: nil,
+            failedAttemptCount: 0,
+            lockedUntil: nil
         )
         entries[approvalId] = entry
 
@@ -189,12 +205,28 @@ actor OrchestrationExecutionApprovalStore {
             )
         }
 
-        if entry.expiresAt <= now, entry.status == .pending || entry.status == .approved {
+        if entry.expiresAt <= now, entry.status == .pending || entry.status == .approved || entry.status == .locked {
             entry.status = .expired
+            entry.lockedUntil = nil
+            entries[approvalId] = entry
+        }
+
+        if entry.status == .locked,
+           let lockedUntil = entry.lockedUntil,
+           lockedUntil <= now {
+            entry.status = .pending
+            entry.failedAttemptCount = 0
+            entry.lockedUntil = nil
             entries[approvalId] = entry
         }
 
         switch entry.status {
+        case .locked:
+            return .denied(
+                code: .approvalLocked,
+                message: lockoutMessage(from: entry, now: now),
+                snapshot: snapshot(from: entry)
+            )
         case .expired:
             return .denied(
                 code: .approvalExpired,
@@ -216,14 +248,31 @@ actor OrchestrationExecutionApprovalStore {
         if let challengeCode {
             let normalizedCode = challengeCode.trimmingCharacters(in: .whitespacesAndNewlines)
             guard normalizedCode == entry.challengeCode else {
+                entry.failedAttemptCount += 1
+                if entry.failedAttemptCount >= maxApproveAttempts {
+                    entry.status = .locked
+                    entry.lockedUntil = min(
+                        entry.expiresAt,
+                        now.addingTimeInterval(TimeInterval(lockoutSeconds))
+                    )
+                    entries[approvalId] = entry
+                    return .denied(
+                        code: .approvalLocked,
+                        message: lockoutMessage(from: entry, now: now),
+                        snapshot: snapshot(from: entry)
+                    )
+                }
+                entries[approvalId] = entry
                 return .denied(
                     code: .approvalCodeMismatch,
-                    message: "승인 코드가 일치하지 않습니다.",
+                    message: "승인 코드가 일치하지 않습니다. 남은 시도 횟수: \(maxApproveAttempts - entry.failedAttemptCount)",
                     snapshot: snapshot(from: entry)
                 )
             }
             entry.status = .approved
             entry.approvedAt = now
+            entry.failedAttemptCount = 0
+            entry.lockedUntil = nil
             entries[approvalId] = entry
             return .allowed(
                 message: "승인되었습니다.",
@@ -272,8 +321,10 @@ actor OrchestrationExecutionApprovalStore {
         var updated = entries
         for key in updated.keys {
             guard var entry = updated[key] else { continue }
-            if (entry.status == .pending || entry.status == .approved), entry.expiresAt <= now {
+            if (entry.status == .pending || entry.status == .approved || entry.status == .locked),
+               entry.expiresAt <= now {
                 entry.status = .expired
+                entry.lockedUntil = nil
                 updated[key] = entry
             }
         }
@@ -285,7 +336,7 @@ actor OrchestrationExecutionApprovalStore {
         entries = entries.filter { _, entry in
             let terminalAt: Date
             switch entry.status {
-            case .pending, .approved:
+            case .pending, .approved, .locked:
                 return true
             case .expired:
                 terminalAt = entry.expiresAt
@@ -308,6 +359,8 @@ actor OrchestrationExecutionApprovalStore {
             status = .pending
         case .approved:
             status = .approved
+        case .locked:
+            status = .locked
         case .expired:
             status = .expired
         case .consumed:
@@ -323,7 +376,10 @@ actor OrchestrationExecutionApprovalStore {
             createdAt: entry.createdAt,
             expiresAt: entry.expiresAt,
             approvedAt: entry.approvedAt,
-            consumedAt: entry.consumedAt
+            consumedAt: entry.consumedAt,
+            failedAttemptCount: entry.failedAttemptCount,
+            maxAttemptCount: maxApproveAttempts,
+            lockedUntil: entry.lockedUntil
         )
     }
 
@@ -339,5 +395,18 @@ actor OrchestrationExecutionApprovalStore {
 
     private static func makeChallengeCode() -> String {
         String(format: "%06d", Int.random(in: 0...999_999))
+    }
+
+    private func lockoutMessage(from entry: Entry, now _: Date) -> String {
+        if let lockedUntil = entry.lockedUntil {
+            return "승인 코드 입력 시도 횟수를 초과했습니다. \(isoTimestamp(lockedUntil)) 이후 다시 시도하세요."
+        }
+        return "승인 코드 입력 시도 횟수를 초과했습니다. 잠시 후 다시 시도하세요."
+    }
+
+    private func isoTimestamp(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 }

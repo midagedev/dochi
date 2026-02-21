@@ -117,4 +117,62 @@ final class OrchestrationExecutionApprovalStoreTests: XCTestCase {
         XCTAssertFalse(mismatchedRepo.isAllowed)
         XCTAssertEqual(mismatchedRepo.failureCode, .approvalContextMismatch)
     }
+
+    func testApproveLocksAfterRepeatedMismatchesAndUnlocksAfterCooldown() async throws {
+        let store = OrchestrationExecutionApprovalStore(
+            defaultTTLSeconds: 120,
+            minTTLSeconds: 1,
+            maxTTLSeconds: 300,
+            maxApproveAttempts: 3,
+            lockoutSeconds: 10
+        )
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        let challenge = await store.create(
+            command: "git status",
+            repositoryRoot: "/tmp/repo",
+            ttlSeconds: 120,
+            now: now
+        )
+
+        let wrong1 = await store.approve(
+            approvalId: challenge.snapshot.approvalId,
+            challengeCode: "111111",
+            now: now.addingTimeInterval(1)
+        )
+        XCTAssertFalse(wrong1.isAllowed)
+        XCTAssertEqual(wrong1.failureCode, .approvalCodeMismatch)
+
+        let wrong2 = await store.approve(
+            approvalId: challenge.snapshot.approvalId,
+            challengeCode: "222222",
+            now: now.addingTimeInterval(2)
+        )
+        XCTAssertFalse(wrong2.isAllowed)
+        XCTAssertEqual(wrong2.failureCode, .approvalCodeMismatch)
+
+        let locked = await store.approve(
+            approvalId: challenge.snapshot.approvalId,
+            challengeCode: "333333",
+            now: now.addingTimeInterval(3)
+        )
+        XCTAssertFalse(locked.isAllowed)
+        XCTAssertEqual(locked.failureCode, .approvalLocked)
+
+        let stillLocked = await store.approve(
+            approvalId: challenge.snapshot.approvalId,
+            challengeCode: challenge.snapshot.challengeCode,
+            now: now.addingTimeInterval(8)
+        )
+        XCTAssertFalse(stillLocked.isAllowed)
+        XCTAssertEqual(stillLocked.failureCode, .approvalLocked)
+
+        let approvedAfterCooldown = await store.approve(
+            approvalId: challenge.snapshot.approvalId,
+            challengeCode: challenge.snapshot.challengeCode,
+            now: now.addingTimeInterval(14)
+        )
+        XCTAssertTrue(approvedAfterCooldown.isAllowed)
+        XCTAssertEqual(approvedAfterCooldown.snapshot?.status, .approved)
+    }
 }
