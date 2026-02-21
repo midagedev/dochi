@@ -29,6 +29,41 @@ struct DiscoveredCodingSession: Sendable, Equatable {
     let summary: String?
     let titleSource: String?
     let titleConfidence: Double?
+    let originator: String?
+    let sessionSource: String?
+    let clientKind: String?
+
+    init(
+        source: DiscoveredCodingSessionSource,
+        provider: String,
+        sessionId: String,
+        workingDirectory: String?,
+        path: String,
+        updatedAt: Date,
+        isActive: Bool,
+        title: String? = nil,
+        summary: String? = nil,
+        titleSource: String? = nil,
+        titleConfidence: Double? = nil,
+        originator: String? = nil,
+        sessionSource: String? = nil,
+        clientKind: String? = nil
+    ) {
+        self.source = source
+        self.provider = provider
+        self.sessionId = sessionId
+        self.workingDirectory = workingDirectory
+        self.path = path
+        self.updatedAt = updatedAt
+        self.isActive = isActive
+        self.title = title
+        self.summary = summary
+        self.titleSource = titleSource
+        self.titleConfidence = titleConfidence
+        self.originator = originator
+        self.sessionSource = sessionSource
+        self.clientKind = clientKind
+    }
 }
 
 enum ManagedGitRepositorySource: String, Codable, Sendable {
@@ -149,6 +184,9 @@ struct UnifiedCodingSession: Sendable, Equatable {
     let summary: String?
     let titleSource: String?
     let titleConfidence: Double?
+    let originator: String?
+    let sessionSource: String?
+    let clientKind: String?
     let activityScore: Int
     let activityState: CodingSessionActivityState
     let activitySignals: CodingSessionActivitySignals
@@ -171,6 +209,9 @@ struct UnifiedCodingSession: Sendable, Equatable {
         summary: String? = nil,
         titleSource: String? = nil,
         titleConfidence: Double? = nil,
+        originator: String? = nil,
+        sessionSource: String? = nil,
+        clientKind: String? = nil,
         activityScore: Int = 0,
         activityState: CodingSessionActivityState = .stale,
         activitySignals: CodingSessionActivitySignals = CodingSessionActivitySignals(
@@ -196,6 +237,9 @@ struct UnifiedCodingSession: Sendable, Equatable {
         self.summary = summary
         self.titleSource = titleSource
         self.titleConfidence = titleConfidence
+        self.originator = originator
+        self.sessionSource = sessionSource
+        self.clientKind = clientKind
         self.activityScore = activityScore
         self.activityState = activityState
         self.activitySignals = activitySignals

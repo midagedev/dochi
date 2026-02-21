@@ -1378,6 +1378,9 @@ struct DochiApp: App {
                 "summary": session.summary ?? NSNull(),
                 "title_source": session.titleSource ?? NSNull(),
                 "title_confidence": session.titleConfidence ?? NSNull(),
+                "originator": session.originator ?? NSNull(),
+                "session_source": session.sessionSource ?? NSNull(),
+                "client_kind": session.clientKind ?? NSNull(),
             ]
         }
         let unifiedSessions = await externalToolManager.listUnifiedCodingSessions(limit: 120)
@@ -1408,6 +1411,9 @@ struct DochiApp: App {
                 "summary": session.summary ?? NSNull(),
                 "title_source": session.titleSource ?? NSNull(),
                 "title_confidence": session.titleConfidence ?? NSNull(),
+                "originator": session.originator ?? NSNull(),
+                "session_source": session.sessionSource ?? NSNull(),
+                "client_kind": session.clientKind ?? NSNull(),
             ]
         }
         let unassignedCount = unifiedSessions.filter(\.isUnassigned).count
@@ -2134,6 +2140,9 @@ struct DochiApp: App {
                 "summary": selected.summary ?? NSNull(),
                 "title_source": selected.titleSource ?? NSNull(),
                 "title_confidence": selected.titleConfidence ?? NSNull(),
+                "originator": selected.originator ?? NSNull(),
+                "session_source": selected.sessionSource ?? NSNull(),
+                "client_kind": selected.clientKind ?? NSNull(),
             ] as [String: Any]
         } else {
             payload["selected_session"] = NSNull()
