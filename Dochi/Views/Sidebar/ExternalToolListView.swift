@@ -786,7 +786,10 @@ struct ExternalToolListView: View {
     private func startableProfiles(for repositoryRoot: String) -> [ExternalToolProfile] {
         unlaunchedProfiles
             .filter { profile in
-                normalizedRepositoryPath(profile.workingDirectory) == repositoryRoot
+                SessionExplorerViewStateBuilder.repositoryContainsWorkingDirectory(
+                    repositoryRoot: repositoryRoot,
+                    workingDirectory: profile.workingDirectory
+                )
             }
             .sorted { lhs, rhs in
                 lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending

@@ -191,6 +191,24 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(filtered.first?.nativeSessionId, "normalized")
     }
 
+    func testRepositoryContainsWorkingDirectoryMatchesNestedPath() {
+        let matches = SessionExplorerViewStateBuilder.repositoryContainsWorkingDirectory(
+            repositoryRoot: "/tmp/repo-a",
+            workingDirectory: "/tmp/repo-a/subdir"
+        )
+
+        XCTAssertTrue(matches)
+    }
+
+    func testRepositoryContainsWorkingDirectoryRejectsDifferentRepo() {
+        let matches = SessionExplorerViewStateBuilder.repositoryContainsWorkingDirectory(
+            repositoryRoot: "/tmp/repo-a",
+            workingDirectory: "/tmp/repo-b/subdir"
+        )
+
+        XCTAssertFalse(matches)
+    }
+
     func testApplyManualRepositoryBindingsOverridesUnassignedSession() {
         let session = makeSession(
             provider: "claude",

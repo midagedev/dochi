@@ -42,6 +42,19 @@ enum SessionExplorerViewStateBuilder {
         return URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
+    static func repositoryContainsWorkingDirectory(
+        repositoryRoot: String,
+        workingDirectory: String
+    ) -> Bool {
+        let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
+        let normalizedWorkingDirectory = normalizedRepositoryPath(workingDirectory)
+        guard let normalizedRoot, let normalizedWorkingDirectory else { return false }
+        if normalizedWorkingDirectory == normalizedRoot {
+            return true
+        }
+        return normalizedWorkingDirectory.hasPrefix(normalizedRoot + "/")
+    }
+
     private static func sortSessions(
         _ sessions: [UnifiedCodingSession],
         sort: SessionExplorerSortOption
