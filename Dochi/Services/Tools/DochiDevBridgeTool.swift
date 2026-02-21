@@ -234,8 +234,13 @@ final class DochiBridgeStatusTool: BuiltInToolProtocol {
             let unassignedCount = unified.filter(\.isUnassigned).count
             lines.append("통합 세션 \(unified.count)개 (unassigned: \(unassignedCount))")
             for item in unified {
-                let title = item.title ?? item.summary
-                let titleSegment = title.map { " title=\"\($0.replacingOccurrences(of: "\"", with: "'"))\"" } ?? ""
+                let normalizedTitle = (item.title ?? item.summary)?
+                    .components(separatedBy: .whitespacesAndNewlines)
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let clippedTitle = normalizedTitle.map { String($0.prefix(100)).replacingOccurrences(of: "\"", with: "'") }
+                let titleSegment = clippedTitle.map { " title=\"\($0)\"" } ?? ""
                 lines.append("- [\(item.provider)] \(item.nativeSessionId)\(titleSegment) state=\(item.activityState.rawValue) score=\(item.activityScore) tier=\(item.controllabilityTier.rawValue) runtime=\(item.runtimeType.rawValue) repo=\(item.repositoryRoot ?? "(unassigned)")")
             }
         }

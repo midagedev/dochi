@@ -807,4 +807,52 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertNil(item.titleSource)
         XCTAssertNil(item.titleConfidence)
     }
+
+    func testEnrichRuntimeSessionMetadataKeepsSessionIdReasonPriority() {
+        let now = Date()
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "claude",
+            nativeSessionId: "claude-session-priority",
+            runtimeSessionId: "12345",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "process://12345",
+            updatedAt: now,
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .claudeProjectFile,
+            provider: "claude",
+            sessionId: "claude-session-priority",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "/tmp/claude-session-priority.jsonl",
+            updatedAt: now,
+            isActive: true,
+            title: "session id 우선",
+            summary: "same cwd but id should win",
+            titleSource: "claude_sessions_index",
+            titleConfidence: 0.9
+        )
+
+        let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered]
+        )
+
+        guard let item = enriched.first else {
+            return XCTFail("Expected runtime session")
+        }
+        XCTAssertEqual(item.title, "session id 우선")
+        XCTAssertEqual(item.titleSource, "claude_sessions_index_session_id_match")
+        XCTAssertNotNil(item.titleConfidence)
+        if let confidence = item.titleConfidence {
+            XCTAssertEqual(confidence, 0.9, accuracy: 0.0001)
+        }
+    }
 }

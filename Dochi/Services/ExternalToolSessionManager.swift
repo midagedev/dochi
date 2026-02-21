@@ -3424,23 +3424,29 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             var score = 0
             var reason = "provider_match"
             var confidenceScale = 0.6
+            var matchedBySessionId = false
 
             if runtimeNativeSessionId == candidate.sessionId {
                 score += 20
                 reason = "session_id_match"
                 confidenceScale = 1.0
+                matchedBySessionId = true
             }
 
             let candidateWorkingDirectory = normalizedDirectoryPath(candidate.workingDirectory)
             if let runtimeWorkingDirectory, let candidateWorkingDirectory {
                 if runtimeWorkingDirectory == candidateWorkingDirectory {
                     score += 16
-                    reason = "cwd_match"
+                    if !matchedBySessionId {
+                        reason = "cwd_match"
+                    }
                     confidenceScale = max(confidenceScale, 0.9)
                 } else if runtimeWorkingDirectory.hasPrefix(candidateWorkingDirectory + "/") ||
                     candidateWorkingDirectory.hasPrefix(runtimeWorkingDirectory + "/") {
                     score += 10
-                    reason = "cwd_nested_match"
+                    if !matchedBySessionId {
+                        reason = "cwd_nested_match"
+                    }
                     confidenceScale = max(confidenceScale, 0.78)
                 }
             }
