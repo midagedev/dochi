@@ -25,6 +25,10 @@ struct DiscoveredCodingSession: Sendable, Equatable {
     let path: String
     let updatedAt: Date
     let isActive: Bool
+    let title: String?
+    let summary: String?
+    let titleSource: String?
+    let titleConfidence: Double?
 }
 
 enum ManagedGitRepositorySource: String, Codable, Sendable {
@@ -141,6 +145,10 @@ struct UnifiedCodingSession: Sendable, Equatable {
     let path: String
     let updatedAt: Date
     let isActive: Bool
+    let title: String?
+    let summary: String?
+    let titleSource: String?
+    let titleConfidence: Double?
     let activityScore: Int
     let activityState: CodingSessionActivityState
     let activitySignals: CodingSessionActivitySignals
@@ -159,6 +167,10 @@ struct UnifiedCodingSession: Sendable, Equatable {
         path: String,
         updatedAt: Date,
         isActive: Bool,
+        title: String? = nil,
+        summary: String? = nil,
+        titleSource: String? = nil,
+        titleConfidence: Double? = nil,
         activityScore: Int = 0,
         activityState: CodingSessionActivityState = .stale,
         activitySignals: CodingSessionActivitySignals = CodingSessionActivitySignals(
@@ -180,6 +192,10 @@ struct UnifiedCodingSession: Sendable, Equatable {
         self.path = path
         self.updatedAt = updatedAt
         self.isActive = isActive
+        self.title = title
+        self.summary = summary
+        self.titleSource = titleSource
+        self.titleConfidence = titleConfidence
         self.activityScore = activityScore
         self.activityState = activityState
         self.activitySignals = activitySignals
@@ -502,6 +518,7 @@ final class ExternalToolSession: Identifiable, @unchecked Sendable {
     var startedAt: Date?
     var lastActivityText: String?
     var lastCommandDate: Date?
+    var lastTerminalTitle: String?
 
     init(
         id: UUID = UUID(),
