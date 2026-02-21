@@ -257,7 +257,7 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
             guard case .repositoryOperationFailed(let reason) = error else {
                 return XCTFail("Unexpected ExternalToolError: \(error)")
             }
-            XCTAssertTrue(reason.contains("이미 존재"))
+            XCTAssertTrue(reason.contains(destination.path))
         }
     }
 
