@@ -2,6 +2,7 @@
 
 내장 도구 스키마 정의. MCP 스타일 입력 스키마. 권한 카테고리는 [security.md](./security.md) 참조.
 신규 도구 추가 시 호출 스모크/가드레일 검증 절차는 [DochiCLI/README.md](../DochiCLI/README.md#11-신규-도구-추가-검증-플레이북-llm-호출e2e-스모크) 참조.
+실패 진단은 [DochiCLI/README.md](../DochiCLI/README.md#8-자주-발생하는-문제)의 secret smoke/gpt-4o-mini 항목 참조.
 
 ---
 

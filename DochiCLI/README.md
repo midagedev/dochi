@@ -67,7 +67,7 @@ dochi dev tool conversation.search '{"query":"회의","limit":5}'
 dochi dev log recent --minutes 15
 dochi dev log tail --seconds 30 --category App --level info
 dochi dev chat stream "최근 대화 3개를 요약해줘"
-dochi dev chat stream --secret --secret-allow-tool datetime "현재 시각만 알려줘"
+dochi dev chat stream --secret --secret-allow-tool datetime -- "현재 시각만 알려줘"
 dochi dev bridge open codex --cwd ~/repo/dochi
 dochi dev bridge open codex --profile "Dochi Bridge Codex" --cwd ~/work/app --force-working-directory
 dochi dev bridge roots --limit 10
@@ -153,6 +153,42 @@ dochi config set model claude-sonnet-4-5-20250929
 dochi --mode standalone --allow-standalone ask "테스트"
 ```
 
+### secret smoke에서 "옵션이 프롬프트로 들어간 것처럼" 보임
+
+- 옵션과 프롬프트를 반드시 분리해서 전달해야 합니다.
+- 권장 형식:
+
+```bash
+dochi --mode app --json dev chat stream \
+  --secret \
+  --secret-allow-tool datetime \
+  -- "반드시 datetime 도구를 1회 호출하고 현재 시각만 한 줄로 답해."
+```
+
+- 래퍼 스크립트/CI에서 argv 배열이 아닌 단일 문자열로 전달하면 옵션이 프롬프트로 섞일 수 있습니다.
+
+### "gpt4mini로 설정했는데 안 돈다"
+
+1. 모델 ID는 `gpt4mini`가 아니라 `gpt-4o-mini`입니다.
+2. provider/model을 함께 맞춥니다.
+
+```bash
+defaults write com.hckim.dochi llmProvider -string openai
+defaults write com.hckim.dochi llmModel -string gpt-4o-mini
+defaults write com.hckim.dochi offlineFallbackEnabled -bool false
+```
+
+3. 현재 값을 확인합니다.
+
+```bash
+defaults read com.hckim.dochi llmProvider
+defaults read com.hckim.dochi llmModel
+defaults read com.hckim.dochi offlineFallbackEnabled
+```
+
+4. secret smoke 결과가 `secret-mock llm fallback`이면 provider/API 키 이슈를 fallback으로 우회한 상태입니다.
+   이 경우 LLM 경로 자체 검증을 위해 OpenAI API 키를 먼저 점검하세요.
+
 ## 9) 종료 코드
 
 - `0`: 성공
@@ -228,7 +264,7 @@ dochi --mode app doctor
 TOOL_NAME="datetime"
 PROMPT="반드시 ${TOOL_NAME} 도구를 1회 호출한 뒤 결과를 한 줄로 요약해."
 
-RESULT="$(dochi --mode app --json dev chat stream --secret --secret-allow-tool "$TOOL_NAME" "$PROMPT")"
+RESULT="$(dochi --mode app --json dev chat stream --secret --secret-allow-tool "$TOOL_NAME" -- "$PROMPT")"
 echo "$RESULT"
 ```
 
@@ -246,6 +282,7 @@ echo "$RESULT" | jq -e --arg t "$TOOL_NAME" '
 추가 확인 포인트:
 
 - `tool_result.text`에 `secret-mock tool`이 포함되면 mock 경로를 탄 것입니다.
+- `done.text`에 `secret-mock llm fallback`이 포함되면 LLM/provider 실패를 deterministic fallback으로 우회한 것입니다.
 - 최종 메시지에 `chat.stream 완료`가 포함되어야 합니다.
 
 ### 11-4. secret 모드 가드레일 점검
