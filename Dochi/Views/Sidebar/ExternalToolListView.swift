@@ -1,5 +1,40 @@
 import SwiftUI
 
+private enum SessionHistoryTimeFilter: String, CaseIterable, Identifiable {
+    case day1 = "1d"
+    case day7 = "7d"
+    case day30 = "30d"
+    case all = "all"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .day1:
+            return "최근 1일"
+        case .day7:
+            return "최근 7일"
+        case .day30:
+            return "최근 30일"
+        case .all:
+            return "전체"
+        }
+    }
+
+    func sinceDate(now: Date = Date()) -> Date? {
+        switch self {
+        case .day1:
+            return now.addingTimeInterval(-24 * 60 * 60)
+        case .day7:
+            return now.addingTimeInterval(-7 * 24 * 60 * 60)
+        case .day30:
+            return now.addingTimeInterval(-30 * 24 * 60 * 60)
+        case .all:
+            return nil
+        }
+    }
+}
+
 struct ExternalToolListView: View {
     let manager: ExternalToolSessionManagerProtocol
     @Binding var selectedSessionId: UUID?
@@ -16,6 +51,19 @@ struct ExternalToolListView: View {
     @State private var mappingNotice: String?
     @State private var expandedRepositoryGroups: Set<String> = []
     @State private var didInitializeRepositoryExpansion = false
+    @State private var historyQueryText = ""
+    @State private var historyRepositoryFilter: String?
+    @State private var historyBranchFilter = ""
+    @State private var historyTimeFilter: SessionHistoryTimeFilter = .day30
+    @State private var historyLimit = 20
+    @State private var historyResults: [SessionHistorySearchResult] = []
+    @State private var historyIndexStatus = SessionHistoryIndexStatus(
+        chunkCount: 0,
+        lastIndexedAt: nil,
+        latestChunkEndAt: nil
+    )
+    @State private var isHistoryIndexing = false
+    @State private var isHistorySearching = false
     private static let relativeDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -165,6 +213,7 @@ struct ExternalToolListView: View {
         )
         .task {
             await refreshUnifiedSessions()
+            refreshHistoryIndexStatus()
         }
     }
 
@@ -201,6 +250,7 @@ struct ExternalToolListView: View {
                 repoDashboardSection
                 sessionExplorerSection
                 unassignedQueueSection
+                sessionHistorySection
 
                 Divider()
                     .padding(.top, 10)
@@ -417,6 +467,117 @@ struct ExternalToolListView: View {
                 .padding(.vertical, 6)
             }
         }
+    }
+
+    @ViewBuilder
+    private var sessionHistorySection: some View {
+        sectionHeader("Session History")
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                TextField("히스토리 검색어", text: $historyQueryText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+                Button("검색") {
+                    Task { await searchSessionHistoryFromUI() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .disabled(isHistorySearching)
+            }
+
+            HStack(spacing: 6) {
+                Menu("repo") {
+                    Button("전체") { historyRepositoryFilter = nil }
+                    ForEach(repositoryFilterOptions, id: \.self) { root in
+                        Button(root) { historyRepositoryFilter = root }
+                    }
+                }
+                TextField("branch(선택)", text: $historyBranchFilter)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 10))
+                Menu("기간") {
+                    ForEach(SessionHistoryTimeFilter.allCases) { filter in
+                        Button(filter.label) { historyTimeFilter = filter }
+                    }
+                }
+                Menu("limit") {
+                    Button("20") { historyLimit = 20 }
+                    Button("50") { historyLimit = 50 }
+                    Button("100") { historyLimit = 100 }
+                }
+            }
+            .font(.system(size: 10))
+
+            HStack(spacing: 8) {
+                Text("chunks \(historyIndexStatus.chunkCount)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text("indexed \(relativeTimestamp(historyIndexStatus.lastIndexedAt))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                if let latestChunkEndAt = historyIndexStatus.latestChunkEndAt {
+                    Text("latest \(relativeTimestamp(latestChunkEndAt))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isHistoryIndexing {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                Button("재인덱싱") {
+                    Task { await rebuildSessionHistoryFromUI() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(isHistoryIndexing)
+            }
+
+            if historyResults.isEmpty {
+                Text("검색 결과가 없습니다. 검색어를 입력해 히스토리를 조회하세요.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(historyResults.prefix(30)) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("[\(item.provider)] \(item.sessionId)")
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                            if let branch = item.branch {
+                                Text(branch)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Text(String(format: "%.2f", item.score))
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(item.maskedSnippet)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        HStack(spacing: 6) {
+                            Text(relativeTimestamp(item.endAt))
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                            Button("세션 보기") {
+                                jumpToHistoryResult(item)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 9, weight: .semibold))
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -781,6 +942,56 @@ struct ExternalToolListView: View {
         case .none:
             mappingNotice = selection.reason
         }
+    }
+
+    @MainActor
+    private func rebuildSessionHistoryFromUI() async {
+        guard !isHistoryIndexing else { return }
+        isHistoryIndexing = true
+        let chunkCount = await manager.rebuildSessionHistoryIndex(limit: max(100, historyLimit * 20))
+        refreshHistoryIndexStatus()
+        isHistoryIndexing = false
+        mappingNotice = "세션 히스토리 인덱스를 재구축했습니다. (chunks: \(chunkCount))"
+    }
+
+    @MainActor
+    private func searchSessionHistoryFromUI() async {
+        guard !isHistorySearching else { return }
+        let queryText = historyQueryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !queryText.isEmpty else {
+            mappingNotice = "히스토리 검색어를 입력해주세요."
+            return
+        }
+        isHistorySearching = true
+        let results = await manager.searchSessionHistory(
+            query: SessionHistorySearchQuery(
+                query: queryText,
+                repositoryRoot: historyRepositoryFilter,
+                branch: historyBranchFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? nil
+                    : historyBranchFilter.trimmingCharacters(in: .whitespacesAndNewlines),
+                since: historyTimeFilter.sinceDate(),
+                until: nil,
+                limit: historyLimit
+            )
+        )
+        historyResults = results
+        refreshHistoryIndexStatus()
+        isHistorySearching = false
+    }
+
+    @MainActor
+    private func jumpToHistoryResult(_ result: SessionHistorySearchResult) {
+        historyQueryText = result.sessionId
+        searchText = result.sessionId
+        explorerFilter.repositoryRoot = result.repositoryRoot
+        explorerFilter.unassignedOnly = false
+        explorerFilter.activeOnly = false
+    }
+
+    @MainActor
+    private func refreshHistoryIndexStatus() {
+        historyIndexStatus = manager.sessionHistoryIndexStatus()
     }
 
     private func startableProfiles(for repositoryRoot: String) -> [ExternalToolProfile] {

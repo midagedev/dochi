@@ -973,6 +973,7 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var sessionHistoryMaskingRulesCallCount = 0
     var recordActivityClassificationFeedbackCallCount = 0
     var sessionManagementKPIReportCallCount = 0
+    var sessionHistoryIndexStatusCallCount = 0
     var rebuildSessionHistoryIndexCallCount = 0
     var searchSessionHistoryCallCount = 0
 
@@ -1005,6 +1006,11 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         counters: SessionManagementKPICounters()
     )
     var mockSessionHistoryResults: [SessionHistorySearchResult] = []
+    var mockSessionHistoryIndexStatus = SessionHistoryIndexStatus(
+        chunkCount: 0,
+        lastIndexedAt: nil,
+        latestChunkEndAt: nil
+    )
 
     func loadProfiles() {
         loadProfilesCallCount += 1
@@ -1212,6 +1218,11 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     func sessionManagementKPIReport() -> SessionManagementKPIReport {
         sessionManagementKPIReportCallCount += 1
         return mockSessionManagementKPIReport
+    }
+
+    func sessionHistoryIndexStatus() -> SessionHistoryIndexStatus {
+        sessionHistoryIndexStatusCallCount += 1
+        return mockSessionHistoryIndexStatus
     }
 
     func rebuildSessionHistoryIndex(limit: Int) async -> Int {

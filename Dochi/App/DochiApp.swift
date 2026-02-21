@@ -1517,20 +1517,25 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeSessionHistoryReindex(
+    nonisolated static func handleBridgeSessionHistoryReindex(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
         let limit = max(10, min(2_000, params["limit"] as? Int ?? 500))
         let chunkCount = await externalToolManager.rebuildSessionHistoryIndex(limit: limit)
+        let status = await MainActor.run {
+            externalToolManager.sessionHistoryIndexStatus()
+        }
         return .ok([
             "status": "reindexed",
             "limit": limit,
             "chunk_count": chunkCount,
+            "indexed_at": status.lastIndexedAt.map { isoTimestamp($0) } ?? NSNull(),
+            "latest_chunk_end_at": status.latestChunkEndAt.map { isoTimestamp($0) } ?? NSNull(),
         ])
     }
 
-    nonisolated private static func handleBridgeSessionHistorySearch(
+    nonisolated static func handleBridgeSessionHistorySearch(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1570,10 +1575,17 @@ struct DochiApp: App {
                 "tags": item.tags,
             ]
         }
+        let status = await MainActor.run {
+            externalToolManager.sessionHistoryIndexStatus()
+        }
 
         return .ok([
             "count": payload.count,
+            "limit": limit,
             "results": payload,
+            "chunk_count": status.chunkCount,
+            "indexed_at": status.lastIndexedAt.map { isoTimestamp($0) } ?? NSNull(),
+            "latest_chunk_end_at": status.latestChunkEndAt.map { isoTimestamp($0) } ?? NSNull(),
         ])
     }
 
