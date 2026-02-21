@@ -203,6 +203,67 @@ final class NativeAgentLoopServiceTests: XCTestCase {
         XCTAssertTrue(adapter.capturedRequests[1].messages.containsToolResult(toolCallId: "tool_1"))
     }
 
+    func testNativeAgentLoopServiceRefreshesToolsForFollowUpRequest() async throws {
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(toolCallId: "", content: "enabled")
+        toolService.stubbedSchemas = [
+            makeToolSchema(name: "tools_enable"),
+            makeToolSchema(name: "coding_sessions"),
+        ]
+
+        let adapter = CapturingNativeLLMProviderAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(toolCallId: "tool_1") {
+                return [.done(text: "done")]
+            }
+            return [
+                .toolUse(
+                    toolCallId: "tool_1",
+                    toolName: "tools.enable",
+                    toolInputJSON: "{\"groups\":[\"coding\"]}"
+                ),
+                .done(text: nil),
+            ]
+        }
+
+        let service = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService
+        )
+        let initialRequest = NativeLLMRequest(
+            provider: .anthropic,
+            model: "test-model",
+            apiKey: "test-key",
+            messages: [.init(role: .user, text: "coding 세션 확인해줘")],
+            tools: [
+                NativeLLMToolDefinition(
+                    name: "tools_enable",
+                    description: "enable tools",
+                    inputSchema: [:]
+                ),
+            ]
+        )
+
+        _ = try await collectEvents(
+            from: service.run(
+                request: initialRequest,
+                toolRefreshContext: NativeAgentLoopToolRefreshContext(
+                    permissions: ["safe", "restricted"],
+                    preferredToolGroups: ["coding"],
+                    intentHint: "coding 세션 확인해줘",
+                    supportsToolCalling: true
+                )
+            )
+        )
+
+        XCTAssertEqual(adapter.capturedRequests.count, 2)
+        XCTAssertEqual(adapter.capturedRequests[0].tools.map(\.name), ["tools_enable"])
+        XCTAssertEqual(
+            Set(adapter.capturedRequests[1].tools.map(\.name)),
+            Set(["tools_enable", "coding_sessions"])
+        )
+        XCTAssertEqual(toolService.lastPreferredToolGroups, ["coding"])
+    }
+
     func testNativeAgentLoopServiceExecutesMultiToolCallsBeforeRerun() async throws {
         let toolService = MockBuiltInToolService()
         toolService.stubbedResult = ToolResult(toolCallId: "", content: "ok")
@@ -574,6 +635,20 @@ private extension NativeAgentLoopServiceTests {
         } catch {
             return (events, error)
         }
+    }
+
+    func makeToolSchema(name: String) -> [String: Any] {
+        [
+            "type": "function",
+            "function": [
+                "name": name,
+                "description": "\(name) description",
+                "parameters": [
+                    "type": "object",
+                    "properties": [String: Any]()
+                ] as [String: Any]
+            ] as [String: Any]
+        ]
     }
 }
 

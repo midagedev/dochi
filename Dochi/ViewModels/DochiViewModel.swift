@@ -1419,6 +1419,11 @@ final class DochiViewModel {
                 provider: provider,
                 model: model
             )
+            let toolRefreshContext = makeNativeToolRefreshContext(
+                provider: request.provider,
+                model: request.model,
+                conversation: currentConversation
+            )
             estimatedInputTokensForLatestRequest = contextCompactionService.estimateRequestInputTokens(
                 systemPrompt: request.systemPrompt,
                 messages: request.messages,
@@ -1437,7 +1442,8 @@ final class DochiViewModel {
 
             eventLoop: for try await event in nativeAgentLoopService.run(
                 request: request,
-                hookContext: nativeHookContext
+                hookContext: nativeHookContext,
+                toolRefreshContext: toolRefreshContext
             ) {
                 guard !Task.isCancelled else { break }
 
@@ -2499,6 +2505,11 @@ final class DochiViewModel {
                 conversation: conversation,
                 channelMetadata: "telegram:\(update.chatId)"
             )
+            let toolRefreshContext = makeNativeToolRefreshContext(
+                provider: request.provider,
+                model: request.model,
+                conversation: conversation
+            )
             let hookContext = NativeAgentLoopHookContext(
                 sessionId: conversation.id.uuidString,
                 workspaceId: sessionContext.workspaceId.uuidString,
@@ -2512,7 +2523,11 @@ final class DochiViewModel {
             var lastEditLength = 0
             let useStreaming = settings.telegramStreamReplies
 
-            for try await event in nativeAgentLoopService.run(request: request, hookContext: hookContext) {
+            for try await event in nativeAgentLoopService.run(
+                request: request,
+                hookContext: hookContext,
+                toolRefreshContext: toolRefreshContext
+            ) {
                 switch event.kind {
                 case .partial:
                     if let delta = event.text {
@@ -3053,6 +3068,23 @@ final class DochiViewModel {
             }
         }
         return nil
+    }
+
+    private func makeNativeToolRefreshContext(
+        provider: LLMProvider,
+        model: String,
+        conversation: Conversation?
+    ) -> NativeAgentLoopToolRefreshContext {
+        let capabilities = ProviderCapabilityMatrix.capabilities(
+            for: provider,
+            model: model
+        )
+        return NativeAgentLoopToolRefreshContext(
+            permissions: currentAgentPermissions(),
+            preferredToolGroups: currentAgentPreferredToolGroups(),
+            intentHint: conversation.flatMap { latestUserIntentHint(in: $0) },
+            supportsToolCalling: capabilities.supportsToolCalling
+        )
     }
 
     private func nativeEndpointURL(for provider: LLMProvider) -> URL? {
