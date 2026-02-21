@@ -586,6 +586,52 @@ struct HeartbeatSettingsContent: View {
             )
         }
 
+        Section {
+            Toggle("Git 변화 추적", isOn: Binding(
+                get: { settings.heartbeatTrackGitChanges },
+                set: { settings.heartbeatTrackGitChanges = $0 }
+            ))
+            Text("저장소 추가/제거, 브랜치, 변경량, 원격 동기화 변화를 감지합니다")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("코딩세션 변화 추적", isOn: Binding(
+                get: { settings.heartbeatTrackCodingSessionChanges },
+                set: { settings.heartbeatTrackCodingSessionChanges = $0 }
+            ))
+            Text("세션 시작/종료, 활동 상태 전이, 저장소 바인딩 변화를 감지합니다")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("변화 알림", isOn: Binding(
+                get: { settings.heartbeatChangeAlertEnabled },
+                set: { settings.heartbeatChangeAlertEnabled = $0 }
+            ))
+
+            if settings.heartbeatChangeAlertEnabled {
+                Stepper(
+                    "중복 억제 쿨다운: \(settings.heartbeatChangeAlertCooldownMinutes)분",
+                    value: Binding(
+                        get: { settings.heartbeatChangeAlertCooldownMinutes },
+                        set: { settings.heartbeatChangeAlertCooldownMinutes = min(max($0, 1), 240) }
+                    ),
+                    in: 1...240
+                )
+            }
+
+            if !settings.heartbeatTrackGitChanges && !settings.heartbeatTrackCodingSessionChanges {
+                Text("감지 토글이 모두 꺼져 있으면 변화 알림이 발생하지 않습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            SettingsSectionHeader(
+                title: "변화 추적",
+                helpContent: "하트비트가 감지할 변화 소스(Git/코딩세션)와 변화 알림 중복 억제 쿨다운을 제어합니다."
+            )
+        }
+        .disabled(!settings.heartbeatEnabled)
+
         // MARK: - Notification Center (H-3)
         Section {
             // Authorization status row
@@ -766,6 +812,12 @@ struct HeartbeatSettingsContent: View {
                         Text("\(result.itemsFound)건")
                             .foregroundStyle(result.itemsFound > 0 ? .primary : .secondary)
                     }
+                    HStack {
+                        Text("감지된 변화")
+                        Spacer()
+                        Text("\(result.detectedChanges.count)건")
+                            .foregroundStyle(result.detectedChanges.isEmpty ? .secondary : .primary)
+                    }
                     if result.notificationSent {
                         Text("알림 전송됨")
                             .foregroundStyle(.green)
@@ -791,6 +843,46 @@ struct HeartbeatSettingsContent: View {
                         Spacer()
                         Text("\(heartbeatService.consecutiveErrors)회")
                             .foregroundStyle(.red)
+                    }
+                }
+
+                let recentChanges = recentChangeEvents(from: heartbeatService, limit: 5)
+                if recentChanges.isEmpty {
+                    Text("아직 감지된 변화가 없습니다")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                } else {
+                    ForEach(recentChanges) { event in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(changeSeverityLabel(event.severity))
+                                    .font(.caption2)
+                                    .fontWeight(.semibold)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(changeSeverityColor(event.severity).opacity(0.2))
+                                    .clipShape(Capsule())
+
+                                Text(changeSourceLabel(event.source))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+
+                                Spacer()
+
+                                Text(event.timestamp, style: .relative)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text(event.title)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Text(changeTargetText(event))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .padding(.vertical, 2)
                     }
                 }
             }
@@ -849,6 +941,60 @@ struct HeartbeatSettingsContent: View {
                 title: "프로액티브 제안",
                 helpContent: "프로액티브 세부 설정은 전용 화면(Settings > 프로액티브 제안)에서만 변경됩니다. 이 영역은 현재 상태 요약과 이동 링크만 제공합니다."
             )
+        }
+    }
+
+    private func recentChangeEvents(
+        from heartbeatService: HeartbeatService,
+        limit: Int
+    ) -> [HeartbeatChangeEvent] {
+        let events = heartbeatService.tickHistory.flatMap(\.detectedChanges)
+        return Array(events.sorted { $0.timestamp > $1.timestamp }.prefix(limit))
+    }
+
+    private func changeSeverityLabel(_ severity: HeartbeatChangeSeverity) -> String {
+        switch severity {
+        case .info:
+            return "정보"
+        case .warning:
+            return "주의"
+        case .critical:
+            return "중요"
+        }
+    }
+
+    private func changeSeverityColor(_ severity: HeartbeatChangeSeverity) -> Color {
+        switch severity {
+        case .info:
+            return .blue
+        case .warning:
+            return .orange
+        case .critical:
+            return .red
+        }
+    }
+
+    private func changeSourceLabel(_ source: HeartbeatChangeSource) -> String {
+        switch source {
+        case .git:
+            return "Git"
+        case .codingSession:
+            return "Coding Session"
+        }
+    }
+
+    private func changeTargetText(_ event: HeartbeatChangeEvent) -> String {
+        switch event.source {
+        case .git:
+            if let repository = event.metadata["repository"], !repository.isEmpty {
+                return repository
+            }
+            return URL(fileURLWithPath: event.targetId).lastPathComponent
+        case .codingSession:
+            let provider = event.metadata["provider"] ?? ""
+            let sessionId = event.metadata["sessionId"] ?? ""
+            let raw = "\(provider) \(sessionId)".trimmingCharacters(in: .whitespacesAndNewlines)
+            return raw.isEmpty ? event.targetId : raw
         }
     }
 }

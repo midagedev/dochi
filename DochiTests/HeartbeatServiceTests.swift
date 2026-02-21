@@ -152,6 +152,8 @@ final class HeartbeatServiceTests: XCTestCase {
 
     func testDetectChangeEventsUsesBaselineWithoutEmitting() {
         let settings = AppSettings()
+        settings.heartbeatTrackGitChanges = true
+        settings.heartbeatTrackCodingSessionChanges = true
         let service = HeartbeatService(settings: settings)
 
         let baselineEvents = service.detectChangeEvents(
@@ -169,6 +171,8 @@ final class HeartbeatServiceTests: XCTestCase {
 
     func testDetectChangeEventsReportsGitAndCodingSessionTransitions() {
         let settings = AppSettings()
+        settings.heartbeatTrackGitChanges = true
+        settings.heartbeatTrackCodingSessionChanges = true
         let service = HeartbeatService(settings: settings)
 
         _ = service.detectChangeEvents(
@@ -206,6 +210,57 @@ final class HeartbeatServiceTests: XCTestCase {
         XCTAssertTrue(eventTypes.contains(.gitAheadBehindChanged))
         XCTAssertTrue(eventTypes.contains(.codingSessionActivityChanged))
         XCTAssertTrue(eventTypes.contains(.codingSessionRepositoryChanged))
+    }
+
+    func testDetectChangeEventsHonorsSourceTrackingSettings() {
+        func runChanges(service: HeartbeatService) -> [HeartbeatChangeEvent] {
+            _ = service.detectChangeEvents(
+                gitInsights: [makeGitInsight(path: "/tmp/repo-a", branch: "main", changedFileCount: 0, untrackedFileCount: 0)],
+                codingSessions: [makeUnifiedSession(
+                    nativeSessionId: "session-1",
+                    path: "tmux://session-1",
+                    repositoryRoot: "/tmp/repo-a",
+                    activityState: .active
+                )],
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+            )
+
+            return service.detectChangeEvents(
+                gitInsights: [makeGitInsight(
+                    path: "/tmp/repo-a",
+                    branch: "feature/heartbeat",
+                    changedFileCount: 10,
+                    untrackedFileCount: 1,
+                    aheadCount: 2,
+                    behindCount: 1
+                )],
+                codingSessions: [makeUnifiedSession(
+                    nativeSessionId: "session-1",
+                    path: "tmux://session-1",
+                    repositoryRoot: "/tmp/repo-b",
+                    activityState: .stale
+                )],
+                timestamp: Date(timeIntervalSince1970: 1_700_000_060)
+            )
+        }
+
+        let gitDisabledSettings = AppSettings()
+        gitDisabledSettings.heartbeatTrackGitChanges = false
+        gitDisabledSettings.heartbeatTrackCodingSessionChanges = true
+        let gitDisabledEvents = runChanges(service: HeartbeatService(settings: gitDisabledSettings))
+        XCTAssertTrue(gitDisabledEvents.allSatisfy { $0.source == .codingSession })
+
+        let sessionDisabledSettings = AppSettings()
+        sessionDisabledSettings.heartbeatTrackGitChanges = true
+        sessionDisabledSettings.heartbeatTrackCodingSessionChanges = false
+        let sessionDisabledEvents = runChanges(service: HeartbeatService(settings: sessionDisabledSettings))
+        XCTAssertTrue(sessionDisabledEvents.allSatisfy { $0.source == .git })
+
+        let allDisabledSettings = AppSettings()
+        allDisabledSettings.heartbeatTrackGitChanges = false
+        allDisabledSettings.heartbeatTrackCodingSessionChanges = false
+        let allDisabledEvents = runChanges(service: HeartbeatService(settings: allDisabledSettings))
+        XCTAssertTrue(allDisabledEvents.isEmpty)
     }
 
     func testSelectChangeAlertsToSendAppliesRuleAndCooldown() {
@@ -424,6 +479,8 @@ final class HeartbeatServiceTests: XCTestCase {
         settings.heartbeatCheckCalendar = false
         settings.heartbeatCheckKanban = false
         settings.heartbeatCheckReminders = false
+        settings.heartbeatTrackGitChanges = true
+        settings.heartbeatTrackCodingSessionChanges = true
         settings.heartbeatQuietHoursStart = 0
         settings.heartbeatQuietHoursEnd = 0
 
@@ -473,6 +530,8 @@ final class HeartbeatServiceTests: XCTestCase {
         settings.heartbeatCheckCalendar = false
         settings.heartbeatCheckKanban = false
         settings.heartbeatCheckReminders = false
+        settings.heartbeatTrackGitChanges = true
+        settings.heartbeatTrackCodingSessionChanges = true
         settings.heartbeatQuietHoursStart = 0
         settings.heartbeatQuietHoursEnd = 0
 
@@ -507,6 +566,8 @@ final class HeartbeatServiceTests: XCTestCase {
         settings.heartbeatCheckCalendar = false
         settings.heartbeatCheckKanban = false
         settings.heartbeatCheckReminders = false
+        settings.heartbeatTrackGitChanges = true
+        settings.heartbeatTrackCodingSessionChanges = true
         settings.heartbeatQuietHoursStart = 0
         settings.heartbeatQuietHoursEnd = 0
         settings.heartbeatNotificationChannel = NotificationChannel.telegramOnly.rawValue
@@ -542,6 +603,8 @@ final class HeartbeatServiceTests: XCTestCase {
         settings.heartbeatCheckCalendar = false
         settings.heartbeatCheckKanban = false
         settings.heartbeatCheckReminders = false
+        settings.heartbeatTrackGitChanges = true
+        settings.heartbeatTrackCodingSessionChanges = true
         settings.heartbeatQuietHoursStart = 0
         settings.heartbeatQuietHoursEnd = 0
         settings.heartbeatNotificationChannel = NotificationChannel.telegramOnly.rawValue

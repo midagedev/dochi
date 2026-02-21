@@ -8,6 +8,11 @@ final class NotificationCenterTests: XCTestCase {
     // MARK: - AppSettings Notification Properties
 
     func testNotificationSettingsDefaults() {
+        UserDefaults.standard.removeObject(forKey: "heartbeatTrackGitChanges")
+        UserDefaults.standard.removeObject(forKey: "heartbeatTrackCodingSessionChanges")
+        UserDefaults.standard.removeObject(forKey: "heartbeatChangeAlertEnabled")
+        UserDefaults.standard.removeObject(forKey: "heartbeatChangeAlertCooldownMinutes")
+
         let settings = AppSettings()
         XCTAssertTrue(settings.notificationCalendarEnabled)
         XCTAssertTrue(settings.notificationKanbanEnabled)
@@ -15,6 +20,8 @@ final class NotificationCenterTests: XCTestCase {
         XCTAssertTrue(settings.notificationMemoryEnabled)
         XCTAssertTrue(settings.notificationSoundEnabled)
         XCTAssertTrue(settings.notificationReplyEnabled)
+        XCTAssertTrue(settings.heartbeatTrackGitChanges)
+        XCTAssertTrue(settings.heartbeatTrackCodingSessionChanges)
         XCTAssertTrue(settings.heartbeatChangeAlertEnabled)
         XCTAssertGreaterThan(settings.heartbeatChangeAlertCooldownMinutes, 0)
     }
@@ -46,6 +53,12 @@ final class NotificationCenterTests: XCTestCase {
         settings.heartbeatChangeAlertCooldownMinutes = 45
         XCTAssertEqual(settings.heartbeatChangeAlertCooldownMinutes, 45)
 
+        settings.heartbeatTrackGitChanges = false
+        XCTAssertFalse(settings.heartbeatTrackGitChanges)
+
+        settings.heartbeatTrackCodingSessionChanges = false
+        XCTAssertFalse(settings.heartbeatTrackCodingSessionChanges)
+
         // Restore defaults
         settings.notificationCalendarEnabled = true
         settings.notificationKanbanEnabled = true
@@ -53,6 +66,8 @@ final class NotificationCenterTests: XCTestCase {
         settings.notificationMemoryEnabled = true
         settings.notificationSoundEnabled = true
         settings.notificationReplyEnabled = true
+        settings.heartbeatTrackGitChanges = true
+        settings.heartbeatTrackCodingSessionChanges = true
         settings.heartbeatChangeAlertEnabled = true
         settings.heartbeatChangeAlertCooldownMinutes = 30
     }

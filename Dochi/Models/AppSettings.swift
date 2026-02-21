@@ -406,6 +406,16 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(heartbeatCheckReminders, forKey: "heartbeatCheckReminders") }
     }
 
+    /// Enables Git repository change detection during heartbeat ticks.
+    var heartbeatTrackGitChanges: Bool = UserDefaults.standard.object(forKey: "heartbeatTrackGitChanges") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(heartbeatTrackGitChanges, forKey: "heartbeatTrackGitChanges") }
+    }
+
+    /// Enables coding session lifecycle/activity change detection during heartbeat ticks.
+    var heartbeatTrackCodingSessionChanges: Bool = UserDefaults.standard.object(forKey: "heartbeatTrackCodingSessionChanges") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(heartbeatTrackCodingSessionChanges, forKey: "heartbeatTrackCodingSessionChanges") }
+    }
+
     var heartbeatQuietHoursStart: Int = UserDefaults.standard.object(forKey: "heartbeatQuietHoursStart") as? Int ?? 23 {
         didSet { UserDefaults.standard.set(heartbeatQuietHoursStart, forKey: "heartbeatQuietHoursStart") }
     }
