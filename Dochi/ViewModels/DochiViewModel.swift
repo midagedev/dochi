@@ -197,6 +197,8 @@ final class DochiViewModel {
 
     // MARK: - External Tool (K-4)
     private(set) var externalToolManager: ExternalToolSessionManagerProtocol?
+    private var telegramOrchestrationApprovalStore = OrchestrationExecutionApprovalStore()
+    private let telegramOrchestrationSummaryService: any OrchestrationSummaryServiceProtocol = OrchestrationSummaryService()
 
     // MARK: - Device Policy (J-1)
     var devicePolicyService: DevicePolicyServiceProtocol?
@@ -549,6 +551,11 @@ final class DochiViewModel {
     func configureExternalToolManager(_ manager: ExternalToolSessionManagerProtocol) {
         self.externalToolManager = manager
         Log.app.info("ExternalToolSessionManager configured")
+    }
+
+    func configureOrchestrationApprovalStore(_ store: OrchestrationExecutionApprovalStore) {
+        self.telegramOrchestrationApprovalStore = store
+        Log.app.info("OrchestrationExecutionApprovalStore configured")
     }
 
     // MARK: - Interest Discovery (K-3)
@@ -2756,6 +2763,22 @@ final class DochiViewModel {
     func handleTelegramMessage(_ update: TelegramUpdate) async {
         Log.telegram.info("Processing Telegram message from \(update.senderUsername ?? "unknown")")
 
+        let route = TelegramBridgeCommandParser.route(update.text)
+        switch route {
+        case .notCommand:
+            break
+        case .usageError(let usage):
+            await persistAndReplyTelegramCommand(
+                update: update,
+                userInput: update.text,
+                replyText: usage
+            )
+            return
+        case .command(let command):
+            await handleTelegramBridgeCommand(command, update: update)
+            return
+        }
+
         // Find or create a persistent conversation for this chat
         var conversation = findOrCreateTelegramConversation(
             chatId: update.chatId,
@@ -2881,6 +2904,504 @@ final class DochiViewModel {
             }
         } catch {
             Log.telegram.error("Telegram response failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func handleTelegramBridgeCommand(_ command: TelegramBridgeCommand, update: TelegramUpdate) async {
+        guard let manager = externalToolManager else {
+            await persistAndReplyTelegramCommand(
+                update: update,
+                userInput: update.text,
+                replyText: "브리지 서비스가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요."
+            )
+            return
+        }
+
+        let result: LocalControlPlaneMethodResult
+        switch command {
+        case .bridgeOpen(let agent, let profileName, let workingDirectory, let forceWorkingDirectory):
+            var params: [String: Any] = ["agent": agent]
+            if let profileName {
+                params["profile_name"] = profileName
+            }
+            if let workingDirectory {
+                params["working_directory"] = workingDirectory
+            }
+            if forceWorkingDirectory {
+                params["force_working_directory"] = true
+            }
+            result = await DochiApp.handleBridgeOpen(
+                params: params,
+                externalToolManager: manager
+            )
+
+        case .bridgeRoots(let limit, let searchPaths):
+            var params: [String: Any] = ["limit": limit]
+            if !searchPaths.isEmpty {
+                params["search_paths"] = searchPaths
+            }
+            result = await DochiApp.handleBridgeRoots(
+                params: params,
+                externalToolManager: manager
+            )
+
+        case .bridgeStatus(let sessionId):
+            var params: [String: Any] = [:]
+            if let sessionId {
+                params["session_id"] = sessionId
+            }
+            result = await DochiApp.handleBridgeStatus(
+                params: params,
+                externalToolManager: manager
+            )
+
+        case .bridgeSend(let sessionId, let command):
+            result = await DochiApp.handleBridgeSend(
+                params: [
+                    "session_id": sessionId,
+                    "command": command,
+                ],
+                externalToolManager: manager
+            )
+
+        case .bridgeRead(let sessionId, let lines):
+            result = await DochiApp.handleBridgeRead(
+                params: [
+                    "session_id": sessionId,
+                    "lines": lines,
+                ],
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoList:
+            result = await DochiApp.handleBridgeRepositoryList(
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoInit(let path, let defaultBranch, let createReadme, let createGitignore):
+            result = await DochiApp.handleBridgeRepositoryInit(
+                params: [
+                    "path": path,
+                    "default_branch": defaultBranch,
+                    "create_readme": createReadme,
+                    "create_gitignore": createGitignore,
+                ],
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoClone(let remoteURL, let destinationPath, let branch):
+            var params: [String: Any] = [
+                "remote_url": remoteURL,
+                "destination_path": destinationPath,
+            ]
+            if let branch {
+                params["branch"] = branch
+            }
+            result = await DochiApp.handleBridgeRepositoryClone(
+                params: params,
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoAttach(let path):
+            result = await DochiApp.handleBridgeRepositoryAttach(
+                params: ["path": path],
+                externalToolManager: manager
+            )
+
+        case .bridgeRepoRemove(let repositoryId, let deleteDirectory):
+            result = await DochiApp.handleBridgeRepositoryRemove(
+                params: [
+                    "repository_id": repositoryId,
+                    "delete_directory": deleteDirectory,
+                ],
+                externalToolManager: manager
+            )
+
+        case .orchSelect(let repositoryRoot):
+            var params: [String: Any] = [:]
+            if let repositoryRoot {
+                params["repository_root"] = repositoryRoot
+            }
+            result = await DochiApp.handleBridgeOrchestratorSelectSession(
+                params: params,
+                externalToolManager: manager
+            )
+
+        case .orchRequest(let command, let repositoryRoot, let ttlSeconds):
+            var params: [String: Any] = ["command": command]
+            if let repositoryRoot {
+                params["repository_root"] = repositoryRoot
+            }
+            if let ttlSeconds {
+                params["ttl_seconds"] = ttlSeconds
+            }
+            result = await DochiApp.handleBridgeOrchestratorRequest(
+                params: params,
+                orchestrationApprovalStore: telegramOrchestrationApprovalStore
+            )
+
+        case .orchApprove(let approvalId, let challengeCode):
+            result = await DochiApp.handleBridgeOrchestratorApprove(
+                params: [
+                    "approval_id": approvalId,
+                    "challenge_code": challengeCode,
+                ],
+                orchestrationApprovalStore: telegramOrchestrationApprovalStore
+            )
+
+        case .orchExecute(let command, let repositoryRoot, let confirmed, let approvalId):
+            var params: [String: Any] = ["command": command]
+            if let repositoryRoot {
+                params["repository_root"] = repositoryRoot
+            }
+            if confirmed {
+                params["confirmed"] = true
+            }
+            if let approvalId {
+                params["approval_id"] = approvalId
+            }
+            result = await DochiApp.handleBridgeOrchestratorExecute(
+                params: params,
+                externalToolManager: manager,
+                orchestrationApprovalStore: telegramOrchestrationApprovalStore
+            )
+
+        case .orchStatus(let repositoryRoot, let sessionId, let lines):
+            var params: [String: Any] = ["lines": lines]
+            if let repositoryRoot {
+                params["repository_root"] = repositoryRoot
+            }
+            if let sessionId {
+                params["session_id"] = sessionId
+            }
+            result = await DochiApp.handleBridgeOrchestratorStatus(
+                params: params,
+                externalToolManager: manager,
+                orchestrationSummaryService: telegramOrchestrationSummaryService
+            )
+
+        case .orchInterrupt(let repositoryRoot, let sessionId):
+            var params: [String: Any] = [:]
+            if let repositoryRoot {
+                params["repository_root"] = repositoryRoot
+            }
+            if let sessionId {
+                params["session_id"] = sessionId
+            }
+            result = await DochiApp.handleBridgeOrchestratorInterrupt(
+                params: params,
+                externalToolManager: manager
+            )
+
+        case .orchSummarize(let repositoryRoot, let sessionId, let lines):
+            var params: [String: Any] = ["lines": lines]
+            if let repositoryRoot {
+                params["repository_root"] = repositoryRoot
+            }
+            if let sessionId {
+                params["session_id"] = sessionId
+            }
+            result = await DochiApp.handleBridgeOrchestratorSummarize(
+                params: params,
+                externalToolManager: manager,
+                orchestrationSummaryService: telegramOrchestrationSummaryService
+            )
+        }
+
+        let replyText = formatTelegramBridgeCommandResult(command: command, result: result)
+        await persistAndReplyTelegramCommand(
+            update: update,
+            userInput: update.text,
+            replyText: replyText
+        )
+    }
+
+    private func formatTelegramBridgeCommandResult(
+        command: TelegramBridgeCommand,
+        result: LocalControlPlaneMethodResult
+    ) -> String {
+        guard result.success else {
+            return formatTelegramBridgeCommandError(
+                code: result.errorCode ?? "unknown_error",
+                message: result.errorMessage ?? "요청 처리에 실패했습니다."
+            )
+        }
+
+        switch command {
+        case .bridgeOpen:
+            let profile = result.result["profile_name"] as? String ?? "-"
+            let sessionId = result.result["session_id"] as? String ?? "-"
+            let status = result.result["status"] as? String ?? "-"
+            let workingDirectory = result.result["working_directory"] as? String ?? "-"
+            let reason = result.result["selection_reason"] as? String ?? "-"
+            let detail = result.result["selection_detail"] as? String ?? "-"
+            let reused = (result.result["reused"] as? Bool == true) ? "재사용" : "새로 생성"
+            return """
+            브리지 채널 준비 완료 (\(reused))
+            - profile: \(profile)
+            - session_id: \(sessionId)
+            - status: \(status)
+            - working_directory: \(workingDirectory)
+            - selection_reason: \(reason)
+            - detail: \(detail)
+            """
+
+        case .bridgeRoots:
+            let roots = result.result["roots"] as? [[String: Any]] ?? []
+            if roots.isEmpty {
+                return "발견된 Git 루트가 없습니다."
+            }
+            let lines = roots.prefix(10).map { root in
+                let path = root["path"] as? String ?? "-"
+                let branch = root["branch"] as? String ?? "-"
+                let score = root["score"] as? Int ?? 0
+                return "- \(path) (branch: \(branch), score: \(score))"
+            }
+            return lines.joined(separator: "\n")
+
+        case .bridgeStatus:
+            if let sessions = result.result["sessions"] as? [[String: Any]] {
+                if sessions.isEmpty {
+                    return "브리지/코딩 세션이 없습니다."
+                }
+                var lines = sessions.map { session in
+                    let profile = session["profile_name"] as? String ?? "-"
+                    let status = session["status"] as? String ?? "-"
+                    let sessionId = session["session_id"] as? String ?? "-"
+                    return "- \(profile): \(status) (\(sessionId))"
+                }
+                let unifiedCount = result.result["unified_count"] as? Int ?? 0
+                if unifiedCount > 0 {
+                    let unassigned = result.result["unassigned_count"] as? Int ?? 0
+                    lines.append("통합 세션: \(unifiedCount) (unassigned: \(unassigned))")
+                }
+                return lines.joined(separator: "\n")
+            }
+
+            let profile = result.result["profile_name"] as? String ?? "-"
+            let status = result.result["status"] as? String ?? "-"
+            let sessionId = result.result["session_id"] as? String ?? "-"
+            return "\(profile): \(status) (\(sessionId))"
+
+        case .bridgeSend:
+            let sessionId = result.result["session_id"] as? String ?? "-"
+            let command = result.result["command"] as? String ?? "-"
+            return """
+            전송 완료
+            - session_id: \(sessionId)
+            - command: \(command)
+            """
+
+        case .bridgeRead:
+            let lines = result.result["lines"] as? [String] ?? []
+            if lines.isEmpty {
+                return "(출력 없음)"
+            }
+            return lines.joined(separator: "\n")
+
+        case .bridgeRepoList:
+            let repositories = result.result["repositories"] as? [[String: Any]] ?? []
+            if repositories.isEmpty {
+                return "관리 중인 리포지토리가 없습니다."
+            }
+            return repositories.prefix(20).map { repository in
+                let name = repository["name"] as? String ?? "-"
+                let rootPath = repository["root_path"] as? String ?? "-"
+                let source = repository["source"] as? String ?? "-"
+                let repositoryId = repository["repository_id"] as? String ?? "-"
+                return "- \(name) [\(source)] \(rootPath) (\(repositoryId))"
+            }.joined(separator: "\n")
+
+        case .bridgeRepoInit:
+            return formatTelegramRepositoryMutationResult(
+                title: "리포지토리를 초기화했습니다.",
+                result: result
+            )
+
+        case .bridgeRepoClone:
+            return formatTelegramRepositoryMutationResult(
+                title: "리포지토리를 클론했습니다.",
+                result: result
+            )
+
+        case .bridgeRepoAttach:
+            return formatTelegramRepositoryMutationResult(
+                title: "리포지토리를 연결했습니다.",
+                result: result
+            )
+
+        case .bridgeRepoRemove:
+            let repositoryId = result.result["repository_id"] as? String ?? "-"
+            let deleteDirectory = result.result["delete_directory"] as? Bool ?? false
+            return """
+            리포지토리를 제거했습니다.
+            - repository_id: \(repositoryId)
+            - delete_directory: \(deleteDirectory)
+            """
+
+        case .orchSelect:
+            let action = result.result["action"] as? String ?? "-"
+            let reason = result.result["reason"] as? String ?? "-"
+            let selected = result.result["selected_session"] as? [String: Any]
+            let sessionId = selected?["runtime_session_id"] as? String ?? (selected?["native_session_id"] as? String ?? "-")
+            let tier = selected?["controllability_tier"] as? String ?? "-"
+            let workingDirectory = selected?["working_directory"] as? String ?? "-"
+            return """
+            오케스트레이션 세션 선택 결과
+            - action: \(action)
+            - reason: \(reason)
+            - session_id: \(sessionId)
+            - tier: \(tier)
+            - working_directory: \(workingDirectory)
+            """
+
+        case .orchRequest:
+            let approvalId = result.result["approval_id"] as? String ?? "-"
+            let challengeCode = result.result["challenge_code"] as? String ?? "-"
+            let expiresAt = result.result["expires_at"] as? String ?? "-"
+            return """
+            실행 승인 요청이 생성되었습니다.
+            - approval_id: \(approvalId)
+            - challenge_code: \(challengeCode)
+            - expires_at: \(expiresAt)
+            다음 단계:
+            1) /orch approve \(approvalId) <challenge_code>
+            2) /orch execute ... --approval-id \(approvalId)
+            """
+
+        case .orchApprove:
+            let approvalId = result.result["approval_id"] as? String ?? "-"
+            let status = result.result["status"] as? String ?? "-"
+            let expiresAt = result.result["expires_at"] as? String ?? "-"
+            return """
+            실행 승인이 완료되었습니다.
+            - approval_id: \(approvalId)
+            - status: \(status)
+            - expires_at: \(expiresAt)
+            """
+
+        case .orchExecute:
+            let status = result.result["status"] as? String ?? "sent"
+            let guardPayload = result.result["guard"] as? [String: Any]
+            let policyCode = guardPayload?["policy_code"] as? String ?? "-"
+            let reason = guardPayload?["reason"] as? String ?? "-"
+            let approval = result.result["approval"] as? [String: Any]
+            let approvalMode = approval?["mode"] as? String ?? "-"
+            let approvalStatus = approval?["status"] as? String ?? "-"
+            return """
+            오케스트레이터 실행 명령을 전송했습니다.
+            - status: \(status)
+            - policy: \(policyCode)
+            - reason: \(reason)
+            - approval_mode: \(approvalMode)
+            - approval_status: \(approvalStatus)
+            """
+
+        case .orchStatus:
+            let kind = result.result["result_kind"] as? String ?? "unknown"
+            let summary = result.result["summary"] as? String ?? "(요약 없음)"
+            let highlights = result.result["highlights"] as? [String] ?? []
+            if highlights.isEmpty {
+                return "orchestrator.status kind=\(kind)\n\(summary)"
+            }
+            let highlightsText = highlights.prefix(5).map { "- \($0)" }.joined(separator: "\n")
+            return "orchestrator.status kind=\(kind)\n\(summary)\n\(highlightsText)"
+
+        case .orchInterrupt:
+            let status = result.result["status"] as? String ?? "interrupted"
+            let session = result.result["session"] as? [String: Any]
+            let sessionId = session?["session_id"] as? String ?? "-"
+            let profile = session?["profile_name"] as? String ?? "-"
+            return """
+            오케스트레이터 세션 중단 완료
+            - status: \(status)
+            - profile: \(profile)
+            - session_id: \(sessionId)
+            """
+
+        case .orchSummarize:
+            let kind = result.result["result_kind"] as? String ?? "unknown"
+            let summary = result.result["summary"] as? String ?? "(요약 없음)"
+            let highlights = result.result["highlights"] as? [String] ?? []
+            if highlights.isEmpty {
+                return "orchestrator.summarize kind=\(kind)\n\(summary)"
+            }
+            let highlightsText = highlights.prefix(5).map { "- \($0)" }.joined(separator: "\n")
+            return "orchestrator.summarize kind=\(kind)\n\(summary)\n\(highlightsText)"
+        }
+    }
+
+    private func formatTelegramRepositoryMutationResult(
+        title: String,
+        result: LocalControlPlaneMethodResult
+    ) -> String {
+        let repository = result.result["repository"] as? [String: Any]
+        let repositoryId = repository?["repository_id"] as? String ?? "-"
+        let name = repository?["name"] as? String ?? "-"
+        let rootPath = repository?["root_path"] as? String ?? "-"
+        let source = repository?["source"] as? String ?? "-"
+        let branch = repository?["default_branch"] as? String ?? "-"
+        return """
+        \(title)
+        - repository_id: \(repositoryId)
+        - name: \(name)
+        - root_path: \(rootPath)
+        - source: \(source)
+        - default_branch: \(branch)
+        """
+    }
+
+    private func formatTelegramBridgeCommandError(code: String, message: String) -> String {
+        switch code {
+        case "approval_required":
+            return """
+            실행이 차단되었습니다(approval_required).
+            - 먼저 /orch request COMMAND... 를 실행해 approval_id를 발급하세요.
+            - 다음으로 /orch approve APPROVAL_ID CHALLENGE_CODE 를 실행하세요.
+            """
+        case "approval_expired":
+            return "승인 토큰이 만료되었습니다. /orch request 로 새 승인 요청을 생성해주세요."
+        case "approval_already_consumed":
+            return "승인 토큰이 이미 사용되었습니다. /orch request 로 새 승인 요청을 생성해주세요."
+        case "approval_not_approved":
+            return "아직 승인되지 않은 요청입니다. /orch approve 로 먼저 승인해주세요."
+        case "approval_context_mismatch":
+            return "승인된 command/repository와 실행 요청이 일치하지 않습니다. 같은 값으로 다시 시도해주세요."
+        case "approval_code_mismatch":
+            return "challenge_code가 일치하지 않습니다. 코드를 확인한 뒤 다시 시도해주세요."
+        default:
+            return "요청 실패 (\(code)): \(message)"
+        }
+    }
+
+    private func persistAndReplyTelegramCommand(
+        update: TelegramUpdate,
+        userInput: String,
+        replyText: String
+    ) async {
+        var conversation = findOrCreateTelegramConversation(
+            chatId: update.chatId,
+            username: update.senderUsername
+        )
+        conversation.messages.append(Message(role: .user, content: userInput))
+        conversation.messages.append(Message(role: .assistant, content: replyText))
+        conversation.updatedAt = Date()
+
+        if conversation.title == "새 대화",
+           let firstUser = conversation.messages.first(where: { $0.role == .user }) {
+            let title = String(firstUser.content.prefix(40))
+            conversation.title = title.count < firstUser.content.count ? title + "…" : title
+        }
+
+        conversationService.save(conversation: conversation)
+        loadConversations()
+
+        guard let tg = getTelegramService() else { return }
+        do {
+            _ = try await tg.sendMessage(chatId: update.chatId, text: replyText)
+            Log.telegram.info("Sent Telegram command response to chat \(update.chatId)")
+        } catch {
+            Log.telegram.error("Telegram command response failed: \(error.localizedDescription)")
         }
     }
 

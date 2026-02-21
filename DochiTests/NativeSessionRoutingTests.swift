@@ -356,6 +356,277 @@ final class NativeSessionRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testTelegramBridgeCommandBypassesNativeLoop() async throws {
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.done(text: "native-should-not-run")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+        let viewModel = makeViewModel(
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            telegramStreamReplies: false
+        )
+
+        let manager = MockExternalToolSessionManager()
+        let profile = ExternalToolProfile(
+            name: "Codex",
+            command: "codex",
+            workingDirectory: "/tmp/repo"
+        )
+        manager.saveProfile(profile)
+        manager.sessions = [
+            ExternalToolSession(
+                id: UUID(uuidString: "99999999-9999-9999-9999-999999999999")!,
+                profileId: profile.id,
+                tmuxSessionName: "mock-session",
+                status: .idle,
+                startedAt: Date()
+            ),
+        ]
+        viewModel.configureExternalToolManager(manager)
+
+        let telegram = MockTelegramService()
+        viewModel.setTelegramService(telegram)
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 1,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "/bridge status"
+        ))
+
+        XCTAssertEqual(adapter.callCount, 0)
+        XCTAssertEqual(telegram.sentMessages.last?.chatId, 123_456)
+        XCTAssertTrue(telegram.sentMessages.last?.text.contains("Codex") == true)
+    }
+
+    @MainActor
+    func testTelegramBridgeRootsCommandBypassesNativeLoopAndListsRoots() async throws {
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.done(text: "native-should-not-run")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+        let viewModel = makeViewModel(
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            telegramStreamReplies: false
+        )
+
+        let manager = MockExternalToolSessionManager()
+        manager.mockGitRepositoryInsights = [
+            GitRepositoryInsight(
+                workDomain: "dochi",
+                workDomainConfidence: 0.95,
+                workDomainReason: "matched owner",
+                path: "/tmp/project-alpha",
+                name: "project-alpha",
+                branch: "main",
+                originURL: "git@github.com:org/project-alpha.git",
+                remoteHost: "github.com",
+                remoteOwner: "org",
+                remoteRepository: "project-alpha",
+                lastCommitEpoch: 1_700_000_000,
+                lastCommitISO8601: "2023-11-14T00:00:00Z",
+                lastCommitRelative: "1h ago",
+                upstreamLastCommitEpoch: 1_700_000_000,
+                upstreamLastCommitISO8601: "2023-11-14T00:00:00Z",
+                upstreamLastCommitRelative: "1h ago",
+                daysSinceLastCommit: 0,
+                recentCommitCount30d: 20,
+                changedFileCount: 3,
+                untrackedFileCount: 1,
+                aheadCount: 0,
+                behindCount: 0,
+                score: 88
+            ),
+        ]
+        viewModel.configureExternalToolManager(manager)
+
+        let telegram = MockTelegramService()
+        viewModel.setTelegramService(telegram)
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 2,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "/bridge roots --limit 1"
+        ))
+
+        XCTAssertEqual(adapter.callCount, 0)
+        XCTAssertEqual(telegram.sentMessages.last?.chatId, 123_456)
+        XCTAssertTrue(telegram.sentMessages.last?.text.contains("/tmp/project-alpha") == true)
+    }
+
+    @MainActor
+    func testTelegramBridgeRepoInitCommandBypassesNativeLoop() async throws {
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.done(text: "native-should-not-run")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+        let viewModel = makeViewModel(
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            telegramStreamReplies: false
+        )
+
+        let manager = MockExternalToolSessionManager()
+        viewModel.configureExternalToolManager(manager)
+
+        let telegram = MockTelegramService()
+        viewModel.setTelegramService(telegram)
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 3,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "/bridge repo init /tmp/new-repo --branch develop --readme --gitignore"
+        ))
+
+        XCTAssertEqual(adapter.callCount, 0)
+        XCTAssertEqual(manager.initializeRepositoryCallCount, 1)
+        XCTAssertTrue(telegram.sentMessages.last?.text.contains("default_branch: develop") == true)
+    }
+
+    @MainActor
+    func testTelegramOrchestratorApprovalFlowConsumesTokenOnce() async throws {
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[.done(text: "native-should-not-run")]]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+        let viewModel = makeViewModel(
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            telegramStreamReplies: false
+        )
+
+        let manager = MockExternalToolSessionManager()
+        let profile = ExternalToolProfile(
+            name: "Codex",
+            command: "codex",
+            workingDirectory: "/tmp/repo"
+        )
+        manager.saveProfile(profile)
+
+        let runtimeSessionId = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
+        manager.sessions = [
+            ExternalToolSession(
+                id: runtimeSessionId,
+                profileId: profile.id,
+                tmuxSessionName: "mock-session",
+                status: .idle,
+                startedAt: Date()
+            ),
+        ]
+        manager.mockOrchestrationSelection = OrchestrationSessionSelection(
+            action: .attachT1,
+            reason: "attach path",
+            repositoryRoot: "/tmp/repo",
+            selectedSession: UnifiedCodingSession(
+                source: "test",
+                runtimeType: .tmux,
+                controllabilityTier: .t1Attach,
+                provider: "codex",
+                nativeSessionId: "sess-telegram",
+                runtimeSessionId: runtimeSessionId.uuidString,
+                workingDirectory: "/tmp/repo",
+                repositoryRoot: "/tmp/repo",
+                path: "/tmp/sess-telegram.jsonl",
+                updatedAt: Date(),
+                isActive: true,
+                activityScore: 95,
+                activityState: .active
+            )
+        )
+        manager.mockOrchestrationDecision = OrchestrationExecutionDecision(
+            kind: .allowed,
+            policyCode: .t1AllowNonDestructive,
+            commandClass: .nonDestructive,
+            reason: "allowed",
+            isDestructiveCommand: false
+        )
+        viewModel.configureExternalToolManager(manager)
+
+        let telegram = MockTelegramService()
+        viewModel.setTelegramService(telegram)
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 10,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "/orch request git status --repo /tmp/repo"
+        ))
+
+        let requestText = try XCTUnwrap(telegram.sentMessages.last?.text)
+        let approvalId = try XCTUnwrap(extractField(named: "approval_id", from: requestText))
+        let challengeCode = try XCTUnwrap(extractField(named: "challenge_code", from: requestText))
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 11,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "/orch approve \(approvalId) \(challengeCode)"
+        ))
+        XCTAssertTrue(telegram.sentMessages.last?.text.contains("승인이 완료") == true)
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 12,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "/orch execute git status --repo /tmp/repo --approval-id \(approvalId)"
+        ))
+        XCTAssertEqual(manager.sendCommandCallCount, 1)
+        XCTAssertTrue(telegram.sentMessages.last?.text.contains("전송") == true)
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 13,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "/orch execute git status --repo /tmp/repo --approval-id \(approvalId)"
+        ))
+        XCTAssertEqual(manager.sendCommandCallCount, 1)
+        XCTAssertTrue(telegram.sentMessages.last?.text.contains("이미 사용") == true)
+        XCTAssertEqual(adapter.callCount, 0)
+    }
+
+    @MainActor
+    private func extractField(named key: String, from text: String) -> String? {
+        let prefix = "\(key):"
+        for line in text.components(separatedBy: .newlines) {
+            guard line.contains(prefix) else { continue }
+            if let range = line.range(of: prefix) {
+                let value = line[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty {
+                    return value
+                }
+            }
+        }
+        return nil
+    }
+
+    @MainActor
     private func makeViewModel(
         provider: LLMProvider,
         nativeLoopService: NativeAgentLoopService,

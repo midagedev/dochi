@@ -463,6 +463,7 @@ struct DochiApp: App {
 
                 // Configure ExternalToolSessionManager (K-4)
                 viewModel.configureExternalToolManager(externalToolManager)
+                viewModel.configureOrchestrationApprovalStore(orchestrationApprovalStore)
                 heartbeatService.setExternalToolManager(externalToolManager)
                 ExternalToolTools.register(toolService: toolService, manager: externalToolManager)
                 DochiDevBridgeTools.register(toolService: toolService, manager: externalToolManager)
@@ -1246,7 +1247,7 @@ struct DochiApp: App {
         return payload
     }
 
-    nonisolated private static func handleBridgeOpen(
+    nonisolated static func handleBridgeOpen(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1350,7 +1351,7 @@ struct DochiApp: App {
         return .ok(payload)
     }
 
-    nonisolated private static func handleBridgeStatus(
+    nonisolated static func handleBridgeStatus(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1454,7 +1455,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeSend(
+    nonisolated static func handleBridgeSend(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1478,7 +1479,7 @@ struct DochiApp: App {
         }
     }
 
-    nonisolated private static func handleBridgeRead(
+    nonisolated static func handleBridgeRead(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1503,7 +1504,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeRoots(
+    nonisolated static func handleBridgeRoots(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1681,7 +1682,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorRequest(
+    nonisolated static func handleBridgeOrchestratorRequest(
         params: [String: Any],
         orchestrationApprovalStore: OrchestrationExecutionApprovalStore
     ) async -> LocalControlPlaneMethodResult {
@@ -1712,7 +1713,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorApprove(
+    nonisolated static func handleBridgeOrchestratorApprove(
         params: [String: Any],
         orchestrationApprovalStore: OrchestrationExecutionApprovalStore
     ) async -> LocalControlPlaneMethodResult {
@@ -2019,7 +2020,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorInterrupt(
+    nonisolated static func handleBridgeOrchestratorInterrupt(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -2099,7 +2100,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeRepositoryList(
+    nonisolated static func handleBridgeRepositoryList(
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
         let repositories = await MainActor.run {
@@ -2114,7 +2115,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeRepositoryInit(
+    nonisolated static func handleBridgeRepositoryInit(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -2141,7 +2142,7 @@ struct DochiApp: App {
         }
     }
 
-    nonisolated private static func handleBridgeRepositoryClone(
+    nonisolated static func handleBridgeRepositoryClone(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -2168,7 +2169,7 @@ struct DochiApp: App {
         }
     }
 
-    nonisolated private static func handleBridgeRepositoryAttach(
+    nonisolated static func handleBridgeRepositoryAttach(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -2187,7 +2188,7 @@ struct DochiApp: App {
         }
     }
 
-    nonisolated private static func handleBridgeRepositoryRemove(
+    nonisolated static func handleBridgeRepositoryRemove(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
