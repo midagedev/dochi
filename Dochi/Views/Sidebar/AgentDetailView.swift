@@ -5,6 +5,7 @@ struct AgentDetailView: View {
     let contextService: ContextServiceProtocol
     let settings: AppSettings
     let sessionContext: SessionContext
+    var availableToolGroups: [String] = []
     var onDelete: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -24,6 +25,7 @@ struct AgentDetailView: View {
     @State private var permSafe: Bool = true
     @State private var permSensitive: Bool = true
     @State private var permRestricted: Bool = true
+    @State private var preferredToolGroups: [String] = []
     @State private var configSaved: Bool = false
 
     // Shell permissions
@@ -50,6 +52,21 @@ struct AgentDetailView: View {
     @State private var showDeleteConfirmation: Bool = false
 
     private var workspaceId: UUID { sessionContext.workspaceId }
+
+    private var preferredToolGroupOptions: [String] {
+        ToolGroupCatalog.orderedGroups(
+            from: ToolGroupCatalog.defaultGroups + availableToolGroups + preferredToolGroups
+        )
+    }
+
+    private var preferredToolGroupsSummary: String {
+        if preferredToolGroups.isEmpty {
+            return "선호 없음 (자동)"
+        }
+        return preferredToolGroups
+            .map { ToolGroupCatalog.displayName(for: $0) }
+            .joined(separator: ", ")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -125,6 +142,41 @@ struct AgentDetailView: View {
                         .disabled(true)
                     Toggle("sensitive (확인 필요)", isOn: $permSensitive)
                     Toggle("restricted (위험 도구)", isOn: $permRestricted)
+                }
+
+                Section("선호 도구 카테고리") {
+                    Text("선택한 순서대로 도구 노출 우선순위에 반영됩니다. 비워두면 자동으로 판단합니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if preferredToolGroupOptions.isEmpty {
+                        Text("표시 가능한 도구 카테고리가 없습니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], spacing: 8) {
+                            ForEach(preferredToolGroupOptions, id: \.self) { group in
+                                preferredToolGroupChip(group)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    HStack(spacing: 8) {
+                        Button("자동으로 두기") {
+                            preferredToolGroups.removeAll()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(preferredToolGroups.isEmpty)
+
+                        Spacer()
+
+                        Text(preferredToolGroupsSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Section {
@@ -276,6 +328,63 @@ struct AgentDetailView: View {
         .padding()
     }
 
+    // MARK: - Preferred Tool Groups
+
+    private func preferredToolGroupChip(_ group: String) -> some View {
+        let isSelected = preferredToolGroups.contains(group)
+        let selectedIndex = preferredToolGroups.firstIndex(of: group)
+        return Button {
+            togglePreferredToolGroup(group)
+        } label: {
+            HStack(spacing: 6) {
+                Group {
+                    if let selectedIndex {
+                        Text("\(selectedIndex + 1)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 16, height: 16)
+                            .background(Color.accentColor.opacity(0.15))
+                            .clipShape(Circle())
+                    } else {
+                        Image(systemName: ToolGroupCatalog.icon(for: group))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, height: 16)
+                    }
+                }
+
+                Text(ToolGroupCatalog.displayName(for: group))
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                        .font(.system(size: 12))
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.08))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func togglePreferredToolGroup(_ group: String) {
+        if let index = preferredToolGroups.firstIndex(of: group) {
+            preferredToolGroups.remove(at: index)
+            return
+        }
+        preferredToolGroups.append(group)
+    }
+
     // MARK: - Data
 
     private func loadContent() {
@@ -287,6 +396,7 @@ struct AgentDetailView: View {
             permSafe = perms.contains("safe")
             permSensitive = perms.contains("sensitive")
             permRestricted = perms.contains("restricted")
+            preferredToolGroups = config.effectivePreferredToolGroups
 
             let shell = config.effectiveShellPermissions
             shellBlockedText = shell.blockedCommands.joined(separator: ", ")
@@ -304,6 +414,7 @@ struct AgentDetailView: View {
             shellBlockedText = shell.blockedCommands.joined(separator: ", ")
             shellConfirmText = shell.confirmCommands.joined(separator: ", ")
             shellAllowedText = shell.allowedCommands.joined(separator: ", ")
+            preferredToolGroups = []
         }
 
         personaText = contextService.loadAgentPersona(workspaceId: workspaceId, agentName: agentName) ?? ""
@@ -338,6 +449,7 @@ struct AgentDetailView: View {
             description: agentDescription.isEmpty ? nil : agentDescription,
             defaultModel: defaultModel.isEmpty ? nil : defaultModel,
             permissions: permissions,
+            preferredToolGroups: preferredToolGroups.isEmpty ? nil : preferredToolGroups,
             shellPermissions: shellPermissions,
             delegationPolicy: delegationPolicy
         )

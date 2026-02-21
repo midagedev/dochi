@@ -24,6 +24,7 @@ struct AgentWizardView: View {
     @State private var permSafe = true
     @State private var permSensitive = true
     @State private var permRestricted = false
+    @State private var preferredToolGroups: [String] = []
 
     // Step 4: 요약 + 템플릿 저장
     @State private var saveAsTemplate = false
@@ -34,6 +35,16 @@ struct AgentWizardView: View {
 
     private var customTemplates: [AgentTemplate] {
         viewModel.contextService.loadCustomTemplates()
+    }
+
+    private var allToolGroups: [String] {
+        viewModel.allToolInfos.map(\.group)
+    }
+
+    private var preferredToolGroupOptions: [String] {
+        ToolGroupCatalog.orderedGroups(
+            from: ToolGroupCatalog.defaultGroups + allToolGroups + preferredToolGroups
+        )
     }
 
     var body: some View {
@@ -369,6 +380,42 @@ struct AgentWizardView: View {
                         }
                     }
                 }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("선호 도구 카테고리")
+                        .font(.subheadline.bold())
+                    Text("선택한 순서대로 도구 선택 우선순위에 반영됩니다. 비워두면 자동으로 판단합니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if preferredToolGroupOptions.isEmpty {
+                        Text("표시 가능한 도구 카테고리가 없습니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], spacing: 8) {
+                            ForEach(preferredToolGroupOptions, id: \.self) { group in
+                                preferredToolGroupChip(group)
+                            }
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        Button("자동으로 두기") {
+                            preferredToolGroups.removeAll()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(preferredToolGroups.isEmpty)
+
+                        Spacer()
+
+                        Text(preferredToolGroupsSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
             .padding()
         }
@@ -409,6 +456,7 @@ struct AgentWizardView: View {
                     summaryRow(label: "설명", value: agentDescription.isEmpty ? "(없음)" : agentDescription)
                     summaryRow(label: "모델", value: selectedModel.isEmpty ? "앱 기본값" : selectedModel)
                     summaryRow(label: "권한", value: permissionsSummary)
+                    summaryRow(label: "선호 도구", value: preferredToolGroupsSummary)
                     summaryRow(label: "페르소나", value: personaText.isEmpty ? "(기본)" : String(personaText.prefix(80)) + (personaText.count > 80 ? "..." : ""))
                 }
                 .padding(12)
@@ -447,6 +495,15 @@ struct AgentWizardView: View {
         if permSensitive { perms.append("sensitive") }
         if permRestricted { perms.append("restricted") }
         return perms.joined(separator: ", ")
+    }
+
+    private var preferredToolGroupsSummary: String {
+        if preferredToolGroups.isEmpty {
+            return "선호 없음 (자동)"
+        }
+        return preferredToolGroups
+            .map { ToolGroupCatalog.displayName(for: $0) }
+            .joined(separator: ", ")
     }
 
     // MARK: - Navigation Buttons
@@ -531,6 +588,7 @@ struct AgentWizardView: View {
         permSafe = true
         permSensitive = perms.contains("sensitive")
         permRestricted = perms.contains("restricted")
+        preferredToolGroups = ToolGroupCatalog.groups(fromToolNames: template.suggestedTools)
     }
 
     // MARK: - Create
@@ -559,7 +617,8 @@ struct AgentWizardView: View {
             wakeWord: wake.isEmpty ? nil : wake,
             description: desc.isEmpty ? nil : desc,
             defaultModel: selectedModel.isEmpty ? nil : selectedModel,
-            permissions: permissions
+            permissions: permissions,
+            preferredToolGroups: preferredToolGroups.isEmpty ? nil : preferredToolGroups
         )
 
         viewModel.contextService.saveAgentConfig(workspaceId: workspaceId, config: config)
@@ -607,6 +666,63 @@ struct AgentWizardView: View {
         templates.append(template)
         viewModel.contextService.saveCustomTemplates(templates)
         Log.app.info("Custom template saved: \(template.name)")
+    }
+
+    // MARK: - Preferred Tool Groups
+
+    private func preferredToolGroupChip(_ group: String) -> some View {
+        let isSelected = preferredToolGroups.contains(group)
+        let selectedIndex = preferredToolGroups.firstIndex(of: group)
+        return Button {
+            togglePreferredToolGroup(group)
+        } label: {
+            HStack(spacing: 6) {
+                Group {
+                    if let selectedIndex {
+                        Text("\(selectedIndex + 1)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 16, height: 16)
+                            .background(Color.accentColor.opacity(0.15))
+                            .clipShape(Circle())
+                    } else {
+                        Image(systemName: ToolGroupCatalog.icon(for: group))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, height: 16)
+                    }
+                }
+
+                Text(ToolGroupCatalog.displayName(for: group))
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                        .font(.system(size: 12))
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.08))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func togglePreferredToolGroup(_ group: String) {
+        if let index = preferredToolGroups.firstIndex(of: group) {
+            preferredToolGroups.remove(at: index)
+            return
+        }
+        preferredToolGroups.append(group)
     }
 
     // MARK: - Helpers

@@ -46,6 +46,7 @@ struct AgentCardGridView: View {
                 contextService: contextService,
                 settings: settings,
                 sessionContext: sessionContext,
+                availableToolGroups: viewModel?.allToolInfos.map(\.group) ?? [],
                 onDelete: {
                     contextService.deleteAgent(workspaceId: workspaceId, name: name)
                     selectedAgent = nil
