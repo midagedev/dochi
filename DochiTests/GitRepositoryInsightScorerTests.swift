@@ -127,6 +127,140 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertEqual(ExternalToolSessionManager.resolveGitTopLevel(path: clonedPath), clonedPath)
     }
 
+    @MainActor
+    func testManagerRepositoryLifecyclePersistsArchivedStateAcrossReload() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-repo-manager-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let appSupport = tempRoot.appendingPathComponent("app-support", isDirectory: true)
+        let settings = AppSettings()
+        settings.externalToolEnabled = false
+        let manager = ExternalToolSessionManager(
+            settings: settings,
+            appSupportDirectory: appSupport
+        )
+
+        let initialized = try await manager.initializeRepository(
+            path: tempRoot.appendingPathComponent("initialized", isDirectory: true).path,
+            defaultBranch: "main",
+            createReadme: false,
+            createGitignore: false
+        )
+
+        let attachRoot = try ExternalToolSessionManager.initializeGitRepository(
+            atPath: tempRoot.appendingPathComponent("attached", isDirectory: true).path,
+            defaultBranch: "main",
+            createReadme: false,
+            createGitignore: false
+        )
+        let nested = URL(fileURLWithPath: attachRoot).appendingPathComponent("Sources/App", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let attached = try await manager.attachRepository(path: nested.path)
+
+        let cloneSource = try ExternalToolSessionManager.initializeGitRepository(
+            atPath: tempRoot.appendingPathComponent("clone-source", isDirectory: true).path,
+            defaultBranch: "main",
+            createReadme: true,
+            createGitignore: false
+        )
+        let cloneDestination = tempRoot.appendingPathComponent("cloned", isDirectory: true).path
+        let cloned = try await manager.cloneRepository(
+            remoteURL: cloneSource,
+            destinationPath: cloneDestination,
+            branch: nil
+        )
+
+        XCTAssertEqual(manager.managedRepositories.filter { !$0.isArchived }.count, 3)
+
+        try await manager.removeManagedRepository(id: cloned.id, deleteDirectory: false)
+        try await manager.removeManagedRepository(id: attached.id, deleteDirectory: true)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cloneDestination))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: attachRoot))
+
+        let reloaded = ExternalToolSessionManager(
+            settings: settings,
+            appSupportDirectory: appSupport
+        )
+        XCTAssertEqual(reloaded.managedRepositories.count, 3)
+        XCTAssertEqual(reloaded.managedRepositories.first(where: { $0.id == initialized.id })?.isArchived, false)
+        XCTAssertEqual(reloaded.managedRepositories.first(where: { $0.id == cloned.id })?.isArchived, true)
+        XCTAssertEqual(reloaded.managedRepositories.first(where: { $0.id == attached.id })?.isArchived, true)
+    }
+
+    @MainActor
+    func testManagerAttachRepositoryRejectsInvalidPath() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-repo-attach-invalid-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let appSupport = tempRoot.appendingPathComponent("app-support", isDirectory: true)
+        let settings = AppSettings()
+        settings.externalToolEnabled = false
+        let manager = ExternalToolSessionManager(
+            settings: settings,
+            appSupportDirectory: appSupport
+        )
+
+        let invalidPath = tempRoot.appendingPathComponent("not-a-repo", isDirectory: true).path
+        try FileManager.default.createDirectory(
+            atPath: invalidPath,
+            withIntermediateDirectories: true
+        )
+
+        do {
+            _ = try await manager.attachRepository(path: invalidPath)
+            XCTFail("Expected invalidRepositoryPath")
+        } catch let error as ExternalToolError {
+            guard case .invalidRepositoryPath(let failingPath) = error else {
+                return XCTFail("Unexpected ExternalToolError: \(error)")
+            }
+            XCTAssertEqual(failingPath, invalidPath)
+        }
+    }
+
+    @MainActor
+    func testManagerCloneRepositoryRejectsExistingDestinationPath() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-repo-clone-existing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let appSupport = tempRoot.appendingPathComponent("app-support", isDirectory: true)
+        let settings = AppSettings()
+        settings.externalToolEnabled = false
+        let manager = ExternalToolSessionManager(
+            settings: settings,
+            appSupportDirectory: appSupport
+        )
+
+        let source = try ExternalToolSessionManager.initializeGitRepository(
+            atPath: tempRoot.appendingPathComponent("source", isDirectory: true).path,
+            defaultBranch: "main",
+            createReadme: false,
+            createGitignore: false
+        )
+        let destination = tempRoot.appendingPathComponent("destination", isDirectory: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+
+        do {
+            _ = try await manager.cloneRepository(
+                remoteURL: source,
+                destinationPath: destination.path,
+                branch: nil
+            )
+            XCTFail("Expected repositoryOperationFailed for existing destination path")
+        } catch let error as ExternalToolError {
+            guard case .repositoryOperationFailed(let reason) = error else {
+                return XCTFail("Unexpected ExternalToolError: \(error)")
+            }
+            XCTAssertTrue(reason.contains("이미 존재"))
+        }
+    }
+
     func testRepositoryRootBindingUsesManagedRootsFirst() {
         let root = "/tmp/work/repo-a"
         let nested = "/tmp/work/repo-a/Sources/App"
