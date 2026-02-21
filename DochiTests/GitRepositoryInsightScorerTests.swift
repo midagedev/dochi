@@ -257,7 +257,9 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
             guard case .repositoryOperationFailed(let reason) = error else {
                 return XCTFail("Unexpected ExternalToolError: \(error)")
             }
-            XCTAssertTrue(reason.contains("이미 존재"))
+            XCTAssertTrue(
+                reason.contains(destination.path) || reason.contains("이미 존재")
+            )
         }
     }
 
@@ -397,6 +399,79 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertLessThan(dead.score, stale.score)
     }
 
+    func testMergeUnifiedCodingSessionsScoresAttachableProcessAsIdle() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "codex",
+            nativeSessionId: "pid-9001",
+            runtimeSessionId: "9001",
+            workingDirectory: "/tmp/repo-a",
+            path: "process://9001",
+            updatedAt: now.addingTimeInterval(-3 * 24 * 60 * 60),
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+
+        let merged = ExternalToolSessionManager.mergeUnifiedCodingSessions(
+            runtimeSessions: [runtime],
+            discoveredSessions: [],
+            managedRepositoryRoots: ["/tmp/repo-a"],
+            limit: 10,
+            now: now,
+            config: .standard
+        )
+
+        guard let session = merged.first else {
+            return XCTFail("Expected merged session")
+        }
+        XCTAssertEqual(session.activityState, .idle)
+        XCTAssertGreaterThanOrEqual(
+            session.activityScore,
+            CodingSessionActivityScoringConfig.standard.idleThreshold
+        )
+    }
+
+    func testMergeUnifiedCodingSessionsKeepsUnknownProcessAsStale() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "codex",
+            nativeSessionId: "pid-9002",
+            runtimeSessionId: "9002",
+            workingDirectory: nil,
+            path: "process://9002",
+            updatedAt: now.addingTimeInterval(-3 * 24 * 60 * 60),
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t3Unknown,
+            source: "process_runtime"
+        )
+
+        let merged = ExternalToolSessionManager.mergeUnifiedCodingSessions(
+            runtimeSessions: [runtime],
+            discoveredSessions: [],
+            managedRepositoryRoots: [],
+            limit: 10,
+            now: now,
+            config: .standard
+        )
+
+        guard let session = merged.first else {
+            return XCTFail("Expected merged session")
+        }
+        XCTAssertEqual(session.activityState, .stale)
+        XCTAssertEqual(session.activityScore, CodingSessionActivityScoringConfig.standard.runtimeAliveWeight)
+    }
+
     func testUnifiedSessionOrderingIsDeterministicWhenTimestampsTie() {
         let tiedTime = Date(timeIntervalSince1970: 1_700_000_000)
         let later = UnifiedCodingSession(
@@ -487,6 +562,31 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
             ExternalToolSessionManager.processProvider(fromCommandLine: "/usr/local/bin/claude --continue"),
             "claude"
         )
+        XCTAssertEqual(
+            ExternalToolSessionManager.processProvider(
+                fromCommandLine: "node /Users/me/.nvm/versions/node/v20.10.0/lib/node_modules/@anthropic-ai/claude-code/dist/cli.js --resume"
+            ),
+            "claude"
+        )
+        XCTAssertEqual(
+            ExternalToolSessionManager.processProvider(
+                fromCommandLine: "bun '/tmp/work/node_modules/@anthropic-ai/claude-code/dist/cli.mjs' --print"
+            ),
+            "claude"
+        )
+        XCTAssertNil(
+            ExternalToolSessionManager.processProvider(fromCommandLine: "/Applications/Codex.app/Contents/MacOS/Codex")
+        )
+        XCTAssertNil(
+            ExternalToolSessionManager.processProvider(
+                fromCommandLine: "/Applications/Codex.app/Contents/Frameworks/Codex Helper.app/Contents/MacOS/Codex Helper --type=gpu-process"
+            )
+        )
+        XCTAssertNil(
+            ExternalToolSessionManager.processProvider(
+                fromCommandLine: "/bin/zsh -c source /Users/me/.claude/shell-snapshots/snapshot.sh && tail -f /private/tmp/claude-501/task.output"
+            )
+        )
         XCTAssertNil(
             ExternalToolSessionManager.processProvider(fromCommandLine: "/usr/bin/vim main.swift")
         )
@@ -497,5 +597,421 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "??"), .t3Unknown)
         XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "-"), .t3Unknown)
         XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "   "), .t3Unknown)
+    }
+
+    func testProcessWorkingDirectoryCandidatePIDSCapsAndSkipsInvalidIDs() {
+        let now = Date()
+        let snapshots: [ExternalToolSessionManager.RuntimeSessionSnapshot] = [
+            .init(
+                provider: "codex",
+                nativeSessionId: "pid-101",
+                runtimeSessionId: "101",
+                workingDirectory: nil,
+                path: "process://101",
+                updatedAt: now,
+                isActive: true,
+                status: .unknown,
+                lastOutputAt: nil,
+                lastCommandAt: nil,
+                hasErrorPattern: false,
+                runtimeType: .process,
+                controllabilityTier: .t1Attach,
+                source: "process_runtime"
+            ),
+            .init(
+                provider: "codex",
+                nativeSessionId: "pid-101-dup",
+                runtimeSessionId: "101",
+                workingDirectory: nil,
+                path: "process://101",
+                updatedAt: now.addingTimeInterval(-1),
+                isActive: true,
+                status: .unknown,
+                lastOutputAt: nil,
+                lastCommandAt: nil,
+                hasErrorPattern: false,
+                runtimeType: .process,
+                controllabilityTier: .t1Attach,
+                source: "process_runtime"
+            ),
+            .init(
+                provider: "claude",
+                nativeSessionId: "pid-202",
+                runtimeSessionId: "202",
+                workingDirectory: nil,
+                path: "process://202",
+                updatedAt: now.addingTimeInterval(-2),
+                isActive: true,
+                status: .unknown,
+                lastOutputAt: nil,
+                lastCommandAt: nil,
+                hasErrorPattern: false,
+                runtimeType: .process,
+                controllabilityTier: .t1Attach,
+                source: "process_runtime"
+            ),
+            .init(
+                provider: "aider",
+                nativeSessionId: "pid-invalid",
+                runtimeSessionId: "abc",
+                workingDirectory: nil,
+                path: "process://abc",
+                updatedAt: now.addingTimeInterval(-3),
+                isActive: true,
+                status: .unknown,
+                lastOutputAt: nil,
+                lastCommandAt: nil,
+                hasErrorPattern: false,
+                runtimeType: .process,
+                controllabilityTier: .t1Attach,
+                source: "process_runtime"
+            ),
+        ]
+
+        let selected = ExternalToolSessionManager.processWorkingDirectoryCandidatePIDs(
+            from: snapshots,
+            cap: 2
+        )
+
+        XCTAssertEqual(selected, [101, 202])
+    }
+
+    func testDiscoverLocalCodingSessionsParsesClaudeIndexTitleMetadata() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-claude-index-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexRoot = tempRoot.appendingPathComponent("codex", isDirectory: true)
+        let claudeRoot = tempRoot.appendingPathComponent("claude", isDirectory: true)
+        let projectDir = claudeRoot.appendingPathComponent("-Users-hckim-repo-dochi", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+        let indexURL = projectDir.appendingPathComponent("sessions-index.json")
+        let entry: [String: Any] = [
+            "sessionId": "claude-session-123",
+            "projectPath": "/Users/hckim/repo/dochi",
+            "fullPath": "/Users/hckim/.claude/projects/-Users-hckim-repo-dochi/claude-session-123.jsonl",
+            "modified": "2026-02-21T01:02:03Z",
+            "summary": "Repo dashboard 정리 및 세션 인덱스 개선",
+            "firstPrompt": "세션 title과 summary를 인덱싱해줘",
+        ]
+        let payload: [String: Any] = ["entries": [entry]]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        try data.write(to: indexURL, options: .atomic)
+
+        let now = Date(timeIntervalSince1970: 1_771_636_000)
+        let discovered = ExternalToolSessionManager.discoverLocalCodingSessions(
+            codexSessionsRoot: codexRoot,
+            claudeProjectsRoot: claudeRoot,
+            limit: 20,
+            now: now
+        )
+
+        let claude = try XCTUnwrap(discovered.first(where: { $0.provider == "claude" && $0.sessionId == "claude-session-123" }))
+        XCTAssertEqual(claude.title, "Repo dashboard 정리 및 세션 인덱스 개선")
+        XCTAssertEqual(claude.summary, "Repo dashboard 정리 및 세션 인덱스 개선")
+        XCTAssertEqual(claude.titleSource, "claude_sessions_index")
+        XCTAssertNotNil(claude.titleConfidence)
+        if let confidence = claude.titleConfidence {
+            XCTAssertEqual(confidence, 0.9, accuracy: 0.0001)
+        }
+    }
+
+    func testDiscoverLocalCodingSessionsParsesCodexClientMetadata() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-codex-meta-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexRoot = tempRoot.appendingPathComponent("codex", isDirectory: true)
+        let claudeRoot = tempRoot.appendingPathComponent("claude", isDirectory: true)
+        let desktopFile = codexRoot
+            .appendingPathComponent("2026/02/21", isDirectory: true)
+            .appendingPathComponent("rollout-desktop.jsonl")
+        let cliFile = codexRoot
+            .appendingPathComponent("2026/02/21", isDirectory: true)
+            .appendingPathComponent("rollout-cli.jsonl")
+        try FileManager.default.createDirectory(
+            at: desktopFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let desktopMeta = """
+        {"timestamp":"2026-02-21T12:00:00Z","type":"session_meta","payload":{"id":"codex-desktop-1","cwd":"/Users/hckim/repo/dochi","originator":"Codex Desktop","source":"vscode"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
+        """
+        try desktopMeta.data(using: .utf8)?.write(to: desktopFile, options: .atomic)
+
+        let cliMeta = """
+        {"timestamp":"2026-02-21T12:10:00Z","type":"session_meta","payload":{"id":"codex-cli-1","cwd":"/Users/hckim/repo/dochi","originator":"Codex CLI","source":"cli"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}
+        """
+        try cliMeta.data(using: .utf8)?.write(to: cliFile, options: .atomic)
+
+        let discovered = ExternalToolSessionManager.discoverLocalCodingSessions(
+            codexSessionsRoot: codexRoot,
+            claudeProjectsRoot: claudeRoot,
+            limit: 20,
+            now: Date(timeIntervalSince1970: 1_771_636_000)
+        )
+
+        let desktop = try XCTUnwrap(discovered.first(where: { $0.sessionId == "codex-desktop-1" }))
+        XCTAssertEqual(desktop.provider, "codex")
+        XCTAssertEqual(desktop.originator, "Codex Desktop")
+        XCTAssertEqual(desktop.sessionSource, "vscode")
+        XCTAssertEqual(desktop.clientKind, "desktop")
+
+        let cli = try XCTUnwrap(discovered.first(where: { $0.sessionId == "codex-cli-1" }))
+        XCTAssertEqual(cli.provider, "codex")
+        XCTAssertEqual(cli.originator, "Codex CLI")
+        XCTAssertEqual(cli.sessionSource, "cli")
+        XCTAssertEqual(cli.clientKind, "cli")
+    }
+
+    func testDiscoverLocalCodingSessionsNormalizesCodexSourceTaxonomy() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-codex-taxonomy-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexRoot = tempRoot.appendingPathComponent("codex", isDirectory: true)
+        let claudeRoot = tempRoot.appendingPathComponent("claude", isDirectory: true)
+        let dayDirectory = codexRoot.appendingPathComponent("2026/02/21", isDirectory: true)
+        try FileManager.default.createDirectory(at: dayDirectory, withIntermediateDirectories: true)
+
+        func writeSessionMeta(
+            fileName: String,
+            sessionId: String,
+            originator: String?,
+            source: String?
+        ) throws {
+            var payload: [String: Any] = [
+                "id": sessionId,
+                "cwd": "/Users/hckim/repo/dochi",
+            ]
+            if let originator {
+                payload["originator"] = originator
+            }
+            if let source {
+                payload["source"] = source
+            }
+            let event: [String: Any] = [
+                "timestamp": "2026-02-21T12:00:00Z",
+                "type": "session_meta",
+                "payload": payload,
+            ]
+            let eventData = try JSONSerialization.data(withJSONObject: event, options: [])
+            let eventLine = String(data: eventData, encoding: .utf8) ?? "{}"
+            let content = """
+            \(eventLine)
+            {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"ping"}]}}
+            """
+            let fileURL = dayDirectory.appendingPathComponent(fileName)
+            try content.data(using: .utf8)?.write(to: fileURL, options: .atomic)
+        }
+
+        try writeSessionMeta(
+            fileName: "desktop-vscode.jsonl",
+            sessionId: "desktop-vscode",
+            originator: "Codex Desktop",
+            source: "VS Code"
+        )
+        try writeSessionMeta(
+            fileName: "desktop-cursor.jsonl",
+            sessionId: "desktop-cursor",
+            originator: "Codex Desktop",
+            source: "cursor-app"
+        )
+        try writeSessionMeta(
+            fileName: "cli-iterm.jsonl",
+            sessionId: "cli-iterm",
+            originator: "Codex CLI",
+            source: "iTerm2"
+        )
+        try writeSessionMeta(
+            fileName: "cli-originator.jsonl",
+            sessionId: "cli-originator",
+            originator: "Codex CLI Terminal",
+            source: nil
+        )
+        try writeSessionMeta(
+            fileName: "unknown-source.jsonl",
+            sessionId: "unknown-source",
+            originator: "Codex Agent",
+            source: "mystery-ui"
+        )
+
+        let discovered = ExternalToolSessionManager.discoverLocalCodingSessions(
+            codexSessionsRoot: codexRoot,
+            claudeProjectsRoot: claudeRoot,
+            limit: 50,
+            now: Date(timeIntervalSince1970: 1_771_636_000)
+        )
+
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "desktop-vscode" })?.clientKind, "desktop")
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "desktop-cursor" })?.clientKind, "desktop")
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "cli-iterm" })?.clientKind, "cli")
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "cli-originator" })?.clientKind, "cli")
+        XCTAssertEqual(discovered.first(where: { $0.sessionId == "unknown-source" })?.clientKind, "unknown")
+    }
+
+    func testEnrichRuntimeSessionMetadataMatchesByWorkingDirectory() {
+        let now = Date(timeIntervalSince1970: 1_771_636_000)
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "claude",
+            nativeSessionId: "pid-31415",
+            runtimeSessionId: "31415",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "process://31415",
+            updatedAt: now,
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .claudeProjectFile,
+            provider: "claude",
+            sessionId: "claude-session-xyz",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "/tmp/claude-session-xyz.jsonl",
+            updatedAt: now,
+            isActive: true,
+            title: "Dochi 브리지 세션 상태 정비",
+            summary: "bridge.status payload 개선",
+            titleSource: "claude_sessions_index",
+            titleConfidence: 0.9,
+            originator: "Codex Desktop",
+            sessionSource: "vscode",
+            clientKind: "desktop"
+        )
+
+        let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered]
+        )
+
+        guard let item = enriched.first else {
+            return XCTFail("Expected enriched runtime session")
+        }
+        XCTAssertEqual(item.title, "Dochi 브리지 세션 상태 정비")
+        XCTAssertEqual(item.summary, "bridge.status payload 개선")
+        XCTAssertEqual(item.titleSource, "claude_sessions_index_cwd_match")
+        XCTAssertNotNil(item.titleConfidence)
+        if let confidence = item.titleConfidence {
+            XCTAssertEqual(confidence, 0.81, accuracy: 0.0001)
+        }
+        XCTAssertEqual(item.originator, "Codex Desktop")
+        XCTAssertEqual(item.sessionSource, "vscode")
+        XCTAssertEqual(item.clientKind, "desktop")
+    }
+
+    func testExtractLatestTerminalTitleParsesOscSequences() {
+        let esc = "\u{001B}"
+        let bel = "\u{0007}"
+        let lines = [
+            "prompt>",
+            "\(esc)]2;Repo: dochi #414\(bel)",
+            "running...",
+            "\(esc)]0;Fix title indexing\(esc)\\",
+        ]
+
+        let parsed = ExternalToolSessionManager.extractLatestTerminalTitle(fromLines: lines)
+        XCTAssertEqual(parsed, "Fix title indexing")
+    }
+
+    func testEnrichRuntimeSessionMetadataSkipsProviderOnlyMatch() {
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "claude",
+            nativeSessionId: "pid-99999",
+            runtimeSessionId: "99999",
+            workingDirectory: nil,
+            path: "process://99999",
+            updatedAt: Date(),
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .claudeProjectFile,
+            provider: "claude",
+            sessionId: "claude-unrelated",
+            workingDirectory: "/Users/hckim/repo/other",
+            path: "/tmp/claude-unrelated.jsonl",
+            updatedAt: Date(),
+            isActive: true,
+            title: "다른 세션 제목",
+            summary: "다른 세션 요약",
+            titleSource: "claude_sessions_index",
+            titleConfidence: 0.9
+        )
+
+        let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered]
+        )
+
+        guard let item = enriched.first else {
+            return XCTFail("Expected runtime session")
+        }
+        XCTAssertNil(item.title)
+        XCTAssertNil(item.summary)
+        XCTAssertNil(item.titleSource)
+        XCTAssertNil(item.titleConfidence)
+    }
+
+    func testEnrichRuntimeSessionMetadataKeepsSessionIdReasonPriority() {
+        let now = Date()
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "claude",
+            nativeSessionId: "claude-session-priority",
+            runtimeSessionId: "12345",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "process://12345",
+            updatedAt: now,
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .claudeProjectFile,
+            provider: "claude",
+            sessionId: "claude-session-priority",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "/tmp/claude-session-priority.jsonl",
+            updatedAt: now,
+            isActive: true,
+            title: "session id 우선",
+            summary: "same cwd but id should win",
+            titleSource: "claude_sessions_index",
+            titleConfidence: 0.9
+        )
+
+        let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered]
+        )
+
+        guard let item = enriched.first else {
+            return XCTFail("Expected runtime session")
+        }
+        XCTAssertEqual(item.title, "session id 우선")
+        XCTAssertEqual(item.titleSource, "claude_sessions_index_session_id_match")
+        XCTAssertNotNil(item.titleConfidence)
+        if let confidence = item.titleConfidence {
+            XCTAssertEqual(confidence, 0.9, accuracy: 0.0001)
+        }
     }
 }

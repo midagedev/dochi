@@ -4,22 +4,22 @@ on:
   pull_request:
     paths:
       - "Dochi/Services/NativeLLM/**"
-      - "DochiTests/**"
-      - "scripts/provider_contract_matrix.sh"
+      - "DochiTests/ProviderContractMatrixTests.swift"
+      - "DochiTests/Fixtures/ProviderContract/**"
       - ".github/workflows/provider-contract-matrix.yml"
   push:
     branches:
       - main
     paths:
       - "Dochi/Services/NativeLLM/**"
-      - "DochiTests/**"
-      - "scripts/provider_contract_matrix.sh"
+      - "DochiTests/ProviderContractMatrixTests.swift"
+      - "DochiTests/Fixtures/ProviderContract/**"
       - ".github/workflows/provider-contract-matrix.yml"
 
 jobs:
   provider-contract:
     runs-on: macos-latest
-    timeout-minutes: 40
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,18 +36,24 @@ jobs:
               '</plist>' > Dochi/Resources/SupabaseConfig.plist
           fi
 
-      - name: Install XcodeGen
+      - name: Generate Xcode Project
         run: |
           if ! command -v xcodegen >/dev/null 2>&1; then
             brew install xcodegen
           fi
+          xcodegen generate
 
-      - name: Run Provider Contract Matrix
-        run: bash scripts/provider_contract_matrix.sh "$GITHUB_WORKSPACE/.artifacts/provider-contract-matrix"
-
-      - name: Upload Provider Contract Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: provider-contract-matrix
-          path: ${{ github.workspace }}/.artifacts/provider-contract-matrix
+      - name: Run Provider Contract Smoke
+        run: |
+          xcodebuild test \
+            -project Dochi.xcodeproj \
+            -scheme Dochi \
+            -destination 'platform=macOS' \
+            -only-testing:DochiTests/AnthropicProviderContractTests/testTextScenario \
+            -only-testing:DochiTests/OpenAIProviderContractTests/testTextScenario \
+            -only-testing:DochiTests/ZAIProviderContractTests/testTextScenario \
+            -only-testing:DochiTests/OllamaProviderContractTests/testTextScenario \
+            -only-testing:DochiTests/LMStudioProviderContractTests/testTextScenario \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""

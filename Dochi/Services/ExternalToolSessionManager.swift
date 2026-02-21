@@ -54,6 +54,7 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
     // Local discovery (file-backed sessions from CLI tools)
     func discoverLocalCodingSessions(limit: Int) async -> [DiscoveredCodingSession]
     func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession]
+    func listUnifiedCodingSessionsForObservability(limit: Int) async -> [UnifiedCodingSession]
     func setManualRepositoryBinding(
         provider: String,
         nativeSessionId: String,
@@ -76,6 +77,7 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
         observed: CodingSessionActivityState
     )
     func sessionManagementKPIReport() -> SessionManagementKPIReport
+    func sessionHistoryIndexStatus() -> SessionHistoryIndexStatus
     func rebuildSessionHistoryIndex(limit: Int) async -> Int
     func searchSessionHistory(query: SessionHistorySearchQuery) async -> [SessionHistorySearchResult]
 }
@@ -112,6 +114,18 @@ extension ExternalToolSessionManagerProtocol {
 
     func listUnifiedCodingSessions(limit _: Int) async -> [UnifiedCodingSession] {
         []
+    }
+
+    func listUnifiedCodingSessionsForObservability(limit: Int) async -> [UnifiedCodingSession] {
+        await listUnifiedCodingSessions(limit: limit)
+    }
+
+    func previewSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {
+        let unified = await listUnifiedCodingSessionsForObservability(limit: 240)
+        return ExternalToolSessionManager.selectSessionForOrchestration(
+            sessions: unified,
+            repositoryRoot: repositoryRoot
+        )
     }
 
     func setManualRepositoryBinding(
@@ -170,6 +184,14 @@ extension ExternalToolSessionManagerProtocol {
             sessionSelectionFailureRate: 0,
             historySearchHitRate: 0,
             counters: SessionManagementKPICounters()
+        )
+    }
+
+    func sessionHistoryIndexStatus() -> SessionHistoryIndexStatus {
+        SessionHistoryIndexStatus(
+            chunkCount: 0,
+            lastIndexedAt: nil,
+            latestChunkEndAt: nil
         )
     }
 
@@ -242,6 +264,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private var localDiscoveryCacheDate: Date?
     private var manualRepositoryBindings: [String: String] = [:]
     private var sessionHistoryChunks: [SessionHistoryChunk] = []
+    private var sessionHistoryIndexedAt: Date?
     private var sessionKPICounters = SessionManagementKPICounters()
 
     init(
@@ -403,6 +426,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     private func loadSessionHistoryIndex() {
         guard let data = try? Data(contentsOf: sessionHistoryFile) else {
             sessionHistoryChunks = []
+            sessionHistoryIndexedAt = nil
             return
         }
 
@@ -410,9 +434,16 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         decoder.dateDecodingStrategy = .iso8601
         guard let decoded = try? decoder.decode([SessionHistoryChunk].self, from: data) else {
             sessionHistoryChunks = []
+            sessionHistoryIndexedAt = nil
             return
         }
         sessionHistoryChunks = decoded.sorted(by: { $0.endAt > $1.endAt })
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: sessionHistoryFile.path),
+           let modifiedAt = attributes[.modificationDate] as? Date {
+            sessionHistoryIndexedAt = modifiedAt
+        } else {
+            sessionHistoryIndexedAt = nil
+        }
     }
 
     private func persistSessionHistoryIndex() {
@@ -422,6 +453,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         do {
             let data = try encoder.encode(sessionHistoryChunks)
             try data.write(to: sessionHistoryFile, options: .atomic)
+            sessionHistoryIndexedAt = Date()
         } catch {
             Log.app.error("Failed to persist session history index: \(error.localizedDescription)")
         }
@@ -767,6 +799,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let output = await captureOutput(sessionId: sessionId, lines: lines)
         session.lastOutput = output
         session.lastHealthCheckDate = Date()
+        if let oscTitle = Self.extractLatestTerminalTitle(fromLines: output) {
+            session.lastTerminalTitle = oscTitle
+        }
 
         if output.isEmpty {
             // Check if tmux session still exists
@@ -875,6 +910,17 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     }
 
     func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession] {
+        await listUnifiedCodingSessions(limit: limit, trackKPI: true)
+    }
+
+    func listUnifiedCodingSessionsForObservability(limit: Int) async -> [UnifiedCodingSession] {
+        await listUnifiedCodingSessions(limit: limit, trackKPI: false)
+    }
+
+    private func listUnifiedCodingSessions(
+        limit: Int,
+        trackKPI: Bool
+    ) async -> [UnifiedCodingSession] {
         let effectiveLimit = max(1, min(300, limit))
         let now = Date()
         let sessionSnapshots: [RuntimeSessionSnapshot] = sessions.compactMap { session in
@@ -897,18 +943,35 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 hasErrorPattern: session.status == .error || Self.containsErrorSignal(session.lastOutput),
                 runtimeType: .tmux,
                 controllabilityTier: .t0Full,
-                source: "tmux_runtime"
+                source: "tmux_runtime",
+                title: session.lastTerminalTitle,
+                summary: nil,
+                titleSource: session.lastTerminalTitle == nil ? nil : "terminal_osc",
+                titleConfidence: session.lastTerminalTitle == nil ? nil : 0.95,
+                originator: nil,
+                sessionSource: nil,
+                clientKind: nil
             )
         }
 
-        async let discoveredSessions = discoverLocalCodingSessions(limit: max(effectiveLimit * 2, 80))
+        // Keep process probing bounded for control-plane latency.
+        let processLimit = max(min(effectiveLimit, 120), 60)
         let processSnapshots = await Task.detached(priority: .utility) {
             Self.discoverProcessRuntimeSessions(
-                limit: max(effectiveLimit * 2, 120),
+                limit: processLimit,
                 now: now
             )
         }.value
-        let discovered = await discoveredSessions
+        let runtimeSnapshots = sessionSnapshots + processSnapshots
+        let hasRuntimeCandidates = !runtimeSnapshots.isEmpty
+        let discoveredSessions = await discoverLocalCodingSessions(limit: max(effectiveLimit * 2, 120))
+        let enrichedRuntime = await Task.detached(priority: .utility) {
+            Self.enrichRuntimeSessionMetadata(
+                runtimeSessions: runtimeSnapshots,
+                discoveredSessions: discoveredSessions
+            )
+        }.value
+        let discoveredForMerge = hasRuntimeCandidates ? [] : discoveredSessions
         let managedRoots = managedRepositories
             .filter { !$0.isArchived }
             .map { URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path }
@@ -916,8 +979,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
         let merged = await Task.detached(priority: .utility) {
             Self.mergeUnifiedCodingSessions(
-                runtimeSessions: sessionSnapshots + processSnapshots,
-                discoveredSessions: discovered,
+                runtimeSessions: enrichedRuntime,
+                discoveredSessions: discoveredForMerge,
                 managedRepositoryRoots: managedRoots,
                 limit: effectiveLimit,
                 now: now,
@@ -934,10 +997,12 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             return (sessions: deduplicated, dedupCandidates: adjusted.count)
         }.value
 
-        updateKPIForUnifiedSnapshot(
-            sessions: dedupResult.sessions,
-            dedupCandidateCount: dedupResult.dedupCandidates
-        )
+        if trackKPI {
+            updateKPIForUnifiedSnapshot(
+                sessions: dedupResult.sessions,
+                dedupCandidateCount: dedupResult.dedupCandidates
+            )
+        }
         return dedupResult.sessions
     }
 
@@ -983,6 +1048,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     func sessionManagementKPIReport() -> SessionManagementKPIReport {
         Self.buildSessionManagementKPIReport(from: sessionKPICounters, now: Date())
+    }
+
+    func sessionHistoryIndexStatus() -> SessionHistoryIndexStatus {
+        SessionHistoryIndexStatus(
+            chunkCount: sessionHistoryChunks.count,
+            lastIndexedAt: sessionHistoryIndexedAt,
+            latestChunkEndAt: sessionHistoryChunks.map(\.endAt).max()
+        )
     }
 
     func rebuildSessionHistoryIndex(limit: Int) async -> Int {
@@ -1121,6 +1194,23 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             distribution[session.activityState.rawValue, default: 0] += 1
         }
         sessionKPICounters.activityStateDistribution = distribution
+
+        let clientKindSampleCount = sessions.filter {
+            Self.hasClientMetadata(originator: $0.originator, sessionSource: $0.sessionSource)
+        }.count
+        let clientKindUnknownCount = sessions.filter {
+            Self.hasClientMetadata(originator: $0.originator, sessionSource: $0.sessionSource) &&
+                $0.clientKind == "unknown"
+        }.count
+        sessionKPICounters.clientKindSampleCount = min(Self.kpiCounterCap, clientKindSampleCount)
+        sessionKPICounters.clientKindUnknownCount = min(Self.kpiCounterCap, clientKindUnknownCount)
+
+        var clientKindDistribution: [String: Int] = [:]
+        for session in sessions {
+            let kind = session.clientKind ?? "unset"
+            clientKindDistribution[kind, default: 0] += 1
+        }
+        sessionKPICounters.clientKindDistribution = clientKindDistribution
     }
 
     private func incrementKPICounter(
@@ -1166,6 +1256,12 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         } else {
             activityAccuracy = nil
         }
+        let clientKindUnknownRate: Double?
+        if counters.clientKindSampleCount > 0 {
+            clientKindUnknownRate = ratio(counters.clientKindUnknownCount, counters.clientKindSampleCount)
+        } else {
+            clientKindUnknownRate = nil
+        }
 
         return SessionManagementKPIReport(
             generatedAt: now,
@@ -1174,6 +1270,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             activityClassificationAccuracy: activityAccuracy,
             sessionSelectionFailureRate: selectionFailureRate,
             historySearchHitRate: searchHitRate,
+            clientKindUnknownRate: clientKindUnknownRate,
             counters: counters
         )
     }
@@ -1181,6 +1278,21 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     nonisolated private static func ratio(_ numerator: Int, _ denominator: Int) -> Double {
         guard denominator > 0 else { return 0 }
         return Double(numerator) / Double(denominator)
+    }
+
+    nonisolated private static func hasClientMetadata(
+        originator: String?,
+        sessionSource: String?
+    ) -> Bool {
+        if let originator {
+            let trimmedOriginator = originator.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedOriginator.isEmpty { return true }
+        }
+        if let sessionSource {
+            let trimmedSource = sessionSource.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedSource.isEmpty { return true }
+        }
+        return false
     }
 
     nonisolated static func evaluateOrchestrationExecutionGuard(
@@ -1980,12 +2092,25 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 for: runtime.workingDirectory,
                 managedRepositoryRoots: managedRepositoryRoots
             )
+            let runtimeAlive = runtime.status != .dead
+            // `ps etime` is process uptime, not recent activity. For attachable process sessions,
+            // avoid stale bias by inferring a fresh command signal from runtime liveness.
+            let inferredRecentCommandAge: TimeInterval?
+            if runtime.runtimeType == .process,
+               runtime.controllabilityTier == .t1Attach,
+               runtimeAlive {
+                inferredRecentCommandAge = 0
+            } else {
+                inferredRecentCommandAge = ageSince(runtime.lastCommandAt, now: now)
+            }
+            let inferredFileMtimeAge: TimeInterval? =
+                runtime.runtimeType == .process ? nil : ageSince(runtime.updatedAt, now: now)
             let activity = scoreUnifiedSessionActivity(
                 input: UnifiedSessionActivityInput(
-                    runtimeAlive: runtime.status != .dead,
+                    runtimeAlive: runtimeAlive,
                     recentOutputAge: ageSince(runtime.lastOutputAt, now: now),
-                    recentCommandAge: ageSince(runtime.lastCommandAt, now: now),
-                    fileMtimeAge: ageSince(runtime.updatedAt, now: now),
+                    recentCommandAge: inferredRecentCommandAge,
+                    fileMtimeAge: inferredFileMtimeAge,
                     hasErrorPattern: runtime.hasErrorPattern
                 ),
                 config: config
@@ -2002,6 +2127,13 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 path: runtime.path,
                 updatedAt: runtime.updatedAt,
                 isActive: activity.state == .active || activity.state == .idle,
+                title: runtime.title,
+                summary: runtime.summary,
+                titleSource: runtime.titleSource,
+                titleConfidence: runtime.titleConfidence,
+                originator: runtime.originator,
+                sessionSource: runtime.sessionSource,
+                clientKind: runtime.clientKind,
                 activityScore: activity.score,
                 activityState: activity.state,
                 activitySignals: activity.signals
@@ -2035,6 +2167,13 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 path: discovered.path,
                 updatedAt: discovered.updatedAt,
                 isActive: activity.state == .active || activity.state == .idle,
+                title: discovered.title,
+                summary: discovered.summary,
+                titleSource: discovered.titleSource,
+                titleConfidence: discovered.titleConfidence,
+                originator: discovered.originator,
+                sessionSource: discovered.sessionSource,
+                clientKind: discovered.clientKind,
                 activityScore: activity.score,
                 activityState: activity.state,
                 activitySignals: activity.signals
@@ -2203,6 +2342,13 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 path: session.path,
                 updatedAt: session.updatedAt,
                 isActive: session.isActive,
+                title: session.title,
+                summary: session.summary,
+                titleSource: session.titleSource,
+                titleConfidence: session.titleConfidence,
+                originator: session.originator,
+                sessionSource: session.sessionSource,
+                clientKind: session.clientKind,
                 activityScore: session.activityScore,
                 activityState: session.activityState,
                 activitySignals: session.activitySignals
@@ -2382,15 +2528,16 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             psOutput: psResult.output,
             now: now,
             workingDirectories: [:],
-            limit: max(effectiveLimit * 2, 80)
+            limit: max(effectiveLimit, 80)
         )
         guard !rough.isEmpty else {
             return []
         }
 
-        let pids = rough
-            .compactMap(\.runtimeSessionId)
-            .compactMap(Int.init)
+        let pids = processWorkingDirectoryCandidatePIDs(
+            from: rough,
+            cap: min(max(effectiveLimit, 24), 64)
+        )
         let workingDirectories = resolveProcessWorkingDirectories(pids: pids)
         return parseProcessRuntimeSnapshots(
             psOutput: psResult.output,
@@ -2445,27 +2592,68 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             .map { $0 }
     }
 
+    nonisolated static func processWorkingDirectoryCandidatePIDs(
+        from snapshots: [RuntimeSessionSnapshot],
+        cap: Int
+    ) -> [Int] {
+        let effectiveCap = max(1, min(400, cap))
+        var selected: [Int] = []
+        selected.reserveCapacity(effectiveCap)
+        var seen: Set<Int> = []
+        seen.reserveCapacity(effectiveCap)
+
+        for snapshot in snapshots {
+            guard selected.count < effectiveCap,
+                  let raw = snapshot.runtimeSessionId,
+                  let pid = Int(raw),
+                  pid > 0,
+                  !seen.contains(pid) else {
+                continue
+            }
+            seen.insert(pid)
+            selected.append(pid)
+        }
+        return selected
+    }
+
     nonisolated static func processProvider(fromCommandLine commandLine: String) -> String? {
         let trimmed = commandLine.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let executable = trimmed
-            .split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
-            .first
-            .map(String.init) ?? trimmed
-        let basename = URL(fileURLWithPath: executable).lastPathComponent.lowercased()
-        if basename == "codex" || basename == "claude" || basename == "aider" {
-            return basename
+        let lower = trimmed.lowercased()
+        if lower.contains("/applications/codex.app/contents/") ||
+            lower.contains("/applications/claude.app/contents/") {
+            return nil
         }
 
-        let lower = " \(trimmed.lowercased()) "
-        if lower.contains(" -m aider ") || lower.contains(" /aider ") || lower.contains(" aider ") {
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map { raw in
+            raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        }
+        guard !tokens.isEmpty else { return nil }
+        let normalizedTokens = tokens.map { token in
+            URL(fileURLWithPath: token).lastPathComponent.lowercased()
+        }
+
+        if normalizedTokens.contains("aider") {
             return "aider"
         }
-        if lower.contains(" /codex ") || lower.contains(" codex ") || lower.contains(" codex-cli ") {
+        if normalizedTokens.contains("codex") || normalizedTokens.contains("codex-cli") {
             return "codex"
         }
-        if lower.contains(" /claude ") || lower.contains(" claude ") || lower.contains(" claude-code ") {
+        if normalizedTokens.contains("claude") || normalizedTokens.contains("claude-code") {
+            return "claude"
+        }
+
+        if let moduleIndex = normalizedTokens.firstIndex(of: "-m"),
+           normalizedTokens.indices.contains(moduleIndex + 1),
+           normalizedTokens[moduleIndex + 1] == "aider" {
+            return "aider"
+        }
+
+        // Claude Code is often launched via node wrappers where the executable is `node`
+        // and only module path reveals the provider.
+        if lower.contains("@anthropic-ai/claude-code") ||
+            lower.contains("/claude-code/") {
             return "claude"
         }
         return nil
@@ -2540,6 +2728,59 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let runtimeType: CodingSessionRuntimeType
         let controllabilityTier: CodingSessionControllabilityTier
         let source: String
+        let title: String?
+        let summary: String?
+        let titleSource: String?
+        let titleConfidence: Double?
+        let originator: String?
+        let sessionSource: String?
+        let clientKind: String?
+
+        init(
+            provider: String,
+            nativeSessionId: String,
+            runtimeSessionId: String?,
+            workingDirectory: String?,
+            path: String,
+            updatedAt: Date,
+            isActive: Bool,
+            status: ExternalToolStatus,
+            lastOutputAt: Date?,
+            lastCommandAt: Date?,
+            hasErrorPattern: Bool,
+            runtimeType: CodingSessionRuntimeType,
+            controllabilityTier: CodingSessionControllabilityTier,
+            source: String,
+            title: String? = nil,
+            summary: String? = nil,
+            titleSource: String? = nil,
+            titleConfidence: Double? = nil,
+            originator: String? = nil,
+            sessionSource: String? = nil,
+            clientKind: String? = nil
+        ) {
+            self.provider = provider
+            self.nativeSessionId = nativeSessionId
+            self.runtimeSessionId = runtimeSessionId
+            self.workingDirectory = workingDirectory
+            self.path = path
+            self.updatedAt = updatedAt
+            self.isActive = isActive
+            self.status = status
+            self.lastOutputAt = lastOutputAt
+            self.lastCommandAt = lastCommandAt
+            self.hasErrorPattern = hasErrorPattern
+            self.runtimeType = runtimeType
+            self.controllabilityTier = controllabilityTier
+            self.source = source
+            self.title = title
+            self.summary = summary
+            self.titleSource = titleSource
+            self.titleConfidence = titleConfidence
+            self.originator = originator
+            self.sessionSource = sessionSource
+            self.clientKind = clientKind
+        }
     }
 
     func tmuxSessionName(for profile: ExternalToolProfile) -> String {
@@ -2929,7 +3170,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             hasErrorPattern: false,
             runtimeType: .process,
             controllabilityTier: processControllabilityTier(tty: tty),
-            source: "process_runtime"
+            source: "process_runtime",
+            title: nil,
+            summary: nil,
+            titleSource: nil,
+            titleConfidence: nil
         )
     }
 
@@ -3002,7 +3247,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 workingDirectory: meta?.cwd,
                 path: candidate.url.path,
                 updatedAt: candidate.modifiedAt,
-                isActive: isActive
+                isActive: isActive,
+                title: meta?.title,
+                summary: meta?.summary,
+                titleSource: meta?.titleSource,
+                titleConfidence: meta?.titleConfidence,
+                originator: meta?.originator,
+                sessionSource: meta?.sessionSource,
+                clientKind: meta?.clientKind
             )
         }
     }
@@ -3037,6 +3289,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                     let fullPath = entry["fullPath"] as? String
                     let modifiedISO = entry["modified"] as? String
                     let fileMtimeMillis = (entry["fileMtime"] as? NSNumber)?.doubleValue
+                    let metadata = claudeSessionMetadataFromIndexEntry(entry)
                     let modifiedAt = parseISO8601Date(modifiedISO)
                         ?? fileMtimeMillis.map { Date(timeIntervalSince1970: $0 / 1_000) }
                         ?? .distantPast
@@ -3049,7 +3302,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                             workingDirectory: projectPath,
                             path: fullPath ?? indexURL.path,
                             updatedAt: modifiedAt,
-                            isActive: isActive
+                            isActive: isActive,
+                            title: metadata.title,
+                            summary: metadata.summary,
+                            titleSource: metadata.titleSource,
+                            titleConfidence: metadata.titleConfidence,
+                            originator: nil,
+                            sessionSource: nil,
+                            clientKind: nil
                         )
                     )
                 }
@@ -3095,7 +3355,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                     workingDirectory: workingDirectory,
                     path: candidate.url.path,
                     updatedAt: candidate.modifiedAt,
-                    isActive: isActive
+                    isActive: isActive,
+                    title: meta?.title,
+                    summary: meta?.summary,
+                    titleSource: meta?.titleSource,
+                    titleConfidence: meta?.titleConfidence,
+                    originator: nil,
+                    sessionSource: nil,
+                    clientKind: nil
                 )
             )
         }
@@ -3134,7 +3401,81 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         return String(data: data, encoding: .utf8)
     }
 
-    nonisolated private static func parseCodexSessionMeta(fromFirstLine line: String?) -> (id: String, cwd: String?)? {
+    private struct SessionClientTaxonomy {
+        let desktopSourceAliases: Set<String>
+        let cliSourceAliases: Set<String>
+        let desktopOriginatorKeywords: Set<String>
+        let cliOriginatorKeywords: Set<String>
+    }
+
+    // Keep provider-specific source normalization in one place so new source values
+    // can be added without changing parser/merge flow logic.
+    nonisolated private static let providerClientTaxonomy: [String: SessionClientTaxonomy] = [
+        "codex": SessionClientTaxonomy(
+            desktopSourceAliases: [
+                "desktop",
+                "vscode",
+                "vscodeinsiders",
+                "cursor",
+                "cursorapp",
+                "windsurf",
+                "zed",
+                "jetbrains",
+                "intellij",
+                "pycharm",
+                "xcode",
+            ],
+            cliSourceAliases: [
+                "cli",
+                "terminal",
+                "shell",
+                "tty",
+                "iterm",
+                "iterm2",
+                "tmux",
+                "zsh",
+                "bash",
+                "fish",
+                "pwsh",
+                "powershell",
+                "cmd",
+            ],
+            desktopOriginatorKeywords: [
+                "desktop",
+                "vscode",
+                "cursor",
+                "windsurf",
+                "zed",
+                "jetbrains",
+            ],
+            cliOriginatorKeywords: [
+                "cli",
+                "terminal",
+                "shell",
+                "tty",
+                "iterm",
+                "tmux",
+                "zsh",
+                "bash",
+                "fish",
+                "pwsh",
+            ]
+        ),
+    ]
+
+    nonisolated private static func parseCodexSessionMeta(
+        fromFirstLine line: String?
+    ) -> (
+        id: String,
+        cwd: String?,
+        title: String?,
+        summary: String?,
+        titleSource: String?,
+        titleConfidence: Double?,
+        originator: String?,
+        sessionSource: String?,
+        clientKind: String?
+    )? {
         guard let line,
               let data = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -3146,10 +3487,91 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }
 
         let cwd = payload["cwd"] as? String
-        return (id: id, cwd: cwd)
+        let originator = normalizedSessionText(payload["originator"], maxLength: 80)
+        let sessionSource = normalizedSessionText(payload["source"], maxLength: 40)
+        let clientKind = classifySessionClientKind(
+            provider: "codex",
+            originator: originator,
+            sessionSource: sessionSource
+        )
+        return (
+            id: id,
+            cwd: cwd,
+            title: nil,
+            summary: nil,
+            titleSource: nil,
+            titleConfidence: nil,
+            originator: originator,
+            sessionSource: sessionSource,
+            clientKind: clientKind
+        )
     }
 
-    nonisolated private static func parseClaudeSessionMeta(fromFirstLine line: String?) -> (id: String, cwd: String?)? {
+    nonisolated private static func classifySessionClientKind(
+        provider: String,
+        originator: String?,
+        sessionSource: String?
+    ) -> String? {
+        let providerKey = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let taxonomy = providerClientTaxonomy[providerKey]
+        let normalizedOriginator = normalizedSessionTaxonomyKey(originator)
+        let normalizedSource = normalizedSessionTaxonomyKey(sessionSource)
+
+        if let taxonomy {
+            if let normalizedSource {
+                if taxonomy.desktopSourceAliases.contains(normalizedSource) {
+                    return "desktop"
+                }
+                if taxonomy.cliSourceAliases.contains(normalizedSource) {
+                    return "cli"
+                }
+            }
+
+            if let normalizedOriginator {
+                if containsTaxonomyKeyword(
+                    in: normalizedOriginator,
+                    keywords: taxonomy.desktopOriginatorKeywords
+                ) {
+                    return "desktop"
+                }
+                if containsTaxonomyKeyword(
+                    in: normalizedOriginator,
+                    keywords: taxonomy.cliOriginatorKeywords
+                ) {
+                    return "cli"
+                }
+            }
+        }
+
+        if normalizedOriginator != nil || normalizedSource != nil {
+            return "unknown"
+        }
+        return nil
+    }
+
+    nonisolated private static func normalizedSessionTaxonomyKey(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lowercased = trimmed.lowercased()
+        let filteredScalars = lowercased.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+        guard !filteredScalars.isEmpty else { return nil }
+        return String(String.UnicodeScalarView(filteredScalars))
+    }
+
+    nonisolated private static func containsTaxonomyKeyword(
+        in normalizedValue: String,
+        keywords: Set<String>
+    ) -> Bool {
+        for keyword in keywords where normalizedValue.contains(keyword) {
+            return true
+        }
+        return false
+    }
+
+    nonisolated private static func parseClaudeSessionMeta(
+        fromFirstLine line: String?
+    ) -> (id: String, cwd: String?, title: String?, summary: String?, titleSource: String?, titleConfidence: Double?)? {
         guard let line,
               let data = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -3158,8 +3580,278 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
         let sessionId = (json["sessionId"] as? String) ?? (json["session_id"] as? String)
         guard let sessionId, !sessionId.isEmpty else { return nil }
-        let cwd = json["cwd"] as? String
-        return (id: sessionId, cwd: cwd)
+        let cwd = (json["cwd"] as? String) ?? (json["projectPath"] as? String)
+        let metadata = claudeSessionMetadataFromSessionJSON(json)
+        return (
+            id: sessionId,
+            cwd: cwd,
+            title: metadata.title,
+            summary: metadata.summary,
+            titleSource: metadata.titleSource,
+            titleConfidence: metadata.titleConfidence
+        )
+    }
+
+    nonisolated private static func claudeSessionMetadataFromIndexEntry(
+        _ entry: [String: Any]
+    ) -> (title: String?, summary: String?, titleSource: String?, titleConfidence: Double?) {
+        let explicitTitle = normalizedSessionText(entry["title"], maxLength: 140)
+        let summary = normalizedSessionText(entry["summary"], maxLength: 320)
+        let firstPrompt = normalizedSessionText(entry["firstPrompt"], maxLength: 220)
+
+        let title = explicitTitle ?? summary ?? firstPrompt
+        let effectiveSummary = summary ?? firstPrompt
+        guard title != nil || effectiveSummary != nil else {
+            return (nil, nil, nil, nil)
+        }
+
+        let confidence: Double
+        if explicitTitle != nil {
+            confidence = 0.96
+        } else if summary != nil {
+            confidence = 0.9
+        } else {
+            confidence = 0.72
+        }
+        return (title, effectiveSummary, "claude_sessions_index", confidence)
+    }
+
+    nonisolated private static func claudeSessionMetadataFromSessionJSON(
+        _ json: [String: Any]
+    ) -> (title: String?, summary: String?, titleSource: String?, titleConfidence: Double?) {
+        let explicitTitle = normalizedSessionText(json["title"], maxLength: 140)
+        let summary = normalizedSessionText(json["summary"], maxLength: 320)
+        let firstPrompt = normalizedSessionText(json["firstPrompt"], maxLength: 220)
+
+        let title = explicitTitle ?? summary ?? firstPrompt
+        let effectiveSummary = summary ?? firstPrompt
+        guard title != nil || effectiveSummary != nil else {
+            return (nil, nil, nil, nil)
+        }
+
+        let confidence: Double
+        if explicitTitle != nil {
+            confidence = 0.78
+        } else if summary != nil {
+            confidence = 0.68
+        } else {
+            confidence = 0.55
+        }
+        return (title, effectiveSummary, "claude_session_file_header", confidence)
+    }
+
+    nonisolated static func enrichRuntimeSessionMetadata(
+        runtimeSessions: [RuntimeSessionSnapshot],
+        discoveredSessions: [DiscoveredCodingSession]
+    ) -> [RuntimeSessionSnapshot] {
+        guard !runtimeSessions.isEmpty, !discoveredSessions.isEmpty else { return runtimeSessions }
+
+        let metadataCandidates = discoveredSessions.filter { session in
+            session.title != nil || session.summary != nil
+        }
+        guard !metadataCandidates.isEmpty else { return runtimeSessions }
+
+        return runtimeSessions.map { runtime in
+            guard runtime.title == nil || runtime.summary == nil else {
+                return runtime
+            }
+            guard let matched = bestMetadataMatch(for: runtime, candidates: metadataCandidates) else {
+                return runtime
+            }
+
+            let mergedTitle = runtime.title ?? matched.session.title ?? matched.session.summary
+            let mergedSummary = runtime.summary ?? matched.session.summary
+            guard mergedTitle != nil || mergedSummary != nil else {
+                return runtime
+            }
+
+            let sourceBase = matched.session.titleSource ?? matched.session.source.rawValue
+            let mergedSource = runtime.titleSource ?? "\(sourceBase)_\(matched.reason)"
+            let baseConfidence = matched.session.titleConfidence ?? 0.6
+            let mergedConfidence = runtime.titleConfidence ?? min(0.98, baseConfidence * matched.confidenceScale)
+            let mergedOriginator = runtime.originator ?? matched.session.originator
+            let mergedSessionSource = runtime.sessionSource ?? matched.session.sessionSource
+            let mergedClientKind = runtime.clientKind
+                ?? matched.session.clientKind
+                ?? classifySessionClientKind(
+                    provider: runtime.provider,
+                    originator: mergedOriginator,
+                    sessionSource: mergedSessionSource
+                )
+
+            return RuntimeSessionSnapshot(
+                provider: runtime.provider,
+                nativeSessionId: runtime.nativeSessionId,
+                runtimeSessionId: runtime.runtimeSessionId,
+                workingDirectory: runtime.workingDirectory,
+                path: runtime.path,
+                updatedAt: runtime.updatedAt,
+                isActive: runtime.isActive,
+                status: runtime.status,
+                lastOutputAt: runtime.lastOutputAt,
+                lastCommandAt: runtime.lastCommandAt,
+                hasErrorPattern: runtime.hasErrorPattern,
+                runtimeType: runtime.runtimeType,
+                controllabilityTier: runtime.controllabilityTier,
+                source: runtime.source,
+                title: mergedTitle,
+                summary: mergedSummary,
+                titleSource: mergedSource,
+                titleConfidence: mergedConfidence,
+                originator: mergedOriginator,
+                sessionSource: mergedSessionSource,
+                clientKind: mergedClientKind
+            )
+        }
+    }
+
+    nonisolated private static func bestMetadataMatch(
+        for runtime: RuntimeSessionSnapshot,
+        candidates: [DiscoveredCodingSession]
+    ) -> (session: DiscoveredCodingSession, reason: String, confidenceScale: Double)? {
+        let runtimeProvider = runtime.provider.lowercased()
+        let runtimeWorkingDirectory = normalizedDirectoryPath(runtime.workingDirectory)
+        let runtimeNativeSessionId = runtime.nativeSessionId
+
+        var best: (session: DiscoveredCodingSession, score: Int, reason: String, confidenceScale: Double)?
+        for candidate in candidates {
+            guard candidate.provider.lowercased() == runtimeProvider else { continue }
+
+            var score = 0
+            var reason = "provider_match"
+            var confidenceScale = 0.6
+            var matchedBySessionId = false
+
+            if runtimeNativeSessionId == candidate.sessionId {
+                score += 20
+                reason = "session_id_match"
+                confidenceScale = 1.0
+                matchedBySessionId = true
+            }
+
+            let candidateWorkingDirectory = normalizedDirectoryPath(candidate.workingDirectory)
+            if let runtimeWorkingDirectory, let candidateWorkingDirectory {
+                if runtimeWorkingDirectory == candidateWorkingDirectory {
+                    score += 16
+                    if !matchedBySessionId {
+                        reason = "cwd_match"
+                    }
+                    confidenceScale = max(confidenceScale, 0.9)
+                } else if runtimeWorkingDirectory.hasPrefix(candidateWorkingDirectory + "/") ||
+                    candidateWorkingDirectory.hasPrefix(runtimeWorkingDirectory + "/") {
+                    score += 10
+                    if !matchedBySessionId {
+                        reason = "cwd_nested_match"
+                    }
+                    confidenceScale = max(confidenceScale, 0.78)
+                }
+            }
+
+            if score > 0, candidate.isActive {
+                score += 2
+            }
+
+            guard score > 0 else { continue }
+            if let currentBest = best {
+                if score > currentBest.score || (score == currentBest.score && candidate.updatedAt > currentBest.session.updatedAt) {
+                    best = (candidate, score, reason, confidenceScale)
+                }
+            } else {
+                best = (candidate, score, reason, confidenceScale)
+            }
+        }
+
+        if let best {
+            return (best.session, best.reason, best.confidenceScale)
+        }
+        return nil
+    }
+
+    nonisolated private static func normalizedDirectoryPath(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(fileURLWithPath: expandedPath(trimmed)).standardizedFileURL.path
+    }
+
+    nonisolated static func extractLatestTerminalTitle(fromLines lines: [String]) -> String? {
+        guard !lines.isEmpty else { return nil }
+        let text = lines.joined(separator: "\n")
+        let esc = "\u{001B}"
+        let bel = "\u{0007}"
+
+        var latest: String?
+        var cursor = text.startIndex
+        while cursor < text.endIndex {
+            guard text[cursor] == Character(esc) else {
+                cursor = text.index(after: cursor)
+                continue
+            }
+            let oscMark = text.index(after: cursor)
+            guard oscMark < text.endIndex, text[oscMark] == "]" else {
+                cursor = oscMark
+                continue
+            }
+
+            var head = text.index(after: oscMark)
+            guard head < text.endIndex else { break }
+            let headChar = text[head]
+            guard headChar == "0" || headChar == "1" || headChar == "2" else {
+                cursor = head
+                continue
+            }
+            head = text.index(after: head)
+            guard head < text.endIndex, text[head] == ";" else {
+                cursor = head
+                continue
+            }
+
+            var bodyStart = text.index(after: head)
+            var bodyEnd: String.Index?
+            while bodyStart < text.endIndex {
+                let ch = text[bodyStart]
+                if ch == Character(bel) {
+                    bodyEnd = bodyStart
+                    bodyStart = text.index(after: bodyStart)
+                    break
+                }
+                if ch == Character(esc) {
+                    let maybeSlash = text.index(after: bodyStart)
+                    if maybeSlash < text.endIndex, text[maybeSlash] == "\\" {
+                        bodyEnd = bodyStart
+                        bodyStart = text.index(after: maybeSlash)
+                        break
+                    }
+                }
+                bodyStart = text.index(after: bodyStart)
+            }
+
+            guard let bodyEnd else { break }
+            let rawTitle = String(text[text.index(after: head)..<bodyEnd])
+            if let normalized = normalizedSessionText(rawTitle, maxLength: 220) {
+                latest = normalized
+            }
+            cursor = bodyStart
+        }
+
+        return latest
+    }
+
+    nonisolated private static func normalizedSessionText(_ value: Any?, maxLength: Int) -> String? {
+        guard let raw = value as? String else { return nil }
+        return normalizedSessionText(raw, maxLength: maxLength)
+    }
+
+    nonisolated private static func normalizedSessionText(_ raw: String, maxLength: Int) -> String? {
+        let compact = raw
+            .replacingOccurrences(of: "\u{001B}", with: "")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !compact.isEmpty else { return nil }
+        let cappedLength = max(20, maxLength)
+        return String(compact.prefix(cappedLength))
     }
 
     nonisolated private static func parseISO8601Date(_ value: String?) -> Date? {

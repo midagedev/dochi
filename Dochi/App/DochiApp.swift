@@ -1358,6 +1358,7 @@ struct DochiApp: App {
                     "status": session.status.rawValue,
                     "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
                     "last_activity": session.lastActivityText ?? NSNull(),
+                    "terminal_title": session.lastTerminalTitle ?? NSNull(),
                 ]
             }
             return UncheckedJSONArray(value: sessions)
@@ -1373,6 +1374,13 @@ struct DochiApp: App {
                 "path": session.path,
                 "updated_at": isoTimestamp(session.updatedAt),
                 "is_active": session.isActive,
+                "title": session.title ?? NSNull(),
+                "summary": session.summary ?? NSNull(),
+                "title_source": session.titleSource ?? NSNull(),
+                "title_confidence": session.titleConfidence ?? NSNull(),
+                "originator": session.originator ?? NSNull(),
+                "session_source": session.sessionSource ?? NSNull(),
+                "client_kind": session.clientKind ?? NSNull(),
             ]
         }
         let unifiedSessions = await externalToolManager.listUnifiedCodingSessions(limit: 120)
@@ -1399,6 +1407,13 @@ struct DochiApp: App {
                 "updated_at": isoTimestamp(session.updatedAt),
                 "is_active": session.isActive,
                 "is_unassigned": session.isUnassigned,
+                "title": session.title ?? NSNull(),
+                "summary": session.summary ?? NSNull(),
+                "title_source": session.titleSource ?? NSNull(),
+                "title_confidence": session.titleConfidence ?? NSNull(),
+                "originator": session.originator ?? NSNull(),
+                "session_source": session.sessionSource ?? NSNull(),
+                "client_kind": session.clientKind ?? NSNull(),
             ]
         }
         let unassignedCount = unifiedSessions.filter(\.isUnassigned).count
@@ -1508,20 +1523,25 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeSessionHistoryReindex(
+    nonisolated static func handleBridgeSessionHistoryReindex(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
         let limit = max(10, min(2_000, params["limit"] as? Int ?? 500))
         let chunkCount = await externalToolManager.rebuildSessionHistoryIndex(limit: limit)
+        let status = await MainActor.run {
+            externalToolManager.sessionHistoryIndexStatus()
+        }
         return .ok([
             "status": "reindexed",
             "limit": limit,
             "chunk_count": chunkCount,
+            "indexed_at": status.lastIndexedAt.map { isoTimestamp($0) } ?? NSNull(),
+            "latest_chunk_end_at": status.latestChunkEndAt.map { isoTimestamp($0) } ?? NSNull(),
         ])
     }
 
-    nonisolated private static func handleBridgeSessionHistorySearch(
+    nonisolated static func handleBridgeSessionHistorySearch(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1561,14 +1581,21 @@ struct DochiApp: App {
                 "tags": item.tags,
             ]
         }
+        let status = await MainActor.run {
+            externalToolManager.sessionHistoryIndexStatus()
+        }
 
         return .ok([
             "count": payload.count,
+            "limit": limit,
             "results": payload,
+            "chunk_count": status.chunkCount,
+            "indexed_at": status.lastIndexedAt.map { isoTimestamp($0) } ?? NSNull(),
+            "latest_chunk_end_at": status.latestChunkEndAt.map { isoTimestamp($0) } ?? NSNull(),
         ])
     }
 
-    nonisolated private static func handleBridgeSessionMetrics(
+    nonisolated static func handleBridgeSessionMetrics(
         params _: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1584,6 +1611,7 @@ struct DochiApp: App {
                 "activity_classification_accuracy": report.activityClassificationAccuracy ?? NSNull(),
                 "session_selection_failure_rate": report.sessionSelectionFailureRate,
                 "history_search_hit_rate": report.historySearchHitRate,
+                "client_kind_unknown_rate": report.clientKindUnknownRate ?? NSNull(),
             ] as [String: Any],
             "counters": [
                 "repository_assigned_count": report.counters.repositoryAssignedCount,
@@ -1597,6 +1625,9 @@ struct DochiApp: App {
                 "activity_feedback_sample_count": report.counters.activityFeedbackSampleCount,
                 "activity_feedback_matched_count": report.counters.activityFeedbackMatchedCount,
                 "activity_state_distribution": report.counters.activityStateDistribution,
+                "client_kind_sample_count": report.counters.clientKindSampleCount,
+                "client_kind_unknown_count": report.counters.clientKindUnknownCount,
+                "client_kind_distribution": report.counters.clientKindDistribution,
             ] as [String: Any],
             "summary": formatSessionManagementKPISummary(report),
         ])
@@ -1625,7 +1656,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorSelectSession(
+    nonisolated static func handleBridgeOrchestratorSelectSession(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1690,7 +1721,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorExecute(
+    nonisolated static func handleBridgeOrchestratorExecute(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1820,7 +1851,7 @@ struct DochiApp: App {
         }
     }
 
-    nonisolated private static func handleBridgeOrchestratorStatus(
+    nonisolated static func handleBridgeOrchestratorStatus(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol,
         orchestrationSummaryService: any OrchestrationSummaryServiceProtocol
@@ -1900,7 +1931,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorSummarize(
+    nonisolated static func handleBridgeOrchestratorSummarize(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol,
         orchestrationSummaryService: any OrchestrationSummaryServiceProtocol
@@ -2083,6 +2114,7 @@ struct DochiApp: App {
             "status": session.status.rawValue,
             "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
             "last_activity": session.lastActivityText ?? NSNull(),
+            "terminal_title": session.lastTerminalTitle ?? NSNull(),
         ]
     }
 
@@ -2108,6 +2140,13 @@ struct DochiApp: App {
                 "activity_score": selected.activityScore,
                 "path": selected.path,
                 "updated_at": isoTimestamp(selected.updatedAt),
+                "title": selected.title ?? NSNull(),
+                "summary": selected.summary ?? NSNull(),
+                "title_source": selected.titleSource ?? NSNull(),
+                "title_confidence": selected.titleConfidence ?? NSNull(),
+                "originator": selected.originator ?? NSNull(),
+                "session_source": selected.sessionSource ?? NSNull(),
+                "client_kind": selected.clientKind ?? NSNull(),
             ] as [String: Any]
         } else {
             payload["selected_session"] = NSNull()
@@ -2124,6 +2163,12 @@ struct DochiApp: App {
         } else {
             activityAccuracy = "n/a"
         }
+        let clientKindUnknownRate: String
+        if let unknownRate = report.clientKindUnknownRate {
+            clientKindUnknownRate = percentageString(unknownRate)
+        } else {
+            clientKindUnknownRate = "n/a"
+        }
         let lines = [
             "session_management_kpi",
             "generated_at=\(isoTimestamp(report.generatedAt))",
@@ -2133,6 +2178,8 @@ struct DochiApp: App {
             "selection_failure_rate=\(percentageString(report.sessionSelectionFailureRate)) (\(report.counters.selectionFailureCount)/\(report.counters.selectionAttemptCount))",
             "history_search_hit_rate=\(percentageString(report.historySearchHitRate)) (\(report.counters.historySearchHitCount)/\(report.counters.historySearchQueryCount))",
             "activity_state_distribution=\(report.counters.activityStateDistribution)",
+            "client_kind_unknown_rate=\(clientKindUnknownRate) (\(report.counters.clientKindUnknownCount)/\(report.counters.clientKindSampleCount))",
+            "client_kind_distribution=\(report.counters.clientKindDistribution)",
         ]
         return lines.joined(separator: "\n")
     }
@@ -2160,6 +2207,7 @@ struct DochiApp: App {
             "status": session.status.rawValue,
             "started_at": session.startedAt.map(isoTimestamp(_:)) ?? NSNull(),
             "last_activity": session.lastActivityText ?? NSNull(),
+            "terminal_title": session.lastTerminalTitle ?? NSNull(),
         ]
     }
 

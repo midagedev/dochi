@@ -25,10 +25,59 @@ struct RepositoryDashboardSummary: Identifiable, Sendable, Equatable {
     let lastActivityAt: Date?
 }
 
+struct RepositorySessionGroup: Identifiable, Sendable, Equatable {
+    let id: String
+    let repositoryRoot: String
+    let displayName: String
+    let sessionCount: Int
+    let activeSessionCount: Int
+    let errorSessionCount: Int
+    let lastActivityAt: Date?
+    let sessions: [UnifiedCodingSession]
+}
+
 enum SessionExplorerViewStateBuilder {
     private static func normalizedRepositoryPath(_ path: String?) -> String? {
         guard let path else { return nil }
         return URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    static func repositoryContainsWorkingDirectory(
+        repositoryRoot: String,
+        workingDirectory: String
+    ) -> Bool {
+        let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
+        let normalizedWorkingDirectory = normalizedRepositoryPath(workingDirectory)
+        guard let normalizedRoot, let normalizedWorkingDirectory else { return false }
+        if normalizedWorkingDirectory == normalizedRoot {
+            return true
+        }
+        return normalizedWorkingDirectory.hasPrefix(normalizedRoot + "/")
+    }
+
+    private static func sortSessions(
+        _ sessions: [UnifiedCodingSession],
+        sort: SessionExplorerSortOption
+    ) -> [UnifiedCodingSession] {
+        switch sort {
+        case .activity:
+            return sessions.sorted(by: ExternalToolSessionManager.isPreferredUnifiedSessionOrder(_:_:))
+        case .updatedAt:
+            return sessions.sorted(by: { lhs, rhs in
+                if lhs.updatedAt != rhs.updatedAt {
+                    return lhs.updatedAt > rhs.updatedAt
+                }
+                return ExternalToolSessionManager.sessionStableKey(lhs) < ExternalToolSessionManager.sessionStableKey(rhs)
+            })
+        case .provider:
+            return sessions.sorted(by: { lhs, rhs in
+                let compare = lhs.provider.localizedCaseInsensitiveCompare(rhs.provider)
+                if compare != .orderedSame {
+                    return compare == .orderedAscending
+                }
+                return ExternalToolSessionManager.isPreferredUnifiedSessionOrder(lhs, rhs)
+            })
+        }
     }
 
     static func repositorySummaries(from sessions: [UnifiedCodingSession]) -> [RepositoryDashboardSummary] {
@@ -91,24 +140,43 @@ enum SessionExplorerViewStateBuilder {
             return true
         }
 
-        switch sort {
-        case .activity:
-            return filtered.sorted(by: ExternalToolSessionManager.isPreferredUnifiedSessionOrder(_:_:))
-        case .updatedAt:
-            return filtered.sorted(by: { lhs, rhs in
-                if lhs.updatedAt != rhs.updatedAt {
-                    return lhs.updatedAt > rhs.updatedAt
-                }
-                return ExternalToolSessionManager.sessionStableKey(lhs) < ExternalToolSessionManager.sessionStableKey(rhs)
-            })
-        case .provider:
-            return filtered.sorted(by: { lhs, rhs in
-                let compare = lhs.provider.localizedCaseInsensitiveCompare(rhs.provider)
-                if compare != .orderedSame {
-                    return compare == .orderedAscending
-                }
-                return ExternalToolSessionManager.isPreferredUnifiedSessionOrder(lhs, rhs)
-            })
+        return sortSessions(filtered, sort: sort)
+    }
+
+    static func repositoryGroups(
+        sessions: [UnifiedCodingSession],
+        sort: SessionExplorerSortOption
+    ) -> [RepositorySessionGroup] {
+        let assignedSessions = sessions.compactMap { session -> (String, UnifiedCodingSession)? in
+            guard let repositoryRoot = normalizedRepositoryPath(session.repositoryRoot) else { return nil }
+            return (repositoryRoot, session)
         }
+        let grouped = Dictionary(grouping: assignedSessions, by: { $0.0 })
+
+        return grouped.map { repositoryRoot, entries in
+            let sortedSessions = sortSessions(entries.map(\.1), sort: sort)
+            let displayName = URL(fileURLWithPath: repositoryRoot).lastPathComponent
+            let activeCount = sortedSessions.filter { $0.activityState == .active || $0.activityState == .idle }.count
+            let errorCount = sortedSessions.filter { $0.activitySignals.errorPenaltyScore > 0 }.count
+            return RepositorySessionGroup(
+                id: repositoryRoot,
+                repositoryRoot: repositoryRoot,
+                displayName: displayName,
+                sessionCount: sortedSessions.count,
+                activeSessionCount: activeCount,
+                errorSessionCount: errorCount,
+                lastActivityAt: sortedSessions.map(\.updatedAt).max(),
+                sessions: sortedSessions
+            )
+        }
+        .sorted(by: { lhs, rhs in
+            if lhs.activeSessionCount != rhs.activeSessionCount {
+                return lhs.activeSessionCount > rhs.activeSessionCount
+            }
+            if lhs.lastActivityAt != rhs.lastActivityAt {
+                return (lhs.lastActivityAt ?? .distantPast) > (rhs.lastActivityAt ?? .distantPast)
+            }
+            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+        })
     }
 }

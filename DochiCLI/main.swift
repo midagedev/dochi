@@ -953,8 +953,20 @@ enum DochiCLI {
                 } else {
                     params = [:]
                 }
-                let result = try client.call(method: "bridge.status", params: params)
+                var result = try client.call(method: "bridge.status", params: params)
                 if let sessions = result["sessions"] as? [[String: Any]] {
+                    let normalizeTitleForList: (String?) -> String? = { raw in
+                        guard let raw else { return nil }
+                        let normalized = raw
+                            .components(separatedBy: .whitespacesAndNewlines)
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " ")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !normalized.isEmpty else { return nil }
+                        let clipped = String(normalized.prefix(100))
+                        return clipped.replacingOccurrences(of: "\"", with: "'")
+                    }
+
                     var lines = sessions.map { session -> String in
                         let id = session["session_id"] as? String ?? "-"
                         let profile = session["profile_name"] as? String ?? "-"
@@ -963,6 +975,9 @@ enum DochiCLI {
                     }
 
                     if let unified = result["unified_sessions"] as? [[String: Any]], !unified.isEmpty {
+                        if (result["count"] as? Int ?? 0) == 0 {
+                            result["count"] = unified.count
+                        }
                         if !lines.isEmpty {
                             lines.append("")
                         }
@@ -976,7 +991,9 @@ enum DochiCLI {
                             let state = item["activity_state"] as? String ?? ((item["is_active"] as? Bool == true) ? "active" : "inactive")
                             let score = item["activity_score"] as? Int ?? 0
                             let repositoryRoot = item["repository_root"] as? String ?? "(unassigned)"
-                            lines.append("- [\(provider)] \(nativeSessionId) state=\(state) score=\(score) tier=\(tier) runtime=\(runtimeType) repo=\(repositoryRoot)")
+                            let title = normalizeTitleForList((item["title"] as? String) ?? (item["summary"] as? String))
+                            let titleSegment = title.map { " title=\"\($0)\"" } ?? ""
+                            lines.append("- [\(provider)] \(nativeSessionId)\(titleSegment) state=\(state) score=\(score) tier=\(tier) runtime=\(runtimeType) repo=\(repositoryRoot)")
                         }
                         if unified.count > 30 {
                             lines.append("... \(unified.count - 30)개 추가")
@@ -991,10 +1008,40 @@ enum DochiCLI {
                             let sessionId = item["session_id"] as? String ?? "-"
                             let active = (item["is_active"] as? Bool == true) ? "active" : "inactive"
                             let path = item["path"] as? String ?? "-"
-                            lines.append("- [\(provider)] \(sessionId) \(active) @ \(path)")
+                            let title = normalizeTitleForList((item["title"] as? String) ?? (item["summary"] as? String))
+                            let titleSegment = title.map { " \"\($0)\"" } ?? ""
+                            lines.append("- [\(provider)] \(sessionId)\(titleSegment) \(active) @ \(path)")
                         }
                         if discovered.count > 20 {
                             lines.append("... \(discovered.count - 20)개 추가")
+                        }
+                        if (result["count"] as? Int ?? 0) == 0 {
+                            result["count"] = discovered.count
+                        }
+                    }
+
+                    if lines.isEmpty, sessionId == nil {
+                        let processFallback = discoverProcessCodingSessions(limit: 30)
+                        if !processFallback.isEmpty {
+                            lines.append("Control Plane 응답에 세션이 없어 로컬 프로세스 감지 결과를 표시합니다.")
+                            lines.append("프로세스 감지 세션 \(processFallback.count)개")
+                            result["process_fallback_count"] = processFallback.count
+                            result["process_fallback_sessions"] = processFallback.map { snapshot in
+                                [
+                                    "provider": snapshot.provider,
+                                    "native_session_id": "pid-\(snapshot.pid)",
+                                    "runtime_session_id": "\(snapshot.pid)",
+                                    "tty": snapshot.tty,
+                                    "is_active": snapshot.isActive,
+                                    "updated_at": ISO8601DateFormatter().string(from: snapshot.updatedAt),
+                                    "command": snapshot.commandLine,
+                                ]
+                            }
+                            result["count"] = processFallback.count
+                            for item in processFallback {
+                                let state = item.isActive ? "active" : "stale"
+                                lines.append("- [\(item.provider)] pid-\(item.pid) state=\(state) tty=\(item.tty)")
+                            }
                         }
                     }
 
@@ -1012,6 +1059,40 @@ enum DochiCLI {
                     data: result
                 )
             } catch let error as CLIControlPlaneError {
+                if sessionId == nil {
+                    let processFallback = discoverProcessCodingSessions(limit: 30)
+                    if !processFallback.isEmpty {
+                        let lines: [String] = [
+                            "Control Plane bridge.status 호출에 실패하여 로컬 프로세스 감지 결과를 표시합니다.",
+                            "프로세스 감지 세션 \(processFallback.count)개",
+                        ] + processFallback.map { snapshot in
+                            let state = snapshot.isActive ? "active" : "stale"
+                            return "- [\(snapshot.provider)] pid-\(snapshot.pid) state=\(state) tty=\(snapshot.tty)"
+                        }
+                        let payload: [[String: Any]] = processFallback.map { snapshot in
+                            [
+                                "provider": snapshot.provider,
+                                "native_session_id": "pid-\(snapshot.pid)",
+                                "runtime_session_id": "\(snapshot.pid)",
+                                "tty": snapshot.tty,
+                                "is_active": snapshot.isActive,
+                                "updated_at": ISO8601DateFormatter().string(from: snapshot.updatedAt),
+                                "command": snapshot.commandLine,
+                            ]
+                        }
+                        return CLIResult(
+                            exitCode: .success,
+                            command: "dev.bridge.status",
+                            message: lines.joined(separator: "\n"),
+                            data: [
+                                "fallback_reason": error.localizedDescription,
+                                "count": processFallback.count,
+                                "process_fallback_count": processFallback.count,
+                                "process_fallback_sessions": payload,
+                            ]
+                        )
+                    }
+                }
                 return mapControlPlaneError(error, command: "dev.bridge.status")
             } catch {
                 return CLIResult(exitCode: .runtimeError, command: "dev.bridge.status", message: "요청 실패: \(error.localizedDescription)")
@@ -1566,6 +1647,184 @@ enum DochiCLI {
             }
             return CLIResult(exitCode: .runtimeError, command: command, message: "앱 요청 실패 (\(code)): \(message)")
         }
+    }
+
+    private struct CLIProcessSessionSnapshot {
+        let provider: String
+        let pid: Int
+        let tty: String
+        let commandLine: String
+        let updatedAt: Date
+        let isActive: Bool
+    }
+
+    private static func discoverProcessCodingSessions(limit: Int, now: Date = Date()) -> [CLIProcessSessionSnapshot] {
+        let effectiveLimit = max(1, min(80, limit))
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["ps", "-axo", "pid=,tty=,etime=,command="]
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        do {
+            try process.run()
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                return []
+            }
+
+            let output = String(data: data, encoding: .utf8) ?? ""
+            let snapshots = output
+                .components(separatedBy: .newlines)
+                .compactMap { parseProcessSessionSnapshotLine($0, now: now) }
+                .sorted { lhs, rhs in
+                    if lhs.isActive != rhs.isActive {
+                        return lhs.isActive && !rhs.isActive
+                    }
+                    if lhs.updatedAt != rhs.updatedAt {
+                        return lhs.updatedAt > rhs.updatedAt
+                    }
+                    if lhs.provider != rhs.provider {
+                        return lhs.provider < rhs.provider
+                    }
+                    return lhs.pid < rhs.pid
+                }
+
+            var dedup: [String: CLIProcessSessionSnapshot] = [:]
+            for snapshot in snapshots {
+                let key = "\(snapshot.provider)|\(snapshot.pid)"
+                if dedup[key] == nil {
+                    dedup[key] = snapshot
+                }
+            }
+            return Array(dedup.values)
+                .sorted { lhs, rhs in
+                    if lhs.isActive != rhs.isActive {
+                        return lhs.isActive && !rhs.isActive
+                    }
+                    if lhs.updatedAt != rhs.updatedAt {
+                        return lhs.updatedAt > rhs.updatedAt
+                    }
+                    if lhs.provider != rhs.provider {
+                        return lhs.provider < rhs.provider
+                    }
+                    return lhs.pid < rhs.pid
+                }
+                .prefix(effectiveLimit)
+                .map { $0 }
+        } catch {
+            return []
+        }
+    }
+
+    private static func parseProcessSessionSnapshotLine(
+        _ rawLine: String,
+        now: Date
+    ) -> CLIProcessSessionSnapshot? {
+        let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let parts = trimmed.split(maxSplits: 3, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
+        guard parts.count >= 4,
+              let pid = Int(parts[0]) else {
+            return nil
+        }
+
+        let tty = String(parts[1])
+        let elapsed = parsePSElapsed(String(parts[2]))
+        let commandLine = String(parts[3]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let provider = processProviderFromCommandLine(commandLine) else {
+            return nil
+        }
+
+        let updatedAt = elapsed.map { now.addingTimeInterval(-$0) } ?? now
+        let isActive = elapsed.map { $0 <= 45 * 60 } ?? true
+        return CLIProcessSessionSnapshot(
+            provider: provider,
+            pid: pid,
+            tty: tty,
+            commandLine: commandLine,
+            updatedAt: updatedAt,
+            isActive: isActive
+        )
+    }
+
+    private static func processProviderFromCommandLine(_ commandLine: String) -> String? {
+        let trimmed = commandLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let lower = trimmed.lowercased()
+        if lower.contains("/applications/codex.app/contents/") ||
+            lower.contains("/applications/claude.app/contents/") {
+            return nil
+        }
+
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !tokens.isEmpty else { return nil }
+        let normalizedTokens = tokens.map { token in
+            URL(fileURLWithPath: token).lastPathComponent.lowercased()
+        }
+
+        if normalizedTokens.contains("codex") { return "codex" }
+        if normalizedTokens.contains("claude") || normalizedTokens.contains("claude-code") { return "claude" }
+        if normalizedTokens.contains("aider") { return "aider" }
+
+        if let moduleIndex = normalizedTokens.firstIndex(of: "-m"),
+           normalizedTokens.indices.contains(moduleIndex + 1),
+           normalizedTokens[moduleIndex + 1] == "aider" {
+            return "aider"
+        }
+        return nil
+    }
+
+    private static func parsePSElapsed(_ raw: String) -> TimeInterval? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let daySplit = trimmed.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: true)
+        let days: Int
+        let timePart: Substring
+        if daySplit.count == 2 {
+            guard let parsedDays = Int(daySplit[0]) else { return nil }
+            days = parsedDays
+            timePart = daySplit[1]
+        } else {
+            days = 0
+            timePart = daySplit[0]
+        }
+
+        let timeComponents = timePart.split(separator: ":")
+        let hours: Int
+        let minutes: Int
+        let seconds: Int
+        switch timeComponents.count {
+        case 2:
+            hours = 0
+            guard let parsedMinutes = Int(timeComponents[0]),
+                  let parsedSeconds = Int(timeComponents[1]) else {
+                return nil
+            }
+            minutes = parsedMinutes
+            seconds = parsedSeconds
+        case 3:
+            guard let parsedHours = Int(timeComponents[0]),
+                  let parsedMinutes = Int(timeComponents[1]),
+                  let parsedSeconds = Int(timeComponents[2]) else {
+                return nil
+            }
+            hours = parsedHours
+            minutes = parsedMinutes
+            seconds = parsedSeconds
+        default:
+            return nil
+        }
+
+        guard days >= 0, hours >= 0, minutes >= 0, seconds >= 0 else { return nil }
+        let totalSeconds = (((days * 24) + hours) * 60 + minutes) * 60 + seconds
+        return TimeInterval(totalSeconds)
     }
 
     private static func parseJSONArguments(_ argumentsJSON: String?) throws -> [String: Any] {

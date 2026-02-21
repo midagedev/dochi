@@ -12,6 +12,8 @@ struct HeartbeatTickResult: Sendable {
     let opportunities: [TaskOpportunity]
     let gitContextSummary: String?
     let detectedChanges: [HeartbeatChangeEvent]
+    let orchestrationOpportunitySummary: String?
+    let sessionHistoryIndexRefreshed: Bool
 
     init(
         timestamp: Date,
@@ -21,7 +23,9 @@ struct HeartbeatTickResult: Sendable {
         error: String?,
         opportunities: [TaskOpportunity] = [],
         gitContextSummary: String? = nil,
-        detectedChanges: [HeartbeatChangeEvent] = []
+        detectedChanges: [HeartbeatChangeEvent] = [],
+        orchestrationOpportunitySummary: String? = nil,
+        sessionHistoryIndexRefreshed: Bool = false
     ) {
         self.timestamp = timestamp
         self.checksPerformed = checksPerformed
@@ -31,6 +35,8 @@ struct HeartbeatTickResult: Sendable {
         self.opportunities = opportunities
         self.gitContextSummary = gitContextSummary
         self.detectedChanges = detectedChanges
+        self.orchestrationOpportunitySummary = orchestrationOpportunitySummary
+        self.sessionHistoryIndexRefreshed = sessionHistoryIndexRefreshed
     }
 }
 
@@ -57,8 +63,10 @@ final class HeartbeatService: Observable {
     private(set) var consecutiveErrors: Int = 0
     private var previousGitInsightSnapshot: [String: GitRepositoryInsight] = [:]
     private var previousCodingSessionSnapshot: [String: UnifiedCodingSession] = [:]
+    private var lastSessionHistoryIndexRefreshAt: Date?
 
     static let maxHistoryCount = 20
+    private static let sessionHistoryRefreshInterval: TimeInterval = 6 * 60 * 60
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -162,6 +170,8 @@ final class HeartbeatService: Observable {
         var gitInsights: [GitRepositoryInsight] = []
         var unifiedCodingSessions: [UnifiedCodingSession] = []
         var detectedChanges: [HeartbeatChangeEvent] = []
+        var orchestrationOpportunitySummary: String?
+        var sessionHistoryIndexRefreshed = false
 
         do {
             try Task.checkCancellation()
@@ -218,6 +228,19 @@ final class HeartbeatService: Observable {
 
                 checksPerformed.append("codingSessions")
                 unifiedCodingSessions = await externalToolManager.listUnifiedCodingSessions(limit: 80)
+                checksPerformed.append("orchestration")
+                orchestrationOpportunitySummary = await detectOrchestrationOpportunity(
+                    manager: externalToolManager,
+                    preferredRepositoryRoot: roots.first?.path
+                )
+
+                if await shouldRefreshSessionHistoryIndex(manager: externalToolManager) {
+                    checksPerformed.append("sessionHistoryIndex")
+                    _ = await externalToolManager.rebuildSessionHistoryIndex(limit: 400)
+                    lastSessionHistoryIndexRefreshAt = Date()
+                    sessionHistoryIndexRefreshed = true
+                    Log.app.info("Heartbeat refreshed session history index")
+                }
             }
 
             // 6. Interest expiration check (K-3)
@@ -328,7 +351,9 @@ final class HeartbeatService: Observable {
             error: errorMessage,
             opportunities: opportunities,
             gitContextSummary: gitContextSummary,
-            detectedChanges: detectedChanges
+            detectedChanges: detectedChanges,
+            orchestrationOpportunitySummary: orchestrationOpportunitySummary,
+            sessionHistoryIndexRefreshed: sessionHistoryIndexRefreshed
         )
         lastTickDate = result.timestamp
         lastTickResult = result
@@ -835,6 +860,43 @@ final class HeartbeatService: Observable {
             return "- [\(root.workDomain)] \(root.name) (\(root.branch)) local:\(root.lastCommitRelative) origin:\(root.upstreamLastCommitRelative) dirty:\(root.changedFileCount)+\(root.untrackedFileCount) \(remoteLabel)"
         }
         return lines.joined(separator: "\n")
+    }
+
+    private func detectOrchestrationOpportunity(
+        manager: ExternalToolSessionManagerProtocol,
+        preferredRepositoryRoot: String?
+    ) async -> String? {
+        let selection = await manager.previewSessionForOrchestration(repositoryRoot: preferredRepositoryRoot)
+        switch selection.action {
+        case .reuseT0Active, .attachT1:
+            if let selected = selection.selectedSession {
+                return "action=\(selection.action.rawValue) provider=\(selected.provider) session=\(selected.nativeSessionId)"
+            }
+            return "action=\(selection.action.rawValue)"
+        case .createT0:
+            return "action=create_t0 repository=\(selection.repositoryRoot ?? "(none)")"
+        case .analyzeOnly:
+            return "action=analyze_only"
+        case .none:
+            return nil
+        }
+    }
+
+    private func shouldRefreshSessionHistoryIndex(
+        manager: ExternalToolSessionManagerProtocol,
+        now: Date = Date()
+    ) async -> Bool {
+        if let last = lastSessionHistoryIndexRefreshAt,
+           now.timeIntervalSince(last) < Self.sessionHistoryRefreshInterval {
+            return false
+        }
+
+        let status = manager.sessionHistoryIndexStatus()
+        guard status.chunkCount == 0 || status.lastIndexedAt == nil else {
+            guard let indexedAt = status.lastIndexedAt else { return true }
+            return now.timeIntervalSince(indexedAt) >= Self.sessionHistoryRefreshInterval
+        }
+        return true
     }
 
     private func parseKanbanContextLine(_ line: String) -> (cardTitle: String, boardName: String?) {

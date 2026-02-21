@@ -25,6 +25,12 @@
 - Logging: use `Log.*` (`os.Logger`); avoid `print()`.
 - Naming: `UpperCamelCase` for types/files, `lowerCamelCase` for properties/functions, test classes end with `Tests`.
 
+## Design Direction
+- Optimize for the best merged architecture, not short-term legacy preservation.
+- Prefer replacing brittle legacy paths with cleaner boundaries over layering new flags/branches.
+- When refactoring behavior, update call sites and tests in the same change so the new structure becomes the default path.
+- Avoid "temporary compatibility" unless explicitly required by product/runtime constraints.
+
 ## Testing Guidelines
 - Framework: XCTest via Xcode test targets.
 - Every feature change should ship with unit tests (happy path, state transitions, and failure paths).

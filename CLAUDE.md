@@ -122,6 +122,7 @@ xcodebuild test -project Dochi.xcodeproj -scheme Dochi -destination 'platform=ma
 - macOS 14+ deployment target
 - `project.yml` auto-includes all files under `Dochi/` path — no need to add new files manually
 - **기능 구현 = 코드 + 테스트**: 모든 기능은 단위 테스트와 쌍으로 작성. 빌드 후 `xcodebuild test` 통과 필수
+- **설계 원칙**: 레거시 보존보다 merge 이후 구조 개선을 우선. 임시 호환 레이어 누적을 피하고, 새 구조를 기본 경로로 정착시킬 것
 
 ## Swift Code Quality Rules
 
