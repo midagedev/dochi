@@ -396,16 +396,20 @@ final class HeartbeatService: Observable {
         let currentGitSnapshot = Self.gitSnapshotIndex(from: gitInsights)
         let currentSessionSnapshot = Self.codingSessionSnapshotIndex(from: codingSessions)
 
-        let gitEvents = Self.diffGitSnapshot(
-            previous: previousGitInsightSnapshot,
-            current: currentGitSnapshot,
-            timestamp: timestamp
-        )
-        let sessionEvents = Self.diffCodingSessionSnapshot(
-            previous: previousCodingSessionSnapshot,
-            current: currentSessionSnapshot,
-            timestamp: timestamp
-        )
+        let gitEvents = settings.heartbeatTrackGitChanges
+            ? Self.diffGitSnapshot(
+                previous: previousGitInsightSnapshot,
+                current: currentGitSnapshot,
+                timestamp: timestamp
+            )
+            : []
+        let sessionEvents = settings.heartbeatTrackCodingSessionChanges
+            ? Self.diffCodingSessionSnapshot(
+                previous: previousCodingSessionSnapshot,
+                current: currentSessionSnapshot,
+                timestamp: timestamp
+            )
+            : []
 
         previousGitInsightSnapshot = currentGitSnapshot
         previousCodingSessionSnapshot = currentSessionSnapshot
