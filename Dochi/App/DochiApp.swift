@@ -1589,7 +1589,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeSessionMetrics(
+    nonisolated static func handleBridgeSessionMetrics(
         params _: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1646,7 +1646,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorSelectSession(
+    nonisolated static func handleBridgeOrchestratorSelectSession(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1711,7 +1711,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorExecute(
+    nonisolated static func handleBridgeOrchestratorExecute(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
@@ -1841,7 +1841,7 @@ struct DochiApp: App {
         }
     }
 
-    nonisolated private static func handleBridgeOrchestratorStatus(
+    nonisolated static func handleBridgeOrchestratorStatus(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol,
         orchestrationSummaryService: any OrchestrationSummaryServiceProtocol
@@ -1921,7 +1921,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorSummarize(
+    nonisolated static func handleBridgeOrchestratorSummarize(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol,
         orchestrationSummaryService: any OrchestrationSummaryServiceProtocol

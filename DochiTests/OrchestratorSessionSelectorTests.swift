@@ -195,3 +195,193 @@ final class OrchestratorSessionSelectorTests: XCTestCase {
         )
     }
 }
+
+@MainActor
+final class DochiAppOrchestratorBridgeFlowTests: XCTestCase {
+
+    func testHandleBridgeOrchestratorExecuteReturnsSelectionAndGuardPayload() async throws {
+        let manager = MockExternalToolSessionManager()
+        let profile = ExternalToolProfile(
+            name: "Codex",
+            command: "codex",
+            workingDirectory: "/tmp/repo"
+        )
+        manager.saveProfile(profile)
+
+        let runtimeSessionId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        manager.sessions = [
+            ExternalToolSession(
+                id: runtimeSessionId,
+                profileId: profile.id,
+                tmuxSessionName: "mock-session",
+                status: .idle,
+                startedAt: Date()
+            ),
+        ]
+
+        manager.mockOrchestrationSelection = OrchestrationSessionSelection(
+            action: .attachT1,
+            reason: "attach path",
+            repositoryRoot: "/tmp/repo",
+            selectedSession: makeUnifiedSession(
+                provider: "codex",
+                nativeSessionId: "sess-a",
+                runtimeSessionId: runtimeSessionId.uuidString,
+                tier: .t1Attach,
+                state: .active,
+                repositoryRoot: "/tmp/repo"
+            )
+        )
+        manager.mockOrchestrationDecision = OrchestrationExecutionDecision(
+            kind: .allowed,
+            policyCode: .t1AllowNonDestructive,
+            commandClass: .nonDestructive,
+            reason: "allowed",
+            isDestructiveCommand: false
+        )
+
+        let result = await DochiApp.handleBridgeOrchestratorExecute(
+            params: [
+                "repository_root": "/tmp/repo",
+                "command": "git status",
+            ],
+            externalToolManager: manager
+        )
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.result["status"] as? String, "sent")
+        XCTAssertEqual(manager.sendCommandCallCount, 1)
+        XCTAssertEqual(manager.lastSentCommand, "git status")
+
+        let selection = try XCTUnwrap(result.result["selection"] as? [String: Any])
+        XCTAssertEqual(selection["action"] as? String, "attach_t1")
+
+        let guardPayload = try XCTUnwrap(result.result["guard"] as? [String: Any])
+        XCTAssertEqual(guardPayload["decision"] as? String, "allowed")
+        XCTAssertEqual(guardPayload["policy_code"] as? String, "policy_t1_allow_non_destructive")
+    }
+
+    func testHandleBridgeOrchestratorStatusBuildsSummaryContract() async throws {
+        let manager = MockExternalToolSessionManager()
+        let profile = ExternalToolProfile(
+            name: "Codex",
+            command: "codex",
+            workingDirectory: "/tmp/repo"
+        )
+        manager.saveProfile(profile)
+
+        let runtimeSessionId = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        manager.sessions = [
+            ExternalToolSession(
+                id: runtimeSessionId,
+                profileId: profile.id,
+                tmuxSessionName: "mock-session",
+                status: .busy,
+                startedAt: Date()
+            ),
+        ]
+
+        manager.mockOrchestrationSelection = OrchestrationSessionSelection(
+            action: .reuseT0Active,
+            reason: "reuse active",
+            repositoryRoot: "/tmp/repo",
+            selectedSession: makeUnifiedSession(
+                provider: "codex",
+                nativeSessionId: "sess-b",
+                runtimeSessionId: runtimeSessionId.uuidString,
+                tier: .t0Full,
+                state: .active,
+                repositoryRoot: "/tmp/repo"
+            )
+        )
+        manager.mockOutputLines = [
+            "Compiling modules...",
+            "Build failed: 2 errors",
+            "error: test failed",
+        ]
+
+        let result = await DochiApp.handleBridgeOrchestratorStatus(
+            params: [
+                "repository_root": "/tmp/repo",
+                "lines": 80,
+            ],
+            externalToolManager: manager,
+            orchestrationSummaryService: OrchestrationSummaryService()
+        )
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.result["result_kind"] as? String, "failed")
+        XCTAssertEqual(result.result["line_count"] as? Int, 3)
+
+        let summary = result.result["summary"] as? String
+        XCTAssertTrue(summary?.contains("실패") == true)
+
+        let highlights = result.result["highlights"] as? [String]
+        XCTAssertFalse((highlights ?? []).isEmpty)
+
+        let sessionPayload = try XCTUnwrap(result.result["session"] as? [String: Any])
+        XCTAssertEqual(sessionPayload["session_id"] as? String, runtimeSessionId.uuidString)
+    }
+
+    func testHandleBridgeSessionMetricsIncludesRequiredKPIFields() async throws {
+        let manager = MockExternalToolSessionManager()
+        manager.mockSessionManagementKPIReport = SessionManagementKPIReport(
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            repositoryAssignmentSuccessRate: 0.75,
+            dedupCorrectionRate: 0.2,
+            activityClassificationAccuracy: 0.5,
+            sessionSelectionFailureRate: 0.25,
+            historySearchHitRate: 0.6,
+            counters: SessionManagementKPICounters(
+                repositoryAssignedCount: 3,
+                repositoryTotalCount: 4,
+                dedupCandidateCount: 10,
+                dedupCorrectionCount: 2,
+                selectionAttemptCount: 8,
+                selectionFailureCount: 2,
+                historySearchQueryCount: 5,
+                historySearchHitCount: 3,
+                activityFeedbackSampleCount: 4,
+                activityFeedbackMatchedCount: 2,
+                activityStateDistribution: ["active": 2]
+            )
+        )
+
+        let result = await DochiApp.handleBridgeSessionMetrics(params: [:], externalToolManager: manager)
+
+        XCTAssertTrue(result.success)
+        let metrics = try XCTUnwrap(result.result["metrics"] as? [String: Any])
+        XCTAssertEqual(metrics["repository_assignment_success_rate"] as? Double, 0.75)
+        XCTAssertEqual(metrics["session_selection_failure_rate"] as? Double, 0.25)
+        XCTAssertEqual(metrics["history_search_hit_rate"] as? Double, 0.6)
+
+        let summary = result.result["summary"] as? String
+        XCTAssertTrue(summary?.contains("selection_failure_rate") == true)
+        XCTAssertTrue(summary?.contains("history_search_hit_rate") == true)
+    }
+
+    private func makeUnifiedSession(
+        provider: String,
+        nativeSessionId: String,
+        runtimeSessionId: String?,
+        tier: CodingSessionControllabilityTier,
+        state: CodingSessionActivityState,
+        repositoryRoot: String?
+    ) -> UnifiedCodingSession {
+        UnifiedCodingSession(
+            source: "test",
+            runtimeType: runtimeSessionId == nil ? .file : .tmux,
+            controllabilityTier: tier,
+            provider: provider,
+            nativeSessionId: nativeSessionId,
+            runtimeSessionId: runtimeSessionId,
+            workingDirectory: repositoryRoot,
+            repositoryRoot: repositoryRoot,
+            path: "/tmp/\(nativeSessionId).jsonl",
+            updatedAt: Date(),
+            isActive: state == .active || state == .idle,
+            activityScore: 90,
+            activityState: state
+        )
+    }
+}

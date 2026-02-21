@@ -976,6 +976,8 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var sessionHistoryIndexStatusCallCount = 0
     var rebuildSessionHistoryIndexCallCount = 0
     var searchSessionHistoryCallCount = 0
+    var listUnifiedCodingSessionsCallCount = 0
+    var listUnifiedCodingSessionsForObservabilityCallCount = 0
 
     var lastSavedProfile: ExternalToolProfile?
     var lastSentCommand: String?
@@ -1006,6 +1008,7 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         counters: SessionManagementKPICounters()
     )
     var mockSessionHistoryResults: [SessionHistorySearchResult] = []
+    var mockUnifiedCodingSessions: [UnifiedCodingSession] = []
     var mockSessionHistoryIndexStatus = SessionHistoryIndexStatus(
         chunkCount: 0,
         lastIndexedAt: nil,
@@ -1180,6 +1183,16 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     ) {
         _ = (provider, nativeSessionId, path, repositoryRoot)
         setManualRepositoryBindingCallCount += 1
+    }
+
+    func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession] {
+        listUnifiedCodingSessionsCallCount += 1
+        return Array(mockUnifiedCodingSessions.prefix(max(1, limit)))
+    }
+
+    func listUnifiedCodingSessionsForObservability(limit: Int) async -> [UnifiedCodingSession] {
+        listUnifiedCodingSessionsForObservabilityCallCount += 1
+        return Array(mockUnifiedCodingSessions.prefix(max(1, limit)))
     }
 
     func selectSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {

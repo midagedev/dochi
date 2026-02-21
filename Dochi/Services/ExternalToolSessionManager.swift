@@ -54,6 +54,7 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
     // Local discovery (file-backed sessions from CLI tools)
     func discoverLocalCodingSessions(limit: Int) async -> [DiscoveredCodingSession]
     func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession]
+    func listUnifiedCodingSessionsForObservability(limit: Int) async -> [UnifiedCodingSession]
     func setManualRepositoryBinding(
         provider: String,
         nativeSessionId: String,
@@ -113,6 +114,18 @@ extension ExternalToolSessionManagerProtocol {
 
     func listUnifiedCodingSessions(limit _: Int) async -> [UnifiedCodingSession] {
         []
+    }
+
+    func listUnifiedCodingSessionsForObservability(limit: Int) async -> [UnifiedCodingSession] {
+        await listUnifiedCodingSessions(limit: limit)
+    }
+
+    func previewSessionForOrchestration(repositoryRoot: String?) async -> OrchestrationSessionSelection {
+        let unified = await listUnifiedCodingSessionsForObservability(limit: 240)
+        return ExternalToolSessionManager.selectSessionForOrchestration(
+            sessions: unified,
+            repositoryRoot: repositoryRoot
+        )
     }
 
     func setManualRepositoryBinding(
@@ -897,6 +910,17 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     }
 
     func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession] {
+        await listUnifiedCodingSessions(limit: limit, trackKPI: true)
+    }
+
+    func listUnifiedCodingSessionsForObservability(limit: Int) async -> [UnifiedCodingSession] {
+        await listUnifiedCodingSessions(limit: limit, trackKPI: false)
+    }
+
+    private func listUnifiedCodingSessions(
+        limit: Int,
+        trackKPI: Bool
+    ) async -> [UnifiedCodingSession] {
         let effectiveLimit = max(1, min(300, limit))
         let now = Date()
         let sessionSnapshots: [RuntimeSessionSnapshot] = sessions.compactMap { session in
@@ -970,10 +994,12 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             return (sessions: deduplicated, dedupCandidates: adjusted.count)
         }.value
 
-        updateKPIForUnifiedSnapshot(
-            sessions: dedupResult.sessions,
-            dedupCandidateCount: dedupResult.dedupCandidates
-        )
+        if trackKPI {
+            updateKPIForUnifiedSnapshot(
+                sessions: dedupResult.sessions,
+                dedupCandidateCount: dedupResult.dedupCandidates
+            )
+        }
         return dedupResult.sessions
     }
 
