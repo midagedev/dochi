@@ -132,6 +132,135 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertFalse(mapped.first?.isUnassigned ?? true)
     }
 
+    func testApplyManualRepositoryBindingsLearnsFromPathPrefixForUnassignedSession() {
+        let session = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "claude",
+            nativeSessionId: "sess-new",
+            runtimeSessionId: nil,
+            workingDirectory: nil,
+            repositoryRoot: nil,
+            path: "/tmp/.claude/projects/-Users-hckim-repo-dochi/sess-new.jsonl",
+            updatedAt: Date(),
+            isActive: true
+        )
+        let learnedKey = ExternalToolSessionManager.sessionBindingKey(
+            provider: "claude",
+            nativeSessionId: "sess-old",
+            path: "/tmp/.claude/projects/-Users-hckim-repo-dochi/sess-old.jsonl"
+        )
+
+        let mapped = ExternalToolSessionManager.applyManualRepositoryBindings(
+            [session],
+            manualBindings: [learnedKey: "/tmp/repo-dochi"]
+        )
+
+        XCTAssertEqual(mapped.count, 1)
+        XCTAssertEqual(mapped.first?.repositoryRoot, "/tmp/repo-dochi")
+    }
+
+    func testApplyManualRepositoryBindingsUsesDeterministicTieBreakerForConflicts() {
+        let session = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "codex",
+            nativeSessionId: "sess-c",
+            runtimeSessionId: nil,
+            workingDirectory: nil,
+            repositoryRoot: nil,
+            path: "/tmp/.codex/sessions/2026/02/19/c.jsonl",
+            updatedAt: Date(),
+            isActive: true
+        )
+        let keyA = ExternalToolSessionManager.sessionBindingKey(
+            provider: "codex",
+            nativeSessionId: "sess-a",
+            path: "/tmp/.codex/sessions/2026/02/19/a.jsonl"
+        )
+        let keyB = ExternalToolSessionManager.sessionBindingKey(
+            provider: "codex",
+            nativeSessionId: "sess-b",
+            path: "/tmp/.codex/sessions/2026/02/19/b.jsonl"
+        )
+
+        let mapped = ExternalToolSessionManager.applyManualRepositoryBindings(
+            [session],
+            manualBindings: [
+                keyA: "/tmp/repo-z",
+                keyB: "/tmp/repo-a",
+            ]
+        )
+
+        XCTAssertEqual(mapped.first?.repositoryRoot, "/tmp/repo-a")
+    }
+
+    func testApplyManualRepositoryBindingsPrefersExactMatchOverHeuristic() {
+        let session = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "codex",
+            nativeSessionId: "sess-exact",
+            runtimeSessionId: nil,
+            workingDirectory: nil,
+            repositoryRoot: nil,
+            path: "/tmp/.codex/sessions/2026/02/19/exact.jsonl",
+            updatedAt: Date(),
+            isActive: true
+        )
+        let exactKey = ExternalToolSessionManager.sessionBindingKey(
+            provider: "codex",
+            nativeSessionId: "sess-exact",
+            path: "/tmp/.codex/sessions/2026/02/19/exact.jsonl"
+        )
+        let heuristicKey = ExternalToolSessionManager.sessionBindingKey(
+            provider: "codex",
+            nativeSessionId: "sess-template",
+            path: "/tmp/.codex/sessions/2026/02/19/template.jsonl"
+        )
+
+        let mapped = ExternalToolSessionManager.applyManualRepositoryBindings(
+            [session],
+            manualBindings: [
+                heuristicKey: "/tmp/repo-heuristic",
+                exactKey: "/tmp/repo-exact",
+            ]
+        )
+
+        XCTAssertEqual(mapped.first?.repositoryRoot, "/tmp/repo-exact")
+    }
+
+    func testApplyManualRepositoryBindingsDoesNotOverrideAssignedRepoWithoutExactMatch() {
+        let session = UnifiedCodingSession(
+            source: "file",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "codex",
+            nativeSessionId: "sess-assigned",
+            runtimeSessionId: nil,
+            workingDirectory: "/tmp/repo-existing",
+            repositoryRoot: "/tmp/repo-existing",
+            path: "/tmp/.codex/sessions/2026/02/19/assigned.jsonl",
+            updatedAt: Date(),
+            isActive: true
+        )
+        let learnedKey = ExternalToolSessionManager.sessionBindingKey(
+            provider: "codex",
+            nativeSessionId: "sess-template",
+            path: "/tmp/.codex/sessions/2026/02/19/template.jsonl"
+        )
+
+        let mapped = ExternalToolSessionManager.applyManualRepositoryBindings(
+            [session],
+            manualBindings: [learnedKey: "/tmp/repo-other"]
+        )
+
+        XCTAssertEqual(mapped.first?.repositoryRoot, "/tmp/repo-existing")
+    }
+
     private func makeSession(
         provider: String,
         nativeId: String,

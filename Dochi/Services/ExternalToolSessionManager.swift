@@ -2106,6 +2106,62 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         return "\(provider.lowercased())|\(nativeSessionId)|\(normalizedPath)"
     }
 
+    nonisolated static func parseSessionBindingKey(
+        _ key: String
+    ) -> (provider: String, nativeSessionId: String, path: String)? {
+        let parts = key.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        let provider = String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let nativeSessionId = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = String(parts[2]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !provider.isEmpty, !nativeSessionId.isEmpty, !path.isEmpty else {
+            return nil
+        }
+        return (provider: provider, nativeSessionId: nativeSessionId, path: path)
+    }
+
+    nonisolated static func inferRepositoryRootFromManualBindings(
+        provider: String,
+        path: String,
+        manualBindings: [String: String]
+    ) -> String? {
+        guard !manualBindings.isEmpty else { return nil }
+        guard let targetPrefix = bindingLearningPrefix(for: path) else { return nil }
+        let targetProvider = provider.lowercased()
+
+        var scoreByRepository: [String: (bestPrefixLength: Int, matchCount: Int)] = [:]
+        for (key, manualRoot) in manualBindings {
+            guard let decoded = parseSessionBindingKey(key),
+                  decoded.provider.lowercased() == targetProvider,
+                  let candidatePrefix = bindingLearningPrefix(for: decoded.path) else {
+                continue
+            }
+            guard targetPrefix == candidatePrefix || targetPrefix.hasPrefix(candidatePrefix + "/") else {
+                continue
+            }
+
+            let normalizedRoot = URL(fileURLWithPath: manualRoot).standardizedFileURL.path
+            let prefixLength = candidatePrefix.count
+            var score = scoreByRepository[normalizedRoot] ?? (bestPrefixLength: 0, matchCount: 0)
+            score.bestPrefixLength = max(score.bestPrefixLength, prefixLength)
+            score.matchCount += 1
+            scoreByRepository[normalizedRoot] = score
+        }
+
+        return scoreByRepository
+            .sorted(by: { lhs, rhs in
+                if lhs.value.bestPrefixLength != rhs.value.bestPrefixLength {
+                    return lhs.value.bestPrefixLength > rhs.value.bestPrefixLength
+                }
+                if lhs.value.matchCount != rhs.value.matchCount {
+                    return lhs.value.matchCount > rhs.value.matchCount
+                }
+                return lhs.key < rhs.key
+            })
+            .first?
+            .key
+    }
+
     nonisolated static func applyManualRepositoryBindings(
         _ sessions: [UnifiedCodingSession],
         manualBindings: [String: String]
@@ -2117,7 +2173,20 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 nativeSessionId: session.nativeSessionId,
                 path: session.path
             )
-            guard let manualRoot = manualBindings[key] else { return session }
+            let resolvedRoot: String?
+            if let exactRoot = manualBindings[key] {
+                resolvedRoot = URL(fileURLWithPath: exactRoot).standardizedFileURL.path
+            } else if session.repositoryRoot == nil {
+                resolvedRoot = inferRepositoryRootFromManualBindings(
+                    provider: session.provider,
+                    path: session.path,
+                    manualBindings: manualBindings
+                )
+            } else {
+                resolvedRoot = nil
+            }
+
+            guard let manualRoot = resolvedRoot else { return session }
             return UnifiedCodingSession(
                 source: session.source,
                 runtimeType: session.runtimeType,
@@ -2135,6 +2204,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 activitySignals: session.activitySignals
             )
         }
+    }
+
+    nonisolated private static func bindingLearningPrefix(for rawPath: String) -> String? {
+        guard !rawPath.contains("://") else { return nil }
+        let standardized = URL(fileURLWithPath: rawPath).standardizedFileURL.path
+        let directory = URL(fileURLWithPath: standardized).deletingLastPathComponent().path
+        guard !directory.isEmpty, directory != "/" else { return nil }
+        return directory
     }
 
     nonisolated static func activityStateRank(_ state: CodingSessionActivityState) -> Int {
