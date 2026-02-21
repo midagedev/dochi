@@ -14,6 +14,13 @@ struct ExternalToolListView: View {
     @State private var explorerFilter = SessionExplorerFilter()
     @State private var sortOption: SessionExplorerSortOption = .activity
     @State private var mappingNotice: String?
+    @State private var expandedRepositoryGroups: Set<String> = []
+    @State private var didInitializeRepositoryExpansion = false
+    private static let relativeDateFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
 
     private var runningSessions: [ExternalToolSession] {
         manager.sessions.filter { $0.status != .dead }
@@ -36,6 +43,13 @@ struct ExternalToolListView: View {
         SessionExplorerViewStateBuilder.repositorySummaries(from: unifiedSessions)
     }
 
+    private var repositorySessionGroups: [RepositorySessionGroup] {
+        SessionExplorerViewStateBuilder.repositoryGroups(
+            sessions: filteredUnifiedSessions.filter { !$0.isUnassigned },
+            sort: sortOption
+        )
+    }
+
     private var filteredUnifiedSessions: [UnifiedCodingSession] {
         let filtered = SessionExplorerViewStateBuilder.filteredSessions(
             sessions: unifiedSessions,
@@ -51,6 +65,8 @@ struct ExternalToolListView: View {
                 session.path,
                 session.repositoryRoot ?? "",
                 session.workingDirectory ?? "",
+                session.title ?? "",
+                session.summary ?? "",
             ].joined(separator: " ").lowercased()
             return haystack.contains(query)
         }
@@ -224,7 +240,7 @@ struct ExternalToolListView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("세션 탐색기")
                     .font(.system(size: 13, weight: .semibold))
-                Text("레포 대시보드 / 필터 / Unassigned 매핑")
+                Text("Repo-first 탐색 / quick action / Unassigned 매핑")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -293,7 +309,7 @@ struct ExternalToolListView: View {
 
     @ViewBuilder
     private var sessionExplorerSection: some View {
-        sectionHeader("Session Explorer")
+        sectionHeader("Repo Session Explorer")
 
         VStack(spacing: 6) {
             TextField("세션 검색 (provider/id/path)", text: $searchText)
@@ -344,18 +360,15 @@ struct ExternalToolListView: View {
         .padding(.horizontal, 10)
         .padding(.bottom, 6)
 
-        if filteredUnifiedSessions.isEmpty {
+        if repositorySessionGroups.isEmpty {
             Text("필터 조건에 맞는 세션이 없습니다.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
         } else {
-            ForEach(
-                filteredUnifiedSessions.map { (key: ExternalToolSessionManager.sessionStableKey($0), value: $0) },
-                id: \.key
-            ) { item in
-                unifiedSessionRow(item.value)
+            ForEach(repositorySessionGroups) { group in
+                repositoryGroupRow(group)
             }
         }
     }
@@ -407,7 +420,101 @@ struct ExternalToolListView: View {
     }
 
     @ViewBuilder
+    private func repositoryGroupRow(_ group: RepositorySessionGroup) -> some View {
+        let isExpanded = expandedRepositoryGroups.contains(group.repositoryRoot)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                Button {
+                    toggleRepositoryGroup(group.repositoryRoot)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 10)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.displayName)
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                            Text("세션 \(group.sessionCount) · 활성 \(group.activeSessionCount) · 오류 \(group.errorSessionCount)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                            Text("업데이트 \(relativeTimestamp(group.lastActivityAt))")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Menu {
+                    Menu("새 세션 시작") {
+                        let candidates = startableProfiles(for: group.repositoryRoot)
+                        if candidates.isEmpty {
+                            Text("시작 가능한 프로파일이 없습니다.")
+                        } else {
+                            ForEach(candidates) { profile in
+                                Button(profile.name) {
+                                    Task { await startProfileSession(profile) }
+                                }
+                            }
+                        }
+                    }
+                    Button("attach 가능한 세션 추천") {
+                        Task {
+                            await recommendAttachableSession(for: group.repositoryRoot)
+                        }
+                    }
+                    Menu("Unassigned 매핑") {
+                        if unassignedUnifiedSessions.isEmpty {
+                            Text("매핑할 Unassigned 세션이 없습니다.")
+                        } else {
+                            ForEach(
+                                unassignedUnifiedSessions.prefix(12).map {
+                                    (key: ExternalToolSessionManager.sessionStableKey($0), value: $0)
+                                },
+                                id: \.key
+                            ) { item in
+                                let session = item.value
+                                Button("[\(session.provider)] \(session.nativeSessionId)") {
+                                    applyManualMapping(session: session, repositoryRoot: group.repositoryRoot)
+                                }
+                            }
+                            if unassignedUnifiedSessions.count > 12 {
+                                Text("추가 \(unassignedUnifiedSessions.count - 12)개는 Unassigned Queue에서 선택")
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 12))
+                }
+                .menuStyle(.borderlessButton)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+
+            if isExpanded {
+                ForEach(
+                    group.sessions.map { (key: ExternalToolSessionManager.sessionStableKey($0), value: $0) },
+                    id: \.key
+                ) { item in
+                    unifiedSessionRow(item.value)
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
     private func unifiedSessionRow(_ session: UnifiedCodingSession) -> some View {
+        let sessionTitle = normalizedSessionTitle(session)
         HStack(spacing: 8) {
             Circle()
                 .fill(activityColor(session.activityState))
@@ -427,12 +534,50 @@ struct ExternalToolListView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
 
+                if let sessionTitle {
+                    Text(sessionTitle)
+                        .font(.system(size: 10))
+                        .lineLimit(1)
+                }
+
                 Text("state=\(session.activityState.rawValue), score=\(session.activityScore), repo=\(session.repositoryRoot ?? "(unassigned)")")
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                Text("업데이트 \(relativeTimestamp(session.updatedAt))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
             }
             Spacer()
+
+            Menu {
+                if let repositoryRoot = session.repositoryRoot {
+                    Button("이 레포만 보기") {
+                        explorerFilter.repositoryRoot = normalizedRepositoryPath(repositoryRoot)
+                        explorerFilter.unassignedOnly = false
+                    }
+                }
+                if session.isUnassigned {
+                    Menu("레포 연결") {
+                        if managedRepositories.isEmpty {
+                            Text("관리 중인 레포가 없습니다.")
+                        } else {
+                            ForEach(managedRepositories) { repository in
+                                Button(repository.name) {
+                                    applyManualMapping(session: session, repositoryRoot: repository.rootPath)
+                                }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+            .menuStyle(.borderlessButton)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -543,25 +688,7 @@ struct ExternalToolListView: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button("시작") {
-                Task { @MainActor in
-                    startingProfileId = profile.id
-                    defer {
-                        if startingProfileId == profile.id {
-                            startingProfileId = nil
-                        }
-                    }
-                    do {
-                        try await manager.startSession(profileId: profile.id)
-                        if let active = manager.activeSession(for: profile.id) {
-                            selectedSessionId = active.id
-                            selectedProfileId = nil
-                        } else {
-                            startErrorMessage = "세션이 즉시 종료되었습니다. 프로파일 설정을 확인해주세요."
-                        }
-                    } catch {
-                        startErrorMessage = error.localizedDescription
-                    }
-                }
+                Task { await startProfileSession(profile) }
             }
             .disabled(startingProfileId == profile.id)
             Button("편집") {
@@ -591,6 +718,7 @@ struct ExternalToolListView: View {
         if let repositoryRoot = explorerFilter.repositoryRoot {
             explorerFilter.repositoryRoot = normalizedRepositoryPath(repositoryRoot)
         }
+        syncExpandedRepositoryGroups()
         isRefreshingUnified = false
     }
 
@@ -611,6 +739,102 @@ struct ExternalToolListView: View {
         Task {
             await refreshUnifiedSessions()
         }
+    }
+
+    @MainActor
+    private func startProfileSession(_ profile: ExternalToolProfile) async {
+        startingProfileId = profile.id
+        defer {
+            if startingProfileId == profile.id {
+                startingProfileId = nil
+            }
+        }
+        do {
+            try await manager.startSession(profileId: profile.id)
+            if let active = manager.activeSession(for: profile.id) {
+                selectedSessionId = active.id
+                selectedProfileId = nil
+            } else {
+                startErrorMessage = "세션이 즉시 종료되었습니다. 프로파일 설정을 확인해주세요."
+            }
+            await refreshUnifiedSessions()
+        } catch {
+            startErrorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func recommendAttachableSession(for repositoryRoot: String) async {
+        let selection = await manager.selectSessionForOrchestration(repositoryRoot: repositoryRoot)
+        explorerFilter.repositoryRoot = repositoryRoot
+        explorerFilter.activeOnly = true
+        switch selection.action {
+        case .reuseT0Active, .attachT1, .analyzeOnly:
+            if let selected = selection.selectedSession {
+                searchText = selected.nativeSessionId
+                mappingNotice = "추천 세션 [\(selected.provider)] \(selected.nativeSessionId) · \(selection.reason)"
+            } else {
+                mappingNotice = selection.reason
+            }
+        case .createT0:
+            mappingNotice = "이 레포에서 재사용 가능한 세션이 없습니다. 새 세션 시작을 선택하세요."
+        case .none:
+            mappingNotice = selection.reason
+        }
+    }
+
+    private func startableProfiles(for repositoryRoot: String) -> [ExternalToolProfile] {
+        unlaunchedProfiles
+            .filter { profile in
+                SessionExplorerViewStateBuilder.repositoryContainsWorkingDirectory(
+                    repositoryRoot: repositoryRoot,
+                    workingDirectory: profile.workingDirectory
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+    }
+
+    private func syncExpandedRepositoryGroups() {
+        let available = Set(
+            SessionExplorerViewStateBuilder.repositoryGroups(
+                sessions: unifiedSessions.filter { !$0.isUnassigned },
+                sort: sortOption
+            )
+            .map(\.repositoryRoot)
+        )
+
+        if !didInitializeRepositoryExpansion {
+            expandedRepositoryGroups = available
+            didInitializeRepositoryExpansion = true
+        } else {
+            expandedRepositoryGroups.formIntersection(available)
+        }
+    }
+
+    private func toggleRepositoryGroup(_ repositoryRoot: String) {
+        if expandedRepositoryGroups.contains(repositoryRoot) {
+            expandedRepositoryGroups.remove(repositoryRoot)
+        } else {
+            expandedRepositoryGroups.insert(repositoryRoot)
+        }
+    }
+
+    private func normalizedSessionTitle(_ session: UnifiedCodingSession) -> String? {
+        guard let raw = session.title ?? session.summary else { return nil }
+        let normalized = raw
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        return String(normalized.prefix(100))
+    }
+
+    private func relativeTimestamp(_ date: Date?) -> String {
+        guard let date else { return "-" }
+        return Self.relativeDateFormatter.localizedString(for: date, relativeTo: Date())
     }
 
     private func normalizedRepositoryPath(_ path: String) -> String {
