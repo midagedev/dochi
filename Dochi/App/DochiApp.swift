@@ -114,6 +114,7 @@ struct DochiApp: App {
     private let interestDiscoveryService: InterestDiscoveryService
     private let externalToolManager: ExternalToolSessionManager
     private let telegramProactiveRelay: TelegramProactiveRelay
+    private let heartbeatChangeJournalService: HeartbeatChangeJournalService
     private let deviceHeartbeatService: DeviceHeartbeatService
     private let controlPlaneService: LocalControlPlaneService
     private let controlPlaneTokenManager: ControlPlaneTokenManager
@@ -175,6 +176,8 @@ struct DochiApp: App {
         self.usageStore = usageStore
         let toolContextStore = ToolContextStore(baseURL: appSupportURL)
         self.toolContextStore = toolContextStore
+        let heartbeatChangeJournalService = HeartbeatChangeJournalService(baseURL: appSupportURL)
+        self.heartbeatChangeJournalService = heartbeatChangeJournalService
 
         // Plugin Manager (J-4)
         let pluginManager = PluginManager()
@@ -299,6 +302,7 @@ struct DochiApp: App {
 
         heartbeatService.configure(contextService: contextService, sessionContext: sessionContext)
         heartbeatService.setNotificationManager(notificationManager)
+        heartbeatService.setChangeJournalService(heartbeatChangeJournalService)
         heartbeatService.setProactiveHandler { [weak viewModel] message in
             guard let viewModel else { return }
             Log.app.info("Heartbeat proactive message: \(message)")

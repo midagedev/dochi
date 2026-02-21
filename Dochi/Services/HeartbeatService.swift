@@ -55,6 +55,7 @@ final class HeartbeatService: Observable {
     private var externalToolManager: ExternalToolSessionManagerProtocol?
     private var resourceOptimizer: ResourceOptimizerProtocol?
     private var telegramRelay: TelegramProactiveRelayProtocol?
+    private var changeJournalService: HeartbeatChangeJournalProtocol?
 
     // Observable state
     private(set) var lastTickDate: Date?
@@ -101,6 +102,11 @@ final class HeartbeatService: Observable {
     /// Inject TelegramProactiveRelay for Telegram notification delivery (K-6).
     func setTelegramRelay(_ relay: TelegramProactiveRelayProtocol) {
         self.telegramRelay = relay
+    }
+
+    /// Inject change journal persistence service for heartbeat change events.
+    func setChangeJournalService(_ service: HeartbeatChangeJournalProtocol) {
+        self.changeJournalService = service
     }
 
     /// Set a callback for when the heartbeat decides to proactively message the user.
@@ -268,6 +274,7 @@ final class HeartbeatService: Observable {
                 timestamp: Date()
             )
             if !detectedChanges.isEmpty {
+                changeJournalService?.append(events: detectedChanges)
                 Log.app.info("HeartbeatService detected \(detectedChanges.count) change event(s)")
             }
 
