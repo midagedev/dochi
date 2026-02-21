@@ -90,6 +90,47 @@ final class ToolExecutionTests: XCTestCase {
         XCTAssertTrue(result.hasSuffix("..."))
     }
 
+    func testIsErrorResultRecognizesKoreanErrorPrefix() {
+        XCTAssertTrue(ToolExecutionSummary.isErrorResult("오류: 권한이 없습니다."))
+    }
+
+    func testIsControlToolNegotiationResultRecognizesToolsEnableOutput() {
+        let content = """
+        도구 활성화 완료: web_search, open_url
+        이미 활성화된 도구: datetime
+        같은 tools.enable 호출을 반복하지 말고, 이제 실제 작업 도구를 호출하세요.
+        """
+        XCTAssertTrue(ToolExecutionSummary.isControlToolNegotiationResult(content))
+    }
+
+    func testGenerateCompactResultSummaryForToolsEnable() {
+        let content = """
+        도구 활성화 완료: web_search, open_url
+        이미 활성화된 도구: datetime
+        찾을 수 없는 도구: ghost_tool
+        """
+        let summary = ToolExecutionSummary.generateCompactResultSummary(from: content)
+        XCTAssertEqual(summary, "도구 활성화 결과 · 신규 2, 이미 1, 미존재 1")
+    }
+
+    func testGenerateCompactResultSummaryForToolsList() {
+        let content = "도구 목록 (35개):\n- a\n- b"
+        let summary = ToolExecutionSummary.generateCompactResultSummary(from: content)
+        XCTAssertEqual(summary, "도구 목록 조회 (35개)")
+    }
+
+    func testConversationViewShouldDisplayToolMessageForToolsEnableResult() {
+        let content = """
+        도구 활성화 완료: web_search, open_url
+        이미 활성화된 도구: datetime
+        """
+        XCTAssertTrue(ConversationView.shouldDisplayToolMessage(content: content, imageURLs: nil))
+    }
+
+    func testConversationViewShouldDisplayToolMessageForErrorResult() {
+        XCTAssertTrue(ConversationView.shouldDisplayToolMessage(content: "오류: 파일 열기 실패", imageURLs: nil))
+    }
+
     // MARK: - ToolExecutionRecord Codable
 
     func testToolExecutionRecordEncodeDecode() throws {

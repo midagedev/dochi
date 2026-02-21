@@ -144,21 +144,25 @@ struct ConversationView: View {
             }
 
             // Keep tool messages only when they are useful in chat:
-            // errors and visual outputs (e.g., generated images).
+            // errors, tools.* negotiation/control outputs, and visual outputs.
             if message.role == .tool {
-                if let imageURLs = message.imageURLs, !imageURLs.isEmpty {
-                    return true
-                }
-
-                let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return false }
-                return trimmed.hasPrefix("오류:")
-                    || trimmed.localizedCaseInsensitiveContains("error")
-                    || trimmed.localizedCaseInsensitiveContains("실패")
+                return Self.shouldDisplayToolMessage(content: message.content, imageURLs: message.imageURLs)
             }
 
             return true
         }
+    }
+
+    nonisolated static func shouldDisplayToolMessage(content: String, imageURLs: [URL]?) -> Bool {
+        if let imageURLs, !imageURLs.isEmpty {
+            return true
+        }
+
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        return ToolExecutionSummary.isErrorResult(trimmed)
+            || ToolExecutionSummary.isControlToolNegotiationResult(trimmed)
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {

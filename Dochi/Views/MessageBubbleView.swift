@@ -13,6 +13,7 @@ struct MessageBubbleView: View {
     @State private var isHovering = false
     @State private var showCopied = false
     @State private var showFeedbackSheet = false
+    @State private var isToolResultExpanded = false
 
     init(
         message: Message,
@@ -234,6 +235,8 @@ struct MessageBubbleView: View {
         if shouldSuppressToolTextForVisualOutput {
             EmptyView()
                 .frame(width: 0, height: 0)
+        } else if shouldRenderCompactToolResultView {
+            compactToolResultView
         } else
         if message.content.isEmpty && message.toolCalls != nil {
             // Assistant message with only tool calls, no text content
@@ -258,6 +261,65 @@ struct MessageBubbleView: View {
         guard message.role == .tool else { return false }
         guard let imageURLs = message.imageURLs, !imageURLs.isEmpty else { return false }
         return true
+    }
+
+    private var shouldRenderCompactToolResultView: Bool {
+        guard message.role == .tool else { return false }
+        let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty
+    }
+
+    private var compactToolResultView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isToolResultExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isToolResultError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(isToolResultError ? .orange : .green)
+
+                    Text(compactToolResultSummary)
+                        .font(.system(size: fontSize))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Spacer(minLength: 6)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isToolResultExpanded ? 90 : 0))
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isToolResultExpanded {
+                Divider()
+                    .padding(.top, 1)
+
+                Text(renderedContent)
+                    .font(.system(size: max(12, fontSize - 1), design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .onAppear {
+            if isToolResultError {
+                isToolResultExpanded = true
+            }
+        }
+    }
+
+    private var isToolResultError: Bool {
+        ToolExecutionSummary.isErrorResult(message.content)
+    }
+
+    private var compactToolResultSummary: String {
+        ToolExecutionSummary.generateCompactResultSummary(from: message.content)
     }
 
     // MARK: - Inline Image Data Display (I-3)
@@ -309,6 +371,7 @@ struct MessageBubbleView: View {
 
 private struct ToolExecutionSummaryRow: View {
     let records: [ToolExecutionRecord]
+    @State private var isExpanded = false
 
     private var successCount: Int {
         records.filter { !$0.isError }.count
@@ -331,32 +394,55 @@ private struct ToolExecutionSummaryRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: statusIcon)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(statusColor)
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: statusIcon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(statusColor)
 
-            Text("도구 \(records.count)개")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
+                    Text("도구 \(records.count)개")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
 
-            Text("성공 \(successCount)")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                    Text("성공 \(successCount)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
 
-            if errorCount > 0 {
-                Text("실패 \(errorCount)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
+                    if errorCount > 0 {
+                        Text("실패 \(errorCount)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                    }
+
+                    if totalDuration > 0 {
+                        Text(String(format: "%.1f초", totalDuration))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
             }
+            .buttonStyle(.plain)
 
-            if totalDuration > 0 {
-                Text(String(format: "%.1f초", totalDuration))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(records.enumerated()), id: \.offset) { _, record in
+                        ToolExecutionRecordCardView(record: record)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-
-            Spacer()
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
