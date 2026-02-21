@@ -175,6 +175,54 @@ final class BuiltInToolServiceCapabilityRouterTests: XCTestCase {
         XCTAssertLessThan(sessionIndex, finderIndex)
     }
 
+    func testIntentScopedFilteringDropsUnrelatedStatusToolsForCodingIntent() {
+        let service = makeService(routerEnabled: false)
+        service.enableTools(names: ["agent.list", "agent.check_status", "coding.sessions"])
+
+        let schemas = service.availableToolSchemas(
+            for: ["safe", "sensitive"],
+            preferredToolGroups: [],
+            intentHint: "코디야 지금 떠있는 코딩에이전트 목록 확인해줘"
+        )
+        let names = schemaNames(from: schemas)
+
+        XCTAssertTrue(names.contains("tools-_-enable"))
+        XCTAssertTrue(names.contains("coding-_-sessions"))
+        XCTAssertTrue(names.contains("agent-_-list"))
+        XCTAssertFalse(names.contains("tools-_-list"))
+        XCTAssertFalse(names.contains("list_reminders"))
+        XCTAssertFalse(names.contains("list_alarms"))
+        XCTAssertFalse(names.contains("list_timers"))
+        XCTAssertFalse(names.contains("calendar-_-list_events"))
+    }
+
+    func testIntentScopedFilteringFallsBackWhenIntentSignalIsWeak() {
+        let service = makeService(routerEnabled: false)
+
+        let schemas = service.availableToolSchemas(
+            for: ["safe"],
+            preferredToolGroups: [],
+            intentHint: "목록 보여줘"
+        )
+        let names = schemaNames(from: schemas)
+
+        XCTAssertTrue(names.contains("list_reminders"))
+        XCTAssertTrue(names.contains("list_alarms"))
+    }
+
+    func testIntentScopedFilteringKeepsToolsListWhenIntentExplicitlyRequestsToolList() {
+        let service = makeService(routerEnabled: false)
+
+        let schemas = service.availableToolSchemas(
+            for: ["safe"],
+            preferredToolGroups: [],
+            intentHint: "사용 가능한 도구 목록 보여줘"
+        )
+        let names = schemaNames(from: schemas)
+
+        XCTAssertTrue(names.contains("tools-_-list"))
+    }
+
     func testColdStartWithoutSignalsRemainsAlphabetical() {
         let service = makeService(routerEnabled: false)
         service.enableTools(names: ["open_url"])
