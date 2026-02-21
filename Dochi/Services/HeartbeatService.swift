@@ -65,9 +65,12 @@ final class HeartbeatService: Observable {
     private var previousGitInsightSnapshot: [String: GitRepositoryInsight] = [:]
     private var previousCodingSessionSnapshot: [String: UnifiedCodingSession] = [:]
     private var lastSessionHistoryIndexRefreshAt: Date?
+    private var changeAlertLastSentAt: [String: Date] = [:]
 
     static let maxHistoryCount = 20
     private static let sessionHistoryRefreshInterval: TimeInterval = 6 * 60 * 60
+    private static let maxChangeAlertsPerTick = 3
+    private static let maxChangeAlertDedupeEntries = 300
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -276,6 +279,19 @@ final class HeartbeatService: Observable {
             if !detectedChanges.isEmpty {
                 changeJournalService?.append(events: detectedChanges)
                 Log.app.info("HeartbeatService detected \(detectedChanges.count) change event(s)")
+
+                let channel = NotificationChannel(rawValue: settings.heartbeatNotificationChannel) ?? .appOnly
+                if channel != .off {
+                    let alerts = Array(
+                        selectChangeAlertsToSend(
+                            from: detectedChanges,
+                            now: Date()
+                        ).prefix(Self.maxChangeAlertsPerTick)
+                    )
+                    if !alerts.isEmpty {
+                        await sendHeartbeatChangeAlerts(alerts, channel: channel)
+                    }
+                }
             }
 
             consecutiveErrors = 0
@@ -680,6 +696,100 @@ final class HeartbeatService: Observable {
     static func codingSessionIdentityKey(for session: UnifiedCodingSession) -> String {
         let runtimeId = session.runtimeSessionId ?? "-"
         return "\(session.provider.lowercased())|\(session.nativeSessionId)|\(runtimeId)|\(session.path)"
+    }
+
+    func selectChangeAlertsToSend(
+        from events: [HeartbeatChangeEvent],
+        now: Date = Date()
+    ) -> [HeartbeatChangeEvent] {
+        guard settings.heartbeatChangeAlertEnabled else { return [] }
+
+        let cooldownMinutes = max(1, settings.heartbeatChangeAlertCooldownMinutes)
+        let cooldownInterval = TimeInterval(cooldownMinutes * 60)
+        var selected: [HeartbeatChangeEvent] = []
+
+        for event in events where shouldSendChangeAlert(for: event) {
+            if let lastSent = changeAlertLastSentAt[event.dedupeKey],
+               now.timeIntervalSince(lastSent) < cooldownInterval {
+                continue
+            }
+            changeAlertLastSentAt[event.dedupeKey] = now
+            selected.append(event)
+        }
+
+        trimChangeAlertDedupeState()
+        return selected.sorted { lhs, rhs in
+            if lhs.severity != rhs.severity {
+                return severityScore(lhs.severity) > severityScore(rhs.severity)
+            }
+            return lhs.timestamp < rhs.timestamp
+        }
+    }
+
+    func shouldSendChangeAlert(for event: HeartbeatChangeEvent) -> Bool {
+        switch event.eventType {
+        case .codingSessionEnded, .gitDirtySpike:
+            return true
+        case .codingSessionActivityChanged:
+            let nextState = event.metadata["newActivityState"]?.lowercased() ?? ""
+            return nextState == CodingSessionActivityState.stale.rawValue
+                || nextState == CodingSessionActivityState.dead.rawValue
+        case .gitAheadBehindChanged:
+            let oldAhead = numericMetadataValue(event.metadata["oldAhead"])
+            let oldBehind = numericMetadataValue(event.metadata["oldBehind"])
+            let newAhead = numericMetadataValue(event.metadata["newAhead"])
+            let newBehind = numericMetadataValue(event.metadata["newBehind"])
+            let totalDelta = abs(newAhead - oldAhead) + abs(newBehind - oldBehind)
+            return totalDelta >= 4 || newAhead >= 5 || newBehind >= 5
+        default:
+            return false
+        }
+    }
+
+    private func sendHeartbeatChangeAlerts(
+        _ events: [HeartbeatChangeEvent],
+        channel: NotificationChannel
+    ) async {
+        guard !events.isEmpty else { return }
+
+        for event in events {
+            if channel.deliversToApp {
+                notificationManager?.sendHeartbeatChangeNotification(event: event)
+            }
+            if channel.deliversToTelegram {
+                await telegramRelay?.sendHeartbeatChangeAlert(event)
+            }
+        }
+        Log.app.info("HeartbeatService sent \(events.count) change alert(s)")
+    }
+
+    private func trimChangeAlertDedupeState() {
+        let overflow = changeAlertLastSentAt.count - Self.maxChangeAlertDedupeEntries
+        guard overflow > 0 else { return }
+
+        let keysToDrop = changeAlertLastSentAt
+            .sorted { $0.value < $1.value }
+            .prefix(overflow)
+            .map(\.key)
+        for key in keysToDrop {
+            changeAlertLastSentAt.removeValue(forKey: key)
+        }
+    }
+
+    private func severityScore(_ severity: HeartbeatChangeSeverity) -> Int {
+        switch severity {
+        case .critical:
+            return 3
+        case .warning:
+            return 2
+        case .info:
+            return 1
+        }
+    }
+
+    private func numericMetadataValue(_ raw: String?) -> Int {
+        guard let raw, let value = Int(raw) else { return 0 }
+        return value
     }
 
     // MARK: - Context Gathering

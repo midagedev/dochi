@@ -14,6 +14,7 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
         case reminder = "dochi-reminder"
         case memory = "dochi-memory"
         case proactive = "dochi-proactive"
+        case change = "dochi-change"
     }
 
     enum ActionIdentifier: String {
@@ -114,8 +115,15 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
             options: []
         )
 
+        let changeCategory = UNNotificationCategory(
+            identifier: Category.change.rawValue,
+            actions: [openAppAction, dismissAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
         UNUserNotificationCenter.current().setNotificationCategories([
-            calendarCategory, kanbanCategory, reminderCategory, memoryCategory, proactiveCategory
+            calendarCategory, kanbanCategory, reminderCategory, memoryCategory, proactiveCategory, changeCategory
         ])
         Log.app.info("NotificationManager: registered \(Category.allCases.count) notification categories (replyEnabled: \(replyEnabled))")
     }
@@ -192,6 +200,16 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
         )
     }
 
+    func sendHeartbeatChangeNotification(event: HeartbeatChangeEvent) {
+        guard settings.heartbeatChangeAlertEnabled else { return }
+
+        sendNotification(
+            title: "도치 - 변화 알림 (\(severityLabel(for: event.severity)))",
+            body: "\(event.title)\n\(event.detail)",
+            category: .change
+        )
+    }
+
     // MARK: - Private
 
     private func sendNotification(title: String, body: String, category: Category) {
@@ -217,6 +235,17 @@ final class NotificationManager: NSObject, Observable, UNUserNotificationCenterD
             } else {
                 Log.app.info("NotificationManager: sent \(category.rawValue) notification")
             }
+        }
+    }
+
+    private func severityLabel(for severity: HeartbeatChangeSeverity) -> String {
+        switch severity {
+        case .info:
+            return "정보"
+        case .warning:
+            return "주의"
+        case .critical:
+            return "중요"
         }
     }
 

@@ -1269,12 +1269,14 @@ final class MockTelegramProactiveRelay: TelegramProactiveRelayProtocol {
     var stopCallCount = 0
     var sendHeartbeatAlertCallCount = 0
     var sendSuggestionCallCount = 0
+    var sendHeartbeatChangeAlertCallCount = 0
 
     var lastHeartbeatCalendar: String?
     var lastHeartbeatKanban: String?
     var lastHeartbeatReminder: String?
     var lastHeartbeatMemory: String?
     var lastSuggestion: ProactiveSuggestion?
+    var lastHeartbeatChangeEvent: HeartbeatChangeEvent?
 
     func start() {
         startCallCount += 1
@@ -1303,6 +1305,12 @@ final class MockTelegramProactiveRelay: TelegramProactiveRelayProtocol {
     func sendSuggestion(_ suggestion: ProactiveSuggestion) async {
         sendSuggestionCallCount += 1
         lastSuggestion = suggestion
+        todayTelegramNotificationCount += 1
+    }
+
+    func sendHeartbeatChangeAlert(_ event: HeartbeatChangeEvent) async {
+        sendHeartbeatChangeAlertCallCount += 1
+        lastHeartbeatChangeEvent = event
         todayTelegramNotificationCount += 1
     }
 }

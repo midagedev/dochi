@@ -208,6 +208,61 @@ final class HeartbeatServiceTests: XCTestCase {
         XCTAssertTrue(eventTypes.contains(.codingSessionRepositoryChanged))
     }
 
+    func testSelectChangeAlertsToSendAppliesRuleAndCooldown() {
+        let settings = AppSettings()
+        settings.heartbeatChangeAlertEnabled = true
+        settings.heartbeatChangeAlertCooldownMinutes = 10
+        let service = HeartbeatService(settings: settings)
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let dirtySpike = HeartbeatChangeEvent(
+            source: .git,
+            eventType: .gitDirtySpike,
+            severity: .warning,
+            targetId: "/tmp/repo-a",
+            title: "dirty",
+            detail: "dirty spike",
+            timestamp: now
+        )
+        let branchChanged = HeartbeatChangeEvent(
+            source: .git,
+            eventType: .gitBranchChanged,
+            severity: .info,
+            targetId: "/tmp/repo-a",
+            title: "branch",
+            detail: "branch changed",
+            timestamp: now
+        )
+        let staleTransition = HeartbeatChangeEvent(
+            source: .codingSession,
+            eventType: .codingSessionActivityChanged,
+            severity: .warning,
+            targetId: "codex|sess-1|-|/tmp/repo-a",
+            title: "state",
+            detail: "active -> stale",
+            metadata: ["newActivityState": "stale"],
+            timestamp: now
+        )
+
+        let first = service.selectChangeAlertsToSend(
+            from: [dirtySpike, branchChanged, staleTransition],
+            now: now
+        )
+        XCTAssertEqual(Set(first.map(\.eventType)), Set([.gitDirtySpike, .codingSessionActivityChanged]))
+
+        let withinCooldown = service.selectChangeAlertsToSend(
+            from: [dirtySpike, staleTransition],
+            now: now.addingTimeInterval(60)
+        )
+        XCTAssertTrue(withinCooldown.isEmpty)
+
+        let afterCooldown = service.selectChangeAlertsToSend(
+            from: [dirtySpike, staleTransition],
+            now: now.addingTimeInterval(601)
+        )
+        XCTAssertEqual(Set(afterCooldown.map(\.eventType)), Set([.gitDirtySpike, .codingSessionActivityChanged]))
+    }
+
     func testMapTaskOpportunitiesBuildsStructuredActions() {
         let settings = AppSettings()
         let service = HeartbeatService(settings: settings)
@@ -444,6 +499,79 @@ final class HeartbeatServiceTests: XCTestCase {
 
         XCTAssertGreaterThan(journal.appendCallCount, 0)
         XCTAssertTrue(journal.entries.contains { $0.event.eventType == .codingSessionEnded })
+    }
+
+    func testTickSendsChangeAlertToTelegramWhenEnabled() async {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+        settings.heartbeatNotificationChannel = NotificationChannel.telegramOnly.rawValue
+        settings.heartbeatChangeAlertEnabled = true
+
+        let service = HeartbeatService(settings: settings)
+        let externalToolManager = MockExternalToolSessionManager()
+        let relay = MockTelegramProactiveRelay()
+        service.setExternalToolManager(externalToolManager)
+        service.setTelegramRelay(relay)
+
+        externalToolManager.mockGitRepositoryInsights = [makeGitInsight(path: "/tmp/repo-a")]
+        externalToolManager.mockUnifiedCodingSessions = [
+            makeUnifiedSession(
+                nativeSessionId: "session-1",
+                path: "tmux://session-1",
+                repositoryRoot: "/tmp/repo-a",
+                activityState: .active
+            ),
+        ]
+        await service.runTickForTesting() // baseline
+
+        externalToolManager.mockUnifiedCodingSessions = []
+        await service.runTickForTesting() // session ended -> alert candidate
+
+        XCTAssertEqual(relay.sendHeartbeatChangeAlertCallCount, 1)
+        XCTAssertEqual(relay.lastHeartbeatChangeEvent?.eventType, .codingSessionEnded)
+    }
+
+    func testTickKeepsJournalWhenChangeAlertDisabled() async {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+        settings.heartbeatNotificationChannel = NotificationChannel.telegramOnly.rawValue
+        settings.heartbeatChangeAlertEnabled = false
+
+        let service = HeartbeatService(settings: settings)
+        let externalToolManager = MockExternalToolSessionManager()
+        let relay = MockTelegramProactiveRelay()
+        let journal = MockHeartbeatChangeJournal()
+        service.setExternalToolManager(externalToolManager)
+        service.setTelegramRelay(relay)
+        service.setChangeJournalService(journal)
+
+        externalToolManager.mockGitRepositoryInsights = [makeGitInsight(path: "/tmp/repo-a")]
+        externalToolManager.mockUnifiedCodingSessions = [
+            makeUnifiedSession(
+                nativeSessionId: "session-1",
+                path: "tmux://session-1",
+                repositoryRoot: "/tmp/repo-a",
+                activityState: .active
+            ),
+        ]
+        await service.runTickForTesting() // baseline
+
+        externalToolManager.mockUnifiedCodingSessions = []
+        await service.runTickForTesting() // session ended
+
+        XCTAssertGreaterThan(journal.appendCallCount, 0)
+        XCTAssertTrue(journal.entries.contains { $0.event.eventType == .codingSessionEnded })
+        XCTAssertEqual(relay.sendHeartbeatChangeAlertCallCount, 0)
     }
 
     func testTickRefreshesSessionHistoryIndexWhenStale() async throws {

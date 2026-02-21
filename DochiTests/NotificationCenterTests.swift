@@ -15,6 +15,8 @@ final class NotificationCenterTests: XCTestCase {
         XCTAssertTrue(settings.notificationMemoryEnabled)
         XCTAssertTrue(settings.notificationSoundEnabled)
         XCTAssertTrue(settings.notificationReplyEnabled)
+        XCTAssertTrue(settings.heartbeatChangeAlertEnabled)
+        XCTAssertGreaterThan(settings.heartbeatChangeAlertCooldownMinutes, 0)
     }
 
     func testNotificationSettingsPersistence() {
@@ -38,6 +40,12 @@ final class NotificationCenterTests: XCTestCase {
         settings.notificationReplyEnabled = false
         XCTAssertFalse(settings.notificationReplyEnabled)
 
+        settings.heartbeatChangeAlertEnabled = false
+        XCTAssertFalse(settings.heartbeatChangeAlertEnabled)
+
+        settings.heartbeatChangeAlertCooldownMinutes = 45
+        XCTAssertEqual(settings.heartbeatChangeAlertCooldownMinutes, 45)
+
         // Restore defaults
         settings.notificationCalendarEnabled = true
         settings.notificationKanbanEnabled = true
@@ -45,6 +53,8 @@ final class NotificationCenterTests: XCTestCase {
         settings.notificationMemoryEnabled = true
         settings.notificationSoundEnabled = true
         settings.notificationReplyEnabled = true
+        settings.heartbeatChangeAlertEnabled = true
+        settings.heartbeatChangeAlertCooldownMinutes = 30
     }
 
     // MARK: - NotificationManager Initialization
@@ -65,16 +75,18 @@ final class NotificationCenterTests: XCTestCase {
         XCTAssertEqual(NotificationManager.Category.reminder.rawValue, "dochi-reminder")
         XCTAssertEqual(NotificationManager.Category.memory.rawValue, "dochi-memory")
         XCTAssertEqual(NotificationManager.Category.proactive.rawValue, "dochi-proactive")
+        XCTAssertEqual(NotificationManager.Category.change.rawValue, "dochi-change")
     }
 
     func testNotificationCategoryAllCases() {
         let allCases = NotificationManager.Category.allCases
-        XCTAssertEqual(allCases.count, 5)
+        XCTAssertEqual(allCases.count, 6)
         XCTAssertTrue(allCases.contains(.calendar))
         XCTAssertTrue(allCases.contains(.kanban))
         XCTAssertTrue(allCases.contains(.reminder))
         XCTAssertTrue(allCases.contains(.memory))
         XCTAssertTrue(allCases.contains(.proactive))
+        XCTAssertTrue(allCases.contains(.change))
     }
 
     // MARK: - NotificationManager Action Constants
@@ -281,6 +293,7 @@ final class NotificationCenterTests: XCTestCase {
         viewModel.handleNotificationOpenApp(category: NotificationManager.Category.reminder.rawValue)
         viewModel.handleNotificationOpenApp(category: NotificationManager.Category.memory.rawValue)
         viewModel.handleNotificationOpenApp(category: NotificationManager.Category.proactive.rawValue)
+        viewModel.handleNotificationOpenApp(category: NotificationManager.Category.change.rawValue)
         viewModel.handleNotificationOpenApp(category: "unknown-category")
     }
 
@@ -471,6 +484,28 @@ final class NotificationCenterTests: XCTestCase {
 
         viewModel.handleNotificationOpenApp(category: "unknown-category")
         XCTAssertNil(viewModel.notificationRequestedSection)
+        XCTAssertFalse(viewModel.notificationShowMemoryPanel)
+    }
+
+    func testHandleNotificationOpenAppNavigatesToChatForChangeAlert() {
+        let settings = AppSettings()
+        let keychainService = MockKeychainService()
+        keychainService.store["openai_api_key"] = "sk-test"
+
+        let viewModel = DochiViewModel(
+            toolService: MockBuiltInToolService(),
+            contextService: MockContextService(),
+            conversationService: MockConversationService(),
+            keychainService: keychainService,
+            speechService: MockSpeechService(),
+            ttsService: MockTTSService(),
+            soundService: MockSoundService(),
+            settings: settings,
+            sessionContext: SessionContext(workspaceId: UUID())
+        )
+
+        viewModel.handleNotificationOpenApp(category: NotificationManager.Category.change.rawValue)
+        XCTAssertEqual(viewModel.notificationRequestedSection, "chat")
         XCTAssertFalse(viewModel.notificationShowMemoryPanel)
     }
 

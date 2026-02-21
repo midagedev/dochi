@@ -414,6 +414,16 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(heartbeatQuietHoursEnd, forKey: "heartbeatQuietHoursEnd") }
     }
 
+    /// Enables proactive alert delivery for detected Git/coding-session change events.
+    var heartbeatChangeAlertEnabled: Bool = UserDefaults.standard.object(forKey: "heartbeatChangeAlertEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(heartbeatChangeAlertEnabled, forKey: "heartbeatChangeAlertEnabled") }
+    }
+
+    /// Minimum interval between repeated alerts for the same change dedupe key.
+    var heartbeatChangeAlertCooldownMinutes: Int = UserDefaults.standard.object(forKey: "heartbeatChangeAlertCooldownMinutes") as? Int ?? 30 {
+        didSet { UserDefaults.standard.set(heartbeatChangeAlertCooldownMinutes, forKey: "heartbeatChangeAlertCooldownMinutes") }
+    }
+
     // MARK: - Automation / Scheduler (J-3)
 
     var automationEnabled: Bool = UserDefaults.standard.object(forKey: "automationEnabled") as? Bool ?? false {

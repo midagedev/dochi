@@ -20,6 +20,9 @@ protocol TelegramProactiveRelayProtocol: AnyObject {
     /// Send a proactive suggestion to Telegram.
     func sendSuggestion(_ suggestion: ProactiveSuggestion) async
 
+    /// Send a heartbeat change alert to Telegram.
+    func sendHeartbeatChangeAlert(_ event: HeartbeatChangeEvent) async
+
     /// Number of Telegram notifications sent today.
     var todayTelegramNotificationCount: Int { get }
 }
