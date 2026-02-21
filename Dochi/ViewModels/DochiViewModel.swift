@@ -2743,6 +2743,9 @@ final class DochiViewModel {
         case NotificationManager.Category.proactive.rawValue:
             notificationRequestedSection = "chat"
             Log.app.info("Notification: navigating to conversation for proactive suggestion")
+        case NotificationManager.Category.change.rawValue:
+            notificationRequestedSection = "chat"
+            Log.app.info("Notification: navigating to conversation for heartbeat change alert")
         default:
             break
         }

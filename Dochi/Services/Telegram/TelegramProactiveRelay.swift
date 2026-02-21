@@ -106,6 +106,22 @@ final class TelegramProactiveRelay: TelegramProactiveRelayProtocol {
         await send(chatId: chatId, text: message)
     }
 
+    func sendHeartbeatChangeAlert(_ event: HeartbeatChangeEvent) async {
+        let channel = NotificationChannel(rawValue: settings.heartbeatNotificationChannel) ?? .appOnly
+        guard shouldSendToTelegram(channel: channel) else { return }
+        guard let chatId = resolveChatId() else {
+            Log.telegram.debug("변화 알람 텔레그램 전송 건너뜀: chatId 미매핑")
+            return
+        }
+        guard hasTelegramToken() else {
+            Log.telegram.debug("변화 알람 텔레그램 전송 건너뜀: 토큰 미설정")
+            return
+        }
+
+        let message = formatChangeAlert(event)
+        await send(chatId: chatId, text: message)
+    }
+
     // MARK: - Channel Logic
 
     func shouldSendToTelegram(channel: NotificationChannel) -> Bool {
@@ -147,6 +163,21 @@ final class TelegramProactiveRelay: TelegramProactiveRelayProtocol {
         }
 
         return "\(emoji) *\(escapeMarkdown(suggestion.title))*\n\(escapeMarkdown(suggestion.body))\n\n\u{1F4A1} \(replyHint)"
+    }
+
+    private func formatChangeAlert(_ event: HeartbeatChangeEvent) -> String {
+        let sourceLabel = event.source == .git ? "Git" : "Coding Session"
+        let severityEmoji: String
+        switch event.severity {
+        case .info:
+            severityEmoji = "\u{2139}\u{FE0F}"
+        case .warning:
+            severityEmoji = "\u{26A0}\u{FE0F}"
+        case .critical:
+            severityEmoji = "\u{1F6A8}"
+        }
+
+        return "\(severityEmoji) *변화 알림 (\(sourceLabel))*\n\(escapeMarkdown(event.title))\n\(escapeMarkdown(event.detail))"
     }
 
     /// Escape Telegram Markdown special characters in user data.

@@ -37,6 +37,8 @@ final class TelegramProactiveRelayTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "heartbeatNotificationChannel")
         UserDefaults.standard.removeObject(forKey: "suggestionNotificationChannel")
         UserDefaults.standard.removeObject(forKey: "telegramSkipWhenAppActive")
+        UserDefaults.standard.removeObject(forKey: "heartbeatChangeAlertEnabled")
+        UserDefaults.standard.removeObject(forKey: "heartbeatChangeAlertCooldownMinutes")
     }
 
     // MARK: - NotificationChannel Enum
@@ -131,6 +133,40 @@ final class TelegramProactiveRelayTests: XCTestCase {
             memory: nil
         )
 
+        XCTAssertTrue(mockTelegramService.sentMessages.isEmpty)
+    }
+
+    func testHeartbeatChangeAlertRelay() async {
+        settings.heartbeatNotificationChannel = NotificationChannel.telegramOnly.rawValue
+        settings.telegramSkipWhenAppActive = false
+
+        let event = HeartbeatChangeEvent(
+            source: .codingSession,
+            eventType: .codingSessionEnded,
+            severity: .warning,
+            targetId: "codex|session-1|-|/tmp/repo",
+            title: "코딩 세션 종료",
+            detail: "codex 세션 session-1이 종료되었습니다."
+        )
+        await relay.sendHeartbeatChangeAlert(event)
+
+        XCTAssertEqual(mockTelegramService.sentMessages.count, 1)
+        XCTAssertTrue(mockTelegramService.sentMessages[0].text.contains("변화 알림"))
+        XCTAssertTrue(mockTelegramService.sentMessages[0].text.contains("코딩 세션 종료"))
+    }
+
+    func testHeartbeatChangeAlertAppOnlyDoesNotSend() async {
+        settings.heartbeatNotificationChannel = NotificationChannel.appOnly.rawValue
+
+        let event = HeartbeatChangeEvent(
+            source: .git,
+            eventType: .gitDirtySpike,
+            severity: .warning,
+            targetId: "/tmp/repo",
+            title: "작업 변경량 급증",
+            detail: "dirty +12"
+        )
+        await relay.sendHeartbeatChangeAlert(event)
         XCTAssertTrue(mockTelegramService.sentMessages.isEmpty)
     }
 
