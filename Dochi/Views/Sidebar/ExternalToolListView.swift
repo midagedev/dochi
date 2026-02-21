@@ -138,6 +138,9 @@ struct ExternalToolListView: View {
                 session.workingDirectory ?? "",
                 session.title ?? "",
                 session.summary ?? "",
+                session.originator ?? "",
+                session.sessionSource ?? "",
+                session.clientKind ?? "",
             ].joined(separator: " ").lowercased()
             return haystack.contains(query)
         }
@@ -861,6 +864,13 @@ struct ExternalToolListView: View {
                         .lineLimit(1)
                 }
 
+                if let clientDescriptor = sessionClientDescriptor(session) {
+                    Text(clientDescriptor)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
                 Text("state=\(session.activityState.rawValue), score=\(session.activityScore), repo=\(session.repositoryRoot ?? "(unassigned)")")
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
@@ -1357,6 +1367,33 @@ struct ExternalToolListView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return nil }
         return String(normalized.prefix(100))
+    }
+
+    private func sessionClientDescriptor(_ session: UnifiedCodingSession) -> String? {
+        var parts: [String] = []
+        if session.provider.lowercased() == "codex" {
+            switch session.clientKind {
+            case "desktop":
+                parts.append("Codex Desktop")
+            case "cli":
+                parts.append("Codex CLI")
+            case "unknown":
+                parts.append("Codex")
+            default:
+                if let originator = session.originator {
+                    parts.append(originator)
+                }
+            }
+        } else if let originator = session.originator {
+            parts.append(originator)
+        }
+
+        if let sessionSource = session.sessionSource, !sessionSource.isEmpty {
+            parts.append("src=\(sessionSource)")
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " · ")
     }
 
     private func relativeTimestamp(_ date: Date?) -> String {

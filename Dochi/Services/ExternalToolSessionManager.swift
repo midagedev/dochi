@@ -947,7 +947,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 title: session.lastTerminalTitle,
                 summary: nil,
                 titleSource: session.lastTerminalTitle == nil ? nil : "terminal_osc",
-                titleConfidence: session.lastTerminalTitle == nil ? nil : 0.95
+                titleConfidence: session.lastTerminalTitle == nil ? nil : 0.95,
+                originator: nil,
+                sessionSource: nil,
+                clientKind: nil
             )
         }
 
@@ -2089,6 +2092,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 summary: runtime.summary,
                 titleSource: runtime.titleSource,
                 titleConfidence: runtime.titleConfidence,
+                originator: runtime.originator,
+                sessionSource: runtime.sessionSource,
+                clientKind: runtime.clientKind,
                 activityScore: activity.score,
                 activityState: activity.state,
                 activitySignals: activity.signals
@@ -2126,6 +2132,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 summary: discovered.summary,
                 titleSource: discovered.titleSource,
                 titleConfidence: discovered.titleConfidence,
+                originator: discovered.originator,
+                sessionSource: discovered.sessionSource,
+                clientKind: discovered.clientKind,
                 activityScore: activity.score,
                 activityState: activity.state,
                 activitySignals: activity.signals
@@ -2298,6 +2307,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 summary: session.summary,
                 titleSource: session.titleSource,
                 titleConfidence: session.titleConfidence,
+                originator: session.originator,
+                sessionSource: session.sessionSource,
+                clientKind: session.clientKind,
                 activityScore: session.activityScore,
                 activityState: session.activityState,
                 activitySignals: session.activitySignals
@@ -2672,6 +2684,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let summary: String?
         let titleSource: String?
         let titleConfidence: Double?
+        let originator: String?
+        let sessionSource: String?
+        let clientKind: String?
 
         init(
             provider: String,
@@ -2691,7 +2706,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             title: String? = nil,
             summary: String? = nil,
             titleSource: String? = nil,
-            titleConfidence: Double? = nil
+            titleConfidence: Double? = nil,
+            originator: String? = nil,
+            sessionSource: String? = nil,
+            clientKind: String? = nil
         ) {
             self.provider = provider
             self.nativeSessionId = nativeSessionId
@@ -2711,6 +2729,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             self.summary = summary
             self.titleSource = titleSource
             self.titleConfidence = titleConfidence
+            self.originator = originator
+            self.sessionSource = sessionSource
+            self.clientKind = clientKind
         }
     }
 
@@ -3179,10 +3200,13 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 path: candidate.url.path,
                 updatedAt: candidate.modifiedAt,
                 isActive: isActive,
-                title: nil,
-                summary: nil,
-                titleSource: nil,
-                titleConfidence: nil
+                title: meta?.title,
+                summary: meta?.summary,
+                titleSource: meta?.titleSource,
+                titleConfidence: meta?.titleConfidence,
+                originator: meta?.originator,
+                sessionSource: meta?.sessionSource,
+                clientKind: meta?.clientKind
             )
         }
     }
@@ -3234,7 +3258,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                             title: metadata.title,
                             summary: metadata.summary,
                             titleSource: metadata.titleSource,
-                            titleConfidence: metadata.titleConfidence
+                            titleConfidence: metadata.titleConfidence,
+                            originator: nil,
+                            sessionSource: nil,
+                            clientKind: nil
                         )
                     )
                 }
@@ -3284,7 +3311,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                     title: meta?.title,
                     summary: meta?.summary,
                     titleSource: meta?.titleSource,
-                    titleConfidence: meta?.titleConfidence
+                    titleConfidence: meta?.titleConfidence,
+                    originator: nil,
+                    sessionSource: nil,
+                    clientKind: nil
                 )
             )
         }
@@ -3323,7 +3353,19 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         return String(data: data, encoding: .utf8)
     }
 
-    nonisolated private static func parseCodexSessionMeta(fromFirstLine line: String?) -> (id: String, cwd: String?)? {
+    nonisolated private static func parseCodexSessionMeta(
+        fromFirstLine line: String?
+    ) -> (
+        id: String,
+        cwd: String?,
+        title: String?,
+        summary: String?,
+        titleSource: String?,
+        titleConfidence: Double?,
+        originator: String?,
+        sessionSource: String?,
+        clientKind: String?
+    )? {
         guard let line,
               let data = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -3335,7 +3377,43 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }
 
         let cwd = payload["cwd"] as? String
-        return (id: id, cwd: cwd)
+        let originator = normalizedSessionText(payload["originator"], maxLength: 80)
+        let sessionSource = normalizedSessionText(payload["source"], maxLength: 40)
+        let clientKind = codexClientKind(originator: originator, sessionSource: sessionSource)
+        return (
+            id: id,
+            cwd: cwd,
+            title: nil,
+            summary: nil,
+            titleSource: nil,
+            titleConfidence: nil,
+            originator: originator,
+            sessionSource: sessionSource,
+            clientKind: clientKind
+        )
+    }
+
+    nonisolated private static func codexClientKind(
+        originator: String?,
+        sessionSource: String?
+    ) -> String? {
+        let normalizedOriginator = originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedSource = sessionSource?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if normalizedOriginator?.contains("desktop") == true ||
+            normalizedSource == "vscode" ||
+            normalizedSource == "desktop" {
+            return "desktop"
+        }
+        if normalizedOriginator?.contains("cli") == true ||
+            normalizedSource == "cli" ||
+            normalizedSource == "terminal" {
+            return "cli"
+        }
+        if normalizedOriginator != nil || normalizedSource != nil {
+            return "unknown"
+        }
+        return nil
     }
 
     nonisolated private static func parseClaudeSessionMeta(
@@ -3438,6 +3516,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             let mergedSource = runtime.titleSource ?? "\(sourceBase)_\(matched.reason)"
             let baseConfidence = matched.session.titleConfidence ?? 0.6
             let mergedConfidence = runtime.titleConfidence ?? min(0.98, baseConfidence * matched.confidenceScale)
+            let mergedOriginator = runtime.originator ?? matched.session.originator
+            let mergedSessionSource = runtime.sessionSource ?? matched.session.sessionSource
+            let mergedClientKind = runtime.clientKind
+                ?? matched.session.clientKind
+                ?? codexClientKind(originator: mergedOriginator, sessionSource: mergedSessionSource)
 
             return RuntimeSessionSnapshot(
                 provider: runtime.provider,
@@ -3457,7 +3540,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 title: mergedTitle,
                 summary: mergedSummary,
                 titleSource: mergedSource,
-                titleConfidence: mergedConfidence
+                titleConfidence: mergedConfidence,
+                originator: mergedOriginator,
+                sessionSource: mergedSessionSource,
+                clientKind: mergedClientKind
             )
         }
     }

@@ -700,6 +700,56 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         }
     }
 
+    func testDiscoverLocalCodingSessionsParsesCodexClientMetadata() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-codex-meta-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexRoot = tempRoot.appendingPathComponent("codex", isDirectory: true)
+        let claudeRoot = tempRoot.appendingPathComponent("claude", isDirectory: true)
+        let desktopFile = codexRoot
+            .appendingPathComponent("2026/02/21", isDirectory: true)
+            .appendingPathComponent("rollout-desktop.jsonl")
+        let cliFile = codexRoot
+            .appendingPathComponent("2026/02/21", isDirectory: true)
+            .appendingPathComponent("rollout-cli.jsonl")
+        try FileManager.default.createDirectory(
+            at: desktopFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let desktopMeta = """
+        {"timestamp":"2026-02-21T12:00:00Z","type":"session_meta","payload":{"id":"codex-desktop-1","cwd":"/Users/hckim/repo/dochi","originator":"Codex Desktop","source":"vscode"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
+        """
+        try desktopMeta.data(using: .utf8)?.write(to: desktopFile, options: .atomic)
+
+        let cliMeta = """
+        {"timestamp":"2026-02-21T12:10:00Z","type":"session_meta","payload":{"id":"codex-cli-1","cwd":"/Users/hckim/repo/dochi","originator":"Codex CLI","source":"cli"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}
+        """
+        try cliMeta.data(using: .utf8)?.write(to: cliFile, options: .atomic)
+
+        let discovered = ExternalToolSessionManager.discoverLocalCodingSessions(
+            codexSessionsRoot: codexRoot,
+            claudeProjectsRoot: claudeRoot,
+            limit: 20,
+            now: Date(timeIntervalSince1970: 1_771_636_000)
+        )
+
+        let desktop = try XCTUnwrap(discovered.first(where: { $0.sessionId == "codex-desktop-1" }))
+        XCTAssertEqual(desktop.provider, "codex")
+        XCTAssertEqual(desktop.originator, "Codex Desktop")
+        XCTAssertEqual(desktop.sessionSource, "vscode")
+        XCTAssertEqual(desktop.clientKind, "desktop")
+
+        let cli = try XCTUnwrap(discovered.first(where: { $0.sessionId == "codex-cli-1" }))
+        XCTAssertEqual(cli.provider, "codex")
+        XCTAssertEqual(cli.originator, "Codex CLI")
+        XCTAssertEqual(cli.sessionSource, "cli")
+        XCTAssertEqual(cli.clientKind, "cli")
+    }
+
     func testEnrichRuntimeSessionMetadataMatchesByWorkingDirectory() {
         let now = Date(timeIntervalSince1970: 1_771_636_000)
         let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
@@ -729,7 +779,10 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
             title: "Dochi 브리지 세션 상태 정비",
             summary: "bridge.status payload 개선",
             titleSource: "claude_sessions_index",
-            titleConfidence: 0.9
+            titleConfidence: 0.9,
+            originator: "Codex Desktop",
+            sessionSource: "vscode",
+            clientKind: "desktop"
         )
 
         let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
@@ -747,6 +800,9 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         if let confidence = item.titleConfidence {
             XCTAssertEqual(confidence, 0.81, accuracy: 0.0001)
         }
+        XCTAssertEqual(item.originator, "Codex Desktop")
+        XCTAssertEqual(item.sessionSource, "vscode")
+        XCTAssertEqual(item.clientKind, "desktop")
     }
 
     func testExtractLatestTerminalTitleParsesOscSequences() {
