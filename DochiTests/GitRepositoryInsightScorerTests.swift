@@ -300,4 +300,68 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertEqual(deduped.map(\.provider), ["alpha", "zeta"])
         XCTAssertEqual(deduped.map(\.nativeSessionId), ["sess-1", "sess-9"])
     }
+
+    func testParseProcessRuntimeSnapshotsClassifiesProviderTierAndRuntimeType() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let output = """
+        1234 ttys003 00:05 /opt/homebrew/bin/codex run
+        2234 ?? 01:10:00 /usr/bin/python3 -m aider --model gpt-4.1
+        3333 ttys004 00:01 /usr/bin/vim main.swift
+        """
+
+        let snapshots = ExternalToolSessionManager.parseProcessRuntimeSnapshots(
+            psOutput: output,
+            now: now,
+            workingDirectories: [1234: "/tmp/repo-a"],
+            limit: 10
+        )
+
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertFalse(snapshots.contains(where: { $0.runtimeSessionId == "3333" }))
+
+        let codex = snapshots.first(where: { $0.runtimeSessionId == "1234" })
+        XCTAssertEqual(codex?.provider, "codex")
+        XCTAssertEqual(codex?.runtimeType, .process)
+        XCTAssertEqual(codex?.controllabilityTier, .t1Attach)
+        XCTAssertEqual(codex?.workingDirectory, "/tmp/repo-a")
+        XCTAssertEqual(codex?.path, "process://1234")
+        XCTAssertEqual(codex?.nativeSessionId, "pid-1234")
+
+        let aider = snapshots.first(where: { $0.runtimeSessionId == "2234" })
+        XCTAssertEqual(aider?.provider, "aider")
+        XCTAssertEqual(aider?.runtimeType, .process)
+        XCTAssertEqual(aider?.controllabilityTier, .t3Unknown)
+    }
+
+    func testParseProcessElapsedSupportsPSFormats() {
+        XCTAssertEqual(ExternalToolSessionManager.parseProcessElapsed("03:15"), 195)
+        XCTAssertEqual(ExternalToolSessionManager.parseProcessElapsed("02:03:04"), 7_384)
+        XCTAssertEqual(ExternalToolSessionManager.parseProcessElapsed("1-02:03:04"), 93_784)
+        XCTAssertNil(ExternalToolSessionManager.parseProcessElapsed("not-a-time"))
+    }
+
+    func testProcessProviderHeuristicsRecognizeCommonLaunchPatterns() {
+        XCTAssertEqual(
+            ExternalToolSessionManager.processProvider(fromCommandLine: "/opt/homebrew/bin/codex run"),
+            "codex"
+        )
+        XCTAssertEqual(
+            ExternalToolSessionManager.processProvider(fromCommandLine: "python3 -m aider --model sonnet"),
+            "aider"
+        )
+        XCTAssertEqual(
+            ExternalToolSessionManager.processProvider(fromCommandLine: "/usr/local/bin/claude --continue"),
+            "claude"
+        )
+        XCTAssertNil(
+            ExternalToolSessionManager.processProvider(fromCommandLine: "/usr/bin/vim main.swift")
+        )
+    }
+
+    func testProcessControllabilityTierTreatsUnknownTTYAsT3() {
+        XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "ttys002"), .t1Attach)
+        XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "??"), .t3Unknown)
+        XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "-"), .t3Unknown)
+        XCTAssertEqual(ExternalToolSessionManager.processControllabilityTier(tty: "   "), .t3Unknown)
+    }
 }

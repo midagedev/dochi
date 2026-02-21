@@ -897,7 +897,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             )
         }
 
-        let discovered = await discoverLocalCodingSessions(limit: max(effectiveLimit * 2, 80))
+        async let discoveredSessions = discoverLocalCodingSessions(limit: max(effectiveLimit * 2, 80))
+        let processSnapshots = await Task.detached(priority: .utility) {
+            Self.discoverProcessRuntimeSessions(
+                limit: max(effectiveLimit * 2, 120),
+                now: now
+            )
+        }.value
+        let discovered = await discoveredSessions
         let managedRoots = managedRepositories
             .filter { !$0.isArchived }
             .map { URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path }
@@ -905,7 +912,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
         let merged = await Task.detached(priority: .utility) {
             Self.mergeUnifiedCodingSessions(
-                runtimeSessions: sessionSnapshots,
+                runtimeSessions: sessionSnapshots + processSnapshots,
                 discoveredSessions: discovered,
                 managedRepositoryRoots: managedRoots,
                 limit: effectiveLimit,
@@ -2277,6 +2284,164 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             .map { $0 }
     }
 
+    nonisolated static func discoverProcessRuntimeSessions(
+        limit: Int,
+        now: Date = Date()
+    ) -> [RuntimeSessionSnapshot] {
+        let effectiveLimit = max(1, min(400, limit))
+        let psResult = runProcessSync(
+            ["ps", "-axo", "pid=,tty=,etime=,command="],
+            currentDirectoryPath: nil
+        )
+        guard psResult.exitCode == 0 else {
+            return []
+        }
+
+        let rough = parseProcessRuntimeSnapshots(
+            psOutput: psResult.output,
+            now: now,
+            workingDirectories: [:],
+            limit: max(effectiveLimit * 2, 80)
+        )
+        guard !rough.isEmpty else {
+            return []
+        }
+
+        let pids = rough
+            .compactMap(\.runtimeSessionId)
+            .compactMap(Int.init)
+        let workingDirectories = resolveProcessWorkingDirectories(pids: pids)
+        return parseProcessRuntimeSnapshots(
+            psOutput: psResult.output,
+            now: now,
+            workingDirectories: workingDirectories,
+            limit: effectiveLimit
+        )
+    }
+
+    nonisolated static func parseProcessRuntimeSnapshots(
+        psOutput: String,
+        now: Date,
+        workingDirectories: [Int: String] = [:],
+        limit: Int
+    ) -> [RuntimeSessionSnapshot] {
+        let effectiveLimit = max(1, min(400, limit))
+        var deduplicated: [String: RuntimeSessionSnapshot] = [:]
+        deduplicated.reserveCapacity(effectiveLimit)
+
+        for rawLine in psOutput.components(separatedBy: .newlines) {
+            guard let snapshot = parseProcessRuntimeSnapshotLine(
+                rawLine,
+                now: now,
+                workingDirectories: workingDirectories
+            ) else {
+                continue
+            }
+            let key = snapshot.runtimeSessionId ?? snapshot.nativeSessionId
+            if let existing = deduplicated[key] {
+                if snapshot.updatedAt > existing.updatedAt {
+                    deduplicated[key] = snapshot
+                }
+            } else {
+                deduplicated[key] = snapshot
+            }
+        }
+
+        return Array(deduplicated.values)
+            .sorted(by: { lhs, rhs in
+                if lhs.isActive != rhs.isActive {
+                    return lhs.isActive && !rhs.isActive
+                }
+                if lhs.controllabilityTier != rhs.controllabilityTier {
+                    return lhs.controllabilityTier == .t1Attach
+                }
+                if lhs.updatedAt != rhs.updatedAt {
+                    return lhs.updatedAt > rhs.updatedAt
+                }
+                return lhs.nativeSessionId < rhs.nativeSessionId
+            })
+            .prefix(effectiveLimit)
+            .map { $0 }
+    }
+
+    nonisolated static func processProvider(fromCommandLine commandLine: String) -> String? {
+        let trimmed = commandLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let executable = trimmed
+            .split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
+            .first
+            .map(String.init) ?? trimmed
+        let basename = URL(fileURLWithPath: executable).lastPathComponent.lowercased()
+        if basename == "codex" || basename == "claude" || basename == "aider" {
+            return basename
+        }
+
+        let lower = " \(trimmed.lowercased()) "
+        if lower.contains(" -m aider ") || lower.contains(" /aider ") || lower.contains(" aider ") {
+            return "aider"
+        }
+        if lower.contains(" /codex ") || lower.contains(" codex ") || lower.contains(" codex-cli ") {
+            return "codex"
+        }
+        if lower.contains(" /claude ") || lower.contains(" claude ") || lower.contains(" claude-code ") {
+            return "claude"
+        }
+        return nil
+    }
+
+    nonisolated static func processControllabilityTier(tty: String) -> CodingSessionControllabilityTier {
+        let normalizedTTY = tty.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedTTY.isEmpty || normalizedTTY == "??" || normalizedTTY == "-" {
+            return .t3Unknown
+        }
+        return .t1Attach
+    }
+
+    nonisolated static func parseProcessElapsed(_ raw: String) -> TimeInterval? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let daySplit = trimmed.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: true)
+        let days: Int
+        let timePart: Substring
+        if daySplit.count == 2 {
+            guard let parsedDays = Int(daySplit[0]) else { return nil }
+            days = parsedDays
+            timePart = daySplit[1]
+        } else if daySplit.count == 1 {
+            days = 0
+            timePart = daySplit[0]
+        } else {
+            return nil
+        }
+
+        let timeSplit = timePart.split(separator: ":", omittingEmptySubsequences: false)
+        let hours: Int
+        let minutes: Int
+        let seconds: Int
+        if timeSplit.count == 2 {
+            hours = 0
+            guard let parsedMinutes = Int(timeSplit[0]),
+                  let parsedSeconds = Int(timeSplit[1]) else { return nil }
+            minutes = parsedMinutes
+            seconds = parsedSeconds
+        } else if timeSplit.count == 3 {
+            guard let parsedHours = Int(timeSplit[0]),
+                  let parsedMinutes = Int(timeSplit[1]),
+                  let parsedSeconds = Int(timeSplit[2]) else { return nil }
+            hours = parsedHours
+            minutes = parsedMinutes
+            seconds = parsedSeconds
+        } else {
+            return nil
+        }
+
+        guard days >= 0, hours >= 0, minutes >= 0, seconds >= 0 else { return nil }
+        let totalSeconds = (((days * 24) + hours) * 60 + minutes) * 60 + seconds
+        return TimeInterval(totalSeconds)
+    }
+
     // MARK: - Helpers
 
     struct RuntimeSessionSnapshot: Sendable {
@@ -2643,6 +2808,79 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         } catch {
             return (error.localizedDescription, 1)
         }
+    }
+
+    nonisolated private static func parseProcessRuntimeSnapshotLine(
+        _ rawLine: String,
+        now: Date,
+        workingDirectories: [Int: String]
+    ) -> RuntimeSessionSnapshot? {
+        let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let parts = trimmed.split(maxSplits: 3, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
+        guard parts.count >= 4,
+              let pid = Int(parts[0]) else {
+            return nil
+        }
+
+        let tty = String(parts[1])
+        let elapsed = parseProcessElapsed(String(parts[2]))
+        let commandLine = String(parts[3]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let provider = processProvider(fromCommandLine: commandLine) else {
+            return nil
+        }
+
+        let updatedAt = elapsed.map { now.addingTimeInterval(-$0) } ?? now
+        let isActive = elapsed.map { $0 <= 45 * 60 } ?? true
+        let workingDirectory = workingDirectories[pid]
+        return RuntimeSessionSnapshot(
+            provider: provider,
+            nativeSessionId: "pid-\(pid)",
+            runtimeSessionId: "\(pid)",
+            workingDirectory: workingDirectory,
+            path: "process://\(pid)",
+            updatedAt: updatedAt,
+            isActive: isActive,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: processControllabilityTier(tty: tty),
+            source: "process_runtime"
+        )
+    }
+
+    nonisolated private static func resolveProcessWorkingDirectories(pids: [Int]) -> [Int: String] {
+        let uniquePids = Array(Set(pids)).filter { $0 > 0 }.sorted()
+        guard !uniquePids.isEmpty else { return [:] }
+
+        let pidArgument = uniquePids.map(String.init).joined(separator: ",")
+        let result = runProcessSync(
+            ["lsof", "-a", "-d", "cwd", "-p", pidArgument, "-Fn", "-P", "-n"],
+            currentDirectoryPath: nil
+        )
+        guard result.exitCode == 0 else {
+            return [:]
+        }
+
+        var mapped: [Int: String] = [:]
+        var currentPid: Int?
+        for rawLine in result.output.components(separatedBy: .newlines) {
+            guard !rawLine.isEmpty else { continue }
+            let marker = rawLine.first
+            if marker == "p", let pid = Int(rawLine.dropFirst()) {
+                currentPid = pid
+                continue
+            }
+            if marker == "n", let currentPid {
+                let path = String(rawLine.dropFirst())
+                guard !path.isEmpty else { continue }
+                mapped[currentPid] = URL(fileURLWithPath: path).standardizedFileURL.path
+            }
+        }
+        return mapped
     }
 
     nonisolated private static func discoverCodexSessionFiles(
