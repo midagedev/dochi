@@ -23,6 +23,74 @@ final class HeartbeatServiceTests: XCTestCase {
         )
     }
 
+    private func makeGitInsight(
+        path: String,
+        name: String = "work",
+        branch: String = "main",
+        changedFileCount: Int = 0,
+        untrackedFileCount: Int = 0,
+        aheadCount: Int = 0,
+        behindCount: Int = 0
+    ) -> GitRepositoryInsight {
+        GitRepositoryInsight(
+            workDomain: "company",
+            workDomainConfidence: 0.8,
+            workDomainReason: "test",
+            path: path,
+            name: name,
+            branch: branch,
+            originURL: "ssh://git@example.com/team/\(name).git",
+            remoteHost: "example.com",
+            remoteOwner: "team",
+            remoteRepository: name,
+            lastCommitEpoch: 1_700_000_000,
+            lastCommitISO8601: "2023-11-14T22:13:20.000Z",
+            lastCommitRelative: "1d ago",
+            upstreamLastCommitEpoch: 1_700_000_000,
+            upstreamLastCommitISO8601: "2023-11-14T22:13:20.000Z",
+            upstreamLastCommitRelative: "1d ago",
+            daysSinceLastCommit: 1,
+            recentCommitCount30d: 8,
+            changedFileCount: changedFileCount,
+            untrackedFileCount: untrackedFileCount,
+            aheadCount: aheadCount,
+            behindCount: behindCount,
+            score: 60
+        )
+    }
+
+    private func makeUnifiedSession(
+        provider: String = "codex",
+        nativeSessionId: String,
+        runtimeSessionId: String? = nil,
+        path: String,
+        repositoryRoot: String? = nil,
+        activityState: CodingSessionActivityState = .active
+    ) -> UnifiedCodingSession {
+        UnifiedCodingSession(
+            source: "mock",
+            runtimeType: .process,
+            controllabilityTier: .t2Observe,
+            provider: provider,
+            nativeSessionId: nativeSessionId,
+            runtimeSessionId: runtimeSessionId,
+            workingDirectory: repositoryRoot,
+            repositoryRoot: repositoryRoot,
+            path: path,
+            updatedAt: Date(),
+            isActive: activityState == .active || activityState == .idle,
+            activityScore: activityState == .active ? 80 : 20,
+            activityState: activityState,
+            activitySignals: CodingSessionActivitySignals(
+                runtimeAliveScore: 1,
+                recentOutputScore: 1,
+                recentCommandScore: 1,
+                fileFreshnessScore: 1,
+                errorPenaltyScore: 0
+            )
+        )
+    }
+
     // MARK: - HeartbeatTickResult
 
     func testTickResultStoresAllFields() {
@@ -64,6 +132,64 @@ final class HeartbeatServiceTests: XCTestCase {
 
     func testMaxHistoryCount() {
         XCTAssertEqual(HeartbeatService.maxHistoryCount, 20)
+    }
+
+    func testDetectChangeEventsUsesBaselineWithoutEmitting() {
+        let settings = AppSettings()
+        let service = HeartbeatService(settings: settings)
+
+        let baselineEvents = service.detectChangeEvents(
+            gitInsights: [makeGitInsight(path: "/tmp/repo-a")],
+            codingSessions: [makeUnifiedSession(
+                nativeSessionId: "session-1",
+                path: "tmux://session-1",
+                repositoryRoot: "/tmp/repo-a"
+            )],
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        XCTAssertTrue(baselineEvents.isEmpty)
+    }
+
+    func testDetectChangeEventsReportsGitAndCodingSessionTransitions() {
+        let settings = AppSettings()
+        let service = HeartbeatService(settings: settings)
+
+        _ = service.detectChangeEvents(
+            gitInsights: [makeGitInsight(path: "/tmp/repo-a", branch: "main", changedFileCount: 0, untrackedFileCount: 0)],
+            codingSessions: [makeUnifiedSession(
+                nativeSessionId: "session-1",
+                path: "tmux://session-1",
+                repositoryRoot: "/tmp/repo-a",
+                activityState: .active
+            )],
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let changedEvents = service.detectChangeEvents(
+            gitInsights: [makeGitInsight(
+                path: "/tmp/repo-a",
+                branch: "feature/heartbeat",
+                changedFileCount: 10,
+                untrackedFileCount: 1,
+                aheadCount: 2,
+                behindCount: 1
+            )],
+            codingSessions: [makeUnifiedSession(
+                nativeSessionId: "session-1",
+                path: "tmux://session-1",
+                repositoryRoot: "/tmp/repo-b",
+                activityState: .stale
+            )],
+            timestamp: Date(timeIntervalSince1970: 1_700_000_060)
+        )
+
+        let eventTypes = Set(changedEvents.map(\.eventType))
+        XCTAssertTrue(eventTypes.contains(.gitBranchChanged))
+        XCTAssertTrue(eventTypes.contains(.gitDirtySpike))
+        XCTAssertTrue(eventTypes.contains(.gitAheadBehindChanged))
+        XCTAssertTrue(eventTypes.contains(.codingSessionActivityChanged))
+        XCTAssertTrue(eventTypes.contains(.codingSessionRepositoryChanged))
     }
 
     func testMapTaskOpportunitiesBuildsStructuredActions() {
@@ -219,6 +345,55 @@ final class HeartbeatServiceTests: XCTestCase {
         XCTAssertNotNil(service.lastTickDate)
         XCTAssertEqual(service.lastTickResult?.notificationSent, false)
         XCTAssertTrue(service.lastTickResult?.gitContextSummary?.contains("[company] work") == true)
+    }
+
+    func testTickIncludesDetectedSessionChangesInHistory() async {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+
+        let service = HeartbeatService(settings: settings)
+        let externalToolManager = MockExternalToolSessionManager()
+        externalToolManager.mockGitRepositoryInsights = [makeGitInsight(path: "/tmp/repo-a")]
+        externalToolManager.mockUnifiedCodingSessions = [
+            makeUnifiedSession(
+                nativeSessionId: "session-1",
+                path: "tmux://session-1",
+                repositoryRoot: "/tmp/repo-a",
+                activityState: .active
+            ),
+        ]
+        service.setExternalToolManager(externalToolManager)
+        await service.runTickForTesting()
+
+        externalToolManager.mockUnifiedCodingSessions = [
+            makeUnifiedSession(
+                nativeSessionId: "session-1",
+                path: "tmux://session-1",
+                repositoryRoot: "/tmp/repo-a",
+                activityState: .idle
+            ),
+            makeUnifiedSession(
+                nativeSessionId: "session-2",
+                path: "tmux://session-2",
+                repositoryRoot: "/tmp/repo-a",
+                activityState: .active
+            ),
+        ]
+        await service.runTickForTesting()
+
+        let hasSessionEvent = service.tickHistory.contains { tick in
+            tick.detectedChanges.contains { event in
+                event.eventType == .codingSessionStarted || event.eventType == .codingSessionActivityChanged
+            }
+        }
+
+        XCTAssertTrue(hasSessionEvent)
+        XCTAssertGreaterThan(externalToolManager.listUnifiedCodingSessionsCallCount, 0)
     }
 
     func testTickTriggersResourceAutoTaskPipelineWhenEnabled() async throws {

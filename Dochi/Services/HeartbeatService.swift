@@ -11,6 +11,7 @@ struct HeartbeatTickResult: Sendable {
     let error: String?
     let opportunities: [TaskOpportunity]
     let gitContextSummary: String?
+    let detectedChanges: [HeartbeatChangeEvent]
 
     init(
         timestamp: Date,
@@ -19,7 +20,8 @@ struct HeartbeatTickResult: Sendable {
         notificationSent: Bool,
         error: String?,
         opportunities: [TaskOpportunity] = [],
-        gitContextSummary: String? = nil
+        gitContextSummary: String? = nil,
+        detectedChanges: [HeartbeatChangeEvent] = []
     ) {
         self.timestamp = timestamp
         self.checksPerformed = checksPerformed
@@ -28,6 +30,7 @@ struct HeartbeatTickResult: Sendable {
         self.error = error
         self.opportunities = opportunities
         self.gitContextSummary = gitContextSummary
+        self.detectedChanges = detectedChanges
     }
 }
 
@@ -52,6 +55,8 @@ final class HeartbeatService: Observable {
     private(set) var lastTickResult: HeartbeatTickResult?
     private(set) var tickHistory: [HeartbeatTickResult] = []
     private(set) var consecutiveErrors: Int = 0
+    private var previousGitInsightSnapshot: [String: GitRepositoryInsight] = [:]
+    private var previousCodingSessionSnapshot: [String: UnifiedCodingSession] = [:]
 
     static let maxHistoryCount = 20
 
@@ -123,6 +128,12 @@ final class HeartbeatService: Observable {
         start()
     }
 
+    #if DEBUG
+    func runTickForTesting() async {
+        await tick()
+    }
+    #endif
+
     // MARK: - Tick
 
     private func tick() async {
@@ -149,6 +160,8 @@ final class HeartbeatService: Observable {
         var memoryWarning: String?
         var gitContextSummary: String?
         var gitInsights: [GitRepositoryInsight] = []
+        var unifiedCodingSessions: [UnifiedCodingSession] = []
+        var detectedChanges: [HeartbeatChangeEvent] = []
 
         do {
             // 1. Calendar -- upcoming events
@@ -200,6 +213,9 @@ final class HeartbeatService: Observable {
                 )
                 gitInsights = roots
                 gitContextSummary = summarizeGitContext(roots)
+
+                checksPerformed.append("codingSessions")
+                unifiedCodingSessions = await externalToolManager.listUnifiedCodingSessions(limit: 80)
             }
 
             // 6. Interest expiration check (K-3)
@@ -219,6 +235,15 @@ final class HeartbeatService: Observable {
                         Log.app.info("Heartbeat queued \(queuedCount) resource auto task(s)")
                     }
                 }
+            }
+
+            detectedChanges = detectChangeEvents(
+                gitInsights: gitInsights,
+                codingSessions: unifiedCodingSessions,
+                timestamp: Date()
+            )
+            if !detectedChanges.isEmpty {
+                Log.app.info("HeartbeatService detected \(detectedChanges.count) change event(s)")
             }
 
             consecutiveErrors = 0
@@ -298,7 +323,8 @@ final class HeartbeatService: Observable {
             notificationSent: notificationSent,
             error: errorMessage,
             opportunities: opportunities,
-            gitContextSummary: gitContextSummary
+            gitContextSummary: gitContextSummary,
+            detectedChanges: detectedChanges
         )
         lastTickDate = result.timestamp
         lastTickResult = result
@@ -306,6 +332,318 @@ final class HeartbeatService: Observable {
         if tickHistory.count > Self.maxHistoryCount {
             tickHistory.removeFirst(tickHistory.count - Self.maxHistoryCount)
         }
+    }
+
+    // MARK: - Change Detection
+
+    func detectChangeEvents(
+        gitInsights: [GitRepositoryInsight],
+        codingSessions: [UnifiedCodingSession],
+        timestamp: Date = Date()
+    ) -> [HeartbeatChangeEvent] {
+        let currentGitSnapshot = Self.gitSnapshotIndex(from: gitInsights)
+        let currentSessionSnapshot = Self.codingSessionSnapshotIndex(from: codingSessions)
+
+        let gitEvents = Self.diffGitSnapshot(
+            previous: previousGitInsightSnapshot,
+            current: currentGitSnapshot,
+            timestamp: timestamp
+        )
+        let sessionEvents = Self.diffCodingSessionSnapshot(
+            previous: previousCodingSessionSnapshot,
+            current: currentSessionSnapshot,
+            timestamp: timestamp
+        )
+
+        previousGitInsightSnapshot = currentGitSnapshot
+        previousCodingSessionSnapshot = currentSessionSnapshot
+
+        return (gitEvents + sessionEvents).sorted { lhs, rhs in
+            if lhs.source.rawValue != rhs.source.rawValue {
+                return lhs.source.rawValue < rhs.source.rawValue
+            }
+            if lhs.targetId != rhs.targetId {
+                return lhs.targetId < rhs.targetId
+            }
+            return lhs.eventType.rawValue < rhs.eventType.rawValue
+        }
+    }
+
+    static func gitSnapshotIndex(from insights: [GitRepositoryInsight]) -> [String: GitRepositoryInsight] {
+        var index: [String: GitRepositoryInsight] = [:]
+        for insight in insights {
+            let key = URL(fileURLWithPath: insight.path).standardizedFileURL.path
+            index[key] = insight
+        }
+        return index
+    }
+
+    static func codingSessionSnapshotIndex(from sessions: [UnifiedCodingSession]) -> [String: UnifiedCodingSession] {
+        var index: [String: UnifiedCodingSession] = [:]
+        for session in sessions {
+            index[codingSessionIdentityKey(for: session)] = session
+        }
+        return index
+    }
+
+    static func diffGitSnapshot(
+        previous: [String: GitRepositoryInsight],
+        current: [String: GitRepositoryInsight],
+        timestamp: Date
+    ) -> [HeartbeatChangeEvent] {
+        guard !previous.isEmpty else { return [] }
+
+        var events: [HeartbeatChangeEvent] = []
+
+        let addedPaths = Set(current.keys).subtracting(previous.keys).sorted()
+        for path in addedPaths {
+            guard let currentInsight = current[path] else { continue }
+            events.append(
+                HeartbeatChangeEvent(
+                    source: .git,
+                    eventType: .gitRepositoryAdded,
+                    severity: .info,
+                    targetId: path,
+                    title: "Git 저장소 감지",
+                    detail: "\(currentInsight.name) 저장소가 하트비트 추적에 추가되었습니다.",
+                    metadata: [
+                        "repository": currentInsight.name,
+                        "branch": currentInsight.branch,
+                        "path": path,
+                    ],
+                    timestamp: timestamp
+                )
+            )
+        }
+
+        let removedPaths = Set(previous.keys).subtracting(current.keys).sorted()
+        for path in removedPaths {
+            guard let previousInsight = previous[path] else { continue }
+            events.append(
+                HeartbeatChangeEvent(
+                    source: .git,
+                    eventType: .gitRepositoryRemoved,
+                    severity: .info,
+                    targetId: path,
+                    title: "Git 저장소 추적 해제",
+                    detail: "\(previousInsight.name) 저장소가 현재 스캔 범위에서 사라졌습니다.",
+                    metadata: [
+                        "repository": previousInsight.name,
+                        "path": path,
+                    ],
+                    timestamp: timestamp
+                )
+            )
+        }
+
+        let sharedPaths = Set(previous.keys).intersection(current.keys).sorted()
+        for path in sharedPaths {
+            guard let old = previous[path], let new = current[path] else { continue }
+
+            if old.branch != new.branch {
+                events.append(
+                    HeartbeatChangeEvent(
+                        source: .git,
+                        eventType: .gitBranchChanged,
+                        severity: .info,
+                        targetId: path,
+                        title: "브랜치 변경",
+                        detail: "\(new.name) 브랜치가 \(old.branch) → \(new.branch) 로 변경되었습니다.",
+                        metadata: [
+                            "repository": new.name,
+                            "oldBranch": old.branch,
+                            "newBranch": new.branch,
+                            "path": path,
+                        ],
+                        timestamp: timestamp
+                    )
+                )
+            }
+
+            let previousDirtyCount = max(0, old.changedFileCount) + max(0, old.untrackedFileCount)
+            let currentDirtyCount = max(0, new.changedFileCount) + max(0, new.untrackedFileCount)
+
+            if (previousDirtyCount == 0 && currentDirtyCount > 0)
+                || (previousDirtyCount > 0 && currentDirtyCount == 0) {
+                let becameDirty = currentDirtyCount > previousDirtyCount
+                events.append(
+                    HeartbeatChangeEvent(
+                        source: .git,
+                        eventType: .gitDirtyStateChanged,
+                        severity: becameDirty ? .warning : .info,
+                        targetId: path,
+                        title: becameDirty ? "작업 트리 변경 감지" : "작업 트리 정리 완료",
+                        detail: "\(new.name) 변경 파일 상태가 \(previousDirtyCount) → \(currentDirtyCount) 로 바뀌었습니다.",
+                        metadata: [
+                            "repository": new.name,
+                            "previousDirty": "\(previousDirtyCount)",
+                            "currentDirty": "\(currentDirtyCount)",
+                            "path": path,
+                        ],
+                        timestamp: timestamp
+                    )
+                )
+            }
+
+            let dirtyDelta = currentDirtyCount - previousDirtyCount
+            if dirtyDelta >= 8 {
+                events.append(
+                    HeartbeatChangeEvent(
+                        source: .git,
+                        eventType: .gitDirtySpike,
+                        severity: .warning,
+                        targetId: path,
+                        title: "작업 변경량 급증",
+                        detail: "\(new.name) 변경량이 +\(dirtyDelta) 증가했습니다.",
+                        metadata: [
+                            "repository": new.name,
+                            "delta": "\(dirtyDelta)",
+                            "currentDirty": "\(currentDirtyCount)",
+                            "path": path,
+                        ],
+                        timestamp: timestamp
+                    )
+                )
+            }
+
+            let oldAhead = old.aheadCount ?? 0
+            let oldBehind = old.behindCount ?? 0
+            let newAhead = new.aheadCount ?? 0
+            let newBehind = new.behindCount ?? 0
+            if oldAhead != newAhead || oldBehind != newBehind {
+                events.append(
+                    HeartbeatChangeEvent(
+                        source: .git,
+                        eventType: .gitAheadBehindChanged,
+                        severity: .info,
+                        targetId: path,
+                        title: "원격 동기화 상태 변경",
+                        detail: "\(new.name) ahead/behind \(oldAhead)/\(oldBehind) → \(newAhead)/\(newBehind)",
+                        metadata: [
+                            "repository": new.name,
+                            "oldAhead": "\(oldAhead)",
+                            "oldBehind": "\(oldBehind)",
+                            "newAhead": "\(newAhead)",
+                            "newBehind": "\(newBehind)",
+                            "path": path,
+                        ],
+                        timestamp: timestamp
+                    )
+                )
+            }
+        }
+
+        return events
+    }
+
+    static func diffCodingSessionSnapshot(
+        previous: [String: UnifiedCodingSession],
+        current: [String: UnifiedCodingSession],
+        timestamp: Date
+    ) -> [HeartbeatChangeEvent] {
+        guard !previous.isEmpty else { return [] }
+
+        var events: [HeartbeatChangeEvent] = []
+
+        let addedKeys = Set(current.keys).subtracting(previous.keys).sorted()
+        for key in addedKeys {
+            guard let session = current[key] else { continue }
+            events.append(
+                HeartbeatChangeEvent(
+                    source: .codingSession,
+                    eventType: .codingSessionStarted,
+                    severity: .info,
+                    targetId: key,
+                    title: "코딩 세션 시작",
+                    detail: "\(session.provider) 세션 \(session.nativeSessionId) 이 시작되었습니다.",
+                    metadata: [
+                        "provider": session.provider,
+                        "sessionId": session.nativeSessionId,
+                        "activityState": session.activityState.rawValue,
+                        "repositoryRoot": session.repositoryRoot ?? "",
+                    ],
+                    timestamp: timestamp
+                )
+            )
+        }
+
+        let removedKeys = Set(previous.keys).subtracting(current.keys).sorted()
+        for key in removedKeys {
+            guard let session = previous[key] else { continue }
+            let severity: HeartbeatChangeSeverity = session.activityState == .active ? .warning : .info
+            events.append(
+                HeartbeatChangeEvent(
+                    source: .codingSession,
+                    eventType: .codingSessionEnded,
+                    severity: severity,
+                    targetId: key,
+                    title: "코딩 세션 종료",
+                    detail: "\(session.provider) 세션 \(session.nativeSessionId) 이 종료되었습니다.",
+                    metadata: [
+                        "provider": session.provider,
+                        "sessionId": session.nativeSessionId,
+                        "lastActivityState": session.activityState.rawValue,
+                        "repositoryRoot": session.repositoryRoot ?? "",
+                    ],
+                    timestamp: timestamp
+                )
+            )
+        }
+
+        let sharedKeys = Set(previous.keys).intersection(current.keys).sorted()
+        for key in sharedKeys {
+            guard let old = previous[key], let new = current[key] else { continue }
+
+            if old.activityState != new.activityState {
+                let severity: HeartbeatChangeSeverity = (new.activityState == .stale || new.activityState == .dead)
+                    ? .warning
+                    : .info
+                events.append(
+                    HeartbeatChangeEvent(
+                        source: .codingSession,
+                        eventType: .codingSessionActivityChanged,
+                        severity: severity,
+                        targetId: key,
+                        title: "코딩 세션 상태 전이",
+                        detail: "\(new.provider) 세션 \(new.nativeSessionId) 상태가 \(old.activityState.rawValue) → \(new.activityState.rawValue) 로 바뀌었습니다.",
+                        metadata: [
+                            "provider": new.provider,
+                            "sessionId": new.nativeSessionId,
+                            "oldActivityState": old.activityState.rawValue,
+                            "newActivityState": new.activityState.rawValue,
+                        ],
+                        timestamp: timestamp
+                    )
+                )
+            }
+
+            if old.repositoryRoot != new.repositoryRoot {
+                events.append(
+                    HeartbeatChangeEvent(
+                        source: .codingSession,
+                        eventType: .codingSessionRepositoryChanged,
+                        severity: .info,
+                        targetId: key,
+                        title: "코딩 세션 저장소 바인딩 변경",
+                        detail: "세션 \(new.nativeSessionId) 저장소가 \(old.repositoryRoot ?? "없음") → \(new.repositoryRoot ?? "없음") 로 변경되었습니다.",
+                        metadata: [
+                            "provider": new.provider,
+                            "sessionId": new.nativeSessionId,
+                            "oldRepositoryRoot": old.repositoryRoot ?? "",
+                            "newRepositoryRoot": new.repositoryRoot ?? "",
+                        ],
+                        timestamp: timestamp
+                    )
+                )
+            }
+        }
+
+        return events
+    }
+
+    static func codingSessionIdentityKey(for session: UnifiedCodingSession) -> String {
+        let runtimeId = session.runtimeSessionId ?? "-"
+        return "\(session.provider.lowercased())|\(session.nativeSessionId)|\(runtimeId)|\(session.path)"
     }
 
     // MARK: - Context Gathering

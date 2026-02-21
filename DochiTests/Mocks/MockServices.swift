@@ -967,6 +967,8 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var attachRepositoryCallCount = 0
     var removeManagedRepositoryCallCount = 0
     var setManualRepositoryBindingCallCount = 0
+    var discoverLocalCodingSessionsCallCount = 0
+    var listUnifiedCodingSessionsCallCount = 0
     var selectSessionForOrchestrationCallCount = 0
     var orchestrationGuardPolicyRulesCallCount = 0
     var evaluateOrchestrationExecutionGuardCallCount = 0
@@ -980,6 +982,8 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     var lastSentCommand: String?
     var mockOutputLines: [String] = ["line1", "line2"]
     var mockGitRepositoryInsights: [GitRepositoryInsight] = []
+    var mockDiscoveredCodingSessions: [DiscoveredCodingSession] = []
+    var mockUnifiedCodingSessions: [UnifiedCodingSession] = []
     var mockOrchestrationSelection = OrchestrationSessionSelection(
         action: .none,
         reason: "mock",
@@ -1101,6 +1105,16 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     func discoverGitRepositoryInsights(searchPaths: [String]?, limit: Int) async -> [GitRepositoryInsight] {
         Array(mockGitRepositoryInsights.prefix(max(1, limit)))
+    }
+
+    func discoverLocalCodingSessions(limit: Int) async -> [DiscoveredCodingSession] {
+        discoverLocalCodingSessionsCallCount += 1
+        return Array(mockDiscoveredCodingSessions.prefix(max(0, limit)))
+    }
+
+    func listUnifiedCodingSessions(limit: Int) async -> [UnifiedCodingSession] {
+        listUnifiedCodingSessionsCallCount += 1
+        return Array(mockUnifiedCodingSessions.prefix(max(0, limit)))
     }
 
     func initializeRepository(
