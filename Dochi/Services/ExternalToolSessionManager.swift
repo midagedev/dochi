@@ -1987,12 +1987,25 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 for: runtime.workingDirectory,
                 managedRepositoryRoots: managedRepositoryRoots
             )
+            let runtimeAlive = runtime.status != .dead
+            // `ps etime` is process uptime, not recent activity. For attachable process sessions,
+            // avoid stale bias by inferring a fresh command signal from runtime liveness.
+            let inferredRecentCommandAge: TimeInterval?
+            if runtime.runtimeType == .process,
+               runtime.controllabilityTier == .t1Attach,
+               runtimeAlive {
+                inferredRecentCommandAge = 0
+            } else {
+                inferredRecentCommandAge = ageSince(runtime.lastCommandAt, now: now)
+            }
+            let inferredFileMtimeAge: TimeInterval? =
+                runtime.runtimeType == .process ? nil : ageSince(runtime.updatedAt, now: now)
             let activity = scoreUnifiedSessionActivity(
                 input: UnifiedSessionActivityInput(
-                    runtimeAlive: runtime.status != .dead,
+                    runtimeAlive: runtimeAlive,
                     recentOutputAge: ageSince(runtime.lastOutputAt, now: now),
-                    recentCommandAge: ageSince(runtime.lastCommandAt, now: now),
-                    fileMtimeAge: ageSince(runtime.updatedAt, now: now),
+                    recentCommandAge: inferredRecentCommandAge,
+                    fileMtimeAge: inferredFileMtimeAge,
                     hasErrorPattern: runtime.hasErrorPattern
                 ),
                 config: config
