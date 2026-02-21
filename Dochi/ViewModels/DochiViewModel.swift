@@ -3028,7 +3028,10 @@ final class DochiViewModel {
             )
 
         case .orchRequest(let command, let repositoryRoot, let ttlSeconds):
-            var params: [String: Any] = ["command": command]
+            var params: [String: Any] = [
+                "command": command,
+                "reveal_challenge_code": true,
+            ]
             if let repositoryRoot {
                 params["repository_root"] = repositoryRoot
             }
@@ -3257,12 +3260,18 @@ final class DochiViewModel {
 
         case .orchRequest:
             let approvalId = result.result["approval_id"] as? String ?? "-"
-            let challengeCode = result.result["challenge_code"] as? String ?? "-"
+            let challengeCode = result.result["challenge_code"] as? String
             let expiresAt = result.result["expires_at"] as? String ?? "-"
+            let codeLine: String
+            if let challengeCode, !challengeCode.isEmpty {
+                codeLine = "- challenge_code: \(challengeCode)"
+            } else {
+                codeLine = "- challenge_code: (보안 정책으로 별도 채널에서 확인)"
+            }
             return """
             실행 승인 요청이 생성되었습니다.
             - approval_id: \(approvalId)
-            - challenge_code: \(challengeCode)
+            \(codeLine)
             - expires_at: \(expiresAt)
             다음 단계:
             1) /orch approve \(approvalId) <challenge_code>
@@ -3369,6 +3378,8 @@ final class DochiViewModel {
             return "승인된 command/repository와 실행 요청이 일치하지 않습니다. 같은 값으로 다시 시도해주세요."
         case "approval_code_mismatch":
             return "challenge_code가 일치하지 않습니다. 코드를 확인한 뒤 다시 시도해주세요."
+        case "approval_locked":
+            return "challenge_code 시도 횟수를 초과했습니다. \(message)"
         default:
             return "요청 실패 (\(code)): \(message)"
         }

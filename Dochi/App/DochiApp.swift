@@ -1691,6 +1691,7 @@ struct DochiApp: App {
         }
         let repositoryRoot = nonEmptyString(params["repository_root"])
         let ttlSeconds = intValue(params["ttl_seconds"])
+        let revealChallengeCode = boolValue(params["reveal_challenge_code"]) ?? false
 
         let challenge = await orchestrationApprovalStore.create(
             command: command,
@@ -1702,15 +1703,21 @@ struct DochiApp: App {
             "ControlPlane approval request created: id=\(snapshot.approvalId), expires=\(isoTimestamp(snapshot.expiresAt))"
         )
 
-        return .ok([
+        var payload: [String: Any] = [
             "approval_id": snapshot.approvalId,
-            "challenge_code": snapshot.challengeCode,
             "status": snapshot.status.rawValue,
             "command": snapshot.command,
             "repository_root": snapshot.repositoryRoot ?? NSNull(),
             "created_at": isoTimestamp(snapshot.createdAt),
             "expires_at": isoTimestamp(snapshot.expiresAt),
-        ])
+        ]
+        if revealChallengeCode {
+            payload["challenge_code"] = snapshot.challengeCode
+        } else {
+            payload["challenge_code_masked"] = maskChallengeCode(snapshot.challengeCode)
+        }
+
+        return .ok(payload)
     }
 
     nonisolated static func handleBridgeOrchestratorApprove(
@@ -2343,6 +2350,14 @@ struct DochiApp: App {
         guard let raw = value as? String else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    nonisolated private static func maskChallengeCode(_ code: String) -> String {
+        guard code.count > 2 else {
+            return String(repeating: "*", count: code.count)
+        }
+        let suffix = code.suffix(2)
+        return String(repeating: "*", count: code.count - 2) + suffix
     }
 
     nonisolated private static func boolValue(_ value: Any?) -> Bool? {

@@ -505,6 +505,40 @@ final class DochiAppOrchestratorBridgeFlowTests: XCTestCase {
         XCTAssertTrue(summary?.contains("history_search_hit_rate") == true)
     }
 
+    func testHandleBridgeOrchestratorRequestMasksChallengeCodeByDefault() async throws {
+        let approvalStore = OrchestrationExecutionApprovalStore()
+        let result = await DochiApp.handleBridgeOrchestratorRequest(
+            params: [
+                "command": "git status",
+                "repository_root": "/tmp/repo",
+            ],
+            orchestrationApprovalStore: approvalStore
+        )
+
+        XCTAssertTrue(result.success)
+        XCTAssertNil(result.result["challenge_code"])
+        let masked = try XCTUnwrap(result.result["challenge_code_masked"] as? String)
+        XCTAssertEqual(masked.count, 6)
+        XCTAssertTrue(masked.hasPrefix("****"))
+    }
+
+    func testHandleBridgeOrchestratorRequestCanRevealChallengeCodeForTrustedChannel() async throws {
+        let approvalStore = OrchestrationExecutionApprovalStore()
+        let result = await DochiApp.handleBridgeOrchestratorRequest(
+            params: [
+                "command": "git status",
+                "repository_root": "/tmp/repo",
+                "reveal_challenge_code": true,
+            ],
+            orchestrationApprovalStore: approvalStore
+        )
+
+        XCTAssertTrue(result.success)
+        let challengeCode = try XCTUnwrap(result.result["challenge_code"] as? String)
+        XCTAssertEqual(challengeCode.count, 6)
+        XCTAssertNil(result.result["challenge_code_masked"])
+    }
+
     private func makeUnifiedSession(
         provider: String,
         nativeSessionId: String,
