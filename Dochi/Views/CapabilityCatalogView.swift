@@ -11,7 +11,7 @@ struct CapabilityCatalogView: View {
     private var groupedTools: [(group: String, icon: String, tools: [ToolInfo])] {
         let groups = Dictionary(grouping: filteredTools) { $0.group }
         return groups
-            .map { (group: $0.key, icon: groupIcon(for: $0.key), tools: $0.value) }
+            .map { (group: $0.key, icon: ToolGroupCatalog.icon(for: $0.key), tools: $0.value) }
             .sorted { $0.group < $1.group }
     }
 
@@ -255,52 +255,8 @@ struct CapabilityCatalogView: View {
             .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 
-    // MARK: - Group Metadata
-
-    private struct GroupMeta {
-        let icon: String
-        let displayName: String
-    }
-
-    private static let groupMetadata: [String: GroupMeta] = [
-        "calendar": GroupMeta(icon: "calendar", displayName: "캘린더"),
-        "kanban": GroupMeta(icon: "rectangle.3.group", displayName: "칸반"),
-        "file": GroupMeta(icon: "doc", displayName: "파일 관리"),
-        "search": GroupMeta(icon: "magnifyingglass", displayName: "웹 검색"),
-        "shell": GroupMeta(icon: "terminal", displayName: "터미널"),
-        "clipboard": GroupMeta(icon: "doc.on.clipboard", displayName: "클립보드"),
-        "screenshot": GroupMeta(icon: "camera.viewfinder", displayName: "스크린샷"),
-        "git": GroupMeta(icon: "arrow.triangle.branch", displayName: "Git"),
-        "github": GroupMeta(icon: "chevron.left.forwardslash.chevron.right", displayName: "GitHub"),
-        "music": GroupMeta(icon: "music.note", displayName: "음악"),
-        "contacts": GroupMeta(icon: "person.2", displayName: "연락처"),
-        "image": GroupMeta(icon: "photo", displayName: "이미지"),
-        "reminders": GroupMeta(icon: "checklist", displayName: "미리알림"),
-        "timer": GroupMeta(icon: "timer", displayName: "타이머"),
-        "alarm": GroupMeta(icon: "alarm", displayName: "알람"),
-        "calculator": GroupMeta(icon: "function", displayName: "계산기"),
-        "datetime": GroupMeta(icon: "clock", displayName: "날짜/시간"),
-        "memory": GroupMeta(icon: "brain", displayName: "기억"),
-        "tools": GroupMeta(icon: "wrench.and.screwdriver", displayName: "도구 관리"),
-        "settings": GroupMeta(icon: "gear", displayName: "설정"),
-        "agent": GroupMeta(icon: "person.badge.key", displayName: "에이전트"),
-        "workspace": GroupMeta(icon: "building.2", displayName: "워크스페이스"),
-        "telegram": GroupMeta(icon: "paperplane", displayName: "텔레그램"),
-        "workflow": GroupMeta(icon: "arrow.triangle.2.circlepath", displayName: "워크플로우"),
-        "coding": GroupMeta(icon: "chevron.left.forwardslash.chevron.right", displayName: "코딩 에이전트"),
-        "finder": GroupMeta(icon: "folder", displayName: "Finder"),
-        "url": GroupMeta(icon: "link", displayName: "URL 열기"),
-        "mcp": GroupMeta(icon: "server.rack", displayName: "MCP 서버"),
-        "profile": GroupMeta(icon: "person.crop.circle", displayName: "사용자 전환"),
-        "context": GroupMeta(icon: "doc.text", displayName: "시스템 프롬프트"),
-    ]
-
-    private func groupIcon(for group: String) -> String {
-        Self.groupMetadata[group]?.icon ?? "square.grid.2x2"
-    }
-
     private func groupDisplayName(for group: String) -> String {
-        Self.groupMetadata[group]?.displayName ?? group
+        ToolGroupCatalog.displayName(for: group)
     }
 
     private func examplePrompt(for tool: ToolInfo) -> String? {

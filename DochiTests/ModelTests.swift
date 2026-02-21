@@ -186,6 +186,27 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(decoded.effectivePreferredToolGroups, ["coding", "external_tool"])
     }
 
+    func testToolGroupCatalogNormalizedUnique() {
+        let groups = ToolGroupCatalog.normalizedUnique([" Coding ", "git", "coding", "", "   "])
+        XCTAssertEqual(groups, ["coding", "git"])
+    }
+
+    func testToolGroupCatalogGroupsFromToolNames() {
+        let groups = ToolGroupCatalog.groups(fromToolNames: [
+            "web_search",
+            "list_calendar_events",
+            "create_calendar_event",
+            "custom.tool",
+            "set_alarm",
+        ])
+        XCTAssertEqual(groups, ["search", "calendar", "custom", "alarm"])
+    }
+
+    func testToolGroupCatalogSupportsTemplateSuggestedTools() {
+        let groups = ToolGroupCatalog.groups(fromToolNames: AgentTemplate.scheduler.suggestedTools)
+        XCTAssertEqual(groups, ["calendar", "reminders"])
+    }
+
     // MARK: - ShellPermissionConfig
 
     func testShellPermissionConfigDefault() {

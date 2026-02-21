@@ -175,3 +175,86 @@ enum ToolGroupResolver {
         }
     }
 }
+
+enum ToolGroupCatalog {
+    struct Meta: Sendable {
+        let icon: String
+        let displayName: String
+    }
+
+    static let metadata: [String: Meta] = [
+        "calendar": Meta(icon: "calendar", displayName: "캘린더"),
+        "kanban": Meta(icon: "rectangle.3.group", displayName: "칸반"),
+        "file": Meta(icon: "doc", displayName: "파일 관리"),
+        "search": Meta(icon: "magnifyingglass", displayName: "웹 검색"),
+        "shell": Meta(icon: "terminal", displayName: "터미널"),
+        "clipboard": Meta(icon: "doc.on.clipboard", displayName: "클립보드"),
+        "screenshot": Meta(icon: "camera.viewfinder", displayName: "스크린샷"),
+        "git": Meta(icon: "arrow.triangle.branch", displayName: "Git"),
+        "github": Meta(icon: "chevron.left.forwardslash.chevron.right", displayName: "GitHub"),
+        "music": Meta(icon: "music.note", displayName: "음악"),
+        "contacts": Meta(icon: "person.2", displayName: "연락처"),
+        "image": Meta(icon: "photo", displayName: "이미지"),
+        "reminders": Meta(icon: "checklist", displayName: "미리알림"),
+        "timer": Meta(icon: "timer", displayName: "타이머"),
+        "alarm": Meta(icon: "alarm", displayName: "알람"),
+        "calculator": Meta(icon: "function", displayName: "계산기"),
+        "datetime": Meta(icon: "clock", displayName: "날짜/시간"),
+        "memory": Meta(icon: "brain", displayName: "기억"),
+        "tools": Meta(icon: "wrench.and.screwdriver", displayName: "도구 관리"),
+        "settings": Meta(icon: "gear", displayName: "설정"),
+        "agent": Meta(icon: "person.badge.key", displayName: "에이전트"),
+        "workspace": Meta(icon: "building.2", displayName: "워크스페이스"),
+        "telegram": Meta(icon: "paperplane", displayName: "텔레그램"),
+        "workflow": Meta(icon: "arrow.triangle.2.circlepath", displayName: "워크플로우"),
+        "coding": Meta(icon: "chevron.left.forwardslash.chevron.right", displayName: "코딩"),
+        "finder": Meta(icon: "folder", displayName: "Finder"),
+        "url": Meta(icon: "link", displayName: "URL 열기"),
+        "mcp": Meta(icon: "server.rack", displayName: "MCP 서버"),
+        "profile": Meta(icon: "person.crop.circle", displayName: "사용자 전환"),
+        "context": Meta(icon: "doc.text", displayName: "시스템 프롬프트"),
+    ]
+
+    static var defaultGroups: [String] {
+        metadata.keys.sorted()
+    }
+
+    static func icon(for group: String) -> String {
+        metadata[normalize(group)]?.icon ?? "square.grid.2x2"
+    }
+
+    static func displayName(for group: String) -> String {
+        metadata[normalize(group)]?.displayName ?? normalize(group)
+    }
+
+    static func normalize(_ group: String) -> String {
+        ToolGroupResolver.normalizeGroupName(group)
+    }
+
+    static func normalizedUnique(_ groups: [String]) -> [String] {
+        var result: [String] = []
+        var seen: Set<String> = []
+
+        for raw in groups {
+            let normalized = normalize(raw)
+            guard !normalized.isEmpty else { continue }
+            if seen.insert(normalized).inserted {
+                result.append(normalized)
+            }
+        }
+
+        return result
+    }
+
+    static func orderedGroups(from groups: [String]) -> [String] {
+        normalizedUnique(groups)
+            .sorted {
+                displayName(for: $0).localizedCaseInsensitiveCompare(displayName(for: $1)) == .orderedAscending
+            }
+    }
+
+    static func groups(fromToolNames toolNames: [String]) -> [String] {
+        let groups = toolNames.map { ToolGroupResolver.group(forToolName: $0) }
+        return normalizedUnique(groups)
+    }
+}

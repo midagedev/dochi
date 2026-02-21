@@ -200,6 +200,7 @@ struct SidebarHeaderView: View {
                 contextService: viewModel.contextService,
                 settings: viewModel.settings,
                 sessionContext: viewModel.sessionContext,
+                availableToolGroups: viewModel.allToolInfos.map(\.group),
                 onDelete: {
                     viewModel.deleteAgent(name: viewModel.settings.activeAgentName)
                 }
