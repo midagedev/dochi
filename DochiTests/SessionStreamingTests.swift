@@ -117,6 +117,81 @@ final class SessionStreamingTests: XCTestCase {
         XCTAssertEqual(assistant, "도구 결과 확인")
     }
 
+    @MainActor
+    func testControlPlaneSecretModeUsesMockToolAndRestoresConversation() async throws {
+        let toolService = MockBuiltInToolService()
+        toolService.stubbedResult = ToolResult(toolCallId: "", content: "real tool executed")
+
+        let adapter = CapturingStreamAdapter(provider: .anthropic) { request in
+            if request.messages.containsToolResult(callId: "tool_1") {
+                return [.done(text: "secret 완료")]
+            }
+            return [
+                .toolUse(
+                    toolCallId: "tool_1",
+                    toolName: "calendar.create",
+                    toolInputJSON: "{\"title\":\"미팅\"}"
+                ),
+                .done(text: nil),
+            ]
+        }
+
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: toolService
+        )
+        let conversationService = MockConversationService()
+        let existingConversation = Conversation(
+            id: UUID(),
+            title: "기존 대화",
+            messages: [Message(role: .assistant, content: "기존 메시지")]
+        )
+        conversationService.save(conversation: existingConversation)
+
+        let viewModel = makeViewModel(
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            toolService: toolService,
+            conversationService: conversationService
+        )
+        viewModel.selectConversation(id: existingConversation.id)
+
+        actor EventCollector {
+            private var events: [DochiViewModel.ControlPlaneStreamEvent] = []
+
+            func append(_ event: DochiViewModel.ControlPlaneStreamEvent) {
+                events.append(event)
+            }
+
+            func all() -> [DochiViewModel.ControlPlaneStreamEvent] {
+                events
+            }
+        }
+        let eventCollector = EventCollector()
+        let response = try await viewModel.runControlPlaneChatStream(
+            prompt: "일정 만들어",
+            correlationId: "secret-cid",
+            timeoutSeconds: 5,
+            executionMode: .secret(.init(allowedToolNames: ["calendar.create"]))
+        ) { event in
+            await eventCollector.append(event)
+        }
+        let events = await eventCollector.all()
+
+        XCTAssertEqual(response.assistantMessage, "secret 완료")
+        XCTAssertEqual(toolService.executeCallCount, 0)
+        XCTAssertEqual(viewModel.currentConversation?.id, existingConversation.id)
+        XCTAssertEqual(
+            viewModel.currentConversation?.messages.last?.content,
+            existingConversation.messages.last?.content
+        )
+        XCTAssertEqual(conversationService.list().count, 1)
+        XCTAssertGreaterThanOrEqual(adapter.capturedRequests.count, 2)
+        XCTAssertFalse(adapter.capturedRequests[0].messages.containsToolResult(callId: "tool_1"))
+        XCTAssertTrue(adapter.capturedRequests[1].messages.containsToolResult(callId: "tool_1"))
+        XCTAssertTrue(events.contains(where: { $0.kind == .done }))
+    }
+
     // MARK: - testFailedEventSetsErrorMessage
 
     /// Verifies that a network error from the native loop sets `errorMessage` on the ViewModel.
@@ -247,7 +322,8 @@ private extension SessionStreamingTests {
         provider: LLMProvider,
         nativeLoopService: NativeAgentLoopService,
         toolService: MockBuiltInToolService? = nil,
-        keychainService: MockKeychainService? = nil
+        keychainService: MockKeychainService? = nil,
+        conversationService: MockConversationService = MockConversationService()
     ) -> DochiViewModel {
         let resolvedToolService = toolService ?? MockBuiltInToolService()
         let resolvedKeychainService = keychainService ?? MockKeychainService()
@@ -266,7 +342,7 @@ private extension SessionStreamingTests {
         return DochiViewModel(
             toolService: resolvedToolService,
             contextService: MockContextService(),
-            conversationService: MockConversationService(),
+            conversationService: conversationService,
             keychainService: resolvedKeychainService,
             speechService: MockSpeechService(),
             ttsService: MockTTSService(),

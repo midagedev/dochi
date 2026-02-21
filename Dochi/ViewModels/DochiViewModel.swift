@@ -90,6 +90,26 @@ final class DochiViewModel {
         let timestamp: String
     }
 
+    struct ControlPlaneSecretOptions: Sendable {
+        let allowedToolNames: [String]
+
+        init(allowedToolNames: [String]) {
+            self.allowedToolNames = allowedToolNames
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .reduce(into: [String]()) { result, value in
+                    if !result.contains(value) {
+                        result.append(value)
+                    }
+                }
+        }
+    }
+
+    enum ControlPlaneExecutionMode: Sendable {
+        case standard
+        case secret(ControlPlaneSecretOptions)
+    }
+
     // MARK: - State
 
     private(set) var interactionState: InteractionState = .idle
@@ -232,6 +252,7 @@ final class DochiViewModel {
     private var sessionTimeoutTask: Task<Void, Never>?
     private var confirmationTimeoutTask: Task<Void, Never>?
     private var localServerMonitorTask: Task<Void, Never>?
+    private var activeControlPlaneExecutionMode: ControlPlaneExecutionMode = .standard
     private var sentenceChunker = SentenceChunker()
     private static let sessionEndingTimeout: TimeInterval = 10
     private static let toolConfirmationTimeout: TimeInterval = 30
@@ -259,6 +280,17 @@ final class DochiViewModel {
     /// Context window size (tokens) for the currently selected model.
     var contextWindowTokens: Int {
         settings.currentProvider.contextWindowTokens(for: settings.llmModel)
+    }
+
+    private var activeControlPlaneSecretOptions: ControlPlaneSecretOptions? {
+        if case .secret(let options) = activeControlPlaneExecutionMode {
+            return options
+        }
+        return nil
+    }
+
+    private var isControlPlaneSecretExecutionActive: Bool {
+        activeControlPlaneSecretOptions != nil
     }
 
     // MARK: - Init
@@ -1035,7 +1067,8 @@ final class DochiViewModel {
         ensureConversation()
 
         // K-3: Analyze message for interest discovery
-        if let conversationId = currentConversation?.id,
+        if !isControlPlaneSecretExecutionActive,
+           let conversationId = currentConversation?.id,
            let interestService = interestDiscoveryService {
             let countBefore = interestService.profile.interests.count
             interestService.analyzeMessage(finalText, conversationId: conversationId)
@@ -1096,11 +1129,16 @@ final class DochiViewModel {
 
     /// Control Plane `chat.send`용 단발 요청.
     /// 기존 `sendMessage()` 플로우를 재사용하고, 완료까지 대기한 뒤 최신 assistant 응답을 반환한다.
-    func sendMessageFromControlPlane(prompt: String, timeoutSeconds: Int = 120) async throws -> ControlPlaneChatSendResponse {
+    func sendMessageFromControlPlane(
+        prompt: String,
+        timeoutSeconds: Int = 120,
+        executionMode: ControlPlaneExecutionMode = .standard
+    ) async throws -> ControlPlaneChatSendResponse {
         try await runControlPlaneChatStream(
             prompt: prompt,
             correlationId: UUID().uuidString,
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            executionMode: executionMode
         ) { _ in }
     }
 
@@ -1110,6 +1148,79 @@ final class DochiViewModel {
         prompt: String,
         correlationId: String,
         timeoutSeconds: Int = 120,
+        executionMode: ControlPlaneExecutionMode = .standard,
+        onEvent: @Sendable @escaping (ControlPlaneStreamEvent) async -> Void
+    ) async throws -> ControlPlaneChatSendResponse {
+        switch executionMode {
+        case .standard:
+            return try await runControlPlaneChatStreamCore(
+                prompt: prompt,
+                correlationId: correlationId,
+                timeoutSeconds: timeoutSeconds,
+                onEvent: onEvent
+            )
+        case .secret(let secretOptions):
+            return try await runControlPlaneChatStreamSecret(
+                prompt: prompt,
+                correlationId: correlationId,
+                timeoutSeconds: timeoutSeconds,
+                secretOptions: secretOptions,
+                onEvent: onEvent
+            )
+        }
+    }
+
+    private func runControlPlaneChatStreamSecret(
+        prompt: String,
+        correlationId: String,
+        timeoutSeconds: Int,
+        secretOptions: ControlPlaneSecretOptions,
+        onEvent: @Sendable @escaping (ControlPlaneStreamEvent) async -> Void
+    ) async throws -> ControlPlaneChatSendResponse {
+        guard !secretOptions.allowedToolNames.isEmpty else {
+            throw ControlPlaneChatSendError.requestFailed("secret 모드는 secret_allowed_tools가 1개 이상 필요합니다.")
+        }
+
+        let previousConversation = currentConversation
+        let previousStreamingText = streamingText
+        let previousErrorMessage = errorMessage
+        let previousToolName = currentToolName
+        let previousInputText = inputText
+        let previousPendingImages = pendingImages
+        let previousVisionWarningDismissed = visionWarningDismissed
+
+        activeControlPlaneExecutionMode = .secret(secretOptions)
+        currentConversation = Conversation(title: "Secret Smoke Session", userId: sessionContext.currentUserId)
+        streamingText = ""
+        errorMessage = nil
+        currentToolName = nil
+        inputText = ""
+        pendingImages = []
+        visionWarningDismissed = false
+
+        defer {
+            activeControlPlaneExecutionMode = .standard
+            currentConversation = previousConversation
+            streamingText = previousStreamingText
+            errorMessage = previousErrorMessage
+            currentToolName = previousToolName
+            inputText = previousInputText
+            pendingImages = previousPendingImages
+            visionWarningDismissed = previousVisionWarningDismissed
+        }
+
+        return try await runControlPlaneChatStreamCore(
+            prompt: prompt,
+            correlationId: correlationId,
+            timeoutSeconds: timeoutSeconds,
+            onEvent: onEvent
+        )
+    }
+
+    private func runControlPlaneChatStreamCore(
+        prompt: String,
+        correlationId: String,
+        timeoutSeconds: Int,
         onEvent: @Sendable @escaping (ControlPlaneStreamEvent) async -> Void
     ) async throws -> ControlPlaneChatSendResponse {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1434,7 +1545,14 @@ final class DochiViewModel {
             let nativeHookContext = NativeAgentLoopHookContext(
                 sessionId: currentConversation?.id.uuidString ?? UUID().uuidString,
                 workspaceId: sessionContext.workspaceId.uuidString,
-                agentId: settings.activeAgentName
+                agentId: settings.activeAgentName,
+                allowMemoryMutation: !isControlPlaneSecretExecutionActive,
+                toolExecutionMode: {
+                    if let secret = activeControlPlaneSecretOptions {
+                        return .mock(allowedToolNames: secret.allowedToolNames)
+                    }
+                    return .live
+                }()
             )
 
             streamingText = ""
@@ -3331,7 +3449,9 @@ final class DochiViewModel {
         if currentConversation == nil {
             currentConversation = Conversation(userId: sessionContext.currentUserId)
         }
-        markCurrentNativeSessionActive()
+        if !isControlPlaneSecretExecutionActive {
+            markCurrentNativeSessionActive()
+        }
     }
 
     private func appendUserMessage(_ text: String, imageData: [ImageContent]? = nil) {
@@ -3432,6 +3552,10 @@ final class DochiViewModel {
 
     private func saveConversation() {
         guard let conversation = currentConversation else { return }
+        guard !isControlPlaneSecretExecutionActive else {
+            Log.app.debug("Secret control-plane execution: skip conversation persistence")
+            return
+        }
         markCurrentNativeSessionActive()
 
         if conversation.title == "새 대화",
@@ -3447,6 +3571,7 @@ final class DochiViewModel {
     }
 
     private func markCurrentNativeSessionActive() {
+        guard !isControlPlaneSecretExecutionActive else { return }
         guard let conversation = currentConversation else { return }
         let workspaceId = sessionContext.workspaceId
         let agentId = settings.activeAgentName
@@ -3470,6 +3595,7 @@ final class DochiViewModel {
     }
 
     private func markCurrentNativeSessionInterrupted() {
+        guard !isControlPlaneSecretExecutionActive else { return }
         guard let conversation = currentConversation else { return }
         let ownerUserId = normalizedUserId(conversation.userId) ?? normalizedUserId(sessionContext.currentUserId)
         _ = nativeSessionStore.interrupt(

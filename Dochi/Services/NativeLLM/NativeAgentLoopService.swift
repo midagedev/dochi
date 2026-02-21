@@ -12,10 +12,31 @@ struct NativeAgentLoopGuardPolicy: Sendable {
     static let `default` = NativeAgentLoopGuardPolicy()
 }
 
+enum NativeAgentLoopToolExecutionMode: Sendable {
+    case live
+    case mock(allowedToolNames: [String])
+}
+
 struct NativeAgentLoopHookContext: Sendable {
     let sessionId: String
     let workspaceId: String
     let agentId: String?
+    let allowMemoryMutation: Bool
+    let toolExecutionMode: NativeAgentLoopToolExecutionMode
+
+    init(
+        sessionId: String,
+        workspaceId: String,
+        agentId: String?,
+        allowMemoryMutation: Bool = true,
+        toolExecutionMode: NativeAgentLoopToolExecutionMode = .live
+    ) {
+        self.sessionId = sessionId
+        self.workspaceId = workspaceId
+        self.agentId = agentId
+        self.allowMemoryMutation = allowMemoryMutation
+        self.toolExecutionMode = toolExecutionMode
+    }
 }
 
 struct NativeAgentLoopToolRefreshContext: Sendable {
@@ -96,7 +117,9 @@ final class NativeAgentLoopService {
         return AsyncThrowingStream { continuation in
             let task = Task { @MainActor [self, guardPolicy, toolService] in
                 let resolvedHookContext = Self.normalizedHookContext(hookContext)
-                if let memoryPipeline, !resolvedHookContext.workspaceId.isEmpty {
+                if resolvedHookContext.allowMemoryMutation,
+                   let memoryPipeline,
+                   !resolvedHookContext.workspaceId.isEmpty {
                     hookPipeline.attachMemoryPipeline(memoryPipeline, workspaceId: resolvedHookContext.workspaceId)
                 }
 
@@ -310,7 +333,17 @@ final class NativeAgentLoopService {
                                 effectiveArguments = arguments
                             }
 
-                            let result = await toolService.execute(name: pending.name, arguments: effectiveArguments)
+                            let result: ToolResult
+                            switch resolvedHookContext.toolExecutionMode {
+                            case .live:
+                                result = await toolService.execute(name: pending.name, arguments: effectiveArguments)
+                            case .mock(let allowedToolNames):
+                                result = Self.executeMockTool(
+                                    name: pending.name,
+                                    arguments: effectiveArguments,
+                                    allowedToolNames: allowedToolNames
+                                )
+                            }
                             continuation.yield(.toolResult(
                                 toolCallId: pending.toolCallId,
                                 content: result.content,
@@ -428,7 +461,9 @@ private extension NativeAgentLoopService {
         return NativeAgentLoopHookContext(
             sessionId: sessionId.isEmpty ? UUID().uuidString : sessionId,
             workspaceId: workspaceId,
-            agentId: context.agentId
+            agentId: context.agentId,
+            allowMemoryMutation: context.allowMemoryMutation,
+            toolExecutionMode: context.toolExecutionMode
         )
     }
 
@@ -527,6 +562,42 @@ private extension NativeAgentLoopService {
         default:
             return .string(String(describing: value))
         }
+    }
+
+    private static func executeMockTool(
+        name: String,
+        arguments: [String: Any],
+        allowedToolNames: [String]
+    ) -> ToolResult {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = Set(
+            allowedToolNames
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+
+        guard allowed.contains(normalizedName) else {
+            return ToolResult(
+                toolCallId: "",
+                content: "secret mock 모드 차단: 허용되지 않은 도구 '\(normalizedName)'",
+                isError: true
+            )
+        }
+
+        let argumentsDescription: String
+        if JSONSerialization.isValidJSONObject(arguments),
+           let data = try? JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            argumentsDescription = text
+        } else {
+            argumentsDescription = String(describing: arguments)
+        }
+
+        return ToolResult(
+            toolCallId: "",
+            content: "secret-mock tool '\(normalizedName)' executed with arguments: \(argumentsDescription)",
+            isError: false
+        )
     }
 
     private static func makeSafeIntegerCodable<T: BinaryInteger>(_ value: T) -> AnyCodableValue {
