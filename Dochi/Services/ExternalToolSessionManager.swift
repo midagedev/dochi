@@ -901,14 +901,21 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             )
         }
 
-        async let discoveredSessions = discoverLocalCodingSessions(limit: max(effectiveLimit * 2, 80))
+        // Keep process probing bounded for control-plane latency.
+        let processLimit = max(min(effectiveLimit, 120), 60)
         let processSnapshots = await Task.detached(priority: .utility) {
             Self.discoverProcessRuntimeSessions(
-                limit: max(effectiveLimit * 2, 120),
+                limit: processLimit,
                 now: now
             )
         }.value
-        let discovered = await discoveredSessions
+        let hasRuntimeCandidates = !(sessionSnapshots.isEmpty && processSnapshots.isEmpty)
+        let discovered: [DiscoveredCodingSession]
+        if hasRuntimeCandidates {
+            discovered = []
+        } else {
+            discovered = await discoverLocalCodingSessions(limit: max(effectiveLimit, 80))
+        }
         let managedRoots = managedRepositories
             .filter { !$0.isArchived }
             .map { URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path }
@@ -2382,15 +2389,16 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             psOutput: psResult.output,
             now: now,
             workingDirectories: [:],
-            limit: max(effectiveLimit * 2, 80)
+            limit: max(effectiveLimit, 80)
         )
         guard !rough.isEmpty else {
             return []
         }
 
-        let pids = rough
-            .compactMap(\.runtimeSessionId)
-            .compactMap(Int.init)
+        let pids = processWorkingDirectoryCandidatePIDs(
+            from: rough,
+            cap: min(max(effectiveLimit, 24), 64)
+        )
         let workingDirectories = resolveProcessWorkingDirectories(pids: pids)
         return parseProcessRuntimeSnapshots(
             psOutput: psResult.output,
@@ -2445,28 +2453,60 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             .map { $0 }
     }
 
+    nonisolated static func processWorkingDirectoryCandidatePIDs(
+        from snapshots: [RuntimeSessionSnapshot],
+        cap: Int
+    ) -> [Int] {
+        let effectiveCap = max(1, min(400, cap))
+        var selected: [Int] = []
+        selected.reserveCapacity(effectiveCap)
+        var seen: Set<Int> = []
+        seen.reserveCapacity(effectiveCap)
+
+        for snapshot in snapshots {
+            guard selected.count < effectiveCap,
+                  let raw = snapshot.runtimeSessionId,
+                  let pid = Int(raw),
+                  pid > 0,
+                  !seen.contains(pid) else {
+                continue
+            }
+            seen.insert(pid)
+            selected.append(pid)
+        }
+        return selected
+    }
+
     nonisolated static func processProvider(fromCommandLine commandLine: String) -> String? {
         let trimmed = commandLine.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let executable = trimmed
-            .split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
-            .first
-            .map(String.init) ?? trimmed
-        let basename = URL(fileURLWithPath: executable).lastPathComponent.lowercased()
-        if basename == "codex" || basename == "claude" || basename == "aider" {
-            return basename
+        let lower = trimmed.lowercased()
+        if lower.contains("/applications/codex.app/contents/") ||
+            lower.contains("/applications/claude.app/contents/") {
+            return nil
         }
 
-        let lower = " \(trimmed.lowercased()) "
-        if lower.contains(" -m aider ") || lower.contains(" /aider ") || lower.contains(" aider ") {
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !tokens.isEmpty else { return nil }
+        let normalizedTokens = tokens.map { token in
+            URL(fileURLWithPath: token).lastPathComponent.lowercased()
+        }
+
+        if normalizedTokens.contains("aider") {
             return "aider"
         }
-        if lower.contains(" /codex ") || lower.contains(" codex ") || lower.contains(" codex-cli ") {
+        if normalizedTokens.contains("codex") || normalizedTokens.contains("codex-cli") {
             return "codex"
         }
-        if lower.contains(" /claude ") || lower.contains(" claude ") || lower.contains(" claude-code ") {
+        if normalizedTokens.contains("claude") || normalizedTokens.contains("claude-code") {
             return "claude"
+        }
+
+        if let moduleIndex = normalizedTokens.firstIndex(of: "-m"),
+           normalizedTokens.indices.contains(moduleIndex + 1),
+           normalizedTokens[moduleIndex + 1] == "aider" {
+            return "aider"
         }
         return nil
     }
