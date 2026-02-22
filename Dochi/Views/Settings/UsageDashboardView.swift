@@ -91,7 +91,7 @@ struct UsageDashboardView: View {
                         .padding(.horizontal)
 
                     // Subscription plan cards
-                    subscriptionCardsSection(resourceOptimizer)
+                    subscriptionCardsSection()
                         .padding(.horizontal)
 
                     // Auto task settings
@@ -557,7 +557,7 @@ struct UsageDashboardView: View {
 
     // MARK: - Subscription Cards Section
 
-    private func subscriptionCardsSection(_ optimizer: any ResourceOptimizerProtocol) -> some View {
+    private func subscriptionCardsSection() -> some View {
         VStack(alignment: .leading, spacing: 8) {
             usageAxisHeader(
                 title: "구독제 (Subscription)",
