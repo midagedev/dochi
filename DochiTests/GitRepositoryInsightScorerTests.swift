@@ -119,6 +119,8 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         try "local working change".data(using: .utf8)?.write(to: trackedFile)
         let untrackedFile = URL(fileURLWithPath: initializedPath).appendingPathComponent("NEW.md")
         try "# temp".data(using: .utf8)?.write(to: untrackedFile)
+        let arrowNamedFile = URL(fileURLWithPath: initializedPath).appendingPathComponent("notes -> plan.md")
+        try "draft".data(using: .utf8)?.write(to: arrowNamedFile)
 
         let insights = GitRepositoryInsightScanner.discover(
             searchPaths: [initializedPath],
@@ -130,6 +132,7 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertEqual(insight.recentCommitPreviews?.first?.subject, "feat: update feed details")
         XCTAssertTrue(insight.changedPathPreview?.contains("tracked.txt") ?? false)
         XCTAssertTrue(insight.changedPathPreview?.contains("NEW.md") ?? false)
+        XCTAssertTrue(insight.changedPathPreview?.contains("notes -> plan.md") ?? false)
     }
 
     private func runGit(args: [String], at path: String) throws {

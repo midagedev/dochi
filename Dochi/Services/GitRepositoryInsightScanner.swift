@@ -420,6 +420,15 @@ enum GitRepositoryInsightScanner {
         let raw = line.trimmingCharacters(in: .newlines)
         guard !raw.isEmpty else { return nil }
 
+        let isRenameOrCopy: Bool
+        if raw.count >= 2 {
+            let first = raw[raw.startIndex]
+            let second = raw[raw.index(after: raw.startIndex)]
+            isRenameOrCopy = first == "R" || first == "C" || second == "R" || second == "C"
+        } else {
+            isRenameOrCopy = false
+        }
+
         let payload: String
         if raw.count >= 3 {
             let markerIndex = raw.index(raw.startIndex, offsetBy: 2)
@@ -435,8 +444,11 @@ enum GitRepositoryInsightScanner {
             return nil
         }
 
-        guard !payload.isEmpty else { return nil }
-        let resolved = payload.components(separatedBy: " -> ").last ?? payload
+        var resolved = payload
+        if isRenameOrCopy, let renameArrow = payload.range(of: " -> ", options: .backwards) {
+            resolved = String(payload[renameArrow.upperBound...])
+        }
+
         let normalized = resolved
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
