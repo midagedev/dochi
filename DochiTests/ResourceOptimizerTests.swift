@@ -10,7 +10,16 @@ final class ResourceOptimizerTests: XCTestCase {
     override func setUp() async throws {
         tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        service = ResourceOptimizerService(baseURL: tempDir, usageStore: nil)
+        let emptyClaude = tempDir.appendingPathComponent("empty-claude")
+        let emptyCodex = tempDir.appendingPathComponent("empty-codex")
+        try FileManager.default.createDirectory(at: emptyClaude, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: emptyCodex, withIntermediateDirectories: true)
+        service = ResourceOptimizerService(
+            baseURL: tempDir,
+            usageStore: nil,
+            claudeProjectsRoots: [emptyClaude],
+            codexSessionsRoots: [emptyCodex]
+        )
     }
 
     override func tearDown() async throws {
@@ -180,6 +189,7 @@ final class ResourceOptimizerTests: XCTestCase {
         let plan = SubscriptionPlan(
             providerName: "OpenAI",
             planName: "Pro",
+            usageSource: .externalToolLogs,
             monthlyTokenLimit: 1_000_000,
             resetDayOfMonth: 1
         )
@@ -204,12 +214,14 @@ final class ResourceOptimizerTests: XCTestCase {
         let normalPlan = SubscriptionPlan(
             providerName: "OpenAI",
             planName: "Normal",
+            usageSource: .externalToolLogs,
             monthlyTokenLimit: 1_000_000,
             resetDayOfMonth: normalResetDay
         )
         let wasteRiskPlan = SubscriptionPlan(
             providerName: "Anthropic",
             planName: "Near reset",
+            usageSource: .externalToolLogs,
             monthlyTokenLimit: 1_000_000,
             resetDayOfMonth: wasteRiskResetDay
         )
@@ -231,6 +243,7 @@ final class ResourceOptimizerTests: XCTestCase {
         let plan = SubscriptionPlan(
             providerName: "OpenAI",
             planName: "Pro",
+            usageSource: .externalToolLogs,
             monthlyTokenLimit: 1_000_000,
             resetDayOfMonth: 1
         )
@@ -258,6 +271,7 @@ final class ResourceOptimizerTests: XCTestCase {
         let plan = SubscriptionPlan(
             providerName: "OpenAI",
             planName: "Pro",
+            usageSource: .externalToolLogs,
             monthlyTokenLimit: 1_000_000,
             resetDayOfMonth: 1
         )
@@ -284,6 +298,7 @@ final class ResourceOptimizerTests: XCTestCase {
         let plan = SubscriptionPlan(
             providerName: "OpenAI",
             planName: "Pro",
+            usageSource: .externalToolLogs,
             monthlyTokenLimit: 1_000_000,
             resetDayOfMonth: 1
         )
@@ -314,6 +329,7 @@ final class ResourceOptimizerTests: XCTestCase {
         let plan = SubscriptionPlan(
             providerName: "OpenAI",
             planName: "Pro",
+            usageSource: .externalToolLogs,
             monthlyTokenLimit: 1_000_000,
             resetDayOfMonth: 1
         )
@@ -327,6 +343,99 @@ final class ResourceOptimizerTests: XCTestCase {
 
         XCTAssertEqual(queued, 0)
         XCTAssertTrue(service.autoTaskRecords.isEmpty)
+    }
+
+    func testEvaluateAndQueueAutoTasksSkipsDochiUsageStoreSource() async {
+        let meteredPlan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Metered",
+            usageSource: .dochiUsageStore,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        let subscriptionPlan = SubscriptionPlan(
+            providerName: "ChatGPT Pro",
+            planName: "Plus",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        await service.addSubscription(meteredPlan)
+        await service.addSubscription(subscriptionPlan)
+
+        let queued = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.research],
+            onlyWasteRisk: false
+        )
+
+        XCTAssertEqual(queued, 1)
+        XCTAssertEqual(service.autoTaskRecords.count, 1)
+        XCTAssertEqual(service.autoTaskRecords.first?.subscriptionId, subscriptionPlan.id)
+    }
+
+    func testEvaluateAndQueueAutoTasksOnlyWasteRiskWithMixedSourcesUsesSubscriptionAxis() async {
+        let calendar = Calendar.current
+        let todayDay = calendar.component(.day, from: Date())
+        let wasteRiskResetDay = todayDay < 28 ? todayDay + 1 : 1
+
+        let meteredWasteRiskPlan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Metered",
+            usageSource: .dochiUsageStore,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: wasteRiskResetDay
+        )
+        let subscriptionWasteRiskPlan = SubscriptionPlan(
+            providerName: "Claude Max",
+            planName: "Max",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: wasteRiskResetDay
+        )
+        await service.addSubscription(meteredWasteRiskPlan)
+        await service.addSubscription(subscriptionWasteRiskPlan)
+
+        let queued = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.research],
+            onlyWasteRisk: true
+        )
+
+        XCTAssertEqual(queued, 1)
+        XCTAssertEqual(service.autoTaskRecords.count, 1)
+        XCTAssertEqual(service.autoTaskRecords.first?.subscriptionId, subscriptionWasteRiskPlan.id)
+    }
+
+    func testEvaluateAndQueueAutoTasksMaintainsSameDayDedupeWithMixedSources() async {
+        let meteredPlan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Metered",
+            usageSource: .dochiUsageStore,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        let subscriptionPlan = SubscriptionPlan(
+            providerName: "Claude Max",
+            planName: "Max",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        await service.addSubscription(meteredPlan)
+        await service.addSubscription(subscriptionPlan)
+
+        let first = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.research],
+            onlyWasteRisk: false
+        )
+        let second = await service.evaluateAndQueueAutoTasks(
+            enabledTypes: [.research],
+            onlyWasteRisk: false
+        )
+
+        XCTAssertEqual(first, 1)
+        XCTAssertEqual(second, 0)
+        XCTAssertEqual(service.autoTaskRecords.count, 1)
+        XCTAssertEqual(service.autoTaskRecords.first?.subscriptionId, subscriptionPlan.id)
     }
 
     // MARK: - Utilization

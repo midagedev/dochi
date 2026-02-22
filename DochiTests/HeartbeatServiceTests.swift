@@ -771,6 +771,63 @@ final class HeartbeatServiceTests: XCTestCase {
         XCTAssertEqual(Set(optimizer.lastEvaluatedTypes), Set([.research]))
     }
 
+    func testTickResourceAutoTaskUsesSubscriptionSourceAxis() async throws {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatIntervalMinutes = 0
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+        settings.resourceAutoTaskEnabled = true
+        settings.resourceAutoTaskOnlyWasteRisk = false
+        settings.resourceAutoTaskTypes = [AutoTaskType.research.rawValue]
+
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeartbeatResourceOptimizer-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let optimizer = ResourceOptimizerService(
+            baseURL: tempRoot.appendingPathComponent("optimizer"),
+            usageStore: nil,
+            claudeProjectsRoots: [tempRoot.appendingPathComponent("claude-empty")],
+            codexSessionsRoots: [tempRoot.appendingPathComponent("codex-empty")]
+        )
+        let meteredPlan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Metered",
+            usageSource: .dochiUsageStore,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        let subscriptionPlan = SubscriptionPlan(
+            providerName: "ChatGPT Pro",
+            planName: "Plus",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        await optimizer.addSubscription(meteredPlan)
+        await optimizer.addSubscription(subscriptionPlan)
+
+        let service = HeartbeatService(settings: settings)
+        service.setResourceOptimizer(optimizer)
+
+        service.start()
+        defer { service.stop() }
+
+        let timeout = Date().addingTimeInterval(0.5)
+        while service.lastTickDate == nil && Date() < timeout {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertNotNil(service.lastTickDate)
+        XCTAssertEqual(optimizer.autoTaskRecords.count, 1)
+        XCTAssertEqual(optimizer.autoTaskRecords.first?.subscriptionId, subscriptionPlan.id)
+    }
+
     // MARK: - Proactive Handler
 
     func testProactiveHandlerIsCalled() {
