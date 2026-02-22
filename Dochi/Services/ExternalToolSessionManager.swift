@@ -2241,6 +2241,30 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 ),
                 config: config
             )
+            let mergedSummary = normalizedSessionText(
+                discovered.summary ?? runtimeOverlay?.summary,
+                maxLength: 320
+            )
+            let baseTitleSource = discovered.titleSource ?? runtimeOverlay?.titleSource
+            let baseTitleConfidence = discovered.titleConfidence ?? runtimeOverlay?.titleConfidence
+            let titleResolution = resolveUnifiedSessionTitle(
+                explicitTitle: discovered.title ?? runtimeOverlay?.title,
+                summary: mergedSummary,
+                provider: discovered.provider,
+                clientKind: discovered.clientKind ?? runtimeOverlay?.clientKind,
+                originator: discovered.originator ?? runtimeOverlay?.originator,
+                repositoryRoot: repositoryRoot,
+                workingDirectory: resolvedWorkingDirectory,
+                activityState: activity.state
+            )
+            let resolvedTitleSource = resolvedTitleSource(
+                resolution: titleResolution,
+                baseSource: baseTitleSource
+            )
+            let resolvedTitleConfidence = resolvedTitleConfidence(
+                resolution: titleResolution,
+                baseConfidence: baseTitleConfidence
+            )
             return UnifiedCodingSession(
                 source: discovered.source.rawValue,
                 runtimeType: .file,
@@ -2253,10 +2277,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 path: discovered.path,
                 updatedAt: mergedUpdatedAt,
                 isActive: activity.state == .active || activity.state == .idle,
-                title: discovered.title ?? runtimeOverlay?.title ?? discovered.summary,
-                summary: discovered.summary ?? runtimeOverlay?.summary,
-                titleSource: discovered.titleSource ?? runtimeOverlay?.titleSource,
-                titleConfidence: discovered.titleConfidence ?? runtimeOverlay?.titleConfidence,
+                title: titleResolution.title,
+                summary: mergedSummary,
+                titleSource: resolvedTitleSource,
+                titleConfidence: resolvedTitleConfidence,
                 originator: discovered.originator ?? runtimeOverlay?.originator,
                 sessionSource: discovered.sessionSource ?? runtimeOverlay?.sessionSource,
                 clientKind: discovered.clientKind ?? runtimeOverlay?.clientKind,
@@ -2295,6 +2319,25 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 ),
                 config: config
             )
+            let mergedSummary = normalizedSessionText(runtime.summary, maxLength: 320)
+            let titleResolution = resolveUnifiedSessionTitle(
+                explicitTitle: runtime.title,
+                summary: mergedSummary,
+                provider: runtime.provider,
+                clientKind: runtime.clientKind,
+                originator: runtime.originator,
+                repositoryRoot: repositoryRoot,
+                workingDirectory: runtime.workingDirectory,
+                activityState: activity.state
+            )
+            let resolvedTitleSource = resolvedTitleSource(
+                resolution: titleResolution,
+                baseSource: runtime.titleSource
+            )
+            let resolvedTitleConfidence = resolvedTitleConfidence(
+                resolution: titleResolution,
+                baseConfidence: runtime.titleConfidence
+            )
             return UnifiedCodingSession(
                 source: runtime.source,
                 runtimeType: runtime.runtimeType,
@@ -2307,10 +2350,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 path: runtime.path,
                 updatedAt: runtime.updatedAt,
                 isActive: activity.state == .active || activity.state == .idle,
-                title: runtime.title,
-                summary: runtime.summary,
-                titleSource: runtime.titleSource,
-                titleConfidence: runtime.titleConfidence,
+                title: titleResolution.title,
+                summary: mergedSummary,
+                titleSource: resolvedTitleSource,
+                titleConfidence: resolvedTitleConfidence,
                 originator: runtime.originator,
                 sessionSource: runtime.sessionSource,
                 clientKind: runtime.clientKind,
@@ -4425,6 +4468,170 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         guard !compact.isEmpty else { return nil }
         let cappedLength = max(20, maxLength)
         return String(compact.prefix(cappedLength))
+    }
+
+    private enum SessionTitleResolutionKind {
+        case explicit
+        case summaryFallback
+        case generated
+    }
+
+    private struct SessionTitleResolution {
+        let title: String?
+        let kind: SessionTitleResolutionKind?
+    }
+
+    nonisolated private static func resolveUnifiedSessionTitle(
+        explicitTitle: String?,
+        summary: String?,
+        provider: String,
+        clientKind: String?,
+        originator: String?,
+        repositoryRoot: String?,
+        workingDirectory: String?,
+        activityState: CodingSessionActivityState
+    ) -> SessionTitleResolution {
+        if let explicitTitle = normalizedSessionText(explicitTitle, maxLength: 140),
+           !looksLikeOpaqueSessionIdentifier(explicitTitle) {
+            return SessionTitleResolution(title: explicitTitle, kind: .explicit)
+        }
+
+        if let summary = normalizedSessionText(summary, maxLength: 140),
+           !looksLikeOpaqueSessionIdentifier(summary) {
+            return SessionTitleResolution(title: summary, kind: .summaryFallback)
+        }
+
+        let generated = generatedSessionTitle(
+            provider: provider,
+            clientKind: clientKind,
+            originator: originator,
+            repositoryRoot: repositoryRoot,
+            workingDirectory: workingDirectory,
+            activityState: activityState
+        )
+        return SessionTitleResolution(
+            title: generated,
+            kind: generated == nil ? nil : .generated
+        )
+    }
+
+    nonisolated private static func generatedSessionTitle(
+        provider: String,
+        clientKind: String?,
+        originator: String?,
+        repositoryRoot: String?,
+        workingDirectory: String?,
+        activityState: CodingSessionActivityState
+    ) -> String? {
+        let repositoryLabel = normalizedDirectoryPath(repositoryRoot ?? workingDirectory)
+            .map { URL(fileURLWithPath: $0).lastPathComponent } ?? "unassigned"
+        let providerLabel = sessionTitleProviderLabel(
+            provider: provider,
+            clientKind: clientKind,
+            originator: originator
+        )
+        let action = sessionStateTitleAction(activityState)
+        return normalizedSessionText(
+            "\(repositoryLabel) · \(providerLabel) · \(action)",
+            maxLength: 140
+        )
+    }
+
+    nonisolated private static func sessionTitleProviderLabel(
+        provider: String,
+        clientKind: String?,
+        originator: String?
+    ) -> String {
+        let normalizedProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedProvider == "codex" {
+            switch clientKind {
+            case "desktop":
+                return "Codex Desktop"
+            case "cli":
+                return "Codex CLI"
+            default:
+                break
+            }
+        } else if normalizedProvider == "claude" {
+            return "Claude"
+        }
+
+        if let originator = normalizedSessionText(originator, maxLength: 48),
+           !originator.isEmpty {
+            return originator
+        }
+
+        let compact = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !compact.isEmpty else { return "Session" }
+        return String(compact.prefix(24))
+    }
+
+    nonisolated private static func sessionStateTitleAction(_ state: CodingSessionActivityState) -> String {
+        switch state {
+        case .active:
+            return "작업 진행 중"
+        case .idle:
+            return "입력 대기 중"
+        case .stale:
+            return "최근 업데이트 지연"
+        case .dead:
+            return "세션 종료"
+        }
+    }
+
+    nonisolated private static func looksLikeOpaqueSessionIdentifier(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+
+        if trimmed.range(
+            of: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+
+        let compact = trimmed.lowercased().replacingOccurrences(of: "-", with: "")
+        if compact.count >= 24 {
+            let isHexLike = compact.unicodeScalars.allSatisfy {
+                CharacterSet(charactersIn: "0123456789abcdef").contains($0)
+            }
+            if isHexLike {
+                return true
+            }
+        }
+        return false
+    }
+
+    nonisolated private static func resolvedTitleSource(
+        resolution: SessionTitleResolution,
+        baseSource: String?
+    ) -> String? {
+        switch resolution.kind {
+        case .explicit:
+            return baseSource
+        case .summaryFallback:
+            return baseSource ?? "session_summary_fallback"
+        case .generated:
+            return "generated_session_title"
+        case nil:
+            return baseSource
+        }
+    }
+
+    nonisolated private static func resolvedTitleConfidence(
+        resolution: SessionTitleResolution,
+        baseConfidence: Double?
+    ) -> Double? {
+        switch resolution.kind {
+        case .explicit:
+            return baseConfidence
+        case .summaryFallback:
+            return min(0.88, max(baseConfidence ?? 0, 0.58))
+        case .generated:
+            return min(0.72, max(baseConfidence ?? 0, 0.42))
+        case nil:
+            return baseConfidence
+        }
     }
 
     nonisolated private static func parseISO8601Date(_ value: String?) -> Date? {

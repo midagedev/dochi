@@ -559,6 +559,72 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(mapped.first?.repositoryRoot, "/tmp/repo-existing")
     }
 
+    func testDisplaySessionTitleRecoversFromOpaqueUUIDTitle() {
+        let session = UnifiedCodingSession(
+            source: "test",
+            runtimeType: .file,
+            controllabilityTier: .t2Observe,
+            provider: "codex",
+            nativeSessionId: "019c83ec-61b9-7f12-91e1-e35a58631234",
+            runtimeSessionId: nil,
+            workingDirectory: "/tmp/repo-a",
+            repositoryRoot: "/tmp/repo-a",
+            path: "/tmp/repo-a/session.jsonl",
+            updatedAt: Date(),
+            isActive: true,
+            title: "019c83ec-61b9-7f12-91e1-e35a58631234",
+            summary: nil,
+            clientKind: "desktop",
+            activityScore: 78,
+            activityState: .active
+        )
+
+        let displayTitle = SessionExplorerViewStateBuilder.displaySessionTitle(for: session)
+
+        XCTAssertFalse(displayTitle.contains("019c83ec-61b9-7f12-91e1-e35a58631234"))
+        XCTAssertTrue(displayTitle.contains("repo-a"))
+    }
+
+    func testSessionChangeLinePrefersWorkingTreePreview() {
+        let session = makeSession(
+            provider: "codex",
+            nativeId: "sess-a",
+            repo: "/tmp/repo-a",
+            tier: .t0Full,
+            state: .active,
+            score: 88
+        )
+        let insight = makeInsight(
+            path: "/tmp/repo-a",
+            changedFileCount: 3,
+            untrackedFileCount: 1,
+            changedPathPreview: ["Sources/App.swift", "README.md", "Tests/AppTests.swift"]
+        )
+
+        let line = SessionExplorerViewStateBuilder.sessionChangeLine(session: session, insight: insight)
+
+        XCTAssertTrue(line.contains("Sources/App.swift"))
+        XCTAssertTrue(line.contains("외 1개"))
+    }
+
+    func testRepositoryCommitFeedLinesUseRecentCommitPreviews() {
+        let insight = makeInsight(
+            path: "/tmp/repo-a",
+            changedFileCount: 0,
+            untrackedFileCount: 0,
+            recentCommitPreviews: [
+                GitCommitPreview(shortHash: "abc1234", subject: "feat: add dashboard feed", relative: "2m ago"),
+                GitCommitPreview(shortHash: "def5678", subject: "fix: session title fallback", relative: "9m ago"),
+            ]
+        )
+
+        let lines = SessionExplorerViewStateBuilder.repositoryCommitFeedLines(for: insight, limit: 5)
+
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertEqual(lines[0], "abc1234 feat: add dashboard feed · 2m ago")
+        XCTAssertEqual(lines[1], "def5678 fix: session title fallback · 9m ago")
+    }
+
     private func makeSession(
         provider: String,
         nativeId: String,
@@ -590,6 +656,44 @@ final class SessionExplorerViewModelTests: XCTestCase {
                 fileFreshnessScore: 0,
                 errorPenaltyScore: errorPenalty
             )
+        )
+    }
+
+    private func makeInsight(
+        path: String,
+        changedFileCount: Int,
+        untrackedFileCount: Int,
+        changedPathPreview: [String]? = nil,
+        recentCommitPreviews: [GitCommitPreview]? = nil
+    ) -> GitRepositoryInsight {
+        GitRepositoryInsight(
+            workDomain: "personal",
+            workDomainConfidence: 0.9,
+            workDomainReason: "test",
+            path: path,
+            name: URL(fileURLWithPath: path).lastPathComponent,
+            branch: "main",
+            originURL: nil,
+            remoteHost: nil,
+            remoteOwner: nil,
+            remoteRepository: nil,
+            lastCommitEpoch: nil,
+            lastCommitISO8601: nil,
+            lastCommitRelative: "-",
+            lastCommitShortHash: nil,
+            lastCommitSubject: nil,
+            upstreamLastCommitEpoch: nil,
+            upstreamLastCommitISO8601: nil,
+            upstreamLastCommitRelative: "-",
+            daysSinceLastCommit: nil,
+            recentCommitCount30d: 0,
+            changedFileCount: changedFileCount,
+            untrackedFileCount: untrackedFileCount,
+            changedPathPreview: changedPathPreview,
+            recentCommitPreviews: recentCommitPreviews,
+            aheadCount: nil,
+            behindCount: nil,
+            score: 0
         )
     }
 }

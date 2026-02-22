@@ -1,5 +1,17 @@
 import Foundation
 
+struct GitCommitPreview: Sendable, Codable, Equatable {
+    let shortHash: String
+    let subject: String
+    let relative: String
+
+    init(shortHash: String, subject: String, relative: String) {
+        self.shortHash = shortHash
+        self.subject = subject
+        self.relative = relative
+    }
+}
+
 struct GitRepositoryInsight: Sendable, Codable, Equatable {
     let workDomain: String
     let workDomainConfidence: Double
@@ -23,6 +35,8 @@ struct GitRepositoryInsight: Sendable, Codable, Equatable {
     let recentCommitCount30d: Int
     let changedFileCount: Int
     let untrackedFileCount: Int
+    let changedPathPreview: [String]?
+    let recentCommitPreviews: [GitCommitPreview]?
     let aheadCount: Int?
     let behindCount: Int?
     let score: Int
@@ -50,6 +64,8 @@ struct GitRepositoryInsight: Sendable, Codable, Equatable {
         recentCommitCount30d: Int,
         changedFileCount: Int,
         untrackedFileCount: Int,
+        changedPathPreview: [String]? = nil,
+        recentCommitPreviews: [GitCommitPreview]? = nil,
         aheadCount: Int?,
         behindCount: Int?,
         score: Int
@@ -76,6 +92,8 @@ struct GitRepositoryInsight: Sendable, Codable, Equatable {
         self.recentCommitCount30d = recentCommitCount30d
         self.changedFileCount = changedFileCount
         self.untrackedFileCount = untrackedFileCount
+        self.changedPathPreview = changedPathPreview
+        self.recentCommitPreviews = recentCommitPreviews
         self.aheadCount = aheadCount
         self.behindCount = behindCount
         self.score = score
@@ -302,6 +320,11 @@ enum GitRepositoryInsightScanner {
             .map(String.init)
         let changedFileCount = statusLines.filter { !$0.hasPrefix("??") }.count
         let untrackedFileCount = statusLines.filter { $0.hasPrefix("??") }.count
+        let changedPathPreview = Array(parsedStatusPaths(from: statusLines).prefix(5))
+        let recentCommitPreviews = parseRecentCommitPreviews(
+            gitOutput(repoPath: path, args: ["log", "-5", "--format=%h%x1f%s%x1f%cr"]),
+            limit: 5
+        )
 
         let aheadBehindOutput = gitOutput(repoPath: path, args: ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
         let (aheadCount, behindCount) = parseAheadBehind(aheadBehindOutput)
@@ -342,6 +365,8 @@ enum GitRepositoryInsightScanner {
             recentCommitCount30d: recentCommitCount30d,
             changedFileCount: changedFileCount,
             untrackedFileCount: untrackedFileCount,
+            changedPathPreview: changedPathPreview.isEmpty ? nil : changedPathPreview,
+            recentCommitPreviews: recentCommitPreviews.isEmpty ? nil : recentCommitPreviews,
             aheadCount: aheadCount,
             behindCount: behindCount,
             score: score
@@ -377,6 +402,86 @@ enum GitRepositoryInsightScanner {
         let normalizedHash = (hash?.isEmpty == false) ? hash : nil
         let normalizedSubject = subject.isEmpty ? nil : String(subject.prefix(120))
         return (normalizedHash, normalizedSubject)
+    }
+
+    private static func parsedStatusPaths(from statusLines: [String]) -> [String] {
+        var unique: [String] = []
+        var seen: Set<String> = []
+        for line in statusLines {
+            guard let parsed = parseStatusPath(line), !parsed.isEmpty else { continue }
+            if seen.insert(parsed).inserted {
+                unique.append(parsed)
+            }
+        }
+        return unique
+    }
+
+    private static func parseStatusPath(_ line: String) -> String? {
+        let raw = line.trimmingCharacters(in: .newlines)
+        guard !raw.isEmpty else { return nil }
+
+        let isRenameOrCopy: Bool
+        if raw.count >= 2 {
+            let first = raw[raw.startIndex]
+            let second = raw[raw.index(after: raw.startIndex)]
+            isRenameOrCopy = first == "R" || first == "C" || second == "R" || second == "C"
+        } else {
+            isRenameOrCopy = false
+        }
+
+        let payload: String
+        if raw.count >= 3 {
+            let markerIndex = raw.index(raw.startIndex, offsetBy: 2)
+            if raw[markerIndex].isWhitespace {
+                let payloadIndex = raw.index(after: markerIndex)
+                payload = String(raw[payloadIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                let segments = raw.split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
+                guard segments.count == 2 else { return nil }
+                payload = String(segments[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        } else {
+            return nil
+        }
+
+        var resolved = payload
+        if isRenameOrCopy, let renameArrow = payload.range(of: " -> ", options: .backwards) {
+            resolved = String(payload[renameArrow.upperBound...])
+        }
+
+        let normalized = resolved
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        guard !normalized.isEmpty else { return nil }
+        return String(normalized.prefix(140))
+    }
+
+    private static func parseRecentCommitPreviews(_ output: String?, limit: Int) -> [GitCommitPreview] {
+        guard let output, !output.isEmpty else { return [] }
+        let normalizedLimit = max(1, min(10, limit))
+        return output
+            .split(whereSeparator: \.isNewline)
+            .compactMap { rawLine in
+                let tokens = rawLine.split(separator: "\u{001F}", maxSplits: 2, omittingEmptySubsequences: false)
+                guard tokens.count >= 2 else { return nil }
+                let shortHash = String(tokens[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let subject = String(tokens[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !shortHash.isEmpty, !subject.isEmpty else { return nil }
+                let relative: String
+                if tokens.count > 2 {
+                    let rawRelative = String(tokens[2]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    relative = rawRelative.isEmpty ? "-" : rawRelative
+                } else {
+                    relative = "-"
+                }
+                return GitCommitPreview(
+                    shortHash: String(shortHash.prefix(16)),
+                    subject: String(subject.prefix(120)),
+                    relative: String(relative.prefix(40))
+                )
+            }
+            .prefix(normalizedLimit)
+            .map { $0 }
     }
 
     private struct RemoteInfo {

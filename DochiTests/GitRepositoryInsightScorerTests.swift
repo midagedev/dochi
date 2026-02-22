@@ -91,6 +91,50 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertFalse(insight.lastCommitShortHash?.isEmpty ?? true)
     }
 
+    func testDiscoverIncludesCommitFeedAndWorkingTreePreview() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-insight-feed-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let repoPath = tempRoot.appendingPathComponent("feed-repo", isDirectory: true).path
+        let initializedPath = try ExternalToolSessionManager.initializeGitRepository(
+            atPath: repoPath,
+            defaultBranch: "main",
+            createReadme: false,
+            createGitignore: false
+        )
+
+        try runGit(args: ["config", "user.email", "dochi-tests@example.com"], at: initializedPath)
+        try runGit(args: ["config", "user.name", "Dochi Tests"], at: initializedPath)
+
+        let trackedFile = URL(fileURLWithPath: initializedPath).appendingPathComponent("tracked.txt")
+        try "v1".data(using: .utf8)?.write(to: trackedFile)
+        try runGit(args: ["add", "tracked.txt"], at: initializedPath)
+        try runGit(args: ["commit", "-m", "feat: initial feed setup"], at: initializedPath)
+
+        try "v2".data(using: .utf8)?.write(to: trackedFile)
+        try runGit(args: ["add", "tracked.txt"], at: initializedPath)
+        try runGit(args: ["commit", "-m", "feat: update feed details"], at: initializedPath)
+
+        try "local working change".data(using: .utf8)?.write(to: trackedFile)
+        let untrackedFile = URL(fileURLWithPath: initializedPath).appendingPathComponent("NEW.md")
+        try "# temp".data(using: .utf8)?.write(to: untrackedFile)
+        let arrowNamedFile = URL(fileURLWithPath: initializedPath).appendingPathComponent("notes -> plan.md")
+        try "draft".data(using: .utf8)?.write(to: arrowNamedFile)
+
+        let insights = GitRepositoryInsightScanner.discover(
+            searchPaths: [initializedPath],
+            limit: 10
+        )
+        let insight = try XCTUnwrap(insights.first(where: { $0.path == initializedPath }))
+
+        XCTAssertGreaterThanOrEqual(insight.recentCommitPreviews?.count ?? 0, 2)
+        XCTAssertEqual(insight.recentCommitPreviews?.first?.subject, "feat: update feed details")
+        XCTAssertTrue(insight.changedPathPreview?.contains("tracked.txt") ?? false)
+        XCTAssertTrue(insight.changedPathPreview?.contains("NEW.md") ?? false)
+        XCTAssertTrue(insight.changedPathPreview?.contains("notes -> plan.md") ?? false)
+    }
+
     private func runGit(args: [String], at path: String) throws {
         let process = Process()
         let outputPipe = Pipe()
