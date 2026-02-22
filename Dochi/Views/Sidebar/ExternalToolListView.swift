@@ -1329,18 +1329,16 @@ struct ExternalToolListView: View {
                 }
                 Menu("필터") {
                     Button("전체") {
-                        explorerFilter.activeOnly = false
-                        explorerFilter.unassignedOnly = false
-                        workboardLaneFilter = nil
+                        applyWorkboardLaneFilter(nil)
                     }
                     Button("Blocked/Failing") {
-                        workboardLaneFilter = .blocked
+                        applyWorkboardLaneFilter(.blocked)
                     }
                     Button("Running") {
-                        workboardLaneFilter = .running
+                        applyWorkboardLaneFilter(.running)
                     }
                     Button("Needs Review") {
-                        workboardLaneFilter = .review
+                        applyWorkboardLaneFilter(.review)
                     }
                 }
                 TextField("세션 검색 (provider/id/path)", text: $searchText)
@@ -2569,6 +2567,12 @@ struct ExternalToolListView: View {
     private func relativeTimestamp(_ date: Date?) -> String {
         guard let date else { return "-" }
         return Self.relativeDateFormatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func applyWorkboardLaneFilter(_ lane: OrchestrationWorkboardLane?) {
+        explorerFilter.activeOnly = false
+        explorerFilter.unassignedOnly = false
+        workboardLaneFilter = lane
     }
 
     private func normalizedRepositoryPath(_ path: String) -> String {
