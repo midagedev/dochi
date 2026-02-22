@@ -10,6 +10,7 @@ enum ExternalUsageProvider: String, Sendable {
 struct ExternalUsageProviderStatus: Sendable, Equatable {
     let code: String
     let message: String?
+    let lastCollectedAt: Date?
 }
 
 /// External tool usage monitor with provider-specific incremental scanners.
@@ -236,10 +237,20 @@ actor ExternalUsageMonitor {
 
     func status(provider: ExternalUsageProvider) -> ExternalUsageProviderStatus? {
         let key = provider.rawValue
-        guard let providerCache = cache.providers[key], let code = providerCache.lastStatus else {
+        guard let providerCache = cache.providers[key] else {
             return nil
         }
-        return ExternalUsageProviderStatus(code: code, message: providerCache.lastMessage)
+        let lastCollectedAt: Date? = providerCache.lastScanUnixMs > 0
+            ? Date(timeIntervalSince1970: Double(providerCache.lastScanUnixMs) / 1000.0)
+            : nil
+        guard let code = providerCache.lastStatus ?? (lastCollectedAt != nil ? "unknown" : nil) else {
+            return nil
+        }
+        return ExternalUsageProviderStatus(
+            code: code,
+            message: providerCache.lastMessage,
+            lastCollectedAt: lastCollectedAt
+        )
     }
 
     // MARK: - Refresh
@@ -267,6 +278,8 @@ actor ExternalUsageMonitor {
         }
 
         pruneDays(providerCache: &providerCache, sinceKey: range.scanSinceKey, untilKey: range.scanUntilKey)
+        providerCache.lastStatus = "ok_log_scan"
+        providerCache.lastMessage = nil
         providerCache.lastScanUnixMs = Int64(now.timeIntervalSince1970 * 1000)
         cache.providers[key] = providerCache
         saveCache()
@@ -295,6 +308,8 @@ actor ExternalUsageMonitor {
         }
 
         pruneDays(providerCache: &providerCache, sinceKey: range.scanSinceKey, untilKey: range.scanUntilKey)
+        providerCache.lastStatus = "ok_log_scan"
+        providerCache.lastMessage = nil
         providerCache.lastScanUnixMs = Int64(now.timeIntervalSince1970 * 1000)
         cache.providers[key] = providerCache
         saveCache()

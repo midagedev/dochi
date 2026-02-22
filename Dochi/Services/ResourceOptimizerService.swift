@@ -23,7 +23,13 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         let updatedAt: Date
     }
 
+    private struct MonitoringSnapshotCacheEntry {
+        let snapshot: SubscriptionMonitoringSnapshot
+        let updatedAt: Date
+    }
+
     private var usageCache: [UsageCacheKey: UsageCacheEntry] = [:]
+    private var monitoringSnapshotCache: [UUID: MonitoringSnapshotCacheEntry] = [:]
 
     // MARK: - Dependencies
 
@@ -111,12 +117,15 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
 
     func addSubscription(_ plan: SubscriptionPlan) async {
         subscriptions.append(plan)
+        monitoringSnapshotCache.removeValue(forKey: plan.id)
         saveToDisk()
     }
 
     func updateSubscription(_ plan: SubscriptionPlan) async {
         if let index = subscriptions.firstIndex(where: { $0.id == plan.id }) {
             subscriptions[index] = plan
+            usageCache = usageCache.filter { $0.key.subscriptionID != plan.id }
+            monitoringSnapshotCache.removeValue(forKey: plan.id)
             saveToDisk()
         }
     }
@@ -124,6 +133,8 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
     func deleteSubscription(id: UUID) async {
         subscriptions.removeAll { $0.id == id }
         autoTaskRecords.removeAll { $0.subscriptionId == id }
+        usageCache = usageCache.filter { $0.key.subscriptionID != id }
+        monitoringSnapshotCache.removeValue(forKey: id)
         saveToDisk()
     }
 
@@ -185,6 +196,68 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         for sub in subscriptions {
             let util = await utilization(for: sub)
             results.append(util)
+        }
+        return results
+    }
+
+    func monitoringSnapshot(for subscription: SubscriptionPlan) async -> SubscriptionMonitoringSnapshot {
+        if let cached = monitoringSnapshotCache[subscription.id],
+           Date().timeIntervalSince(cached.updatedAt) < externalUsageCacheTTL {
+            return cached.snapshot
+        }
+
+        let snapshot: SubscriptionMonitoringSnapshot
+        switch subscription.usageSource {
+        case .externalToolLogs:
+            snapshot = await externalMonitoringSnapshot(for: subscription)
+        case .dochiUsageStore:
+            let latestMap = await latestUsageStoreDatesByProvider(
+                normalizedProviders: [normalizedProviderKey(subscription.providerName)]
+            )
+            snapshot = usageStoreMonitoringSnapshot(
+                for: subscription,
+                latestDate: latestMap[normalizedProviderKey(subscription.providerName)]
+            )
+        }
+
+        monitoringSnapshotCache[subscription.id] = MonitoringSnapshotCacheEntry(
+            snapshot: snapshot,
+            updatedAt: Date()
+        )
+        return snapshot
+    }
+
+    func monitoringSnapshots(for subscriptions: [SubscriptionPlan]) async -> [UUID: SubscriptionMonitoringSnapshot] {
+        var results: [UUID: SubscriptionMonitoringSnapshot] = [:]
+        let now = Date()
+
+        let dochiSubscriptions = subscriptions.filter { $0.usageSource == .dochiUsageStore }
+        let providerKeys = Set(dochiSubscriptions.map { normalizedProviderKey($0.providerName) })
+        let latestStoreDates = await latestUsageStoreDatesByProvider(normalizedProviders: providerKeys)
+
+        for subscription in subscriptions {
+            if let cached = monitoringSnapshotCache[subscription.id],
+               now.timeIntervalSince(cached.updatedAt) < externalUsageCacheTTL {
+                results[subscription.id] = cached.snapshot
+                continue
+            }
+
+            let snapshot: SubscriptionMonitoringSnapshot
+            switch subscription.usageSource {
+            case .externalToolLogs:
+                snapshot = await externalMonitoringSnapshot(for: subscription)
+            case .dochiUsageStore:
+                snapshot = usageStoreMonitoringSnapshot(
+                    for: subscription,
+                    latestDate: latestStoreDates[normalizedProviderKey(subscription.providerName)]
+                )
+            }
+
+            monitoringSnapshotCache[subscription.id] = MonitoringSnapshotCacheEntry(
+                snapshot: snapshot,
+                updatedAt: now
+            )
+            results[subscription.id] = snapshot
         }
         return results
     }
@@ -576,6 +649,14 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         return formatter.string(from: date)
     }
 
+    nonisolated private static func parseUsageStoreDay(_ value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: value)
+    }
+
     nonisolated private static func lineCountForText(_ text: String) -> Int {
         guard !text.isEmpty else { return 0 }
         var count = 0
@@ -583,6 +664,127 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
             count += 1
         }
         return text.hasSuffix("\n") ? count : count + 1
+    }
+
+    // MARK: - Monitoring Snapshot Query
+
+    private func externalMonitoringSnapshot(for subscription: SubscriptionPlan) async -> SubscriptionMonitoringSnapshot {
+        let providerKind = Self.externalProviderKind(from: subscription.providerName)
+        guard let externalProvider = Self.externalUsageProvider(from: providerKind) else {
+            return SubscriptionMonitoringSnapshot(
+                subscriptionID: subscription.id,
+                source: subscription.usageSource,
+                provider: subscription.providerName,
+                statusCode: "unsupported_provider",
+                statusMessage: "현재 프로바이더는 외부 로그/API 모니터링 대상이 아닙니다.",
+                lastCollectedAt: nil
+            )
+        }
+
+        var status = await externalUsageMonitor.status(provider: externalProvider)
+        if status == nil {
+            _ = await warmUpExternalProviderStatus(for: subscription, provider: externalProvider)
+            status = await externalUsageMonitor.status(provider: externalProvider)
+        }
+
+        guard let status else {
+            let message = externalProvider == .gemini
+                ? "Gemini 수집 이력이 아직 없습니다. 인증 상태를 확인하세요."
+                : "로그 수집 이력이 아직 없습니다."
+            return SubscriptionMonitoringSnapshot(
+                subscriptionID: subscription.id,
+                source: subscription.usageSource,
+                provider: subscription.providerName,
+                statusCode: "no_data",
+                statusMessage: message,
+                lastCollectedAt: nil
+            )
+        }
+
+        return SubscriptionMonitoringSnapshot(
+            subscriptionID: subscription.id,
+            source: subscription.usageSource,
+            provider: subscription.providerName,
+            statusCode: status.code,
+            statusMessage: status.message,
+            lastCollectedAt: status.lastCollectedAt
+        )
+    }
+
+    private func warmUpExternalProviderStatus(
+        for subscription: SubscriptionPlan,
+        provider: ExternalUsageProvider
+    ) async -> Int {
+        let since = Calendar.current.date(byAdding: .day, value: -35, to: Date()) ?? Date()
+        switch provider {
+        case .gemini:
+            return await externalUsageMonitor.tokensUsed(
+                provider: provider,
+                since: since,
+                tokenLimit: subscription.monthlyTokenLimit
+            )
+        case .codex, .claude:
+            return await externalUsageMonitor.tokensUsed(provider: provider, since: since)
+        }
+    }
+
+    private func usageStoreMonitoringSnapshot(
+        for subscription: SubscriptionPlan,
+        latestDate: Date?
+    ) -> SubscriptionMonitoringSnapshot {
+        guard usageStore != nil else {
+            return SubscriptionMonitoringSnapshot(
+                subscriptionID: subscription.id,
+                source: subscription.usageSource,
+                provider: subscription.providerName,
+                statusCode: "no_data",
+                statusMessage: "UsageStore가 초기화되지 않았습니다.",
+                lastCollectedAt: nil
+            )
+        }
+        guard let latestDate else {
+            return SubscriptionMonitoringSnapshot(
+                subscriptionID: subscription.id,
+                source: subscription.usageSource,
+                provider: subscription.providerName,
+                statusCode: "no_data",
+                statusMessage: "해당 프로바이더의 UsageStore 기록이 아직 없습니다.",
+                lastCollectedAt: nil
+            )
+        }
+        return SubscriptionMonitoringSnapshot(
+            subscriptionID: subscription.id,
+            source: subscription.usageSource,
+            provider: subscription.providerName,
+            statusCode: "ok_store",
+            statusMessage: nil,
+            lastCollectedAt: latestDate
+        )
+    }
+
+    private func latestUsageStoreDatesByProvider(normalizedProviders: Set<String>) async -> [String: Date] {
+        guard let store = usageStore else { return [:] }
+        guard !normalizedProviders.isEmpty else { return [:] }
+
+        let months = await store.allMonths()
+        var latestMap: [String: Date] = [:]
+
+        for month in months {
+            let records = await store.dailyRecords(for: month)
+            for day in records {
+                guard let recordDate = Self.parseUsageStoreDay(day.date) else { continue }
+                for entry in day.entries {
+                    let key = normalizedProviderKey(entry.provider)
+                    guard normalizedProviders.contains(key) else { continue }
+                    if let current = latestMap[key], current >= recordDate {
+                        continue
+                    }
+                    latestMap[key] = recordDate
+                }
+            }
+        }
+
+        return latestMap
     }
 
     // MARK: - Token Usage Query
@@ -751,5 +953,18 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
             return .codex
         }
         return .unknown
+    }
+
+    nonisolated private static func externalUsageProvider(from kind: ExternalProviderKind) -> ExternalUsageProvider? {
+        switch kind {
+        case .claude:
+            return .claude
+        case .codex:
+            return .codex
+        case .gemini:
+            return .gemini
+        case .unknown:
+            return nil
+        }
     }
 }

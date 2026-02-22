@@ -5,6 +5,7 @@ import Foundation
 final class MockResourceOptimizer: ResourceOptimizerProtocol {
     var subscriptions: [SubscriptionPlan] = []
     var autoTaskRecords: [AutoTaskRecord] = []
+    var monitoringSnapshotsByID: [UUID: SubscriptionMonitoringSnapshot] = [:]
 
     var addSubscriptionCallCount = 0
     var updateSubscriptionCallCount = 0
@@ -50,6 +51,20 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
             results.append(await utilization(for: sub))
         }
         return results
+    }
+
+    func monitoringSnapshot(for subscription: SubscriptionPlan) async -> SubscriptionMonitoringSnapshot {
+        if let existing = monitoringSnapshotsByID[subscription.id] {
+            return existing
+        }
+        return SubscriptionMonitoringSnapshot(
+            subscriptionID: subscription.id,
+            source: subscription.usageSource,
+            provider: subscription.providerName,
+            statusCode: subscription.usageSource == .externalToolLogs ? "ok_log_scan" : "ok_store",
+            statusMessage: nil,
+            lastCollectedAt: Date()
+        )
     }
 
     func calculateRiskLevel(

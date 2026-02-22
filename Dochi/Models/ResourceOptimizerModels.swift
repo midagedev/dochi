@@ -23,6 +23,15 @@ enum SubscriptionUsageSource: String, Codable, CaseIterable, Sendable {
             return "Dochi UsageStore 기반 집계"
         }
     }
+
+    var axisSectionTitle: String {
+        switch self {
+        case .externalToolLogs:
+            return "외부 로그/API 기반"
+        case .dochiUsageStore:
+            return "Dochi UsageStore 기반"
+        }
+    }
 }
 
 // MARK: - SubscriptionPlan
@@ -133,6 +142,124 @@ struct ResourceUtilization: Sendable {
     var projectedRemainingPercent: Double {
         max(0, (1.0 - projectedUsageRatio) * 100)
     }
+}
+
+// MARK: - Monitoring Snapshot
+
+struct SubscriptionMonitoringSnapshot: Sendable, Equatable {
+    let subscriptionID: UUID
+    let source: SubscriptionUsageSource
+    let provider: String
+    let statusCode: String
+    let statusMessage: String?
+    let lastCollectedAt: Date?
+
+    init(
+        subscriptionID: UUID,
+        source: SubscriptionUsageSource,
+        provider: String,
+        statusCode: String,
+        statusMessage: String? = nil,
+        lastCollectedAt: Date? = nil
+    ) {
+        self.subscriptionID = subscriptionID
+        self.source = source
+        self.provider = provider
+        self.statusCode = statusCode
+        self.statusMessage = statusMessage
+        self.lastCollectedAt = lastCollectedAt
+    }
+
+    var statusPresentation: MonitoringStatusPresentation {
+        switch statusCode {
+        case "ok_api":
+            return MonitoringStatusPresentation(
+                label: "API 정상",
+                detail: statusMessage,
+                tone: .success
+            )
+        case "ok_cli":
+            return MonitoringStatusPresentation(
+                label: "CLI 대체 수집",
+                detail: statusMessage ?? "API 실패 시 CLI 통계로 수집했습니다.",
+                tone: .info
+            )
+        case "ok_log_scan":
+            return MonitoringStatusPresentation(
+                label: "로그 스캔 정상",
+                detail: statusMessage,
+                tone: .success
+            )
+        case "ok_store":
+            return MonitoringStatusPresentation(
+                label: "UsageStore 정상",
+                detail: statusMessage,
+                tone: .success
+            )
+        case "not_logged_in":
+            return MonitoringStatusPresentation(
+                label: "로그인 필요",
+                detail: statusMessage ?? "Gemini 인증이 필요합니다. 터미널에서 gemini 인증을 완료하세요.",
+                tone: .warning
+            )
+        case "unsupported_auth_type":
+            return MonitoringStatusPresentation(
+                label: "인증 타입 미지원",
+                detail: statusMessage ?? "api-key/vertex-ai 인증은 현재 사용량 모니터링에서 지원하지 않습니다.",
+                tone: .warning
+            )
+        case "api_error":
+            return MonitoringStatusPresentation(
+                label: "API 수집 실패",
+                detail: statusMessage ?? "API 응답을 확인할 수 없습니다. 네트워크/인증 상태를 점검하세요.",
+                tone: .error
+            )
+        case "cli_error":
+            return MonitoringStatusPresentation(
+                label: "CLI 수집 실패",
+                detail: statusMessage ?? "Gemini CLI 경로/권한/로그인 상태를 점검하세요.",
+                tone: .error
+            )
+        case "parse_error":
+            return MonitoringStatusPresentation(
+                label: "응답 해석 실패",
+                detail: statusMessage ?? "모니터링 응답 포맷이 예상과 달라 해석에 실패했습니다.",
+                tone: .error
+            )
+        case "unsupported_provider":
+            return MonitoringStatusPresentation(
+                label: "프로바이더 미지원",
+                detail: statusMessage ?? "현재 프로바이더는 외부 로그/API 모니터링 대상이 아닙니다.",
+                tone: .neutral
+            )
+        case "no_data":
+            return MonitoringStatusPresentation(
+                label: "데이터 없음",
+                detail: statusMessage ?? "해당 프로바이더의 UsageStore 기록이 아직 없습니다.",
+                tone: .neutral
+            )
+        default:
+            return MonitoringStatusPresentation(
+                label: statusCode,
+                detail: statusMessage,
+                tone: .neutral
+            )
+        }
+    }
+}
+
+struct MonitoringStatusPresentation: Sendable, Equatable {
+    let label: String
+    let detail: String?
+    let tone: MonitoringStatusTone
+}
+
+enum MonitoringStatusTone: Sendable, Equatable {
+    case success
+    case info
+    case warning
+    case error
+    case neutral
 }
 
 // MARK: - WasteRiskLevel

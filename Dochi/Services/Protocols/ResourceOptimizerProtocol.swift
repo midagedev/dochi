@@ -11,6 +11,8 @@ protocol ResourceOptimizerProtocol: Sendable {
     // MARK: - Utilization
     func utilization(for subscription: SubscriptionPlan) async -> ResourceUtilization
     func allUtilizations() async -> [ResourceUtilization]
+    func monitoringSnapshot(for subscription: SubscriptionPlan) async -> SubscriptionMonitoringSnapshot
+    func monitoringSnapshots(for subscriptions: [SubscriptionPlan]) async -> [UUID: SubscriptionMonitoringSnapshot]
 
     // MARK: - Risk Assessment
     func calculateRiskLevel(
@@ -60,5 +62,13 @@ extension ResourceOptimizerProtocol {
             onlyWasteRisk: onlyWasteRisk,
             gitInsights: nil
         )
+    }
+
+    func monitoringSnapshots(for subscriptions: [SubscriptionPlan]) async -> [UUID: SubscriptionMonitoringSnapshot] {
+        var result: [UUID: SubscriptionMonitoringSnapshot] = [:]
+        for subscription in subscriptions {
+            result[subscription.id] = await monitoringSnapshot(for: subscription)
+        }
+        return result
     }
 }
