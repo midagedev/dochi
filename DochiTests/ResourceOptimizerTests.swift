@@ -839,6 +839,62 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(util.usedTokens, 210) // 185 + 25
     }
 
+    func testExternalUsageMonitorCreatesCacheOnFirstSave() async throws {
+        let codexRoot = tempDir.appendingPathComponent("codex-cache-first-save")
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        let cacheURL = tempDir.appendingPathComponent("external-cache-first-save.json")
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+
+        let content = [
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"sess-cache\"}}",
+            "{\"type\":\"event_msg\",\"timestamp\":\"\(iso.string(from: now))\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":80,\"cached_input_tokens\":10,\"output_tokens\":20}}}}",
+        ].joined(separator: "\n")
+        try content.write(to: codexRoot.appendingPathComponent("session.jsonl"), atomically: true, encoding: .utf8)
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [codexRoot],
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            cacheURL: cacheURL,
+            refreshMinIntervalSeconds: 0
+        )
+
+        let used = await monitor.tokensUsed(provider: .codex, since: now.addingTimeInterval(-3600), now: now)
+        XCTAssertEqual(used, 100)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cacheURL.path))
+    }
+
+    func testExternalUsageMonitorClaudeAvoidsDuplicateAcrossScanBoundary() async throws {
+        let claudeRoot = tempDir.appendingPathComponent("claude-boundary")
+        let projectDir = claudeRoot.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        let cacheURL = tempDir.appendingPathComponent("external-cache-claude-boundary.json")
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        let fileURL = projectDir.appendingPathComponent("session.jsonl")
+
+        let first = "{\"type\":\"assistant\",\"timestamp\":\"\(iso.string(from: now.addingTimeInterval(-20)))\",\"requestId\":\"req-1\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":100,\"cache_creation_input_tokens\":50,\"cache_read_input_tokens\":25,\"output_tokens\":10}}}"
+        try first.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [claudeRoot],
+            cacheURL: cacheURL,
+            refreshMinIntervalSeconds: 0
+        )
+        let since = now.addingTimeInterval(-3600)
+
+        let firstUsed = await monitor.tokensUsed(provider: .claude, since: since, now: now)
+        XCTAssertEqual(firstUsed, 185)
+
+        let duplicate = "{\"type\":\"assistant\",\"timestamp\":\"\(iso.string(from: now.addingTimeInterval(-10)))\",\"requestId\":\"req-1\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":100,\"cache_creation_input_tokens\":50,\"cache_read_input_tokens\":25,\"output_tokens\":10}}}"
+        let distinct = "{\"type\":\"assistant\",\"timestamp\":\"\(iso.string(from: now))\",\"requestId\":\"req-2\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":20,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":5}}}"
+        try [first, duplicate, distinct].joined(separator: "\n").write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let secondUsed = await monitor.tokensUsed(provider: .claude, since: since, now: now.addingTimeInterval(1))
+        XCTAssertEqual(secondUsed, 210)
+    }
+
     // MARK: - Mock Tests
 
     func testMockResourceOptimizer() async {

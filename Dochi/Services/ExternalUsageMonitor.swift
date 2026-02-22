@@ -556,29 +556,9 @@ actor ExternalUsageMonitor {
             return
         }
 
+        // Accuracy first: streamed assistant chunks may replay the same message/request
+        // pair across scan boundaries, so we reparse full Claude files when they change.
         if let cached = providerCache.files[path] {
-            let startOffset = cached.parsedBytes ?? cached.size
-            let canIncremental = size > cached.size && startOffset > 0 && startOffset <= size
-            if canIncremental {
-                let delta = parseClaudeFile(fileURL: fileURL, range: range, startOffset: startOffset)
-                if !delta.dayTokens.isEmpty {
-                    applyDayTokens(providerCache: &providerCache, dayTokens: delta.dayTokens, sign: 1)
-                }
-
-                var mergedDays = cached.dayTokens
-                mergeDayTokens(existing: &mergedDays, delta: delta.dayTokens)
-                providerCache.files[path] = FileUsage(
-                    mtimeUnixMs: mtimeUnixMs,
-                    size: size,
-                    dayTokens: mergedDays,
-                    parsedBytes: delta.parsedBytes,
-                    lastTotals: nil,
-                    sessionId: nil,
-                    fileIdentity: cached.fileIdentity
-                )
-                return
-            }
-
             applyDayTokens(providerCache: &providerCache, dayTokens: cached.dayTokens, sign: -1)
         }
 
@@ -737,7 +717,19 @@ actor ExternalUsageMonitor {
             let data = try JSONEncoder().encode(cache)
             let temporaryURL = directory.appendingPathComponent(".tmp-\(UUID().uuidString).json")
             try data.write(to: temporaryURL, options: [.atomic])
-            _ = try FileManager.default.replaceItemAt(cacheURL, withItemAt: temporaryURL)
+            if FileManager.default.fileExists(atPath: cacheURL.path) {
+                _ = try FileManager.default.replaceItemAt(cacheURL, withItemAt: temporaryURL)
+            } else {
+                do {
+                    try FileManager.default.moveItem(at: temporaryURL, to: cacheURL)
+                } catch {
+                    if FileManager.default.fileExists(atPath: cacheURL.path) {
+                        _ = try FileManager.default.replaceItemAt(cacheURL, withItemAt: temporaryURL)
+                    } else {
+                        throw error
+                    }
+                }
+            }
         } catch {
             Log.storage.warning("Failed to save external usage cache: \(error.localizedDescription)")
         }
