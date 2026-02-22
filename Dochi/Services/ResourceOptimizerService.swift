@@ -649,14 +649,6 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         return formatter.string(from: date)
     }
 
-    nonisolated private static func parseUsageStoreDay(_ value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: value)
-    }
-
     nonisolated private static func lineCountForText(_ text: String) -> Int {
         guard !text.isEmpty else { return 0 }
         var count = 0
@@ -766,21 +758,10 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         guard let store = usageStore else { return [:] }
         guard !normalizedProviders.isEmpty else { return [:] }
 
-        let months = await store.allMonths()
         var latestMap: [String: Date] = [:]
-
-        for month in months {
-            let records = await store.dailyRecords(for: month)
-            for day in records {
-                guard let recordDate = Self.parseUsageStoreDay(day.date) else { continue }
-                for entry in day.entries {
-                    let key = normalizedProviderKey(entry.provider)
-                    guard normalizedProviders.contains(key) else { continue }
-                    if let current = latestMap[key], current >= recordDate {
-                        continue
-                    }
-                    latestMap[key] = recordDate
-                }
+        for normalizedProvider in normalizedProviders {
+            if let latest = await store.latestRecordDay(for: normalizedProvider) {
+                latestMap[normalizedProvider] = latest
             }
         }
 

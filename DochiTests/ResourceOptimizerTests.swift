@@ -740,6 +740,31 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertNotNil(snapshot.lastCollectedAt)
     }
 
+    func testMonitoringSnapshotUsesUsageStoreLatestRecordDayIndexAPI() async {
+        let mockStore = MockUsageStore()
+        mockStore.latestDayByProvider["openai"] = Date()
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-monitoring-store-index"),
+            usageStore: mockStore,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")]
+        )
+        let plan = SubscriptionPlan(
+            providerName: "openai",
+            planName: "Metered",
+            usageSource: .dochiUsageStore,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+
+        let snapshot = await sourceService.monitoringSnapshot(for: plan)
+        XCTAssertEqual(snapshot.statusCode, "ok_store")
+        XCTAssertEqual(mockStore.latestRecordDayCallCount, 1)
+        XCTAssertEqual(mockStore.allMonthsCallCount, 0)
+        XCTAssertEqual(mockStore.dailyRecordsCallCount, 0)
+    }
+
     func testMonitoringSnapshotGeminiUnsupportedAuthType() async throws {
         let geminiRoot = tempDir.appendingPathComponent("gemini-monitoring-unsupported")
         try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
