@@ -358,8 +358,8 @@ actor ExternalUsageMonitor {
             }
             return GeminiProbeResult(
                 usedFraction: nil,
-                statusCode: apiError.statusCode,
-                message: apiError.message
+                statusCode: fallback.statusCode == "not_logged_in" ? fallback.statusCode : apiError.statusCode,
+                message: fallback.statusCode == "not_logged_in" ? fallback.message : apiError.message
             )
         } catch {
             let fallback = fetchGeminiUsageViaCLI()
@@ -368,8 +368,8 @@ actor ExternalUsageMonitor {
             }
             return GeminiProbeResult(
                 usedFraction: nil,
-                statusCode: "api_error",
-                message: error.localizedDescription
+                statusCode: fallback.statusCode == "not_logged_in" ? fallback.statusCode : "api_error",
+                message: fallback.statusCode == "not_logged_in" ? fallback.message : error.localizedDescription
             )
         }
     }

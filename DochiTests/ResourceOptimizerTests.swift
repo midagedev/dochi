@@ -982,6 +982,56 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(status?.code, "ok_cli")
     }
 
+    func testExternalUsageMonitorGeminiNotLoggedInStatus() async throws {
+        let geminiRoot = tempDir.appendingPathComponent("gemini-not-logged-in")
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+        let settings = #"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#
+        try settings.write(
+            to: geminiRoot.appendingPathComponent("settings.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let fakeCLI = tempDir.appendingPathComponent("fake-gemini-not-logged")
+        try "#!/bin/sh\necho auth\n".write(to: fakeCLI, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeCLI.path)
+
+        let previousGeminiCLIPath = ProcessInfo.processInfo.environment["GEMINI_CLI_PATH"]
+        setenv("GEMINI_CLI_PATH", fakeCLI.path, 1)
+        defer {
+            if let previousGeminiCLIPath {
+                setenv("GEMINI_CLI_PATH", previousGeminiCLIPath, 1)
+            } else {
+                unsetenv("GEMINI_CLI_PATH")
+            }
+        }
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            geminiConfigRoots: [geminiRoot],
+            cacheURL: tempDir.appendingPathComponent("gemini-not-logged-cache.json"),
+            refreshMinIntervalSeconds: 0,
+            geminiDataLoader: { _ in
+                throw URLError(.cannotConnectToHost)
+            },
+            geminiCommandRunner: { _, _, _ in
+                ("Waiting for auth... (Press ESC or CTRL+C to cancel)", 0)
+            }
+        )
+        let now = Date()
+
+        let used = await monitor.tokensUsed(
+            provider: .gemini,
+            since: now.addingTimeInterval(-3600),
+            tokenLimit: 1000,
+            now: now
+        )
+        XCTAssertEqual(used, 0)
+        let status = await monitor.status(provider: .gemini)
+        XCTAssertEqual(status?.code, "not_logged_in")
+    }
+
     func testExternalUsageMonitorGeminiRefreshesExpiredOAuthToken() async throws {
         let geminiRoot = tempDir.appendingPathComponent("gemini-refresh")
         try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
