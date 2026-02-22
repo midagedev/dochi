@@ -14,6 +14,8 @@ struct GitRepositoryInsight: Sendable, Codable, Equatable {
     let lastCommitEpoch: Int?
     let lastCommitISO8601: String?
     let lastCommitRelative: String
+    let lastCommitShortHash: String?
+    let lastCommitSubject: String?
     let upstreamLastCommitEpoch: Int?
     let upstreamLastCommitISO8601: String?
     let upstreamLastCommitRelative: String
@@ -24,6 +26,60 @@ struct GitRepositoryInsight: Sendable, Codable, Equatable {
     let aheadCount: Int?
     let behindCount: Int?
     let score: Int
+
+    init(
+        workDomain: String,
+        workDomainConfidence: Double,
+        workDomainReason: String,
+        path: String,
+        name: String,
+        branch: String,
+        originURL: String?,
+        remoteHost: String?,
+        remoteOwner: String?,
+        remoteRepository: String?,
+        lastCommitEpoch: Int?,
+        lastCommitISO8601: String?,
+        lastCommitRelative: String,
+        lastCommitShortHash: String? = nil,
+        lastCommitSubject: String? = nil,
+        upstreamLastCommitEpoch: Int?,
+        upstreamLastCommitISO8601: String?,
+        upstreamLastCommitRelative: String,
+        daysSinceLastCommit: Int?,
+        recentCommitCount30d: Int,
+        changedFileCount: Int,
+        untrackedFileCount: Int,
+        aheadCount: Int?,
+        behindCount: Int?,
+        score: Int
+    ) {
+        self.workDomain = workDomain
+        self.workDomainConfidence = workDomainConfidence
+        self.workDomainReason = workDomainReason
+        self.path = path
+        self.name = name
+        self.branch = branch
+        self.originURL = originURL
+        self.remoteHost = remoteHost
+        self.remoteOwner = remoteOwner
+        self.remoteRepository = remoteRepository
+        self.lastCommitEpoch = lastCommitEpoch
+        self.lastCommitISO8601 = lastCommitISO8601
+        self.lastCommitRelative = lastCommitRelative
+        self.lastCommitShortHash = lastCommitShortHash
+        self.lastCommitSubject = lastCommitSubject
+        self.upstreamLastCommitEpoch = upstreamLastCommitEpoch
+        self.upstreamLastCommitISO8601 = upstreamLastCommitISO8601
+        self.upstreamLastCommitRelative = upstreamLastCommitRelative
+        self.daysSinceLastCommit = daysSinceLastCommit
+        self.recentCommitCount30d = recentCommitCount30d
+        self.changedFileCount = changedFileCount
+        self.untrackedFileCount = untrackedFileCount
+        self.aheadCount = aheadCount
+        self.behindCount = behindCount
+        self.score = score
+    }
 }
 
 struct GitRepositoryActivityMetrics: Sendable, Equatable {
@@ -235,6 +291,8 @@ enum GitRepositoryInsightScanner {
             remoteInfo: remoteInfo,
             personalIdentity: personalIdentity
         )
+        let lastCommitHeadline = gitOutput(repoPath: path, args: ["log", "-1", "--format=%h%x1f%s"])
+        let parsedHeadline = parseLastCommitHeadline(lastCommitHeadline)
         let lastCommitEpoch = gitOutput(repoPath: path, args: ["log", "-1", "--format=%ct"]).flatMap { Int($0) }
         let upstreamLastCommitEpoch = gitOutput(repoPath: path, args: ["log", "-1", "--format=%ct", "@{upstream}"]).flatMap { Int($0) }
         let recentCommitCount30d = gitOutput(repoPath: path, args: ["rev-list", "--count", "--since=30 days ago", "HEAD"]).flatMap { Int($0) } ?? 0
@@ -275,6 +333,8 @@ enum GitRepositoryInsightScanner {
             lastCommitEpoch: lastCommitEpoch,
             lastCommitISO8601: lastCommitEpoch.map(iso8601(epoch:)),
             lastCommitRelative: relativeTimeDescription(daysSinceLastCommit: daysSinceLastCommit),
+            lastCommitShortHash: parsedHeadline.shortHash,
+            lastCommitSubject: parsedHeadline.subject,
             upstreamLastCommitEpoch: upstreamLastCommitEpoch,
             upstreamLastCommitISO8601: upstreamLastCommitEpoch.map(iso8601(epoch:)),
             upstreamLastCommitRelative: relativeTimeDescription(daysSinceLastCommit: upstreamLastCommitEpoch.map(daysSinceEpoch(_:))),
@@ -300,6 +360,23 @@ enum GitRepositoryInsightScanner {
             return (nil, nil)
         }
         return (ahead, behind)
+    }
+
+    private static func parseLastCommitHeadline(_ output: String?) -> (shortHash: String?, subject: String?) {
+        guard let output else { return (nil, nil) }
+        let tokens = output.split(separator: "\u{001F}", maxSplits: 1, omittingEmptySubsequences: false)
+        guard !tokens.isEmpty else { return (nil, nil) }
+
+        let hash = tokens.first.map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let subjectRaw = tokens.count > 1 ? String(tokens[1]) : ""
+        let subject = subjectRaw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+
+        let normalizedHash = (hash?.isEmpty == false) ? hash : nil
+        let normalizedSubject = subject.isEmpty ? nil : String(subject.prefix(120))
+        return (normalizedHash, normalizedSubject)
     }
 
     private struct RemoteInfo {
