@@ -12,6 +12,7 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
     private(set) var autoTaskRecords: [AutoTaskRecord] = []
 
     private struct UsageCacheKey: Hashable {
+        let subscriptionID: UUID
         let source: SubscriptionUsageSource
         let provider: String
         let startDay: String
@@ -30,6 +31,7 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
     private let usageStore: UsageStoreProtocol?
     private let claudeProjectsRoots: [URL]
     private let codexSessionsRoots: [URL]
+    private let geminiConfigRoots: [URL]
     private let externalUsageMonitor: ExternalUsageMonitor
 
     private let reserveBufferRatio = 0.08
@@ -41,19 +43,23 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         baseURL: URL? = nil,
         usageStore: UsageStoreProtocol? = nil,
         claudeProjectsRoots: [URL]? = nil,
-        codexSessionsRoots: [URL]? = nil
+        codexSessionsRoots: [URL]? = nil,
+        geminiConfigRoots: [URL]? = nil
     ) {
         let appSupport = baseURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Dochi")
         let resolvedClaudeRoots = claudeProjectsRoots ?? Self.defaultClaudeProjectsRoots()
         let resolvedCodexRoots = codexSessionsRoots ?? Self.defaultCodexSessionsRoots()
+        let resolvedGeminiRoots = geminiConfigRoots ?? Self.defaultGeminiConfigRoots()
         self.baseURL = appSupport
         self.usageStore = usageStore
         self.claudeProjectsRoots = resolvedClaudeRoots
         self.codexSessionsRoots = resolvedCodexRoots
+        self.geminiConfigRoots = resolvedGeminiRoots
         self.externalUsageMonitor = ExternalUsageMonitor(
             codexSessionsRoots: resolvedCodexRoots,
             claudeProjectsRoots: resolvedClaudeRoots,
+            geminiConfigRoots: resolvedGeminiRoots,
             cacheURL: appSupport.appendingPathComponent("external-usage-cache-v1.json")
         )
         loadFromDisk()
@@ -586,6 +592,7 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         dayFormatter.dateFormat = "yyyy-MM-dd"
         dayFormatter.locale = Locale(identifier: "en_US_POSIX")
         let key = UsageCacheKey(
+            subscriptionID: subscription.id,
             source: subscription.usageSource,
             provider: normalizedProviderKey(subscription.providerName),
             startDay: dayFormatter.string(from: startDate)
@@ -600,7 +607,7 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         case .dochiUsageStore:
             tokens = await tokensUsedByUsageStore(subscription.providerName, since: startDate)
         case .externalToolLogs:
-            tokens = await tokensUsedByExternalToolLogs(subscription.providerName, since: startDate)
+            tokens = await tokensUsedByExternalToolLogs(subscription, since: startDate)
         }
         usageCache[key] = UsageCacheEntry(tokens: tokens, updatedAt: Date())
         return tokens
@@ -635,15 +642,19 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         return totalTokens
     }
 
-    private func tokensUsedByExternalToolLogs(_ providerName: String, since startDate: Date) async -> Int {
-        let provider = Self.externalProviderKind(from: providerName)
+    private func tokensUsedByExternalToolLogs(_ subscription: SubscriptionPlan, since startDate: Date) async -> Int {
+        let provider = Self.externalProviderKind(from: subscription.providerName)
         switch provider {
         case .claude:
             return await externalUsageMonitor.tokensUsed(provider: .claude, since: startDate)
         case .codex:
             return await externalUsageMonitor.tokensUsed(provider: .codex, since: startDate)
         case .gemini:
-            return await externalUsageMonitor.tokensUsed(provider: .gemini, since: startDate)
+            return await externalUsageMonitor.tokensUsed(
+                provider: .gemini,
+                since: startDate,
+                tokenLimit: subscription.monthlyTokenLimit
+            )
         case .unknown:
             return 0
         }
@@ -695,6 +706,21 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
             rawRoots.append(URL(fileURLWithPath: expanded).appendingPathComponent("sessions", isDirectory: true))
         }
         rawRoots.append(home.appendingPathComponent(".codex/sessions", isDirectory: true))
+        return uniqueStandardizedPaths(rawRoots)
+    }
+
+    nonisolated private static func defaultGeminiConfigRoots() -> [URL] {
+        let env = ProcessInfo.processInfo.environment
+        let home = FileManager.default.homeDirectoryForCurrentUser
+
+        var rawRoots: [URL] = []
+        if let custom = env["GEMINI_HOME"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !custom.isEmpty {
+            let expanded = NSString(string: custom).expandingTildeInPath
+            rawRoots.append(URL(fileURLWithPath: expanded))
+        }
+        rawRoots.append(home.appendingPathComponent(".gemini", isDirectory: true))
         return uniqueStandardizedPaths(rawRoots)
     }
 

@@ -895,6 +895,334 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(secondUsed, 210)
     }
 
+    func testExternalUsageMonitorGeminiRejectsUnsupportedAuthType() async throws {
+        let geminiRoot = tempDir.appendingPathComponent("gemini-unsupported")
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+        let settings = #"{"security":{"auth":{"selectedType":"api-key"}}}"#
+        try settings.write(
+            to: geminiRoot.appendingPathComponent("settings.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            geminiConfigRoots: [geminiRoot],
+            cacheURL: tempDir.appendingPathComponent("gemini-unsupported-cache.json"),
+            refreshMinIntervalSeconds: 0
+        )
+        let now = Date()
+
+        let used = await monitor.tokensUsed(
+            provider: .gemini,
+            since: now.addingTimeInterval(-3600),
+            tokenLimit: 1000,
+            now: now
+        )
+
+        XCTAssertEqual(used, 0)
+        let status = await monitor.status(provider: .gemini)
+        XCTAssertEqual(status?.code, "unsupported_auth_type")
+    }
+
+    func testExternalUsageMonitorGeminiFallsBackToCLIStats() async throws {
+        let geminiRoot = tempDir.appendingPathComponent("gemini-cli-fallback")
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+        let settings = #"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#
+        try settings.write(
+            to: geminiRoot.appendingPathComponent("settings.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let fakeCLI = tempDir.appendingPathComponent("fake-gemini-cli")
+        try "#!/bin/sh\necho test\n".write(to: fakeCLI, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeCLI.path)
+
+        let previousGeminiCLIPath = ProcessInfo.processInfo.environment["GEMINI_CLI_PATH"]
+        setenv("GEMINI_CLI_PATH", fakeCLI.path, 1)
+        defer {
+            if let previousGeminiCLIPath {
+                setenv("GEMINI_CLI_PATH", previousGeminiCLIPath, 1)
+            } else {
+                unsetenv("GEMINI_CLI_PATH")
+            }
+        }
+
+        let statsOutput = """
+        │  Model Usage                            Reqs                  Usage left  │
+        │  gemini-2.5-flash                          -       75.0% (Resets in 12h)  │
+        │  gemini-2.5-pro                            -       82.0% (Resets in 12h)  │
+        """
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            geminiConfigRoots: [geminiRoot],
+            cacheURL: tempDir.appendingPathComponent("gemini-cli-fallback-cache.json"),
+            refreshMinIntervalSeconds: 0,
+            geminiDataLoader: { _ in
+                throw URLError(.cannotConnectToHost)
+            },
+            geminiCommandRunner: { _, _, _ in
+                (statsOutput, 0)
+            }
+        )
+        let now = Date()
+
+        let used = await monitor.tokensUsed(
+            provider: .gemini,
+            since: now.addingTimeInterval(-3600),
+            tokenLimit: 1000,
+            now: now
+        )
+        XCTAssertEqual(used, 250)
+        let status = await monitor.status(provider: .gemini)
+        XCTAssertEqual(status?.code, "ok_cli")
+    }
+
+    func testExternalUsageMonitorGeminiNotLoggedInStatus() async throws {
+        let geminiRoot = tempDir.appendingPathComponent("gemini-not-logged-in")
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+        let settings = #"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#
+        try settings.write(
+            to: geminiRoot.appendingPathComponent("settings.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let fakeCLI = tempDir.appendingPathComponent("fake-gemini-not-logged")
+        try "#!/bin/sh\necho auth\n".write(to: fakeCLI, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeCLI.path)
+
+        let previousGeminiCLIPath = ProcessInfo.processInfo.environment["GEMINI_CLI_PATH"]
+        setenv("GEMINI_CLI_PATH", fakeCLI.path, 1)
+        defer {
+            if let previousGeminiCLIPath {
+                setenv("GEMINI_CLI_PATH", previousGeminiCLIPath, 1)
+            } else {
+                unsetenv("GEMINI_CLI_PATH")
+            }
+        }
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            geminiConfigRoots: [geminiRoot],
+            cacheURL: tempDir.appendingPathComponent("gemini-not-logged-cache.json"),
+            refreshMinIntervalSeconds: 0,
+            geminiDataLoader: { _ in
+                throw URLError(.cannotConnectToHost)
+            },
+            geminiCommandRunner: { _, _, _ in
+                ("Waiting for auth... (Press ESC or CTRL+C to cancel)", 0)
+            }
+        )
+        let now = Date()
+
+        let used = await monitor.tokensUsed(
+            provider: .gemini,
+            since: now.addingTimeInterval(-3600),
+            tokenLimit: 1000,
+            now: now
+        )
+        XCTAssertEqual(used, 0)
+        let status = await monitor.status(provider: .gemini)
+        XCTAssertEqual(status?.code, "not_logged_in")
+    }
+
+    func testExternalUsageMonitorGeminiRefreshesExpiredOAuthToken() async throws {
+        let geminiRoot = tempDir.appendingPathComponent("gemini-refresh")
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+
+        let settings = #"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#
+        try settings.write(
+            to: geminiRoot.appendingPathComponent("settings.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let expiredMs = (Date().addingTimeInterval(-600).timeIntervalSince1970 * 1000).rounded()
+        let creds = """
+        {
+          "access_token": "expired-token",
+          "refresh_token": "refresh-token",
+          "id_token": "dummy.id.token",
+          "expiry_date": \(Int(expiredMs))
+        }
+        """
+        try creds.write(
+            to: geminiRoot.appendingPathComponent("oauth_creds.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let cliRoot = tempDir.appendingPathComponent("gemini-cli-root")
+        let cliBinDir = cliRoot.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: cliBinDir, withIntermediateDirectories: true)
+        let cliBinary = cliBinDir.appendingPathComponent("gemini")
+        try "#!/bin/sh\necho gemini\n".write(to: cliBinary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cliBinary.path)
+
+        let oauthJS = cliRoot
+            .appendingPathComponent("libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js")
+        try FileManager.default.createDirectory(at: oauthJS.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let oauthSource = """
+        const OAUTH_CLIENT_ID = 'client-id-123.apps.googleusercontent.com';
+        const OAUTH_CLIENT_SECRET = 'secret-xyz';
+        """
+        try oauthSource.write(to: oauthJS, atomically: true, encoding: .utf8)
+
+        let previousGeminiCLIPath = ProcessInfo.processInfo.environment["GEMINI_CLI_PATH"]
+        setenv("GEMINI_CLI_PATH", cliBinary.path, 1)
+        defer {
+            if let previousGeminiCLIPath {
+                setenv("GEMINI_CLI_PATH", previousGeminiCLIPath, 1)
+            } else {
+                unsetenv("GEMINI_CLI_PATH")
+            }
+        }
+
+        let dataLoader: @Sendable (URLRequest) async throws -> (Data, URLResponse) = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            switch (url.host ?? "", url.path) {
+            case ("oauth2.googleapis.com", "/token"):
+                let body = #"{"access_token":"fresh-token","expires_in":3600}"#.data(using: .utf8)!
+                return (body, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            case ("cloudcode-pa.googleapis.com", "/v1internal:loadCodeAssist"):
+                let body = #"{"cloudaicompanionProject":"project-123"}"#.data(using: .utf8)!
+                return (body, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            case ("cloudcode-pa.googleapis.com", "/v1internal:retrieveUserQuota"):
+                let auth = request.value(forHTTPHeaderField: "Authorization") ?? ""
+                if auth == "Bearer fresh-token" {
+                    let body = #"{"buckets":[{"modelId":"gemini-2.5-pro","remainingFraction":0.4}]}"#
+                        .data(using: .utf8)!
+                    return (body, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+                }
+                return (Data(), HTTPURLResponse(url: url, statusCode: 401, httpVersion: nil, headerFields: nil)!)
+            default:
+                return (Data(), HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+            }
+        }
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            geminiConfigRoots: [geminiRoot],
+            cacheURL: tempDir.appendingPathComponent("gemini-refresh-cache.json"),
+            refreshMinIntervalSeconds: 0,
+            geminiDataLoader: dataLoader,
+            geminiCommandRunner: { _, _, _ in nil }
+        )
+
+        let now = Date()
+        let used = await monitor.tokensUsed(
+            provider: .gemini,
+            since: now.addingTimeInterval(-3600),
+            tokenLimit: 1000,
+            now: now
+        )
+
+        XCTAssertEqual(used, 600)
+        let status = await monitor.status(provider: .gemini)
+        XCTAssertEqual(status?.code, "ok_api")
+
+        let updatedCredsData = try Data(contentsOf: geminiRoot.appendingPathComponent("oauth_creds.json"))
+        let updatedObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: updatedCredsData) as? [String: Any]
+        )
+        XCTAssertEqual(updatedObject["access_token"] as? String, "fresh-token")
+    }
+
+    func testExternalToolLogsMixedProvidersIncludesGeminiCLIFallback() async throws {
+        let claudeRoot = tempDir.appendingPathComponent("mixed-claude")
+        let codexRoot = tempDir.appendingPathComponent("mixed-codex")
+        let geminiRoot = tempDir.appendingPathComponent("mixed-gemini")
+        let claudeProject = claudeRoot.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: claudeProject, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        let codexLines = [
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"mixed-codex\"}}",
+            "{\"type\":\"event_msg\",\"timestamp\":\"\(iso.string(from: now))\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":100,\"cached_input_tokens\":20,\"output_tokens\":20}}}}",
+        ].joined(separator: "\n")
+        try codexLines.write(to: codexRoot.appendingPathComponent("session.jsonl"), atomically: true, encoding: .utf8)
+
+        let claudeLine = "{\"type\":\"assistant\",\"timestamp\":\"\(iso.string(from: now))\",\"requestId\":\"mixed-req\",\"message\":{\"id\":\"mixed-msg\",\"usage\":{\"input_tokens\":40,\"cache_creation_input_tokens\":20,\"cache_read_input_tokens\":10,\"output_tokens\":30}}}"
+        try claudeLine.write(
+            to: claudeProject.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let geminiSettings = #"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#
+        try geminiSettings.write(to: geminiRoot.appendingPathComponent("settings.json"), atomically: true, encoding: .utf8)
+
+        let fakeCLI = tempDir.appendingPathComponent("mixed-fake-gemini")
+        let fakeScript = """
+        #!/bin/sh
+        cat <<'EOF'
+        │  Model Usage                            Reqs                  Usage left  │
+        │  gemini-2.5-flash                          -       75.0% (Resets in 12h)  │
+        │  gemini-2.5-pro                            -       90.0% (Resets in 12h)  │
+        EOF
+        """
+        try fakeScript.write(to: fakeCLI, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeCLI.path)
+
+        let previousGeminiCLIPath = ProcessInfo.processInfo.environment["GEMINI_CLI_PATH"]
+        setenv("GEMINI_CLI_PATH", fakeCLI.path, 1)
+        defer {
+            if let previousGeminiCLIPath {
+                setenv("GEMINI_CLI_PATH", previousGeminiCLIPath, 1)
+            } else {
+                unsetenv("GEMINI_CLI_PATH")
+            }
+        }
+
+        let service = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-mixed-providers"),
+            usageStore: nil,
+            claudeProjectsRoots: [claudeRoot],
+            codexSessionsRoots: [codexRoot],
+            geminiConfigRoots: [geminiRoot]
+        )
+
+        let codexPlan = SubscriptionPlan(
+            providerName: "ChatGPT Pro",
+            planName: "Plus",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        let claudePlan = SubscriptionPlan(
+            providerName: "Claude Max",
+            planName: "Max",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+        let geminiPlan = SubscriptionPlan(
+            providerName: "Gemini CLI",
+            planName: "Pro",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1000,
+            resetDayOfMonth: 1
+        )
+
+        let codexUtil = await service.utilization(for: codexPlan)
+        let claudeUtil = await service.utilization(for: claudePlan)
+        let geminiUtil = await service.utilization(for: geminiPlan)
+
+        XCTAssertEqual(codexUtil.usedTokens, 120)
+        XCTAssertEqual(claudeUtil.usedTokens, 100)
+        XCTAssertEqual(geminiUtil.usedTokens, 250)
+    }
+
     // MARK: - Mock Tests
 
     func testMockResourceOptimizer() async {

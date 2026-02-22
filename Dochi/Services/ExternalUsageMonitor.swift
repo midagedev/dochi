@@ -7,6 +7,11 @@ enum ExternalUsageProvider: String, Sendable {
     case gemini
 }
 
+struct ExternalUsageProviderStatus: Sendable, Equatable {
+    let code: String
+    let message: String?
+}
+
 /// External tool usage monitor with provider-specific incremental scanners.
 actor ExternalUsageMonitor {
     private struct MonitorCache: Codable, Sendable {
@@ -18,6 +23,9 @@ actor ExternalUsageMonitor {
         var lastScanUnixMs: Int64 = 0
         var files: [String: FileUsage] = [:]
         var days: [String: Int] = [:]
+        var lastUsageFraction: Double? = nil
+        var lastStatus: String? = nil
+        var lastMessage: String? = nil
     }
 
     private struct FileUsage: Codable, Sendable {
@@ -100,6 +108,46 @@ actor ExternalUsageMonitor {
         var seenFileIds: Set<String> = []
     }
 
+    private enum GeminiAuthType: String, Sendable {
+        case oauthPersonal = "oauth-personal"
+        case apiKey = "api-key"
+        case vertexAI = "vertex-ai"
+        case unknown
+    }
+
+    private struct GeminiProbeError: Error, Sendable {
+        let statusCode: String
+        let message: String
+    }
+
+    private struct GeminiProbeResult: Sendable {
+        let usedFraction: Double?
+        let statusCode: String
+        let message: String?
+    }
+
+    private struct GeminiCredentials: Sendable {
+        var accessToken: String
+        let refreshToken: String?
+        let idToken: String?
+        let expiryDate: Date?
+        let credentialsURL: URL
+    }
+
+    private struct GeminiOAuthClientCredentials: Sendable {
+        let clientId: String
+        let clientSecret: String
+    }
+
+    private struct GeminiQuotaBucket: Decodable {
+        let remainingFraction: Double?
+        let modelId: String?
+    }
+
+    private struct GeminiQuotaResponse: Decodable {
+        let buckets: [GeminiQuotaBucket]?
+    }
+
     private struct JSONLLine: Sendable {
         let bytes: Data
         let wasTruncated: Bool
@@ -113,38 +161,69 @@ actor ExternalUsageMonitor {
         "yyyy-MM-dd'T'HH:mm:ss",
     ]
 
+    private static let geminiQuotaEndpoint = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota")
+    private static let geminiLoadCodeAssistEndpoint = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")
+    private static let geminiRefreshEndpoint = URL(string: "https://oauth2.googleapis.com/token")
+
     private let codexSessionsRoots: [URL]
     private let claudeProjectsRoots: [URL]
+    private let geminiConfigRoots: [URL]
     private let cacheURL: URL
     private let refreshMinIntervalSeconds: TimeInterval
+    private let geminiDataLoader: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    private let geminiCommandRunner: @Sendable (_ executable: String, _ arguments: [String], _ timeout: TimeInterval) -> (output: String, exitCode: Int32)?
 
     private var cache: MonitorCache
 
     init(
         codexSessionsRoots: [URL],
         claudeProjectsRoots: [URL],
+        geminiConfigRoots: [URL] = [],
         cacheURL: URL,
-        refreshMinIntervalSeconds: TimeInterval = 60
+        refreshMinIntervalSeconds: TimeInterval = 60,
+        geminiDataLoader: (@Sendable (URLRequest) async throws -> (Data, URLResponse))? = nil,
+        geminiCommandRunner: (@Sendable (_ executable: String, _ arguments: [String], _ timeout: TimeInterval) -> (output: String, exitCode: Int32)?)? = nil
     ) {
         self.codexSessionsRoots = Self.uniqueStandardizedPaths(codexSessionsRoots)
         self.claudeProjectsRoots = Self.uniqueStandardizedPaths(claudeProjectsRoots)
+        self.geminiConfigRoots = Self.uniqueStandardizedPaths(geminiConfigRoots)
         self.cacheURL = cacheURL
         self.refreshMinIntervalSeconds = max(0, refreshMinIntervalSeconds)
+        self.geminiDataLoader = geminiDataLoader ?? { request in
+            try await URLSession.shared.data(for: request)
+        }
+        self.geminiCommandRunner = geminiCommandRunner ?? { executable, arguments, timeout in
+            Self.runProcess(executable: executable, arguments: arguments, timeout: timeout)
+        }
         self.cache = Self.loadCache(at: cacheURL) ?? MonitorCache()
     }
 
-    func tokensUsed(provider: ExternalUsageProvider, since startDate: Date, now: Date = Date()) -> Int {
+    func tokensUsed(
+        provider: ExternalUsageProvider,
+        since startDate: Date,
+        tokenLimit: Int? = nil,
+        now: Date = Date()
+    ) async -> Int {
         switch provider {
         case .codex:
             refreshCodex(since: startDate, now: now)
         case .claude:
             refreshClaude(since: startDate, now: now)
         case .gemini:
-            return 0
+            await refreshGemini(since: startDate, now: now)
         }
 
         let key = provider.rawValue
         guard let providerCache = cache.providers[key] else { return 0 }
+        if provider == .gemini {
+            guard let fraction = providerCache.lastUsageFraction,
+                  let tokenLimit,
+                  tokenLimit > 0 else {
+                return 0
+            }
+            return max(0, Int((Double(tokenLimit) * fraction).rounded()))
+        }
+
         let range = DayRange(since: startDate, until: now)
         let sum = providerCache.days.reduce(0) { partial, entry in
             guard DayRange.isInRange(dayKey: entry.key, since: range.sinceKey, until: range.untilKey) else {
@@ -153,6 +232,14 @@ actor ExternalUsageMonitor {
             return partial + max(0, entry.value)
         }
         return max(0, sum)
+    }
+
+    func status(provider: ExternalUsageProvider) -> ExternalUsageProviderStatus? {
+        let key = provider.rawValue
+        guard let providerCache = cache.providers[key], let code = providerCache.lastStatus else {
+            return nil
+        }
+        return ExternalUsageProviderStatus(code: code, message: providerCache.lastMessage)
     }
 
     // MARK: - Refresh
@@ -219,6 +306,414 @@ actor ExternalUsageMonitor {
         let nowMs = Int64(now.timeIntervalSince1970 * 1000)
         let refreshMs = Int64(refreshMinIntervalSeconds * 1000)
         return (nowMs - lastScanUnixMs) > refreshMs
+    }
+
+    // MARK: - Gemini scan
+
+    private func refreshGemini(since _: Date, now: Date) async {
+        let key = ExternalUsageProvider.gemini.rawValue
+        var providerCache = cache.providers[key] ?? ProviderCache()
+
+        guard shouldRefresh(lastScanUnixMs: providerCache.lastScanUnixMs, now: now) else { return }
+
+        let result = await fetchGeminiUsage(now: now)
+        providerCache.lastStatus = result.statusCode
+        providerCache.lastMessage = result.message
+        providerCache.lastUsageFraction = result.usedFraction
+        providerCache.files.removeAll(keepingCapacity: true)
+
+        providerCache.lastScanUnixMs = Int64(now.timeIntervalSince1970 * 1000)
+        cache.providers[key] = providerCache
+        saveCache()
+    }
+
+    private func fetchGeminiUsage(now: Date) async -> GeminiProbeResult {
+        let configRoot = resolvedGeminiConfigRoot()
+        let authType = geminiAuthType(configRoot: configRoot)
+
+        switch authType {
+        case .apiKey:
+            return GeminiProbeResult(
+                usedFraction: nil,
+                statusCode: "unsupported_auth_type",
+                message: "Gemini auth type 'api-key' is not supported for usage monitoring."
+            )
+        case .vertexAI:
+            return GeminiProbeResult(
+                usedFraction: nil,
+                statusCode: "unsupported_auth_type",
+                message: "Gemini auth type 'vertex-ai' is not supported for usage monitoring."
+            )
+        case .oauthPersonal, .unknown:
+            break
+        }
+
+        do {
+            let usedFraction = try await fetchGeminiUsageViaAPI(configRoot: configRoot, now: now)
+            return GeminiProbeResult(usedFraction: usedFraction, statusCode: "ok_api", message: nil)
+        } catch let apiError as GeminiProbeError {
+            let fallback = fetchGeminiUsageViaCLI()
+            if let fallbackUsed = fallback.usedFraction {
+                return GeminiProbeResult(usedFraction: fallbackUsed, statusCode: "ok_cli", message: fallback.message)
+            }
+            return GeminiProbeResult(
+                usedFraction: nil,
+                statusCode: fallback.statusCode == "not_logged_in" ? fallback.statusCode : apiError.statusCode,
+                message: fallback.statusCode == "not_logged_in" ? fallback.message : apiError.message
+            )
+        } catch {
+            let fallback = fetchGeminiUsageViaCLI()
+            if let fallbackUsed = fallback.usedFraction {
+                return GeminiProbeResult(usedFraction: fallbackUsed, statusCode: "ok_cli", message: fallback.message)
+            }
+            return GeminiProbeResult(
+                usedFraction: nil,
+                statusCode: fallback.statusCode == "not_logged_in" ? fallback.statusCode : "api_error",
+                message: fallback.statusCode == "not_logged_in" ? fallback.message : error.localizedDescription
+            )
+        }
+    }
+
+    private func fetchGeminiUsageViaAPI(configRoot: URL, now: Date) async throws -> Double {
+        var credentials = try loadGeminiCredentials(configRoot: configRoot)
+        if let expiry = credentials.expiryDate, expiry <= now {
+            credentials.accessToken = try await refreshGeminiAccessToken(
+                configRoot: configRoot,
+                refreshToken: credentials.refreshToken,
+                credentialsURL: credentials.credentialsURL
+            )
+        }
+
+        let projectId = await fetchGeminiProjectID(accessToken: credentials.accessToken)
+        let quotaData = try await fetchGeminiQuotaData(accessToken: credentials.accessToken, projectID: projectId)
+        return try parseGeminiUsedFraction(data: quotaData)
+    }
+
+    private func fetchGeminiQuotaData(accessToken: String, projectID: String?) async throws -> Data {
+        guard let endpoint = Self.geminiQuotaEndpoint else {
+            throw GeminiProbeError(statusCode: "api_error", message: "Gemini quota endpoint is invalid.")
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 8
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let projectID, !projectID.isEmpty {
+            request.httpBody = Data("{\"project\":\"\(projectID)\"}".utf8)
+        } else {
+            request.httpBody = Data("{}".utf8)
+        }
+
+        let (data, response) = try await geminiDataLoader(request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GeminiProbeError(statusCode: "api_error", message: "Gemini quota response is invalid.")
+        }
+        if httpResponse.statusCode == 401 {
+            throw GeminiProbeError(statusCode: "not_logged_in", message: "Gemini OAuth token is invalid or expired.")
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw GeminiProbeError(
+                statusCode: "api_error",
+                message: "Gemini quota API returned HTTP \(httpResponse.statusCode)."
+            )
+        }
+        return data
+    }
+
+    private func fetchGeminiProjectID(accessToken: String) async -> String? {
+        guard let endpoint = Self.geminiLoadCodeAssistEndpoint else { return nil }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 6
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("{\"metadata\":{\"ideType\":\"GEMINI_CLI\",\"pluginType\":\"GEMINI\"}}".utf8)
+
+        guard let (data, response) = try? await geminiDataLoader(request),
+              let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200,
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+            return nil
+        }
+
+        if let project = object["cloudaicompanionProject"] as? String {
+            let trimmed = project.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let project = object["cloudaicompanionProject"] as? [String: Any] {
+            if let value = project["id"] as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+            if let value = project["projectId"] as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        }
+        return nil
+    }
+
+    private func parseGeminiUsedFraction(data: Data) throws -> Double {
+        let response: GeminiQuotaResponse
+        do {
+            response = try JSONDecoder().decode(GeminiQuotaResponse.self, from: data)
+        } catch {
+            throw GeminiProbeError(statusCode: "parse_error", message: "Could not decode Gemini quota response.")
+        }
+
+        guard let buckets = response.buckets, !buckets.isEmpty else {
+            throw GeminiProbeError(statusCode: "parse_error", message: "Gemini quota response has no buckets.")
+        }
+
+        var minRemainingByModel: [String: Double] = [:]
+        for bucket in buckets {
+            guard let modelID = bucket.modelId, !modelID.isEmpty, let remaining = bucket.remainingFraction else {
+                continue
+            }
+            let clamped = min(1, max(0, remaining))
+            if let existing = minRemainingByModel[modelID] {
+                minRemainingByModel[modelID] = min(existing, clamped)
+            } else {
+                minRemainingByModel[modelID] = clamped
+            }
+        }
+
+        guard let lowestRemaining = minRemainingByModel.values.min() else {
+            throw GeminiProbeError(statusCode: "parse_error", message: "No usable Gemini model quota found.")
+        }
+
+        return min(1, max(0, 1 - lowestRemaining))
+    }
+
+    private func loadGeminiCredentials(configRoot: URL) throws -> GeminiCredentials {
+        let credentialsURL = configRoot.appendingPathComponent("oauth_creds.json")
+        guard let data = try? Data(contentsOf: credentialsURL) else {
+            throw GeminiProbeError(statusCode: "not_logged_in", message: "Gemini oauth_creds.json not found.")
+        }
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw GeminiProbeError(statusCode: "parse_error", message: "Gemini oauth_creds.json is invalid.")
+        }
+
+        guard let accessToken = object["access_token"] as? String,
+              !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            throw GeminiProbeError(statusCode: "not_logged_in", message: "Gemini access_token is missing.")
+        }
+
+        let refreshToken = (object["refresh_token"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let idToken = (object["id_token"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let expiryRaw = Self.parseDouble(object["expiry_date"])
+        let expiryDate = expiryRaw.map { Date(timeIntervalSince1970: $0 / 1000) }
+
+        return GeminiCredentials(
+            accessToken: accessToken,
+            refreshToken: refreshToken?.isEmpty == true ? nil : refreshToken,
+            idToken: idToken?.isEmpty == true ? nil : idToken,
+            expiryDate: expiryDate,
+            credentialsURL: credentialsURL
+        )
+    }
+
+    private func refreshGeminiAccessToken(
+        configRoot: URL,
+        refreshToken: String?,
+        credentialsURL: URL
+    ) async throws -> String {
+        guard let refreshToken, !refreshToken.isEmpty else {
+            throw GeminiProbeError(statusCode: "not_logged_in", message: "Gemini refresh_token is missing.")
+        }
+        guard let oauthCreds = extractGeminiOAuthClientCredentials() else {
+            throw GeminiProbeError(
+                statusCode: "api_error",
+                message: "Could not extract Gemini CLI OAuth client configuration."
+            )
+        }
+        guard let endpoint = Self.geminiRefreshEndpoint else {
+            throw GeminiProbeError(statusCode: "api_error", message: "Gemini refresh endpoint is invalid.")
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 8
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let formItems = [
+            ("client_id", oauthCreds.clientId),
+            ("client_secret", oauthCreds.clientSecret),
+            ("refresh_token", refreshToken),
+            ("grant_type", "refresh_token"),
+        ]
+        request.httpBody = Self.formURLEncoded(formItems).data(using: .utf8)
+
+        let (data, response) = try await geminiDataLoader(request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GeminiProbeError(statusCode: "api_error", message: "Gemini token refresh response is invalid.")
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw GeminiProbeError(
+                statusCode: "not_logged_in",
+                message: "Gemini token refresh failed with HTTP \(httpResponse.statusCode)."
+            )
+        }
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let accessToken = object["access_token"] as? String,
+              !accessToken.isEmpty
+        else {
+            throw GeminiProbeError(statusCode: "parse_error", message: "Gemini token refresh payload is invalid.")
+        }
+
+        updateGeminiCredentialsFile(
+            configRoot: configRoot,
+            credentialsURL: credentialsURL,
+            refreshResponse: object
+        )
+        return accessToken
+    }
+
+    private func updateGeminiCredentialsFile(
+        configRoot _: URL,
+        credentialsURL: URL,
+        refreshResponse: [String: Any]
+    ) {
+        guard let existing = try? Data(contentsOf: credentialsURL),
+              var object = (try? JSONSerialization.jsonObject(with: existing)) as? [String: Any]
+        else {
+            return
+        }
+
+        if let accessToken = refreshResponse["access_token"] {
+            object["access_token"] = accessToken
+        }
+        if let expiresIn = Self.parseDouble(refreshResponse["expires_in"]) {
+            object["expiry_date"] = (Date().timeIntervalSince1970 + expiresIn) * 1000
+        }
+        if let idToken = refreshResponse["id_token"] {
+            object["id_token"] = idToken
+        }
+
+        if let updated = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted]) {
+            try? updated.write(to: credentialsURL, options: .atomic)
+        }
+    }
+
+    private func extractGeminiOAuthClientCredentials() -> GeminiOAuthClientCredentials? {
+        guard let geminiBinary = resolveGeminiBinaryPath() else { return nil }
+        let resolvedBinary = Self.resolveSymlinkPath(geminiBinary)
+        let binDirectory = (resolvedBinary as NSString).deletingLastPathComponent
+        let baseDirectory = (binDirectory as NSString).deletingLastPathComponent
+
+        let oauthFile = "dist/src/code_assist/oauth2.js"
+        let possiblePaths = [
+            "\(baseDirectory)/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/\(oauthFile)",
+            "\(baseDirectory)/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/\(oauthFile)",
+            "\(baseDirectory)/share/gemini-cli/node_modules/@google/gemini-cli-core/\(oauthFile)",
+            "\(baseDirectory)/../gemini-cli-core/\(oauthFile)",
+            "\(baseDirectory)/node_modules/@google/gemini-cli-core/\(oauthFile)",
+        ]
+
+        for path in possiblePaths {
+            guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
+            if let parsed = Self.parseGeminiOAuthClientCredentials(from: content) {
+                return parsed
+            }
+        }
+        return nil
+    }
+
+    private func resolveGeminiBinaryPath() -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment["GEMINI_CLI_PATH"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !override.isEmpty {
+            let expanded = NSString(string: override).expandingTildeInPath
+            if FileManager.default.isExecutableFile(atPath: expanded) {
+                return expanded
+            }
+        }
+
+        if let pathValue = environment["PATH"] {
+            for directory in pathValue.split(separator: ":") {
+                let candidate = URL(fileURLWithPath: String(directory))
+                    .appendingPathComponent("gemini").path
+                if FileManager.default.isExecutableFile(atPath: candidate) {
+                    return candidate
+                }
+            }
+        }
+
+        let commonPaths = ["/opt/homebrew/bin/gemini", "/usr/local/bin/gemini", "/usr/bin/gemini"]
+        return commonPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
+    }
+
+    private func resolvedGeminiConfigRoot() -> URL {
+        if let existing = geminiConfigRoots.first(where: {
+            FileManager.default.fileExists(atPath: $0.appendingPathComponent("settings.json").path)
+                || FileManager.default.fileExists(atPath: $0.appendingPathComponent("oauth_creds.json").path)
+        }) {
+            return existing
+        }
+
+        if let first = geminiConfigRoots.first {
+            return first
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".gemini", isDirectory: true)
+    }
+
+    private func geminiAuthType(configRoot: URL) -> GeminiAuthType {
+        let settingsURL = configRoot.appendingPathComponent("settings.json")
+        guard let data = try? Data(contentsOf: settingsURL),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let security = object["security"] as? [String: Any],
+              let auth = security["auth"] as? [String: Any],
+              let selectedType = auth["selectedType"] as? String
+        else {
+            return .unknown
+        }
+
+        return GeminiAuthType(rawValue: selectedType) ?? .unknown
+    }
+
+    private func fetchGeminiUsageViaCLI() -> GeminiProbeResult {
+        guard let executable = resolveGeminiBinaryPath() else {
+            return GeminiProbeResult(
+                usedFraction: nil,
+                statusCode: "cli_error",
+                message: "Gemini CLI is not installed."
+            )
+        }
+
+        let argumentCandidates = [
+            ["--stats"],
+            ["/stats"],
+            ["stats"],
+        ]
+
+        for arguments in argumentCandidates {
+            guard let runResult = geminiCommandRunner(executable, arguments, 8) else { continue }
+            let output = runResult.output
+            if let usedFraction = Self.parseGeminiStatsUsedFraction(output) {
+                return GeminiProbeResult(usedFraction: usedFraction, statusCode: "ok_cli", message: nil)
+            }
+            if Self.looksGeminiNotLoggedIn(output) {
+                return GeminiProbeResult(
+                    usedFraction: nil,
+                    statusCode: "not_logged_in",
+                    message: "Gemini CLI is not logged in."
+                )
+            }
+        }
+
+        return GeminiProbeResult(
+            usedFraction: nil,
+            statusCode: "cli_error",
+            message: "Gemini CLI /stats output could not be parsed."
+        )
     }
 
     // MARK: - Codex scan
@@ -824,6 +1319,150 @@ actor ExternalUsageMonitor {
             if let double = Double(trimmed) { return Int(double.rounded()) }
         }
         return nil
+    }
+
+    private static func parseDouble(_ value: Any?) -> Double? {
+        guard let value else { return nil }
+        if let double = value as? Double { return double }
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Double(trimmed)
+        }
+        return nil
+    }
+
+    private static func parseGeminiOAuthClientCredentials(from content: String) -> GeminiOAuthClientCredentials? {
+        let clientIDPattern = #"OAUTH_CLIENT_ID\s*=\s*['"]([\w\-\.]+)['"]\s*;"#
+        let clientSecretPattern = #"OAUTH_CLIENT_SECRET\s*=\s*['"]([\w\-]+)['"]\s*;"#
+
+        guard let clientIDRegex = try? NSRegularExpression(pattern: clientIDPattern),
+              let clientSecretRegex = try? NSRegularExpression(pattern: clientSecretPattern)
+        else {
+            return nil
+        }
+
+        let range = NSRange(content.startIndex..<content.endIndex, in: content)
+        guard let clientIDMatch = clientIDRegex.firstMatch(in: content, range: range),
+              let clientIDRange = Range(clientIDMatch.range(at: 1), in: content),
+              let clientSecretMatch = clientSecretRegex.firstMatch(in: content, range: range),
+              let clientSecretRange = Range(clientSecretMatch.range(at: 1), in: content)
+        else {
+            return nil
+        }
+
+        return GeminiOAuthClientCredentials(
+            clientId: String(content[clientIDRange]),
+            clientSecret: String(content[clientSecretRange])
+        )
+    }
+
+    private static func resolveSymlinkPath(_ path: String) -> String {
+        let fileManager = FileManager.default
+        guard let destination = try? fileManager.destinationOfSymbolicLink(atPath: path) else {
+            return path
+        }
+        if destination.hasPrefix("/") {
+            return destination
+        }
+        let directory = (path as NSString).deletingLastPathComponent
+        return (directory as NSString).appendingPathComponent(destination)
+    }
+
+    private static func formURLEncoded(_ pairs: [(String, String)]) -> String {
+        pairs.map { key, value in
+            let encodedKey = Self.urlEncodeFormComponent(key)
+            let encodedValue = Self.urlEncodeFormComponent(value)
+            return "\(encodedKey)=\(encodedValue)"
+        }.joined(separator: "&")
+    }
+
+    private static func urlEncodeFormComponent(_ value: String) -> String {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private static func parseGeminiStatsUsedFraction(_ rawText: String) -> Double? {
+        let stripped = Self.stripANSICodes(rawText)
+        let pattern = #"(gemini[-\w.]+)\s+[\d-]+\s+([0-9]+(?:\.[0-9]+)?)\s*%\s*\(([^)]+)\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+
+        var minPercentLeft: Double?
+        for line in stripped.split(whereSeparator: \.isNewline) {
+            let cleanLine = String(line).replacingOccurrences(of: "│", with: " ")
+            let range = NSRange(cleanLine.startIndex..<cleanLine.endIndex, in: cleanLine)
+            guard let match = regex.firstMatch(in: cleanLine, range: range),
+                  let percentRange = Range(match.range(at: 2), in: cleanLine),
+                  let percentLeft = Double(cleanLine[percentRange])
+            else {
+                continue
+            }
+
+            if let current = minPercentLeft {
+                minPercentLeft = min(current, percentLeft)
+            } else {
+                minPercentLeft = percentLeft
+            }
+        }
+
+        guard let minPercentLeft else { return nil }
+        let remaining = min(100, max(0, minPercentLeft))
+        return min(1, max(0, 1 - (remaining / 100)))
+    }
+
+    private static func looksGeminiNotLoggedIn(_ text: String) -> Bool {
+        let lower = stripANSICodes(text).lowercased()
+        if lower.contains("login with google") { return true }
+        if lower.contains("waiting for auth") { return true }
+        if lower.contains("run 'gemini' in terminal to authenticate") { return true }
+        return false
+    }
+
+    private static func stripANSICodes(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: #"\u{001B}\[[0-9;]*[A-Za-z]"#,
+            with: "",
+            options: .regularExpression
+        )
+    }
+
+    private static func runProcess(
+        executable: String,
+        arguments: [String],
+        timeout: TimeInterval
+    ) -> (output: String, exitCode: Int32)? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        let group = DispatchGroup()
+        group.enter()
+        process.terminationHandler = { _ in group.leave() }
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        let waitResult = group.wait(timeout: .now() + timeout)
+        if waitResult == .timedOut {
+            process.terminate()
+            _ = group.wait(timeout: .now() + 1)
+            return nil
+        }
+
+        let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
+        let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+        let outputText = String(data: outputData + errorData, encoding: .utf8) ?? ""
+        return (outputText, process.terminationStatus)
     }
 
     private static func dayKeyFromFilename(_ filename: String) -> String? {
