@@ -19,6 +19,13 @@
 - 선택 상태와 상세 진입 상태가 연결되지 않아 사용자가 흐름을 잃는다.
 - "세션 확인 → 상세 출력 보기"가 메뉴 탐색에 의존한다.
 
+## 2.1 비목표 (Non-goals)
+
+- 외부 도구 실행 엔진(tmux/runtime bridge) 구조 변경
+- 새로운 글로벌 네비게이션(탭/레이아웃) 도입
+- 세션 상태 판정 알고리즘 자체 교체(active/idle/stale/dead 계산식 전면 변경)
+- iOS 화면 신규 설계 (본 문서는 macOS tools 탭 중심)
+
 ## 3. 정보 우선순위
 
 세션 정보 노출 우선순위:
@@ -98,7 +105,22 @@ Repo 카드 우선순위:
 - `SessionExplorerViewStateBuilder`
   - 대표 세션 계산 로직(우선순위: active > idle > stale > dead, updatedAt desc)
 
-## 10. 완료 기준
+## 10. 이벤트 계측 (효과 측정)
+
+최소 계측 이벤트:
+- `session_explorer_repo_card_clicked`
+  - props: `repository_root`, `active_session_count`, `error_session_count`
+- `session_explorer_session_row_clicked`
+  - props: `provider`, `native_session_id`, `activity_state`, `controllability_tier`
+- `session_explorer_detail_opened`
+  - props: `provider`, `native_session_id`, `open_result(success|fallback|unavailable)`
+
+핵심 지표:
+- Repo 카드 클릭 후 상세 진입 전환율
+- 세션 행 클릭 대비 상세 진입 성공률
+- stale/dead 세션 클릭 후 재시작/attach 액션 전환율
+
+## 11. 완료 기준
 
 - 클릭 가능한 요소별 동작이 구현과 1:1 매핑된다.
 - 사용자 여정 A/B/C가 실제 동작으로 재현된다.
