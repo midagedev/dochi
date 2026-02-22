@@ -963,7 +963,6 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             )
         }.value
         let runtimeSnapshots = sessionSnapshots + processSnapshots
-        let hasRuntimeCandidates = !runtimeSnapshots.isEmpty
         let discoveredSessions = await discoverLocalCodingSessions(limit: max(effectiveLimit * 2, 120))
         let enrichedRuntime = await Task.detached(priority: .utility) {
             Self.enrichRuntimeSessionMetadata(
@@ -971,7 +970,6 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 discoveredSessions: discoveredSessions
             )
         }.value
-        let discoveredForMerge = hasRuntimeCandidates ? [] : discoveredSessions
         let managedRoots = managedRepositories
             .filter { !$0.isArchived }
             .map { URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path }
@@ -980,11 +978,12 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let merged = await Task.detached(priority: .utility) {
             Self.mergeUnifiedCodingSessions(
                 runtimeSessions: enrichedRuntime,
-                discoveredSessions: discoveredForMerge,
+                discoveredSessions: discoveredSessions,
                 managedRepositoryRoots: managedRoots,
                 limit: effectiveLimit,
                 now: now,
-                config: .standard
+                config: .standard,
+                includeUnmatchedProcessRuntime: false
             )
         }.value
 
@@ -2085,32 +2084,119 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         managedRepositoryRoots: [String],
         limit: Int,
         now: Date = Date(),
-        config: CodingSessionActivityScoringConfig = .standard
+        config: CodingSessionActivityScoringConfig = .standard,
+        includeUnmatchedProcessRuntime: Bool = true
     ) -> [UnifiedCodingSession] {
-        var merged: [UnifiedCodingSession] = runtimeSessions.map { runtime in
+        var runtimeOverlayByDiscoveredKey: [String: (index: Int, runtime: RuntimeSessionSnapshot)] = [:]
+        runtimeOverlayByDiscoveredKey.reserveCapacity(discoveredSessions.count)
+
+        for (runtimeIndex, runtime) in runtimeSessions.enumerated() {
+            guard let matched = bestMetadataMatch(for: runtime, candidates: discoveredSessions) else {
+                continue
+            }
+            let discoveredKey = discoveredSessionMatchKey(matched.session)
+            if let existing = runtimeOverlayByDiscoveredKey[discoveredKey] {
+                if isPreferredRuntimeOverlay(
+                    candidate: runtime,
+                    over: existing.runtime,
+                    now: now,
+                    config: config
+                ) {
+                    runtimeOverlayByDiscoveredKey[discoveredKey] = (runtimeIndex, runtime)
+                }
+            } else {
+                runtimeOverlayByDiscoveredKey[discoveredKey] = (runtimeIndex, runtime)
+            }
+        }
+
+        let matchedRuntimeIndices = Set(runtimeOverlayByDiscoveredKey.values.map(\.index))
+        let runtimeOverlayLookup = Dictionary(
+            uniqueKeysWithValues: runtimeOverlayByDiscoveredKey.map { ($0.key, $0.value.runtime) }
+        )
+
+        var merged: [UnifiedCodingSession] = discoveredSessions.map { discovered in
+            let discoveredKey = discoveredSessionMatchKey(discovered)
+            let runtimeOverlay = runtimeOverlayLookup[discoveredKey]
+            let resolvedWorkingDirectory = discovered.workingDirectory ?? runtimeOverlay?.workingDirectory
+            let repositoryRoot = repositoryRoot(
+                for: resolvedWorkingDirectory,
+                managedRepositoryRoots: managedRepositoryRoots
+            )
+            let runtimeAlive = runtimeOverlay.map { $0.status != .dead } ?? discovered.isActive
+            let recentOutputAge: TimeInterval?
+            if let runtimeOverlay {
+                recentOutputAge = ageSince(runtimeOverlay.lastOutputAt, now: now)
+            } else if discovered.isActive {
+                recentOutputAge = ageSince(discovered.updatedAt, now: now)
+            } else {
+                recentOutputAge = nil
+            }
+            let recentCommandAge = inferredRecentCommandAge(
+                for: runtimeOverlay,
+                runtimeAlive: runtimeAlive,
+                now: now
+            )
+            let mergedUpdatedAt = max(discovered.updatedAt, runtimeOverlay?.updatedAt ?? .distantPast)
+            let activity = scoreUnifiedSessionActivity(
+                input: UnifiedSessionActivityInput(
+                    runtimeAlive: runtimeAlive,
+                    recentOutputAge: recentOutputAge,
+                    recentCommandAge: recentCommandAge,
+                    fileMtimeAge: ageSince(discovered.updatedAt, now: now),
+                    hasErrorPattern: runtimeOverlay?.hasErrorPattern ?? false
+                ),
+                config: config
+            )
+            return UnifiedCodingSession(
+                source: discovered.source.rawValue,
+                runtimeType: .file,
+                controllabilityTier: runtimeOverlay?.controllabilityTier ?? .t2Observe,
+                provider: discovered.provider,
+                nativeSessionId: discovered.sessionId,
+                runtimeSessionId: runtimeOverlay?.runtimeSessionId,
+                workingDirectory: resolvedWorkingDirectory,
+                repositoryRoot: repositoryRoot,
+                path: discovered.path,
+                updatedAt: mergedUpdatedAt,
+                isActive: activity.state == .active || activity.state == .idle,
+                title: discovered.title ?? runtimeOverlay?.title ?? discovered.summary,
+                summary: discovered.summary ?? runtimeOverlay?.summary,
+                titleSource: discovered.titleSource ?? runtimeOverlay?.titleSource,
+                titleConfidence: discovered.titleConfidence ?? runtimeOverlay?.titleConfidence,
+                originator: discovered.originator ?? runtimeOverlay?.originator,
+                sessionSource: discovered.sessionSource ?? runtimeOverlay?.sessionSource,
+                clientKind: discovered.clientKind ?? runtimeOverlay?.clientKind,
+                activityScore: activity.score,
+                activityState: activity.state,
+                activitySignals: activity.signals
+            )
+        }
+
+        merged.append(contentsOf: runtimeSessions.enumerated().compactMap { runtimeIndex, runtime in
+            if matchedRuntimeIndices.contains(runtimeIndex) {
+                return nil
+            }
+            if !includeUnmatchedProcessRuntime && runtime.runtimeType == .process {
+                return nil
+            }
             let repositoryRoot = repositoryRoot(
                 for: runtime.workingDirectory,
                 managedRepositoryRoots: managedRepositoryRoots
             )
             let runtimeAlive = runtime.status != .dead
-            // `ps etime` is process uptime, not recent activity. For attachable process sessions,
-            // avoid stale bias by inferring a fresh command signal from runtime liveness.
-            let inferredRecentCommandAge: TimeInterval?
-            if runtime.runtimeType == .process,
-               runtime.controllabilityTier == .t1Attach,
-               runtimeAlive {
-                inferredRecentCommandAge = 0
-            } else {
-                inferredRecentCommandAge = ageSince(runtime.lastCommandAt, now: now)
-            }
-            let inferredFileMtimeAge: TimeInterval? =
+            let recentCommandAge = inferredRecentCommandAge(
+                for: runtime,
+                runtimeAlive: runtimeAlive,
+                now: now
+            )
+            let fileMtimeAge: TimeInterval? =
                 runtime.runtimeType == .process ? nil : ageSince(runtime.updatedAt, now: now)
             let activity = scoreUnifiedSessionActivity(
                 input: UnifiedSessionActivityInput(
                     runtimeAlive: runtimeAlive,
                     recentOutputAge: ageSince(runtime.lastOutputAt, now: now),
-                    recentCommandAge: inferredRecentCommandAge,
-                    fileMtimeAge: inferredFileMtimeAge,
+                    recentCommandAge: recentCommandAge,
+                    fileMtimeAge: fileMtimeAge,
                     hasErrorPattern: runtime.hasErrorPattern
                 ),
                 config: config
@@ -2138,49 +2224,85 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 activityState: activity.state,
                 activitySignals: activity.signals
             )
-        }
-
-        merged.append(contentsOf: discoveredSessions.map { discovered in
-            let repositoryRoot = repositoryRoot(
-                for: discovered.workingDirectory,
-                managedRepositoryRoots: managedRepositoryRoots
-            )
-            let activity = scoreUnifiedSessionActivity(
-                input: UnifiedSessionActivityInput(
-                    runtimeAlive: discovered.isActive,
-                    recentOutputAge: discovered.isActive ? ageSince(discovered.updatedAt, now: now) : nil,
-                    recentCommandAge: nil,
-                    fileMtimeAge: ageSince(discovered.updatedAt, now: now),
-                    hasErrorPattern: false
-                ),
-                config: config
-            )
-            return UnifiedCodingSession(
-                source: discovered.source.rawValue,
-                runtimeType: .file,
-                controllabilityTier: .t2Observe,
-                provider: discovered.provider,
-                nativeSessionId: discovered.sessionId,
-                runtimeSessionId: nil,
-                workingDirectory: discovered.workingDirectory,
-                repositoryRoot: repositoryRoot,
-                path: discovered.path,
-                updatedAt: discovered.updatedAt,
-                isActive: activity.state == .active || activity.state == .idle,
-                title: discovered.title,
-                summary: discovered.summary,
-                titleSource: discovered.titleSource,
-                titleConfidence: discovered.titleConfidence,
-                originator: discovered.originator,
-                sessionSource: discovered.sessionSource,
-                clientKind: discovered.clientKind,
-                activityScore: activity.score,
-                activityState: activity.state,
-                activitySignals: activity.signals
-            )
         })
 
         return deduplicateUnifiedCodingSessions(merged, limit: limit)
+    }
+
+    nonisolated private static func isPreferredRuntimeOverlay(
+        candidate: RuntimeSessionSnapshot,
+        over current: RuntimeSessionSnapshot,
+        now: Date,
+        config: CodingSessionActivityScoringConfig
+    ) -> Bool {
+        let candidateActivity = runtimeActivityScore(runtime: candidate, now: now, config: config)
+        let currentActivity = runtimeActivityScore(runtime: current, now: now, config: config)
+        if candidateActivity != currentActivity {
+            return candidateActivity > currentActivity
+        }
+        let candidateTierRank = controllabilityTierRank(candidate.controllabilityTier)
+        let currentTierRank = controllabilityTierRank(current.controllabilityTier)
+        if candidateTierRank != currentTierRank {
+            return candidateTierRank < currentTierRank
+        }
+        if candidate.updatedAt != current.updatedAt {
+            return candidate.updatedAt > current.updatedAt
+        }
+        return candidate.nativeSessionId < current.nativeSessionId
+    }
+
+    nonisolated private static func runtimeActivityScore(
+        runtime: RuntimeSessionSnapshot,
+        now: Date,
+        config: CodingSessionActivityScoringConfig
+    ) -> Int {
+        let runtimeAlive = runtime.status != .dead
+        let fileMtimeAge: TimeInterval? =
+            runtime.runtimeType == .process ? nil : ageSince(runtime.updatedAt, now: now)
+        let scored = scoreUnifiedSessionActivity(
+            input: UnifiedSessionActivityInput(
+                runtimeAlive: runtimeAlive,
+                recentOutputAge: ageSince(runtime.lastOutputAt, now: now),
+                recentCommandAge: inferredRecentCommandAge(
+                    for: runtime,
+                    runtimeAlive: runtimeAlive,
+                    now: now
+                ),
+                fileMtimeAge: fileMtimeAge,
+                hasErrorPattern: runtime.hasErrorPattern
+            ),
+            config: config
+        )
+        return scored.score
+    }
+
+    nonisolated private static func inferredRecentCommandAge(
+        for runtime: RuntimeSessionSnapshot?,
+        runtimeAlive: Bool,
+        now: Date
+    ) -> TimeInterval? {
+        guard let runtime else { return nil }
+        // `ps etime` is process uptime, not recent activity. For attachable process sessions,
+        // avoid stale bias by inferring a fresh command signal from runtime liveness.
+        if runtime.runtimeType == .process,
+           runtime.controllabilityTier == .t1Attach,
+           runtimeAlive {
+            return 0
+        }
+        return ageSince(runtime.lastCommandAt, now: now)
+    }
+
+    nonisolated private static func controllabilityTierRank(_ tier: CodingSessionControllabilityTier) -> Int {
+        switch tier {
+        case .t0Full:
+            return 0
+        case .t1Attach:
+            return 1
+        case .t2Observe:
+            return 2
+        case .t3Unknown:
+            return 3
+        }
     }
 
     nonisolated static func deduplicateUnifiedCodingSessions(
@@ -2528,6 +2650,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             psOutput: psResult.output,
             now: now,
             workingDirectories: [:],
+            processMetadata: [:],
             limit: max(effectiveLimit, 80)
         )
         guard !rough.isEmpty else {
@@ -2539,10 +2662,12 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             cap: min(max(effectiveLimit, 24), 64)
         )
         let workingDirectories = resolveProcessWorkingDirectories(pids: pids)
+        let processMetadata = resolveProcessRuntimeMetadata(pids: pids)
         return parseProcessRuntimeSnapshots(
             psOutput: psResult.output,
             now: now,
             workingDirectories: workingDirectories,
+            processMetadata: processMetadata,
             limit: effectiveLimit
         )
     }
@@ -2551,6 +2676,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         psOutput: String,
         now: Date,
         workingDirectories: [Int: String] = [:],
+        processMetadata: [Int: ProcessRuntimeMetadata] = [:],
         limit: Int
     ) -> [RuntimeSessionSnapshot] {
         let effectiveLimit = max(1, min(400, limit))
@@ -2561,7 +2687,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             guard let snapshot = parseProcessRuntimeSnapshotLine(
                 rawLine,
                 now: now,
-                workingDirectories: workingDirectories
+                workingDirectories: workingDirectories,
+                processMetadata: processMetadata
             ) else {
                 continue
             }
@@ -2713,11 +2840,20 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     // MARK: - Helpers
 
+    struct ProcessRuntimeMetadata: Sendable, Equatable {
+        let sessionHintKeys: [String]
+        let gitBranch: String?
+        let originator: String?
+        let sessionSource: String?
+        let tmuxPane: String?
+    }
+
     struct RuntimeSessionSnapshot: Sendable {
         let provider: String
         let nativeSessionId: String
         let runtimeSessionId: String?
         let workingDirectory: String?
+        let gitBranch: String?
         let path: String
         let updatedAt: Date
         let isActive: Bool
@@ -2735,12 +2871,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let originator: String?
         let sessionSource: String?
         let clientKind: String?
+        let sessionHintKeys: [String]
 
         init(
             provider: String,
             nativeSessionId: String,
             runtimeSessionId: String?,
             workingDirectory: String?,
+            gitBranch: String? = nil,
             path: String,
             updatedAt: Date,
             isActive: Bool,
@@ -2757,12 +2895,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             titleConfidence: Double? = nil,
             originator: String? = nil,
             sessionSource: String? = nil,
-            clientKind: String? = nil
+            clientKind: String? = nil,
+            sessionHintKeys: [String] = []
         ) {
             self.provider = provider
             self.nativeSessionId = nativeSessionId
             self.runtimeSessionId = runtimeSessionId
             self.workingDirectory = workingDirectory
+            self.gitBranch = gitBranch
             self.path = path
             self.updatedAt = updatedAt
             self.isActive = isActive
@@ -2780,6 +2920,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             self.originator = originator
             self.sessionSource = sessionSource
             self.clientKind = clientKind
+            self.sessionHintKeys = sessionHintKeys
         }
     }
 
@@ -3135,7 +3276,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     nonisolated private static func parseProcessRuntimeSnapshotLine(
         _ rawLine: String,
         now: Date,
-        workingDirectories: [Int: String]
+        workingDirectories: [Int: String],
+        processMetadata: [Int: ProcessRuntimeMetadata]
     ) -> RuntimeSessionSnapshot? {
         let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -3156,11 +3298,21 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let updatedAt = elapsed.map { now.addingTimeInterval(-$0) } ?? now
         let isActive = elapsed.map { $0 <= 45 * 60 } ?? true
         let workingDirectory = workingDirectories[pid]
+        let metadata = processMetadata[pid]
+        let originator = metadata?.originator
+        let sessionSource = metadata?.sessionSource
+        let clientKind = classifySessionClientKind(
+            provider: provider,
+            originator: originator,
+            sessionSource: sessionSource
+        )
+        let sessionHintKeys = metadata?.sessionHintKeys ?? extractSessionHintKeysFromCommandLine(commandLine)
         return RuntimeSessionSnapshot(
             provider: provider,
             nativeSessionId: "pid-\(pid)",
             runtimeSessionId: "\(pid)",
             workingDirectory: workingDirectory,
+            gitBranch: metadata?.gitBranch,
             path: "process://\(pid)",
             updatedAt: updatedAt,
             isActive: isActive,
@@ -3174,8 +3326,141 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             title: nil,
             summary: nil,
             titleSource: nil,
-            titleConfidence: nil
+            titleConfidence: nil,
+            originator: originator,
+            sessionSource: sessionSource,
+            clientKind: clientKind,
+            sessionHintKeys: sessionHintKeys
         )
+    }
+
+    nonisolated private static func resolveProcessRuntimeMetadata(pids: [Int]) -> [Int: ProcessRuntimeMetadata] {
+        let uniquePids = Array(Set(pids)).filter { $0 > 0 }.sorted()
+        guard !uniquePids.isEmpty else { return [:] }
+
+        let pidArgument = uniquePids.map(String.init).joined(separator: ",")
+        let result = runProcessSync(
+            ["ps", "-eww", "-p", pidArgument, "-o", "pid=,command="],
+            currentDirectoryPath: nil
+        )
+        guard result.exitCode == 0 else {
+            return [:]
+        }
+
+        var mapped: [Int: ProcessRuntimeMetadata] = [:]
+        for rawLine in result.output.components(separatedBy: .newlines) {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            let parts = trimmed.split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
+            guard parts.count == 2, let pid = Int(parts[0]) else { continue }
+            let commandWithEnvironment = String(parts[1])
+
+            let environmentHintKeys = [
+                extractProcessEnvironmentValue(commandWithEnvironment, key: "CODEX_THREAD_ID"),
+                extractProcessEnvironmentValue(commandWithEnvironment, key: "CLAUDE_SESSION_ID"),
+                extractProcessEnvironmentValue(commandWithEnvironment, key: "CLAUDE_CODE_SESSION_ID"),
+                extractProcessEnvironmentValue(commandWithEnvironment, key: "ANTHROPIC_SESSION_ID"),
+            ]
+            let sessionHintKeys = normalizedUniqueSessionHintKeys(
+                environmentHintKeys.compactMap { $0 } +
+                    extractSessionHintKeysFromCommandLine(commandWithEnvironment)
+            )
+
+            let originator = normalizedSessionText(
+                extractProcessEnvironmentValue(commandWithEnvironment, key: "CODEX_INTERNAL_ORIGINATOR_OVERRIDE"),
+                maxLength: 80
+            )
+            let sessionSource = normalizedSessionText(
+                extractProcessEnvironmentValue(commandWithEnvironment, key: "TERM_PROGRAM")
+                    ?? extractProcessEnvironmentValue(commandWithEnvironment, key: "CODEX_SOURCE"),
+                maxLength: 40
+            )
+            let gitBranch = normalizedSessionText(
+                extractProcessEnvironmentValue(commandWithEnvironment, key: "GIT_BRANCH")
+                    ?? extractProcessEnvironmentValue(commandWithEnvironment, key: "BASE_BRANCH"),
+                maxLength: 120
+            )
+            let tmuxPane = normalizedSessionText(
+                extractProcessEnvironmentValue(commandWithEnvironment, key: "TMUX_PANE"),
+                maxLength: 40
+            )
+
+            if sessionHintKeys.isEmpty,
+               originator == nil,
+               sessionSource == nil,
+               gitBranch == nil,
+               tmuxPane == nil {
+                continue
+            }
+
+            mapped[pid] = ProcessRuntimeMetadata(
+                sessionHintKeys: sessionHintKeys,
+                gitBranch: gitBranch,
+                originator: originator,
+                sessionSource: sessionSource,
+                tmuxPane: tmuxPane
+            )
+        }
+        return mapped
+    }
+
+    nonisolated private static func extractProcessEnvironmentValue(_ commandLine: String, key: String) -> String? {
+        let escapedKey = NSRegularExpression.escapedPattern(for: key)
+        let pattern = "(?:^|\\s)\(escapedKey)=([^\\s]+)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+        let range = NSRange(commandLine.startIndex..<commandLine.endIndex, in: commandLine)
+        guard let match = regex.firstMatch(in: commandLine, range: range),
+              let valueRange = Range(match.range(at: 1), in: commandLine) else {
+            return nil
+        }
+        let rawValue = String(commandLine[valueRange])
+        let trimmed = rawValue.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    nonisolated private static func extractSessionHintKeysFromCommandLine(_ commandLine: String) -> [String] {
+        let patterns = [
+            "--resume(?:=|\\s+)([A-Za-z0-9._:-]{6,})",
+            "--session(?:=|\\s+)([A-Za-z0-9._:-]{6,})",
+            "--conversation(?:=|\\s+)([A-Za-z0-9._:-]{6,})",
+        ]
+        var extracted: [String] = []
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(commandLine.startIndex..<commandLine.endIndex, in: commandLine)
+            let matches = regex.matches(in: commandLine, range: range)
+            for match in matches {
+                guard let valueRange = Range(match.range(at: 1), in: commandLine) else { continue }
+                extracted.append(String(commandLine[valueRange]))
+            }
+        }
+        return normalizedUniqueSessionHintKeys(extracted)
+    }
+
+    nonisolated private static func normalizedUniqueSessionHintKeys(_ rawValues: [String]) -> [String] {
+        var normalized: [String] = []
+        var seen: Set<String> = []
+        for rawValue in rawValues {
+            guard let key = normalizedSessionHintKey(rawValue), !seen.contains(key) else {
+                continue
+            }
+            seen.insert(key)
+            normalized.append(key)
+        }
+        return normalized
+    }
+
+    nonisolated private static func normalizedSessionHintKey(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 6 else { return nil }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._:"))
+        let filtered = trimmed.lowercased().unicodeScalars.filter { allowed.contains($0) }
+        guard filtered.count >= 6 else { return nil }
+        return String(String.UnicodeScalarView(filtered))
     }
 
     nonisolated private static func resolveProcessWorkingDirectories(pids: [Int]) -> [Int: String] {
@@ -3245,9 +3530,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 provider: "codex",
                 sessionId: sessionId,
                 workingDirectory: meta?.cwd,
+                gitBranch: meta?.gitBranch,
                 path: candidate.url.path,
                 updatedAt: candidate.modifiedAt,
                 isActive: isActive,
+                sessionHintKeys: meta?.sessionHintKeys ?? normalizedUniqueSessionHintKeys([sessionId]),
                 title: meta?.title,
                 summary: meta?.summary,
                 titleSource: meta?.titleSource,
@@ -3290,6 +3577,10 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                     let modifiedISO = entry["modified"] as? String
                     let fileMtimeMillis = (entry["fileMtime"] as? NSNumber)?.doubleValue
                     let metadata = claudeSessionMetadataFromIndexEntry(entry)
+                    let gitBranch = normalizedSessionText(
+                        entry["gitBranch"] ?? entry["branch"],
+                        maxLength: 120
+                    )
                     let modifiedAt = parseISO8601Date(modifiedISO)
                         ?? fileMtimeMillis.map { Date(timeIntervalSince1970: $0 / 1_000) }
                         ?? .distantPast
@@ -3300,9 +3591,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                             provider: "claude",
                             sessionId: sessionId,
                             workingDirectory: projectPath,
+                            gitBranch: gitBranch,
                             path: fullPath ?? indexURL.path,
                             updatedAt: modifiedAt,
                             isActive: isActive,
+                            sessionHintKeys: normalizedUniqueSessionHintKeys([sessionId]),
                             title: metadata.title,
                             summary: metadata.summary,
                             titleSource: metadata.titleSource,
@@ -3353,9 +3646,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                     provider: "claude",
                     sessionId: sessionId,
                     workingDirectory: workingDirectory,
+                    gitBranch: meta?.gitBranch,
                     path: candidate.url.path,
                     updatedAt: candidate.modifiedAt,
                     isActive: isActive,
+                    sessionHintKeys: meta?.sessionHintKeys ?? normalizedUniqueSessionHintKeys([sessionId]),
                     title: meta?.title,
                     summary: meta?.summary,
                     titleSource: meta?.titleSource,
@@ -3468,6 +3763,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     ) -> (
         id: String,
         cwd: String?,
+        gitBranch: String?,
+        sessionHintKeys: [String],
         title: String?,
         summary: String?,
         titleSource: String?,
@@ -3487,8 +3784,13 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }
 
         let cwd = payload["cwd"] as? String
+        let gitBranch = normalizedSessionText(
+            (payload["git"] as? [String: Any])?["branch"] ?? payload["gitBranch"],
+            maxLength: 120
+        )
         let originator = normalizedSessionText(payload["originator"], maxLength: 80)
         let sessionSource = normalizedSessionText(payload["source"], maxLength: 40)
+        let sessionHintKeys = normalizedUniqueSessionHintKeys([id])
         let clientKind = classifySessionClientKind(
             provider: "codex",
             originator: originator,
@@ -3497,6 +3799,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         return (
             id: id,
             cwd: cwd,
+            gitBranch: gitBranch,
+            sessionHintKeys: sessionHintKeys,
             title: nil,
             summary: nil,
             titleSource: nil,
@@ -3571,7 +3875,16 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     nonisolated private static func parseClaudeSessionMeta(
         fromFirstLine line: String?
-    ) -> (id: String, cwd: String?, title: String?, summary: String?, titleSource: String?, titleConfidence: Double?)? {
+    ) -> (
+        id: String,
+        cwd: String?,
+        gitBranch: String?,
+        sessionHintKeys: [String],
+        title: String?,
+        summary: String?,
+        titleSource: String?,
+        titleConfidence: Double?
+    )? {
         guard let line,
               let data = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -3581,10 +3894,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let sessionId = (json["sessionId"] as? String) ?? (json["session_id"] as? String)
         guard let sessionId, !sessionId.isEmpty else { return nil }
         let cwd = (json["cwd"] as? String) ?? (json["projectPath"] as? String)
+        let gitBranch = normalizedSessionText(json["gitBranch"] ?? json["branch"], maxLength: 120)
+        let sessionHintKeys = normalizedUniqueSessionHintKeys([sessionId])
         let metadata = claudeSessionMetadataFromSessionJSON(json)
         return (
             id: sessionId,
             cwd: cwd,
+            gitBranch: gitBranch,
+            sessionHintKeys: sessionHintKeys,
             title: metadata.title,
             summary: metadata.summary,
             titleSource: metadata.titleSource,
@@ -3684,6 +4001,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 nativeSessionId: runtime.nativeSessionId,
                 runtimeSessionId: runtime.runtimeSessionId,
                 workingDirectory: runtime.workingDirectory,
+                gitBranch: runtime.gitBranch ?? matched.session.gitBranch,
                 path: runtime.path,
                 updatedAt: runtime.updatedAt,
                 isActive: runtime.isActive,
@@ -3700,9 +4018,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 titleConfidence: mergedConfidence,
                 originator: mergedOriginator,
                 sessionSource: mergedSessionSource,
-                clientKind: mergedClientKind
+                clientKind: mergedClientKind,
+                sessionHintKeys: runtime.sessionHintKeys
             )
         }
+    }
+
+    nonisolated private static func discoveredSessionMatchKey(_ session: DiscoveredCodingSession) -> String {
+        "\(session.provider.lowercased())|\(session.sessionId.lowercased())"
     }
 
     nonisolated private static func bestMetadataMatch(
@@ -3711,7 +4034,14 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     ) -> (session: DiscoveredCodingSession, reason: String, confidenceScale: Double)? {
         let runtimeProvider = runtime.provider.lowercased()
         let runtimeWorkingDirectory = normalizedDirectoryPath(runtime.workingDirectory)
-        let runtimeNativeSessionId = runtime.nativeSessionId
+        var runtimeHintInputs = runtime.sessionHintKeys
+        if let runtimeSessionId = runtime.runtimeSessionId {
+            runtimeHintInputs.append(runtimeSessionId)
+        }
+        let runtimeHintKeys = Set(normalizedUniqueSessionHintKeys(runtimeHintInputs))
+        let runtimeNativeSessionIdKey = normalizedSessionHintKey(runtime.nativeSessionId)
+        let runtimeBranch = normalizedBranchKey(runtime.gitBranch)
+        let runtimeClientKind = normalizedSessionTaxonomyKey(runtime.clientKind)
 
         var best: (session: DiscoveredCodingSession, score: Int, reason: String, confidenceScale: Double)?
         for candidate in candidates {
@@ -3720,12 +4050,30 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             var score = 0
             var reason = "provider_match"
             var confidenceScale = 0.6
+            var matchedBySessionHint = false
             var matchedBySessionId = false
+            var matchedByWorkingDirectory = false
+            var matchedByBranch = false
 
-            if runtimeNativeSessionId == candidate.sessionId {
-                score += 20
-                reason = "session_id_match"
+            let candidateHintKeys = Set(
+                normalizedUniqueSessionHintKeys(candidate.sessionHintKeys + [candidate.sessionId])
+            )
+            if !runtimeHintKeys.isEmpty,
+               !candidateHintKeys.isEmpty,
+               !runtimeHintKeys.isDisjoint(with: candidateHintKeys) {
+                score += 30
+                reason = "session_hint_match"
                 confidenceScale = 1.0
+                matchedBySessionHint = true
+            }
+
+            if let runtimeNativeSessionIdKey,
+               runtimeNativeSessionIdKey == normalizedSessionHintKey(candidate.sessionId) {
+                score += 20
+                if !matchedBySessionHint {
+                    reason = "session_id_match"
+                }
+                confidenceScale = max(confidenceScale, 1.0)
                 matchedBySessionId = true
             }
 
@@ -3733,25 +4081,63 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             if let runtimeWorkingDirectory, let candidateWorkingDirectory {
                 if runtimeWorkingDirectory == candidateWorkingDirectory {
                     score += 16
-                    if !matchedBySessionId {
+                    matchedByWorkingDirectory = true
+                    if !matchedBySessionHint, !matchedBySessionId {
                         reason = "cwd_match"
                     }
                     confidenceScale = max(confidenceScale, 0.9)
                 } else if runtimeWorkingDirectory.hasPrefix(candidateWorkingDirectory + "/") ||
                     candidateWorkingDirectory.hasPrefix(runtimeWorkingDirectory + "/") {
                     score += 10
-                    if !matchedBySessionId {
+                    matchedByWorkingDirectory = true
+                    if !matchedBySessionHint, !matchedBySessionId {
                         reason = "cwd_nested_match"
                     }
                     confidenceScale = max(confidenceScale, 0.78)
                 }
             }
 
+            let candidateBranch = normalizedBranchKey(candidate.gitBranch)
+            if let runtimeBranch, let candidateBranch, runtimeBranch == candidateBranch {
+                score += 7
+                matchedByBranch = true
+                if !matchedBySessionHint, !matchedBySessionId, !matchedByWorkingDirectory {
+                    reason = "git_branch_match"
+                }
+                confidenceScale = max(confidenceScale, 0.8)
+            }
+
+            let candidateClientKind = normalizedSessionTaxonomyKey(candidate.clientKind)
+            if let runtimeClientKind, let candidateClientKind, runtimeClientKind == candidateClientKind {
+                score += 2
+                if reason == "provider_match" {
+                    reason = "client_kind_match"
+                }
+                confidenceScale = max(confidenceScale, 0.7)
+            }
+
+            let recencyDelta = abs(runtime.updatedAt.timeIntervalSince(candidate.updatedAt))
+            if recencyDelta <= 10 * 60 {
+                score += 5
+                if reason == "provider_match" {
+                    reason = "recency_match"
+                }
+                confidenceScale = max(confidenceScale, 0.84)
+            } else if recencyDelta <= 60 * 60 {
+                score += 3
+                confidenceScale = max(confidenceScale, 0.78)
+            } else if recencyDelta > 48 * 60 * 60,
+                      !matchedBySessionHint,
+                      !matchedBySessionId {
+                score -= 4
+            }
+
             if score > 0, candidate.isActive {
                 score += 2
             }
 
-            guard score > 0 else { continue }
+            let hasAnchor = matchedBySessionHint || matchedBySessionId || matchedByWorkingDirectory || matchedByBranch
+            guard hasAnchor, score > 0 else { continue }
             if let currentBest = best {
                 if score > currentBest.score || (score == currentBest.score && candidate.updatedAt > currentBest.session.updatedAt) {
                     best = (candidate, score, reason, confidenceScale)
@@ -3765,6 +4151,13 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             return (best.session, best.reason, best.confidenceScale)
         }
         return nil
+    }
+
+    nonisolated private static func normalizedBranchKey(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.lowercased()
     }
 
     nonisolated private static func normalizedDirectoryPath(_ value: String?) -> String? {

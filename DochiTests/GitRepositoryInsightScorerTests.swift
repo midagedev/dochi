@@ -472,6 +472,115 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertEqual(session.activityScore, CodingSessionActivityScoringConfig.standard.runtimeAliveWeight)
     }
 
+    func testMergeUnifiedCodingSessionsOverlaysRuntimeOnDiscoveredSession() {
+        let now = Date(timeIntervalSince1970: 1_771_640_000)
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "codex",
+            nativeSessionId: "pid-111",
+            runtimeSessionId: "111",
+            workingDirectory: "/tmp/repo-a",
+            path: "process://111",
+            updatedAt: now,
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: now.addingTimeInterval(-20),
+            lastCommandAt: now.addingTimeInterval(-10),
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime",
+            sessionHintKeys: ["019c816b-0847-7b72-9d37-bdf5ac6685f0"]
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .codexSessionFile,
+            provider: "codex",
+            sessionId: "019c816b-0847-7b72-9d37-bdf5ac6685f0",
+            workingDirectory: "/tmp/repo-a",
+            path: "/tmp/codex-session.jsonl",
+            updatedAt: now.addingTimeInterval(-120),
+            isActive: true,
+            sessionHintKeys: ["019c816b-0847-7b72-9d37-bdf5ac6685f0"],
+            title: "session-file title",
+            summary: "session-file summary",
+            titleSource: "codex_session_file_header",
+            titleConfidence: 0.9
+        )
+
+        let merged = ExternalToolSessionManager.mergeUnifiedCodingSessions(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered],
+            managedRepositoryRoots: ["/tmp/repo-a"],
+            limit: 10,
+            now: now,
+            config: .standard,
+            includeUnmatchedProcessRuntime: false
+        )
+
+        guard let session = merged.first else {
+            return XCTFail("Expected merged session")
+        }
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(session.source, DiscoveredCodingSessionSource.codexSessionFile.rawValue)
+        XCTAssertEqual(session.runtimeType, .file)
+        XCTAssertEqual(session.controllabilityTier, .t1Attach)
+        XCTAssertEqual(session.nativeSessionId, discovered.sessionId)
+        XCTAssertEqual(session.runtimeSessionId, "111")
+        XCTAssertEqual(session.workingDirectory, "/tmp/repo-a")
+        XCTAssertEqual(session.path, "/tmp/codex-session.jsonl")
+        XCTAssertEqual(session.title, "session-file title")
+        XCTAssertEqual(session.summary, "session-file summary")
+    }
+
+    func testMergeUnifiedCodingSessionsCanExcludeUnmatchedProcessRuntime() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let processRuntime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "codex",
+            nativeSessionId: "pid-9002",
+            runtimeSessionId: "9002",
+            workingDirectory: nil,
+            path: "process://9002",
+            updatedAt: now,
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+        let tmuxRuntime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "codex",
+            nativeSessionId: "tmux-session",
+            runtimeSessionId: UUID().uuidString,
+            workingDirectory: "/tmp/repo-a",
+            path: "tmux://tmux-session",
+            updatedAt: now,
+            isActive: true,
+            status: .idle,
+            lastOutputAt: now.addingTimeInterval(-30),
+            lastCommandAt: now.addingTimeInterval(-10),
+            hasErrorPattern: false,
+            runtimeType: .tmux,
+            controllabilityTier: .t0Full,
+            source: "tmux_runtime"
+        )
+
+        let merged = ExternalToolSessionManager.mergeUnifiedCodingSessions(
+            runtimeSessions: [processRuntime, tmuxRuntime],
+            discoveredSessions: [],
+            managedRepositoryRoots: ["/tmp/repo-a"],
+            limit: 10,
+            now: now,
+            config: .standard,
+            includeUnmatchedProcessRuntime: false
+        )
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged.first?.runtimeType, .tmux)
+        XCTAssertEqual(merged.first?.nativeSessionId, "tmux-session")
+    }
+
     func testUnifiedSessionOrderingIsDeterministicWhenTimestampsTie() {
         let tiedTime = Date(timeIntervalSince1970: 1_700_000_000)
         let later = UnifiedCodingSession(
@@ -1013,5 +1122,128 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         if let confidence = item.titleConfidence {
             XCTAssertEqual(confidence, 0.9, accuracy: 0.0001)
         }
+    }
+
+    func testParseProcessRuntimeSnapshotsInjectsProcessMetadata() {
+        let now = Date(timeIntervalSince1970: 1_771_640_000)
+        let output = "4231 ttys003 00:02 /opt/homebrew/bin/codex run"
+        let processMetadata: [Int: ExternalToolSessionManager.ProcessRuntimeMetadata] = [
+            4231: .init(
+                sessionHintKeys: ["019c816b-0847-7b72-9d37-bdf5ac6685f0"],
+                gitBranch: "release/2026-02",
+                originator: "Codex Desktop",
+                sessionSource: "vscode",
+                tmuxPane: "%11"
+            )
+        ]
+
+        let snapshots = ExternalToolSessionManager.parseProcessRuntimeSnapshots(
+            psOutput: output,
+            now: now,
+            workingDirectories: [4231: "/tmp/repo"],
+            processMetadata: processMetadata,
+            limit: 5
+        )
+
+        let codex = snapshots.first
+        XCTAssertEqual(codex?.provider, "codex")
+        XCTAssertEqual(codex?.workingDirectory, "/tmp/repo")
+        XCTAssertEqual(codex?.gitBranch, "release/2026-02")
+        XCTAssertEqual(codex?.originator, "Codex Desktop")
+        XCTAssertEqual(codex?.sessionSource, "vscode")
+        XCTAssertEqual(codex?.clientKind, "desktop")
+        XCTAssertEqual(codex?.sessionHintKeys, ["019c816b-0847-7b72-9d37-bdf5ac6685f0"])
+    }
+
+    func testEnrichRuntimeSessionMetadataMatchesBySessionHint() {
+        let now = Date(timeIntervalSince1970: 1_771_640_000)
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "codex",
+            nativeSessionId: "pid-111",
+            runtimeSessionId: "111",
+            workingDirectory: nil,
+            path: "process://111",
+            updatedAt: now,
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime",
+            sessionHintKeys: ["019c816b-0847-7b72-9d37-bdf5ac6685f0"]
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .codexSessionFile,
+            provider: "codex",
+            sessionId: "019c816b-0847-7b72-9d37-bdf5ac6685f0",
+            workingDirectory: "/Users/hckim/repo/dochi",
+            path: "/tmp/codex-session.jsonl",
+            updatedAt: now,
+            isActive: true,
+            title: "프로세스-메타 매핑 강화",
+            summary: "session hint 기반 연결",
+            titleSource: "codex_session_file_header",
+            titleConfidence: 0.88
+        )
+
+        let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered]
+        )
+
+        let item = enriched.first
+        XCTAssertEqual(item?.title, "프로세스-메타 매핑 강화")
+        XCTAssertEqual(item?.titleSource, "codex_session_file_header_session_hint_match")
+        XCTAssertNotNil(item?.titleConfidence)
+        if let confidence = item?.titleConfidence {
+            XCTAssertEqual(confidence, 0.88, accuracy: 0.0001)
+        }
+    }
+
+    func testEnrichRuntimeSessionMetadataMatchesByGitBranch() {
+        let now = Date(timeIntervalSince1970: 1_771_640_000)
+        let runtime = ExternalToolSessionManager.RuntimeSessionSnapshot(
+            provider: "claude",
+            nativeSessionId: "pid-222",
+            runtimeSessionId: "222",
+            workingDirectory: nil,
+            gitBranch: "feature/session-map",
+            path: "process://222",
+            updatedAt: now,
+            isActive: true,
+            status: .unknown,
+            lastOutputAt: nil,
+            lastCommandAt: nil,
+            hasErrorPattern: false,
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            source: "process_runtime"
+        )
+        let discovered = DiscoveredCodingSession(
+            source: .claudeProjectFile,
+            provider: "claude",
+            sessionId: "claude-session-branch",
+            workingDirectory: nil,
+            gitBranch: "feature/session-map",
+            path: "/tmp/claude-session-branch.jsonl",
+            updatedAt: now.addingTimeInterval(-2 * 60 * 60),
+            isActive: true,
+            title: "브랜치 기반 매핑",
+            summary: "cwd가 없어도 연결",
+            titleSource: "claude_sessions_index",
+            titleConfidence: 0.9
+        )
+
+        let enriched = ExternalToolSessionManager.enrichRuntimeSessionMetadata(
+            runtimeSessions: [runtime],
+            discoveredSessions: [discovered]
+        )
+
+        let item = enriched.first
+        XCTAssertEqual(item?.title, "브랜치 기반 매핑")
+        XCTAssertEqual(item?.titleSource, "claude_sessions_index_git_branch_match")
+        XCTAssertNotNil(item?.titleConfidence)
     }
 }
