@@ -1,11 +1,22 @@
 import SwiftUI
 import Charts
 
+@MainActor
+@Observable
+final class UsageDashboardSessionCache {
+    var summary: MonthlyUsageSummary?
+    var allMonthsSummaries: [MonthlyUsageSummary] = []
+    var utilizations: [ResourceUtilization] = []
+    var monitoringSnapshots: [UUID: SubscriptionMonitoringSnapshot] = [:]
+    var hasLoadedData = false
+}
+
 /// Settings > AI > Usage dashboard showing token usage, cost, and budget.
 struct UsageDashboardView: View {
     let metricsCollector: MetricsCollector
     let settings: AppSettings
     var resourceOptimizer: (any ResourceOptimizerProtocol)?
+    var sessionCache: UsageDashboardSessionCache?
 
     @State private var selectedPeriod: Period = .thisMonth
     @State private var chartMode: ChartMode = .cost
@@ -19,6 +30,7 @@ struct UsageDashboardView: View {
     @State private var editingSubscription: SubscriptionPlan?
     @State private var showDeleteConfirm = false
     @State private var deletingSubscriptionId: UUID?
+    @State private var subscriptionAutoRefreshTask: Task<Void, Never>?
 
     enum Period: String, CaseIterable {
         case today = "오늘"
@@ -36,6 +48,19 @@ struct UsageDashboardView: View {
         case model = "모델별"
         case agent = "에이전트별"
     }
+
+    private static let resetRelativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
+
+    private static let resetAbsoluteFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "M/d HH:mm"
+        return formatter
+    }()
 
     var body: some View {
         ScrollView {
@@ -108,8 +133,19 @@ struct UsageDashboardView: View {
             .padding(.vertical)
         }
         .task {
-            await loadData()
-            await loadUtilizations()
+            restoreCachedStateIfNeeded()
+            async let loadDataTask: Void = loadData()
+            async let loadUtilizationsTask: Void = loadUtilizations()
+            _ = await (loadDataTask, loadUtilizationsTask)
+        }
+        .onAppear {
+            restoreCachedStateIfNeeded()
+            startSubscriptionAutoRefreshIfNeeded()
+        }
+        .onDisappear {
+            subscriptionAutoRefreshTask?.cancel()
+            subscriptionAutoRefreshTask = nil
+            persistSessionCache()
         }
         .onChange(of: selectedPeriod) { _, _ in
             Task { await loadData() }
@@ -479,9 +515,13 @@ struct UsageDashboardView: View {
     // MARK: - Data Loading
 
     private func loadData() async {
-        isLoading = true
+        let hadSummary = summary != nil
+        if !hadSummary {
+            isLoading = true
+        }
         guard let store = metricsCollector.usageStore else {
             isLoading = false
+            persistSessionCache()
             return
         }
 
@@ -503,6 +543,7 @@ struct UsageDashboardView: View {
         }
 
         isLoading = false
+        persistSessionCache()
     }
 
     // MARK: - Filtering
@@ -627,6 +668,10 @@ struct UsageDashboardView: View {
     private func subscriptionCard(_ util: ResourceUtilization) -> some View {
         let snapshot = monitoringSnapshots[util.subscription.id]
         let status = snapshot?.statusPresentation
+        let primaryWindow = snapshot?.primaryWindow
+        let secondaryWindow = snapshot?.secondaryWindow
+        let usageRatio = primaryWindow?.usedRatio ?? max(0, min(1, util.usageRatio))
+        let hasWindowMetrics = primaryWindow != nil || secondaryWindow != nil
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -710,35 +755,53 @@ struct UsageDashboardView: View {
                         .fill(.secondary.opacity(0.15))
                     RoundedRectangle(cornerRadius: 3)
                         .fill(riskColor(util.riskLevel))
-                        .frame(width: max(0, min(geo.size.width, geo.size.width * util.usageRatio)))
+                        .frame(width: max(0, min(geo.size.width, geo.size.width * usageRatio)))
                 }
             }
             .frame(height: 8)
 
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    usageAmountText(util)
-                    Spacer()
-                    Text("리셋일: 매월 \(util.subscription.resetDayOfMonth)일")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    Text("잔여: \(util.daysRemaining)일")
+            usageAmountText(util)
+
+            if util.subscription.usageSource == .externalToolLogs {
+                if let primaryWindow {
+                    monitoringWindowUsageLine(primaryWindow, fallbackTitle: "윈도우 사용")
+                }
+                if let secondaryWindow {
+                    monitoringWindowUsageLine(
+                        secondaryWindow,
+                        fallbackTitle: secondaryWindow.windowMinutes == 10_080 ? "주간 사용" : "보조 윈도우"
+                    )
+                }
+                if !hasWindowMetrics {
+                    Text("윈도우 사용량/리셋 시간이 아직 수집되지 않았습니다.")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        Text("리셋일: 매월 \(util.subscription.resetDayOfMonth)일")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("잔여: \(util.daysRemaining)일")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    usageAmountText(util)
-                    Text("리셋일: 매월 \(util.subscription.resetDayOfMonth)일")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    Text("잔여: \(util.daysRemaining)일")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("리셋일: 매월 \(util.subscription.resetDayOfMonth)일")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text("잔여: \(util.daysRemaining)일")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
-            if util.subscription.monthlyTokenLimit != nil {
+            if util.subscription.monthlyTokenLimit != nil
+                && util.subscription.usageSource != .externalToolLogs {
                 Text("예상 미사용: \(String(format: "%.0f", util.currentUnusedPercent))%")
                     .font(.system(size: 10))
                     .foregroundStyle(util.riskLevel == .wasteRisk ? .red : .secondary)
@@ -886,6 +949,68 @@ struct UsageDashboardView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func monitoringWindowUsageLine(
+        _ window: MonitoringUsageWindowSnapshot,
+        fallbackTitle: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text("\(monitoringWindowTitle(window, fallback: fallbackTitle)): \(Int(window.usedPercent.rounded()))%")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(monitoringWindowResetText(window))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(.secondary.opacity(0.14))
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(monitoringWindowUsageColor(window.usedPercent))
+                        .frame(width: max(0, min(geo.size.width, geo.size.width * window.usedRatio)))
+                }
+            }
+            .frame(height: 5)
+        }
+    }
+
+    private func monitoringWindowTitle(
+        _ window: MonitoringUsageWindowSnapshot,
+        fallback: String
+    ) -> String {
+        if let minutes = window.windowMinutes, minutes > 0 {
+            if minutes == 300 { return "세션 사용" }
+            if minutes == 10_080 { return "주간 사용" }
+            if minutes == 1_440 { return "일간 사용" }
+            if minutes % 1_440 == 0 { return "\(minutes / 1_440)일 윈도우" }
+            if minutes % 60 == 0 { return "\(minutes / 60)시간 윈도우" }
+            return "\(minutes)분 윈도우"
+        }
+        let trimmed = window.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private func monitoringWindowResetText(_ window: MonitoringUsageWindowSnapshot) -> String {
+        if let reset = window.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines), !reset.isEmpty {
+            return "리셋: \(reset)"
+        }
+        guard let resetsAt = window.resetsAt else {
+            return "리셋: 정보 없음"
+        }
+        let absolute = Self.resetAbsoluteFormatter.string(from: resetsAt)
+        let relative = Self.resetRelativeFormatter.localizedString(for: resetsAt, relativeTo: Date())
+        return "리셋: \(absolute) (\(relative))"
+    }
+
+    private func monitoringWindowUsageColor(_ usedPercent: Double) -> Color {
+        if usedPercent >= 90 { return .red }
+        if usedPercent >= 70 { return .orange }
+        return .blue
     }
 
     // MARK: - Auto Task Section
@@ -1072,12 +1197,56 @@ struct UsageDashboardView: View {
         let loaded = await optimizer.allUtilizations()
         utilizations = loaded
         monitoringSnapshots = await optimizer.monitoringSnapshots(for: loaded.map(\.subscription))
+        persistSessionCache()
     }
 
     private func bootstrapSubscriptionsIfNeeded() async {
         guard let optimizer = resourceOptimizer else { return }
         guard optimizer.subscriptions.isEmpty else { return }
         _ = await optimizer.bootstrapDefaultExternalSubscriptionsIfNeeded()
+    }
+
+    @MainActor
+    private func restoreCachedStateIfNeeded() {
+        guard let sessionCache else { return }
+        if summary == nil {
+            summary = sessionCache.summary
+        }
+        if allMonthsSummaries.isEmpty {
+            allMonthsSummaries = sessionCache.allMonthsSummaries
+        }
+        if utilizations.isEmpty {
+            utilizations = sessionCache.utilizations
+        }
+        if monitoringSnapshots.isEmpty {
+            monitoringSnapshots = sessionCache.monitoringSnapshots
+        }
+        if sessionCache.hasLoadedData, summary != nil {
+            isLoading = false
+        }
+    }
+
+    @MainActor
+    private func persistSessionCache() {
+        guard let sessionCache else { return }
+        sessionCache.summary = summary
+        sessionCache.allMonthsSummaries = allMonthsSummaries
+        sessionCache.utilizations = utilizations
+        sessionCache.monitoringSnapshots = monitoringSnapshots
+        sessionCache.hasLoadedData = summary != nil
+    }
+
+    @MainActor
+    private func startSubscriptionAutoRefreshIfNeeded() {
+        guard subscriptionAutoRefreshTask == nil else { return }
+        guard resourceOptimizer != nil else { return }
+        subscriptionAutoRefreshTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                if Task.isCancelled { break }
+                await loadUtilizations()
+            }
+        }
     }
 
     private var isGitScanAutoTaskEnabled: Bool {

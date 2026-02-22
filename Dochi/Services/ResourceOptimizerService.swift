@@ -757,7 +757,22 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
             provider: subscription.providerName,
             statusCode: status.code,
             statusMessage: status.message,
-            lastCollectedAt: status.lastCollectedAt
+            lastCollectedAt: status.lastCollectedAt,
+            primaryWindow: Self.monitoringWindowSnapshot(from: status.primaryWindow),
+            secondaryWindow: Self.monitoringWindowSnapshot(from: status.secondaryWindow)
+        )
+    }
+
+    nonisolated private static func monitoringWindowSnapshot(
+        from window: ExternalUsageRateWindow?
+    ) -> MonitoringUsageWindowSnapshot? {
+        guard let window else { return nil }
+        return MonitoringUsageWindowSnapshot(
+            label: window.label,
+            usedPercent: window.usedPercent,
+            windowMinutes: window.windowMinutes,
+            resetsAt: window.resetsAt,
+            resetDescription: window.resetDescription
         )
     }
 

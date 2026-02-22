@@ -73,9 +73,37 @@ private struct OrchestrationMonitorEvent: Identifiable {
     let timestamp: Date
 }
 
+@MainActor
+@Observable
+final class ExternalToolListSessionCache {
+    var unifiedSessions: [UnifiedCodingSession] = []
+    var discoveredSessions: [DiscoveredCodingSession] = []
+    var gitInsights: [GitRepositoryInsight] = []
+    var historyResults: [SessionHistorySearchResult] = []
+    var historyIndexStatus = SessionHistoryIndexStatus(
+        chunkCount: 0,
+        lastIndexedAt: nil,
+        latestChunkEndAt: nil
+    )
+    var kpiReport = SessionManagementKPIReport(
+        generatedAt: Date(timeIntervalSince1970: 0),
+        repositoryAssignmentSuccessRate: 0,
+        dedupCorrectionRate: 0,
+        activityClassificationAccuracy: nil,
+        sessionSelectionFailureRate: 0,
+        historySearchHitRate: 0,
+        counters: SessionManagementKPICounters()
+    )
+    var subscriptionUtilizations: [ResourceUtilization] = []
+    var subscriptionMonitoringSnapshots: [UUID: SubscriptionMonitoringSnapshot] = [:]
+    var hasLoadedData = false
+    var lastLoadedAt: Date?
+}
+
 struct ExternalToolListView: View {
     let manager: ExternalToolSessionManagerProtocol
     var resourceOptimizer: (any ResourceOptimizerProtocol)?
+    var sessionCache: ExternalToolListSessionCache?
     @Binding var selectedSessionId: UUID?
     @Binding var selectedProfileId: UUID?
     @State private var showProfileEditor = false
@@ -142,6 +170,12 @@ struct ExternalToolListView: View {
     private static let relativeDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
+    private static let windowResetAbsoluteFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "M/d HH:mm"
         return formatter
     }()
     @State private var unifiedAutoRefreshTask: Task<Void, Never>?
@@ -510,17 +544,27 @@ struct ExternalToolListView: View {
             }
         )
         .task {
-            await refreshUnifiedSessions()
-            await refreshSubscriptionUsage()
-            refreshHistoryIndexStatus()
-            refreshKPIReport()
+            restoreCachedStateIfNeeded()
+            if shouldRunInitialRefresh() {
+                async let unified: Void = refreshUnifiedSessions()
+                async let subscription: Void = refreshSubscriptionUsage()
+                _ = await (unified, subscription)
+                refreshHistoryIndexStatus()
+                refreshKPIReport()
+                persistSessionCache()
+            } else {
+                refreshHistoryIndexStatus()
+                refreshKPIReport()
+            }
         }
         .onAppear {
+            restoreCachedStateIfNeeded()
             startUnifiedAutoRefreshLoop()
         }
         .onDisappear {
             unifiedAutoRefreshTask?.cancel()
             unifiedAutoRefreshTask = nil
+            persistSessionCache()
         }
         .onChange(of: explorerFilter.activeOnly) { _, _ in
             Task { await refreshUnifiedSessions() }
@@ -721,7 +765,10 @@ struct ExternalToolListView: View {
     private func subscriptionUsageCard(_ util: ResourceUtilization) -> some View {
         let snapshot = subscriptionMonitoringSnapshots[util.subscription.id]
         let status = snapshot?.statusPresentation
-        let usageRatio = util.subscription.monthlyTokenLimit == nil ? 0 : max(0, min(1, util.usageRatio))
+        let primaryWindow = snapshot?.primaryWindow
+        let secondaryWindow = snapshot?.secondaryWindow
+        let hasWindowMetrics = primaryWindow != nil || secondaryWindow != nil
+        let usageRatio = primaryWindow?.usedRatio ?? (util.subscription.monthlyTokenLimit == nil ? 0 : max(0, min(1, util.usageRatio)))
 
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
@@ -756,7 +803,14 @@ struct ExternalToolListView: View {
                         .clipShape(Capsule())
                 }
                 Spacer()
-                Text("리셋 D-\(util.daysRemaining)")
+                Text(
+                    compactResetLabel(
+                        primaryWindow: primaryWindow,
+                        secondaryWindow: secondaryWindow,
+                        source: util.subscription.usageSource,
+                        fallbackDaysRemaining: util.daysRemaining
+                    )
+                )
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
             }
@@ -778,9 +832,38 @@ struct ExternalToolListView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer()
-                Text("예상 \(Int((util.projectedUsageRatio * 100).rounded()))%")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
+                if util.subscription.usageSource == .externalToolLogs {
+                    if let primaryWindow {
+                        Text("\(Int(primaryWindow.usedPercent.rounded()))%")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("-")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("예상 \(Int((util.projectedUsageRatio * 100).rounded()))%")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if util.subscription.usageSource == .externalToolLogs {
+                if let primaryWindow {
+                    compactWindowUsageBlock(primaryWindow, fallbackTitle: "세션")
+                }
+                if let secondaryWindow {
+                    compactWindowUsageBlock(
+                        secondaryWindow,
+                        fallbackTitle: secondaryWindow.windowMinutes == 10_080 ? "주간" : "보조"
+                    )
+                }
+                if !hasWindowMetrics {
+                    Text("윈도우/리셋 정보 없음")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.horizontal, 8)
@@ -2334,6 +2417,7 @@ struct ExternalToolListView: View {
         syncExpandedRepositoryGroups()
         refreshKPIReport()
         isRefreshingUnified = false
+        persistSessionCache()
     }
 
     private func mergeGitInsights(
@@ -2371,6 +2455,7 @@ struct ExternalToolListView: View {
         guard let resourceOptimizer else {
             subscriptionUtilizations = []
             subscriptionMonitoringSnapshots = [:]
+            persistSessionCache()
             return
         }
 
@@ -2382,6 +2467,7 @@ struct ExternalToolListView: View {
         subscriptionMonitoringSnapshots = await resourceOptimizer.monitoringSnapshots(
             for: utilizations.map(\.subscription)
         )
+        persistSessionCache()
     }
 
     @MainActor
@@ -2645,6 +2731,7 @@ struct ExternalToolListView: View {
         refreshHistoryIndexStatus()
         refreshKPIReport()
         isHistorySearching = false
+        persistSessionCache()
     }
 
     @MainActor
@@ -2659,11 +2746,68 @@ struct ExternalToolListView: View {
     @MainActor
     private func refreshHistoryIndexStatus() {
         historyIndexStatus = manager.sessionHistoryIndexStatus()
+        persistSessionCache()
     }
 
     @MainActor
     private func refreshKPIReport() {
         kpiReport = manager.sessionManagementKPIReport()
+        persistSessionCache()
+    }
+
+    @MainActor
+    private func restoreCachedStateIfNeeded() {
+        guard let sessionCache else { return }
+
+        if unifiedSessions.isEmpty {
+            unifiedSessions = sessionCache.unifiedSessions
+        }
+        if discoveredSessions.isEmpty {
+            discoveredSessions = sessionCache.discoveredSessions
+        }
+        if gitInsights.isEmpty {
+            gitInsights = sessionCache.gitInsights
+        }
+        if historyResults.isEmpty {
+            historyResults = sessionCache.historyResults
+        }
+        if historyIndexStatus.chunkCount == 0, historyIndexStatus.lastIndexedAt == nil {
+            historyIndexStatus = sessionCache.historyIndexStatus
+        }
+        if kpiReport.generatedAt.timeIntervalSince1970 <= 0 {
+            kpiReport = sessionCache.kpiReport
+        }
+        if subscriptionUtilizations.isEmpty {
+            subscriptionUtilizations = sessionCache.subscriptionUtilizations
+        }
+        if subscriptionMonitoringSnapshots.isEmpty {
+            subscriptionMonitoringSnapshots = sessionCache.subscriptionMonitoringSnapshots
+        }
+    }
+
+    @MainActor
+    private func persistSessionCache() {
+        guard let sessionCache else { return }
+        sessionCache.unifiedSessions = unifiedSessions
+        sessionCache.discoveredSessions = discoveredSessions
+        sessionCache.gitInsights = gitInsights
+        sessionCache.historyResults = historyResults
+        sessionCache.historyIndexStatus = historyIndexStatus
+        sessionCache.kpiReport = kpiReport
+        sessionCache.subscriptionUtilizations = subscriptionUtilizations
+        sessionCache.subscriptionMonitoringSnapshots = subscriptionMonitoringSnapshots
+        sessionCache.hasLoadedData = !unifiedSessions.isEmpty
+            || !historyResults.isEmpty
+            || historyIndexStatus.chunkCount > 0
+        sessionCache.lastLoadedAt = Date()
+    }
+
+    @MainActor
+    private func shouldRunInitialRefresh() -> Bool {
+        guard let sessionCache else { return true }
+        guard sessionCache.hasLoadedData else { return true }
+        guard let lastLoadedAt = sessionCache.lastLoadedAt else { return true }
+        return Date().timeIntervalSince(lastLoadedAt) > 20
     }
 
     private func startableProfiles(for repositoryRoot: String) -> [ExternalToolProfile] {
@@ -3116,6 +3260,91 @@ struct ExternalToolListView: View {
         case .neutral:
             return .gray
         }
+    }
+
+    private func compactResetLabel(
+        primaryWindow: MonitoringUsageWindowSnapshot?,
+        secondaryWindow: MonitoringUsageWindowSnapshot?,
+        source: SubscriptionUsageSource,
+        fallbackDaysRemaining: Int
+    ) -> String {
+        let targetWindow = secondaryWindow ?? primaryWindow
+        guard source == .externalToolLogs else {
+            return "리셋 D-\(fallbackDaysRemaining)"
+        }
+        guard let targetWindow else {
+            return "리셋 정보 없음"
+        }
+        if let reset = targetWindow.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines), !reset.isEmpty {
+            return "리셋 \(reset)"
+        }
+        guard let resetsAt = targetWindow.resetsAt else {
+            return "리셋 정보 없음"
+        }
+        let absolute = Self.windowResetAbsoluteFormatter.string(from: resetsAt)
+        return "리셋 \(absolute)"
+    }
+
+    private func compactWindowUsageLine(
+        _ window: MonitoringUsageWindowSnapshot,
+        fallbackTitle: String
+    ) -> String {
+        let title = compactWindowTitle(window, fallback: fallbackTitle)
+        var parts: [String] = ["\(title) \(Int(window.usedPercent.rounded()))%"]
+
+        if let reset = window.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines), !reset.isEmpty {
+            parts.append("리셋 \(reset)")
+        } else if let resetsAt = window.resetsAt {
+            let absolute = Self.windowResetAbsoluteFormatter.string(from: resetsAt)
+            parts.append("리셋 \(absolute)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func compactWindowUsageBlock(
+        _ window: MonitoringUsageWindowSnapshot,
+        fallbackTitle: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(compactWindowUsageLine(window, fallbackTitle: fallbackTitle))
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.secondary.opacity(0.15))
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(compactWindowUsageColor(window.usedPercent))
+                        .frame(width: max(0, min(proxy.size.width, proxy.size.width * window.usedRatio)))
+                }
+            }
+            .frame(height: 4)
+        }
+    }
+
+    private func compactWindowUsageColor(_ usedPercent: Double) -> Color {
+        if usedPercent >= 90 { return .red }
+        if usedPercent >= 70 { return .orange }
+        return .blue
+    }
+
+    private func compactWindowTitle(
+        _ window: MonitoringUsageWindowSnapshot,
+        fallback: String
+    ) -> String {
+        if let minutes = window.windowMinutes, minutes > 0 {
+            if minutes == 300 { return "세션" }
+            if minutes == 10_080 { return "주간" }
+            if minutes == 1_440 { return "일간" }
+            if minutes % 1_440 == 0 { return "\(minutes / 1_440)일" }
+            if minutes % 60 == 0 { return "\(minutes / 60)시간" }
+            return "\(minutes)분"
+        }
+        let trimmed = window.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
     }
 
     private func subscriptionUsageAmountText(_ util: ResourceUtilization) -> String {

@@ -7,10 +7,34 @@ enum ExternalUsageProvider: String, Sendable {
     case gemini
 }
 
+struct ExternalUsageRateWindow: Codable, Sendable, Equatable {
+    let label: String
+    let usedPercent: Double
+    let windowMinutes: Int?
+    let resetsAt: Date?
+    let resetDescription: String?
+
+    init(
+        label: String,
+        usedPercent: Double,
+        windowMinutes: Int? = nil,
+        resetsAt: Date? = nil,
+        resetDescription: String? = nil
+    ) {
+        self.label = label
+        self.usedPercent = min(100, max(0, usedPercent))
+        self.windowMinutes = windowMinutes
+        self.resetsAt = resetsAt
+        self.resetDescription = resetDescription
+    }
+}
+
 struct ExternalUsageProviderStatus: Sendable, Equatable {
     let code: String
     let message: String?
     let lastCollectedAt: Date?
+    let primaryWindow: ExternalUsageRateWindow?
+    let secondaryWindow: ExternalUsageRateWindow?
 }
 
 /// External tool usage monitor with provider-specific incremental scanners.
@@ -27,6 +51,8 @@ actor ExternalUsageMonitor {
         var lastUsageFraction: Double? = nil
         var lastStatus: String? = nil
         var lastMessage: String? = nil
+        var primaryWindow: ExternalUsageRateWindow? = nil
+        var secondaryWindow: ExternalUsageRateWindow? = nil
     }
 
     private struct FileUsage: Codable, Sendable {
@@ -97,11 +123,26 @@ actor ExternalUsageMonitor {
         let parsedBytes: Int64
         let lastTotals: CodexTotals?
         let sessionId: String?
+        let windowSample: ExternalRateWindowSample?
     }
 
     private struct ClaudeParseResult: Sendable {
         let dayTokens: [String: Int]
         let parsedBytes: Int64
+    }
+
+    private struct ClaudeWindowProbeResult: Sendable {
+        let statusCode: String
+        let message: String?
+        let primaryWindow: ExternalUsageRateWindow?
+        let secondaryWindow: ExternalUsageRateWindow?
+    }
+
+    private struct ExternalRateWindowSample: Sendable {
+        let sourcePriority: Int
+        let observedAtUnixMs: Int64
+        let primaryWindow: ExternalUsageRateWindow?
+        let secondaryWindow: ExternalUsageRateWindow?
     }
 
     private struct CodexScanState {
@@ -125,6 +166,8 @@ actor ExternalUsageMonitor {
         let usedFraction: Double?
         let statusCode: String
         let message: String?
+        let primaryWindow: ExternalUsageRateWindow?
+        let secondaryWindow: ExternalUsageRateWindow?
     }
 
     private struct GeminiCredentials: Sendable {
@@ -143,10 +186,23 @@ actor ExternalUsageMonitor {
     private struct GeminiQuotaBucket: Decodable {
         let remainingFraction: Double?
         let modelId: String?
+        let resetTime: String?
     }
 
     private struct GeminiQuotaResponse: Decodable {
         let buckets: [GeminiQuotaBucket]?
+    }
+
+    private struct GeminiQuotaParseResult: Sendable {
+        let usedFraction: Double
+        let primaryWindow: ExternalUsageRateWindow?
+        let secondaryWindow: ExternalUsageRateWindow?
+    }
+
+    private struct GeminiStatsParseResult: Sendable {
+        let usedFraction: Double
+        let primaryWindow: ExternalUsageRateWindow?
+        let secondaryWindow: ExternalUsageRateWindow?
     }
 
     private struct JSONLLine: Sendable {
@@ -171,6 +227,8 @@ actor ExternalUsageMonitor {
     private let geminiConfigRoots: [URL]
     private let cacheURL: URL
     private let refreshMinIntervalSeconds: TimeInterval
+    private let claudeCommandRunner: @Sendable (_ executable: String, _ arguments: [String], _ timeout: TimeInterval) -> (output: String, exitCode: Int32)?
+    private let claudeCommandRunnerIsInjected: Bool
     private let geminiDataLoader: @Sendable (URLRequest) async throws -> (Data, URLResponse)
     private let geminiCommandRunner: @Sendable (_ executable: String, _ arguments: [String], _ timeout: TimeInterval) -> (output: String, exitCode: Int32)?
 
@@ -182,6 +240,7 @@ actor ExternalUsageMonitor {
         geminiConfigRoots: [URL] = [],
         cacheURL: URL,
         refreshMinIntervalSeconds: TimeInterval = 60,
+        claudeCommandRunner: (@Sendable (_ executable: String, _ arguments: [String], _ timeout: TimeInterval) -> (output: String, exitCode: Int32)?)? = nil,
         geminiDataLoader: (@Sendable (URLRequest) async throws -> (Data, URLResponse))? = nil,
         geminiCommandRunner: (@Sendable (_ executable: String, _ arguments: [String], _ timeout: TimeInterval) -> (output: String, exitCode: Int32)?)? = nil
     ) {
@@ -190,6 +249,10 @@ actor ExternalUsageMonitor {
         self.geminiConfigRoots = Self.uniqueStandardizedPaths(geminiConfigRoots)
         self.cacheURL = cacheURL
         self.refreshMinIntervalSeconds = max(0, refreshMinIntervalSeconds)
+        self.claudeCommandRunnerIsInjected = claudeCommandRunner != nil
+        self.claudeCommandRunner = claudeCommandRunner ?? { executable, arguments, timeout in
+            Self.runProcess(executable: executable, arguments: arguments, timeout: timeout)
+        }
         self.geminiDataLoader = geminiDataLoader ?? { request in
             try await URLSession.shared.data(for: request)
         }
@@ -249,7 +312,9 @@ actor ExternalUsageMonitor {
         return ExternalUsageProviderStatus(
             code: code,
             message: providerCache.lastMessage,
-            lastCollectedAt: lastCollectedAt
+            lastCollectedAt: lastCollectedAt,
+            primaryWindow: providerCache.primaryWindow,
+            secondaryWindow: providerCache.secondaryWindow
         )
     }
 
@@ -264,10 +329,19 @@ actor ExternalUsageMonitor {
         let range = DayRange(since: startDate, until: now)
         let files = listCodexSessionFiles(range: range)
         let touchedPaths = Set(files.map(\.path))
+        let requiresWindowBackfill = providerCache.primaryWindow == nil && providerCache.secondaryWindow == nil
 
         var state = CodexScanState()
+        var latestWindowSample: ExternalRateWindowSample?
         for fileURL in files {
-            scanCodexFile(fileURL: fileURL, range: range, providerCache: &providerCache, state: &state)
+            scanCodexFile(
+                fileURL: fileURL,
+                range: range,
+                providerCache: &providerCache,
+                state: &state,
+                requiresWindowBackfill: requiresWindowBackfill,
+                latestWindowSample: &latestWindowSample
+            )
         }
 
         for stalePath in providerCache.files.keys where !touchedPaths.contains(stalePath) {
@@ -278,6 +352,10 @@ actor ExternalUsageMonitor {
         }
 
         pruneDays(providerCache: &providerCache, sinceKey: range.scanSinceKey, untilKey: range.scanUntilKey)
+        if let latestWindowSample {
+            providerCache.primaryWindow = latestWindowSample.primaryWindow
+            providerCache.secondaryWindow = latestWindowSample.secondaryWindow
+        }
         providerCache.lastStatus = "ok_log_scan"
         providerCache.lastMessage = nil
         providerCache.lastScanUnixMs = Int64(now.timeIntervalSince1970 * 1000)
@@ -308,8 +386,11 @@ actor ExternalUsageMonitor {
         }
 
         pruneDays(providerCache: &providerCache, sinceKey: range.scanSinceKey, untilKey: range.scanUntilKey)
-        providerCache.lastStatus = "ok_log_scan"
-        providerCache.lastMessage = nil
+        let windowProbe = probeClaudeUsageWindows(now: now)
+        providerCache.primaryWindow = windowProbe.primaryWindow
+        providerCache.secondaryWindow = windowProbe.secondaryWindow
+        providerCache.lastStatus = windowProbe.statusCode
+        providerCache.lastMessage = windowProbe.message
         providerCache.lastScanUnixMs = Int64(now.timeIntervalSince1970 * 1000)
         cache.providers[key] = providerCache
         saveCache()
@@ -335,6 +416,8 @@ actor ExternalUsageMonitor {
         providerCache.lastStatus = result.statusCode
         providerCache.lastMessage = result.message
         providerCache.lastUsageFraction = result.usedFraction
+        providerCache.primaryWindow = result.primaryWindow
+        providerCache.secondaryWindow = result.secondaryWindow
         providerCache.files.removeAll(keepingCapacity: true)
 
         providerCache.lastScanUnixMs = Int64(now.timeIntervalSince1970 * 1000)
@@ -351,45 +434,71 @@ actor ExternalUsageMonitor {
             return GeminiProbeResult(
                 usedFraction: nil,
                 statusCode: "unsupported_auth_type",
-                message: "Gemini auth type 'api-key' is not supported for usage monitoring."
+                message: "Gemini auth type 'api-key' is not supported for usage monitoring.",
+                primaryWindow: nil,
+                secondaryWindow: nil
             )
         case .vertexAI:
             return GeminiProbeResult(
                 usedFraction: nil,
                 statusCode: "unsupported_auth_type",
-                message: "Gemini auth type 'vertex-ai' is not supported for usage monitoring."
+                message: "Gemini auth type 'vertex-ai' is not supported for usage monitoring.",
+                primaryWindow: nil,
+                secondaryWindow: nil
             )
         case .oauthPersonal, .unknown:
             break
         }
 
         do {
-            let usedFraction = try await fetchGeminiUsageViaAPI(configRoot: configRoot, now: now)
-            return GeminiProbeResult(usedFraction: usedFraction, statusCode: "ok_api", message: nil)
+            let parsed = try await fetchGeminiUsageViaAPI(configRoot: configRoot, now: now)
+            return GeminiProbeResult(
+                usedFraction: parsed.usedFraction,
+                statusCode: "ok_api",
+                message: nil,
+                primaryWindow: parsed.primaryWindow,
+                secondaryWindow: parsed.secondaryWindow
+            )
         } catch let apiError as GeminiProbeError {
-            let fallback = fetchGeminiUsageViaCLI()
+            let fallback = fetchGeminiUsageViaCLI(now: now)
             if let fallbackUsed = fallback.usedFraction {
-                return GeminiProbeResult(usedFraction: fallbackUsed, statusCode: "ok_cli", message: fallback.message)
+                return GeminiProbeResult(
+                    usedFraction: fallbackUsed,
+                    statusCode: "ok_cli",
+                    message: fallback.message,
+                    primaryWindow: fallback.primaryWindow,
+                    secondaryWindow: fallback.secondaryWindow
+                )
             }
             return GeminiProbeResult(
                 usedFraction: nil,
                 statusCode: fallback.statusCode == "not_logged_in" ? fallback.statusCode : apiError.statusCode,
-                message: fallback.statusCode == "not_logged_in" ? fallback.message : apiError.message
+                message: fallback.statusCode == "not_logged_in" ? fallback.message : apiError.message,
+                primaryWindow: fallback.primaryWindow,
+                secondaryWindow: fallback.secondaryWindow
             )
         } catch {
-            let fallback = fetchGeminiUsageViaCLI()
+            let fallback = fetchGeminiUsageViaCLI(now: now)
             if let fallbackUsed = fallback.usedFraction {
-                return GeminiProbeResult(usedFraction: fallbackUsed, statusCode: "ok_cli", message: fallback.message)
+                return GeminiProbeResult(
+                    usedFraction: fallbackUsed,
+                    statusCode: "ok_cli",
+                    message: fallback.message,
+                    primaryWindow: fallback.primaryWindow,
+                    secondaryWindow: fallback.secondaryWindow
+                )
             }
             return GeminiProbeResult(
                 usedFraction: nil,
                 statusCode: fallback.statusCode == "not_logged_in" ? fallback.statusCode : "api_error",
-                message: fallback.statusCode == "not_logged_in" ? fallback.message : error.localizedDescription
+                message: fallback.statusCode == "not_logged_in" ? fallback.message : error.localizedDescription,
+                primaryWindow: fallback.primaryWindow,
+                secondaryWindow: fallback.secondaryWindow
             )
         }
     }
 
-    private func fetchGeminiUsageViaAPI(configRoot: URL, now: Date) async throws -> Double {
+    private func fetchGeminiUsageViaAPI(configRoot: URL, now: Date) async throws -> GeminiQuotaParseResult {
         var credentials = try loadGeminiCredentials(configRoot: configRoot)
         if let expiry = credentials.expiryDate, expiry <= now {
             credentials.accessToken = try await refreshGeminiAccessToken(
@@ -401,7 +510,7 @@ actor ExternalUsageMonitor {
 
         let projectId = await fetchGeminiProjectID(accessToken: credentials.accessToken)
         let quotaData = try await fetchGeminiQuotaData(accessToken: credentials.accessToken, projectID: projectId)
-        return try parseGeminiUsedFraction(data: quotaData)
+        return try parseGeminiUsage(data: quotaData)
     }
 
     private func fetchGeminiQuotaData(accessToken: String, projectID: String?) async throws -> Data {
@@ -471,7 +580,7 @@ actor ExternalUsageMonitor {
         return nil
     }
 
-    private func parseGeminiUsedFraction(data: Data) throws -> Double {
+    private func parseGeminiUsage(data: Data) throws -> GeminiQuotaParseResult {
         let response: GeminiQuotaResponse
         do {
             response = try JSONDecoder().decode(GeminiQuotaResponse.self, from: data)
@@ -484,23 +593,46 @@ actor ExternalUsageMonitor {
         }
 
         var minRemainingByModel: [String: Double] = [:]
-        for bucket in buckets {
-            guard let modelID = bucket.modelId, !modelID.isEmpty, let remaining = bucket.remainingFraction else {
+        var representativeBucketByModel: [String: GeminiQuotaBucket] = [:]
+        for (index, bucket) in buckets.enumerated() {
+            guard let remaining = bucket.remainingFraction else {
                 continue
             }
+            let modelIDRaw = bucket.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let modelID = (modelIDRaw?.isEmpty == false ? modelIDRaw! : "bucket-\(index)")
             let clamped = min(1, max(0, remaining))
             if let existing = minRemainingByModel[modelID] {
-                minRemainingByModel[modelID] = min(existing, clamped)
+                if clamped <= existing {
+                    minRemainingByModel[modelID] = clamped
+                    representativeBucketByModel[modelID] = bucket
+                }
             } else {
                 minRemainingByModel[modelID] = clamped
+                representativeBucketByModel[modelID] = bucket
             }
         }
 
-        guard let lowestRemaining = minRemainingByModel.values.min() else {
+        guard let limitingModel = minRemainingByModel.min(by: { $0.value < $1.value }) else {
             throw GeminiProbeError(statusCode: "parse_error", message: "No usable Gemini model quota found.")
         }
 
-        return min(1, max(0, 1 - lowestRemaining))
+        let usedFraction = min(1, max(0, 1 - limitingModel.value))
+        let limitingBucket = representativeBucketByModel[limitingModel.key]
+        let resetAt = Self.parseDateFlexible(limitingBucket?.resetTime)
+
+        let primaryWindow = ExternalUsageRateWindow(
+            label: "Gemini quota",
+            usedPercent: usedFraction * 100,
+            windowMinutes: nil,
+            resetsAt: resetAt,
+            resetDescription: nil
+        )
+
+        return GeminiQuotaParseResult(
+            usedFraction: usedFraction,
+            primaryWindow: primaryWindow,
+            secondaryWindow: nil
+        )
     }
 
     private func loadGeminiCredentials(configRoot: URL) throws -> GeminiCredentials {
@@ -694,12 +826,14 @@ actor ExternalUsageMonitor {
         return GeminiAuthType(rawValue: selectedType) ?? .unknown
     }
 
-    private func fetchGeminiUsageViaCLI() -> GeminiProbeResult {
+    private func fetchGeminiUsageViaCLI(now: Date) -> GeminiProbeResult {
         guard let executable = resolveGeminiBinaryPath() else {
             return GeminiProbeResult(
                 usedFraction: nil,
                 statusCode: "cli_error",
-                message: "Gemini CLI is not installed."
+                message: "Gemini CLI is not installed.",
+                primaryWindow: nil,
+                secondaryWindow: nil
             )
         }
 
@@ -712,14 +846,22 @@ actor ExternalUsageMonitor {
         for arguments in argumentCandidates {
             guard let runResult = geminiCommandRunner(executable, arguments, 8) else { continue }
             let output = runResult.output
-            if let usedFraction = Self.parseGeminiStatsUsedFraction(output) {
-                return GeminiProbeResult(usedFraction: usedFraction, statusCode: "ok_cli", message: nil)
+            if let parsed = Self.parseGeminiStats(output, now: now) {
+                return GeminiProbeResult(
+                    usedFraction: parsed.usedFraction,
+                    statusCode: "ok_cli",
+                    message: nil,
+                    primaryWindow: parsed.primaryWindow,
+                    secondaryWindow: parsed.secondaryWindow
+                )
             }
             if Self.looksGeminiNotLoggedIn(output) {
                 return GeminiProbeResult(
                     usedFraction: nil,
                     statusCode: "not_logged_in",
-                    message: "Gemini CLI is not logged in."
+                    message: "Gemini CLI is not logged in.",
+                    primaryWindow: nil,
+                    secondaryWindow: nil
                 )
             }
         }
@@ -727,7 +869,9 @@ actor ExternalUsageMonitor {
         return GeminiProbeResult(
             usedFraction: nil,
             statusCode: "cli_error",
-            message: "Gemini CLI /stats output could not be parsed."
+            message: "Gemini CLI /stats output could not be parsed.",
+            primaryWindow: nil,
+            secondaryWindow: nil
         )
     }
 
@@ -737,7 +881,9 @@ actor ExternalUsageMonitor {
         fileURL: URL,
         range: DayRange,
         providerCache: inout ProviderCache,
-        state: inout CodexScanState
+        state: inout CodexScanState,
+        requiresWindowBackfill: Bool,
+        latestWindowSample: inout ExternalRateWindowSample?
     ) {
         let path = fileURL.path
         let attributes = (try? FileManager.default.attributesOfItem(atPath: path)) ?? [:]
@@ -770,6 +916,12 @@ actor ExternalUsageMonitor {
            cached.size == size,
            !needsSessionIdRefresh
         {
+            if requiresWindowBackfill {
+                let parsedForWindow = parseCodexFile(fileURL: fileURL, range: range)
+                if let sample = parsedForWindow.windowSample {
+                    latestWindowSample = Self.preferredWindowSample(current: latestWindowSample, candidate: sample)
+                }
+            }
             if let cachedSessionId = cached.sessionId {
                 state.seenSessionIds.insert(cachedSessionId)
             }
@@ -789,6 +941,9 @@ actor ExternalUsageMonitor {
                     startOffset: startOffset,
                     initialTotals: cached.lastTotals
                 )
+                if let sample = delta.windowSample {
+                    latestWindowSample = Self.preferredWindowSample(current: latestWindowSample, candidate: sample)
+                }
                 let sessionId = delta.sessionId ?? cached.sessionId
                 if let sessionId, state.seenSessionIds.contains(sessionId) {
                     dropCachedFile(cached)
@@ -826,6 +981,9 @@ actor ExternalUsageMonitor {
         }
 
         let parsed = parseCodexFile(fileURL: fileURL, range: range)
+        if let sample = parsed.windowSample {
+            latestWindowSample = Self.preferredWindowSample(current: latestWindowSample, candidate: sample)
+        }
         let sessionId = parsed.sessionId ?? cached?.sessionId
         if let sessionId, state.seenSessionIds.contains(sessionId) {
             providerCache.files.removeValue(forKey: path)
@@ -861,6 +1019,7 @@ actor ExternalUsageMonitor {
         var previousTotals = initialTotals
         var sessionId: String?
         var dayTokens: [String: Int] = [:]
+        var latestWindowSample: ExternalRateWindowSample?
 
         let maxLineBytes = 256 * 1024
         let prefixBytes = 32 * 1024
@@ -901,12 +1060,15 @@ actor ExternalUsageMonitor {
                     return
                 }
 
-                guard let timestampText = object["timestamp"] as? String else { return }
-                guard let dayKey = Self.dayKeyFromTimestamp(timestampText) else { return }
-
                 guard type == "event_msg" else { return }
                 guard let payload = object["payload"] as? [String: Any] else { return }
                 guard (payload["type"] as? String) == "token_count" else { return }
+
+                let timestampText = object["timestamp"] as? String
+                if let rateLimits = payload["rate_limits"] as? [String: Any],
+                   let sample = Self.parseCodexRateWindowSample(rateLimits: rateLimits, timestampText: timestampText) {
+                    latestWindowSample = Self.preferredWindowSample(current: latestWindowSample, candidate: sample)
+                }
 
                 let info = payload["info"] as? [String: Any]
                 let totalUsage = info?["total_token_usage"] as? [String: Any]
@@ -931,6 +1093,7 @@ actor ExternalUsageMonitor {
                     return
                 }
 
+                guard let timestampText, let dayKey = Self.dayKeyFromTimestamp(timestampText) else { return }
                 let tokenDelta = deltaInput + deltaOutput
                 guard tokenDelta > 0 else { return }
                 if DayRange.isInRange(dayKey: dayKey, since: range.scanSinceKey, until: range.scanUntilKey) {
@@ -943,7 +1106,8 @@ actor ExternalUsageMonitor {
             dayTokens: dayTokens,
             parsedBytes: parsedBytes,
             lastTotals: previousTotals,
-            sessionId: sessionId
+            sessionId: sessionId,
+            windowSample: latestWindowSample
         )
     }
 
@@ -1178,6 +1342,646 @@ actor ExternalUsageMonitor {
         return files.sorted(by: { $0.path < $1.path })
     }
 
+    // MARK: - Claude usage probe
+
+    private func probeClaudeUsageWindows(now: Date) -> ClaudeWindowProbeResult {
+        let scriptPath = "/usr/bin/script"
+        guard claudeCommandRunnerIsInjected || FileManager.default.isExecutableFile(atPath: scriptPath) else {
+            return ClaudeWindowProbeResult(
+                statusCode: "window_probe_unavailable",
+                message: "script 실행기가 없어 Claude 세션/주간 윈도우를 수집할 수 없습니다.",
+                primaryWindow: nil,
+                secondaryWindow: nil
+            )
+        }
+
+        let timeout: TimeInterval = 24
+        let claudeBinary = resolvedClaudeExecutable()
+
+        let runResult: (output: String, exitCode: Int32)?
+        if claudeCommandRunnerIsInjected {
+            runResult = claudeCommandRunner(scriptPath, [claudeBinary], timeout + 4)
+        } else {
+            runResult = Self.runClaudeUsageScriptProbe(
+                scriptExecutable: scriptPath,
+                claudeBinary: claudeBinary,
+                timeout: timeout + 4
+            )
+        }
+
+        guard let runResult else {
+            return ClaudeWindowProbeResult(
+                statusCode: "window_probe_failed",
+                message: "Claude CLI /usage 수집 실행에 실패했습니다.",
+                primaryWindow: nil,
+                secondaryWindow: nil
+            )
+        }
+
+        let parsed = Self.parseClaudeUsageProbeOutput(runResult.output, now: now)
+        if parsed.statusCode == "ok_log_scan_cli" {
+            return parsed
+        }
+
+        if runResult.exitCode != 0 {
+            let base = parsed.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = base?.isEmpty == false ? base! : "Claude CLI /usage 수집을 해석하지 못했습니다."
+            return ClaudeWindowProbeResult(
+                statusCode: parsed.statusCode,
+                message: "\(detail) (exit \(runResult.exitCode))",
+                primaryWindow: nil,
+                secondaryWindow: nil
+            )
+        }
+        return parsed
+    }
+
+    private static func runClaudeUsageScriptProbe(
+        scriptExecutable: String,
+        claudeBinary: String,
+        timeout: TimeInterval
+    ) -> (output: String, exitCode: Int32)? {
+        let fileManager = FileManager.default
+        let tempRoot = fileManager.temporaryDirectory
+            .appendingPathComponent("dochi-claude-usage-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = tempRoot.appendingPathComponent("usage-transcript.log")
+
+        do {
+            try fileManager.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        } catch {
+            try? fileManager.removeItem(at: tempRoot)
+            return nil
+        }
+        defer { try? fileManager.removeItem(at: tempRoot) }
+
+        let escapedTranscript = shellSingleQuoted(transcriptURL.path)
+        let escapedBinary = shellSingleQuoted(claudeBinary)
+        let escapedScript = shellSingleQuoted(scriptExecutable)
+        let command = """
+        { printf '/usage\\r'; sleep 2; printf '\\r'; sleep 6; printf '\\033'; sleep 1; printf '/exit\\r'; sleep 1; } | \(escapedScript) -q \(escapedTranscript) \(escapedBinary) --allowed-tools ""
+        """
+
+        let shellResult = runProcess(
+            executable: "/bin/zsh",
+            arguments: ["-lc", command],
+            timeout: timeout,
+            captureOutputOnTimeout: true
+        )
+
+        let transcriptText: String = {
+            guard let data = try? Data(contentsOf: transcriptURL) else { return "" }
+            return String(decoding: data, as: UTF8.self)
+        }()
+
+        if shellResult == nil && transcriptText.isEmpty {
+            return nil
+        }
+
+        let mergedOutput: String = {
+            var chunks: [String] = []
+            if let shellOutput = shellResult?.output.trimmingCharacters(in: .whitespacesAndNewlines),
+               !shellOutput.isEmpty {
+                chunks.append(shellOutput)
+            }
+            let transcriptTrimmed = transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !transcriptTrimmed.isEmpty {
+                chunks.append(transcriptTrimmed)
+            }
+            return chunks.joined(separator: "\n")
+        }()
+
+        return (
+            output: mergedOutput,
+            exitCode: shellResult?.exitCode ?? -1
+        )
+    }
+
+    private func resolvedClaudeExecutable() -> String {
+        let env = ProcessInfo.processInfo.environment
+        if let custom = env["CLAUDE_CLI_PATH"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !custom.isEmpty {
+            return custom
+        }
+        return "claude"
+    }
+
+    private static func parseClaudeUsageProbeOutput(_ rawText: String, now: Date) -> ClaudeWindowProbeResult {
+        let clean = stripANSICodes(rawText)
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        if looksClaudeNotLoggedIn(clean) {
+            return ClaudeWindowProbeResult(
+                statusCode: "not_logged_in",
+                message: "Claude CLI 인증이 필요합니다. 터미널에서 claude login 후 다시 시도하세요.",
+                primaryWindow: nil,
+                secondaryWindow: nil
+            )
+        }
+
+        if let usageError = parseClaudeUsageError(clean) {
+            return ClaudeWindowProbeResult(
+                statusCode: "window_probe_failed",
+                message: usageError,
+                primaryWindow: nil,
+                secondaryWindow: nil
+            )
+        }
+
+        let usagePanel = trimToLatestClaudeUsagePanel(clean)
+        let lines = usagePanel.components(separatedBy: .newlines)
+
+        let hasSessionLabel = lines.contains {
+            lineContainsClaudeLabel(
+                normalizedLine: normalizedForLabelSearch($0),
+                normalizedLabel: normalizedForLabelSearch("Current session")
+            )
+        }
+        let hasWeeklyLabel = lines.contains {
+            lineContainsClaudeLabel(
+                normalizedLine: normalizedForLabelSearch($0),
+                normalizedLabel: normalizedForLabelSearch("Current week")
+            )
+        }
+        let hasUsagePanelHint = lines.contains {
+            let compact = compactForLabelSearch(normalizedForLabelSearch($0))
+            return compact.contains("settingsusage") || compact.contains("esctocancel")
+        }
+
+        var sessionLeft = extractClaudePercent(
+            labelCandidates: ["Current session"],
+            lines: lines
+        )
+        var weeklyLeft = extractClaudePercent(
+            labelCandidates: ["Current week (all models)", "Current week"],
+            lines: lines
+        )
+
+        let orderedFallback = inferClaudeWindowsFromOrderedPercents(
+            lines: lines,
+            allowUnlabeledFallback: hasUsagePanelHint
+        )
+        var usedOrderedFallback = false
+        if sessionLeft == nil, let inferredSession = orderedFallback.sessionLeft {
+            sessionLeft = inferredSession
+            usedOrderedFallback = true
+        }
+        if weeklyLeft == nil, let inferredWeekly = orderedFallback.weeklyLeft {
+            weeklyLeft = inferredWeekly
+            usedOrderedFallback = true
+        }
+
+        guard let sessionLeft else {
+            if let weeklyBannerWindow = parseClaudeWeeklyBannerWindow(text: clean, now: now) {
+                return ClaudeWindowProbeResult(
+                    statusCode: "ok_log_scan_cli_partial",
+                    message: "Claude CLI에서 /usage 패널 대신 주간 사용 배너를 감지해 주간 윈도우만 수집했습니다.",
+                    primaryWindow: nil,
+                    secondaryWindow: weeklyBannerWindow
+                )
+            }
+            return ClaudeWindowProbeResult(
+                statusCode: "window_probe_failed",
+                message: "Claude /usage 출력에서 Current session 사용량을 찾지 못했습니다.",
+                primaryWindow: nil,
+                secondaryWindow: nil
+            )
+        }
+
+        let sessionResetRaw = extractClaudeReset(
+            labelCandidates: ["Current session"],
+            lines: lines
+        ) ?? orderedFallback.sessionReset
+        let weeklyResetRaw = extractClaudeReset(
+            labelCandidates: ["Current week (all models)", "Current week"],
+            lines: lines
+        ) ?? orderedFallback.weeklyReset
+
+        let sessionReset = parseClaudeResetInfo(sessionResetRaw, now: now)
+        let weeklyReset = parseClaudeResetInfo(weeklyResetRaw, now: now)
+
+        let primaryWindow = ExternalUsageRateWindow(
+            label: "Session",
+            usedPercent: max(0, 100 - Double(sessionLeft)),
+            windowMinutes: 300,
+            resetsAt: sessionReset.resetsAt,
+            resetDescription: sessionReset.resetDescription
+        )
+
+        let secondaryWindow: ExternalUsageRateWindow? = weeklyLeft.map { percentLeft in
+            ExternalUsageRateWindow(
+                label: "Weekly",
+                usedPercent: max(0, 100 - Double(percentLeft)),
+                windowMinutes: 10_080,
+                resetsAt: weeklyReset.resetsAt,
+                resetDescription: weeklyReset.resetDescription
+            )
+        }
+
+        let incompleteLabels = !hasSessionLabel || (weeklyLeft != nil && !hasWeeklyLabel)
+        if incompleteLabels || usedOrderedFallback {
+            return ClaudeWindowProbeResult(
+                statusCode: "ok_log_scan_cli_partial",
+                message: "Claude /usage 라벨 인식이 불완전해 퍼센트 기반으로 윈도우를 복원했습니다.",
+                primaryWindow: primaryWindow,
+                secondaryWindow: secondaryWindow
+            )
+        }
+
+        return ClaudeWindowProbeResult(
+            statusCode: "ok_log_scan_cli",
+            message: nil,
+            primaryWindow: primaryWindow,
+            secondaryWindow: secondaryWindow
+        )
+    }
+
+    private static func trimToLatestClaudeUsagePanel(_ text: String) -> String {
+        if let sessionRange = text.range(of: "Current session", options: [.caseInsensitive, .backwards]) {
+            let prefix = text[..<sessionRange.lowerBound]
+            let start = prefix.range(of: "Settings:", options: [.caseInsensitive, .backwards])?.lowerBound ?? text.startIndex
+            return String(text[start...])
+        }
+
+        if let settingsRange = text.range(of: "Settings:", options: [.caseInsensitive, .backwards]) {
+            return String(text[settingsRange.lowerBound...])
+        }
+
+        return text
+    }
+
+    private static func normalizedForLabelSearch(_ text: String) -> String {
+        text.lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private static func compactForLabelSearch(_ text: String) -> String {
+        text.lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]"#, with: "", options: .regularExpression)
+    }
+
+    private static func lineContainsClaudeLabel(
+        normalizedLine: String,
+        normalizedLabel: String
+    ) -> Bool {
+        if normalizedLine.contains(normalizedLabel) { return true }
+
+        let compactLine = compactForLabelSearch(normalizedLine)
+        let compactLabel = compactForLabelSearch(normalizedLabel)
+        if !compactLabel.isEmpty, compactLine.contains(compactLabel) {
+            return true
+        }
+
+        if compactLabel == "currentsession" {
+            return compactLine.contains("session") &&
+                (compactLine.contains("current") || compactLine.contains("curre"))
+        }
+
+        if compactLabel == "currentweek" {
+            return compactLine.contains("week") &&
+                (compactLine.contains("current") || compactLine.contains("curre"))
+        }
+
+        if compactLabel == "currentweekallmodels" {
+            return compactLine.contains("week") &&
+                (compactLine.contains("allmodels") || compactLine.contains("allmodel"))
+        }
+
+        return false
+    }
+
+    private static func inferClaudeWindowsFromOrderedPercents(
+        lines: [String],
+        allowUnlabeledFallback: Bool
+    ) -> (sessionLeft: Int?, weeklyLeft: Int?, sessionReset: String?, weeklyReset: String?) {
+        guard allowUnlabeledFallback else { return (nil, nil, nil, nil) }
+
+        var indexedPercents: [(index: Int, leftPercent: Int)] = []
+        for (index, line) in lines.enumerated() {
+            guard let leftPercent = parseClaudePercentLeft(from: line) else { continue }
+            let normalized = normalizedForLabelSearch(line)
+            let compact = compactForLabelSearch(normalized)
+
+            // Footer banner can leak into transcript after dismissing /usage.
+            if compact.contains("weeklylimit"), !compact.contains("currentweek") {
+                continue
+            }
+
+            if let last = indexedPercents.last,
+               last.leftPercent == leftPercent,
+               index - last.index <= 2 {
+                continue
+            }
+
+            indexedPercents.append((index, leftPercent))
+        }
+
+        guard indexedPercents.indices.contains(0) else { return (nil, nil, nil, nil) }
+        let sessionEntry = indexedPercents[0]
+        let weeklyEntry = indexedPercents.indices.contains(1) ? indexedPercents[1] : nil
+
+        func scanReset(after index: Int) -> String? {
+            let upper = min(lines.count, index + 8)
+            for candidate in lines[index..<upper] {
+                if let reset = resetFromLine(candidate) {
+                    return reset
+                }
+            }
+            return nil
+        }
+
+        return (
+            sessionLeft: sessionEntry.leftPercent,
+            weeklyLeft: weeklyEntry?.leftPercent,
+            sessionReset: scanReset(after: sessionEntry.index),
+            weeklyReset: weeklyEntry.flatMap { scanReset(after: $0.index) }
+        )
+    }
+
+    private static func extractClaudePercent(
+        labelCandidates: [String],
+        lines: [String]
+    ) -> Int? {
+        let normalizedLines = lines.map { normalizedForLabelSearch($0) }
+        let normalizedLabels = labelCandidates.map { normalizedForLabelSearch($0) }
+
+        for (index, normalizedLine) in normalizedLines.enumerated() {
+            guard normalizedLabels.contains(where: {
+                lineContainsClaudeLabel(normalizedLine: normalizedLine, normalizedLabel: $0)
+            }) else { continue }
+            let end = min(lines.count, index + 13)
+            for candidate in lines[index..<end] {
+                if let percentLeft = parseClaudePercentLeft(from: candidate) {
+                    return percentLeft
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func extractClaudeReset(
+        labelCandidates: [String],
+        lines: [String]
+    ) -> String? {
+        let normalizedLines = lines.map { normalizedForLabelSearch($0) }
+        let normalizedLabels = labelCandidates.map { normalizedForLabelSearch($0) }
+
+        for (index, normalizedLine) in normalizedLines.enumerated() {
+            guard normalizedLabels.contains(where: {
+                lineContainsClaudeLabel(normalizedLine: normalizedLine, normalizedLabel: $0)
+            }) else { continue }
+            let end = min(lines.count, index + 14)
+            for candidate in lines[index..<end] {
+                let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+                let normalized = normalizedForLabelSearch(trimmed)
+                if normalized.hasPrefix("current"),
+                   !normalizedLabels.contains(where: {
+                       lineContainsClaudeLabel(normalizedLine: normalized, normalizedLabel: $0)
+                   }) {
+                    break
+                }
+                if let reset = resetFromLine(candidate) {
+                    return reset
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func resetFromLine(_ line: String) -> String? {
+        let trimmed = stripANSICodes(line).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let range = trimmed.range(of: #"(?i)res(?:et|es|e)?s?"#, options: .regularExpression) {
+            let suffix = String(trimmed[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let raw = suffix.isEmpty ? "Resets" : "Resets \(suffix)"
+            let cleaned = cleanResetLine(raw)
+            return cleaned.isEmpty ? nil : cleaned
+        }
+
+        if let shortDuration = firstRegexCapture(pattern: #"([0-9]+\s*[smhdw])"#, text: trimmed) {
+            var fallback = "Resets \(shortDuration)"
+            if let zoneRange = trimmed.range(of: #"\([^)]+\)"#, options: .regularExpression) {
+                fallback += " \(trimmed[zoneRange])"
+            }
+            let cleaned = cleanResetLine(fallback)
+            return cleaned.isEmpty ? nil : cleaned
+        }
+
+        return nil
+    }
+
+    private static func cleanResetLine(_ raw: String) -> String {
+        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: " )"))
+        let openCount = cleaned.filter { $0 == "(" }.count
+        let closeCount = cleaned.filter { $0 == ")" }.count
+        if openCount > closeCount {
+            cleaned.append(")")
+        }
+        return cleaned
+    }
+
+    private static func parseClaudeResetInfo(_ rawReset: String?, now: Date) -> (resetsAt: Date?, resetDescription: String?) {
+        guard let rawReset, !rawReset.isEmpty else { return (nil, nil) }
+        let cleaned = cleanResetLine(rawReset)
+        guard !cleaned.isEmpty else { return (nil, nil) }
+
+        let normalized = cleaned
+            .replacingOccurrences(of: #"(?i)^resets?:?\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty {
+            return (nil, cleaned)
+        }
+
+        if let relativeMinutes = parseRelativeDurationMinutes(normalized) {
+            return (now.addingTimeInterval(Double(relativeMinutes) * 60), cleaned)
+        }
+
+        if let absoluteDate = parseDateFlexible(normalized) ?? parseDateFlexible(cleaned) {
+            return (absoluteDate, cleaned)
+        }
+
+        return (nil, cleaned)
+    }
+
+    private static func parseClaudeWeeklyBannerWindow(text: String, now: Date) -> ExternalUsageRateWindow? {
+        let normalized = text.replacingOccurrences(of: "\u{00A0}", with: " ")
+        guard let usedPercent = parseClaudeWeeklyBannerUsedPercent(normalized) else { return nil }
+        let resetRaw = parseClaudeWeeklyBannerReset(normalized)
+        let resetInfo = parseClaudeResetInfo(resetRaw, now: now)
+
+        return ExternalUsageRateWindow(
+            label: "Weekly",
+            usedPercent: usedPercent,
+            windowMinutes: 10_080,
+            resetsAt: resetInfo.resetsAt,
+            resetDescription: resetInfo.resetDescription
+        )
+    }
+
+    private static func parseClaudeWeeklyBannerUsedPercent(_ text: String) -> Double? {
+        let compact = text.lowercased().filter { !$0.isWhitespace }
+
+        let usedPattern = #"(?:you['’]?ve|youhave)used([0-9]{1,3}(?:\.[0-9]+)?)%ofyourweeklylimit"#
+        if let usedMatch = firstRegexCapture(pattern: usedPattern, text: compact),
+           let usedPercent = Double(usedMatch) {
+            return max(0, min(100, usedPercent))
+        }
+
+        let remainingPattern =
+            #"(?:you['’]?ve|youhave)([0-9]{1,3}(?:\.[0-9]+)?)%ofyourweeklylimit(?:left|remaining|available)"#
+        if let remainingMatch = firstRegexCapture(pattern: remainingPattern, text: compact),
+           let remainingPercent = Double(remainingMatch) {
+            return max(0, min(100, 100 - remainingPercent))
+        }
+        return nil
+    }
+
+    private static func parseClaudeWeeklyBannerReset(_ text: String) -> String? {
+        for rawLine in text.components(separatedBy: .newlines) {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+            let normalized = normalizedForLabelSearch(trimmed)
+            let compact = normalized.replacingOccurrences(of: " ", with: "")
+            guard normalized.contains("weekly limit") || compact.contains("weeklylimit") else { continue }
+
+            if let resetRange = trimmed.range(of: "resets", options: .caseInsensitive) {
+                var raw = String(trimmed[resetRange.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if raw.range(of: #"(?i)^resets[^\s]"#, options: .regularExpression) != nil {
+                    raw = raw.replacingOccurrences(
+                        of: #"(?i)^resets"#,
+                        with: "Resets ",
+                        options: .regularExpression
+                    )
+                }
+                let cleaned = cleanResetLine(raw)
+                if !cleaned.isEmpty {
+                    return cleaned
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func firstRegexCapture(pattern: String, text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              match.numberOfRanges >= 2,
+              let captureRange = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        let value = String(text[captureRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private static func parseRelativeDurationMinutes(_ text: String) -> Int? {
+        let normalized = text.lowercased()
+        guard let regex = try? NSRegularExpression(pattern: #"(\d+)\s*([smhdw])"#, options: []) else {
+            return nil
+        }
+
+        let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+        let matches = regex.matches(in: normalized, range: range)
+        guard !matches.isEmpty else { return nil }
+
+        var totalMinutes = 0
+        for match in matches {
+            guard let amountRange = Range(match.range(at: 1), in: normalized),
+                  let unitRange = Range(match.range(at: 2), in: normalized),
+                  let amount = Int(normalized[amountRange]),
+                  let unit = normalized[unitRange].first else {
+                continue
+            }
+
+            switch unit {
+            case "s":
+                totalMinutes += max(1, Int((Double(amount) / 60.0).rounded(.up)))
+            case "m":
+                totalMinutes += amount
+            case "h":
+                totalMinutes += amount * 60
+            case "d":
+                totalMinutes += amount * 24 * 60
+            case "w":
+                totalMinutes += amount * 7 * 24 * 60
+            default:
+                continue
+            }
+        }
+
+        return totalMinutes > 0 ? totalMinutes : nil
+    }
+
+    private static func parseClaudePercentLeft(from line: String) -> Int? {
+        guard !isLikelyClaudeStatusContextLine(line) else { return nil }
+        guard let regex = try? NSRegularExpression(pattern: #"([0-9]{1,3}(?:\.[0-9]+)?)\p{Zs}*%"#, options: []) else {
+            return nil
+        }
+
+        let range = NSRange(line.startIndex..<line.endIndex, in: line)
+        guard let match = regex.firstMatch(in: line, range: range),
+              let valueRange = Range(match.range(at: 1), in: line),
+              let raw = Double(line[valueRange]) else {
+            return nil
+        }
+
+        let clamped = max(0, min(100, raw))
+        let lower = line.lowercased()
+        if lower.contains("used") || lower.contains("spent") || lower.contains("consumed") {
+            return Int((100 - clamped).rounded())
+        }
+        if lower.contains("left") || lower.contains("remaining") || lower.contains("available") {
+            return Int(clamped.rounded())
+        }
+        return Int(clamped.rounded())
+    }
+
+    private static func isLikelyClaudeStatusContextLine(_ line: String) -> Bool {
+        let lower = line.lowercased()
+        if lower.contains("context") && lower.contains("%") { return true }
+        if line.contains("|"),
+           (lower.contains("opus") || lower.contains("sonnet") || lower.contains("haiku")) {
+            return true
+        }
+        return false
+    }
+
+    private static func allClaudePercents(_ lines: [String]) -> [Int] {
+        lines.compactMap { parseClaudePercentLeft(from: $0) }
+    }
+
+    private static func parseClaudeUsageError(_ text: String) -> String? {
+        let lower = text.lowercased()
+        if lower.contains("failed to load usage data") {
+            return "Claude CLI가 사용량 데이터를 불러오지 못했습니다. claude를 직접 열어 /usage 동작을 확인하세요."
+        }
+        if lower.contains("unknown skill: usage") {
+            return "Claude CLI에서 /usage 명령을 처리하지 못했습니다."
+        }
+        if lower.contains("token_expired") || lower.contains("token has expired") {
+            return "Claude 인증이 만료되었습니다. 터미널에서 claude login 후 다시 시도하세요."
+        }
+        if lower.contains("authentication_error") {
+            return "Claude 인증 오류로 /usage를 수집하지 못했습니다."
+        }
+        return nil
+    }
+
+    private static func looksClaudeNotLoggedIn(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        if lower.contains("claude login") { return true }
+        if lower.contains("not logged in") { return true }
+        if lower.contains("login required") { return true }
+        return false
+    }
+
     // MARK: - Cache mutations
 
     private func applyDayTokens(providerCache: inout ProviderCache, dayTokens: [String: Int], sign: Int) {
@@ -1324,6 +2128,112 @@ actor ExternalUsageMonitor {
 
     // MARK: - Parse helpers
 
+    private static func preferredWindowSample(
+        current: ExternalRateWindowSample?,
+        candidate: ExternalRateWindowSample
+    ) -> ExternalRateWindowSample {
+        guard let current else { return candidate }
+        let timestampDelta = abs(candidate.observedAtUnixMs - current.observedAtUnixMs)
+        if timestampDelta <= 5_000, candidate.sourcePriority != current.sourcePriority {
+            return candidate.sourcePriority > current.sourcePriority ? candidate : current
+        }
+        if candidate.observedAtUnixMs != current.observedAtUnixMs {
+            return candidate.observedAtUnixMs > current.observedAtUnixMs ? candidate : current
+        }
+        if candidate.sourcePriority != current.sourcePriority {
+            return candidate.sourcePriority > current.sourcePriority ? candidate : current
+        }
+
+        let currentScore = (current.primaryWindow != nil ? 1 : 0) + (current.secondaryWindow != nil ? 1 : 0)
+        let candidateScore = (candidate.primaryWindow != nil ? 1 : 0) + (candidate.secondaryWindow != nil ? 1 : 0)
+        return candidateScore >= currentScore ? candidate : current
+    }
+
+    private static func parseCodexRateWindowSample(
+        rateLimits: [String: Any],
+        timestampText: String?
+    ) -> ExternalRateWindowSample? {
+        let limitID = (rateLimits["limit_id"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+
+        let sourcePriority: Int
+        if limitID == "codex" {
+            sourcePriority = 3
+        } else if limitID.hasPrefix("codex_") {
+            sourcePriority = 2
+        } else if limitID.contains("codex") {
+            sourcePriority = 1
+        } else {
+            sourcePriority = 0
+        }
+
+        let observedAtUnixMs: Int64
+        if let timestampText, let observedDate = parseDateFlexible(timestampText) {
+            observedAtUnixMs = Int64(observedDate.timeIntervalSince1970 * 1000)
+        } else {
+            observedAtUnixMs = 0
+        }
+
+        let primaryObject = rateLimits["primary"] as? [String: Any]
+        let secondaryObject = rateLimits["secondary"] as? [String: Any]
+
+        let primaryWindow = parseCodexRateWindow(
+            from: primaryObject,
+            fallbackLabel: "Primary",
+            fallbackReset: nil
+        )
+        let secondaryWindow = parseCodexRateWindow(
+            from: secondaryObject,
+            fallbackLabel: "Secondary",
+            fallbackReset: nil
+        )
+
+        guard primaryWindow != nil || secondaryWindow != nil else { return nil }
+        return ExternalRateWindowSample(
+            sourcePriority: sourcePriority,
+            observedAtUnixMs: observedAtUnixMs,
+            primaryWindow: primaryWindow,
+            secondaryWindow: secondaryWindow
+        )
+    }
+
+    private static func parseCodexRateWindow(
+        from object: [String: Any]?,
+        fallbackLabel: String,
+        fallbackReset: String?
+    ) -> ExternalUsageRateWindow? {
+        guard let object else { return nil }
+        guard let usedPercent = parseDouble(object["used_percent"] ?? object["usedPercent"]) else { return nil }
+
+        let windowMinutes = parseInteger(object["window_minutes"] ?? object["windowMinutes"])
+        let resetValue = object["resets_at"] ?? object["resetsAt"] ?? object["reset_time"] ?? object["resetTime"]
+        let resetsAt = parseDateFlexible(resetValue)
+        let label = codexWindowLabel(windowMinutes: windowMinutes, fallback: fallbackLabel)
+
+        return ExternalUsageRateWindow(
+            label: label,
+            usedPercent: usedPercent,
+            windowMinutes: windowMinutes,
+            resetsAt: resetsAt,
+            resetDescription: fallbackReset
+        )
+    }
+
+    private static func codexWindowLabel(windowMinutes: Int?, fallback: String) -> String {
+        guard let windowMinutes, windowMinutes > 0 else { return fallback }
+        if windowMinutes == 10_080 { return "Weekly" }
+        if windowMinutes == 1_440 { return "Daily" }
+        if windowMinutes == 300 { return "5h" }
+        if windowMinutes % 1_440 == 0 {
+            return "\(windowMinutes / 1_440)d"
+        }
+        if windowMinutes % 60 == 0 {
+            return "\(windowMinutes / 60)h"
+        }
+        return "\(windowMinutes)m"
+    }
+
     private static func parseInteger(_ value: Any?) -> Int? {
         guard let value else { return nil }
         if let integer = value as? Int { return integer }
@@ -1397,14 +2307,23 @@ actor ExternalUsageMonitor {
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
-    private static func parseGeminiStatsUsedFraction(_ rawText: String) -> Double? {
+    private static func shellSingleQuoted(_ value: String) -> String {
+        if value.isEmpty { return "''" }
+        return "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+
+    private static func parseGeminiStats(_ rawText: String, now: Date) -> GeminiStatsParseResult? {
         let stripped = Self.stripANSICodes(rawText)
         let pattern = #"(gemini[-\w.]+)\s+[\d-]+\s+([0-9]+(?:\.[0-9]+)?)\s*%\s*\(([^)]+)\)"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return nil
         }
 
-        var minPercentLeft: Double?
+        var bestUsedFraction: Double?
+        var bestResetDescription: String?
+        var bestWindowMinutes: Int?
+        var bestResetAt: Date?
+
         for line in stripped.split(whereSeparator: \.isNewline) {
             let cleanLine = String(line).replacingOccurrences(of: "│", with: " ")
             let range = NSRange(cleanLine.startIndex..<cleanLine.endIndex, in: cleanLine)
@@ -1415,16 +2334,79 @@ actor ExternalUsageMonitor {
                 continue
             }
 
-            if let current = minPercentLeft {
-                minPercentLeft = min(current, percentLeft)
+            let resetDescription: String? = {
+                guard let resetRange = Range(match.range(at: 3), in: cleanLine) else { return nil }
+                let text = String(cleanLine[resetRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                return text.isEmpty ? nil : text
+            }()
+
+            let remaining = min(100, max(0, percentLeft))
+            let usedFraction = min(1, max(0, 1 - (remaining / 100)))
+
+            if let currentBest = bestUsedFraction, usedFraction <= currentBest {
+                continue
+            }
+
+            bestUsedFraction = usedFraction
+            bestResetDescription = resetDescription
+            if let resetDescription {
+                bestWindowMinutes = parseGeminiResetDurationMinutes(resetDescription)
+                if let minutes = bestWindowMinutes {
+                    bestResetAt = now.addingTimeInterval(Double(minutes) * 60)
+                } else {
+                    bestResetAt = parseDateFlexible(resetDescription)
+                }
             } else {
-                minPercentLeft = percentLeft
+                bestWindowMinutes = nil
+                bestResetAt = nil
             }
         }
 
-        guard let minPercentLeft else { return nil }
-        let remaining = min(100, max(0, minPercentLeft))
-        return min(1, max(0, 1 - (remaining / 100)))
+        guard let bestUsedFraction else { return nil }
+        let primaryWindow = ExternalUsageRateWindow(
+            label: "Gemini quota",
+            usedPercent: bestUsedFraction * 100,
+            windowMinutes: bestWindowMinutes,
+            resetsAt: bestResetAt,
+            resetDescription: bestResetDescription
+        )
+
+        return GeminiStatsParseResult(
+            usedFraction: bestUsedFraction,
+            primaryWindow: primaryWindow,
+            secondaryWindow: nil
+        )
+    }
+
+    private static func parseGeminiResetDurationMinutes(_ text: String) -> Int? {
+        let normalized = text.lowercased()
+        guard let regex = try? NSRegularExpression(pattern: #"(\d+)\s*([smhdw])"#, options: []) else {
+            return nil
+        }
+        let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+        guard let match = regex.firstMatch(in: normalized, range: range),
+              let amountRange = Range(match.range(at: 1), in: normalized),
+              let unitRange = Range(match.range(at: 2), in: normalized),
+              let amount = Int(normalized[amountRange]),
+              let unit = normalized[unitRange].first
+        else {
+            return nil
+        }
+
+        switch unit {
+        case "s":
+            return max(1, Int((Double(amount) / 60.0).rounded(.up)))
+        case "m":
+            return amount
+        case "h":
+            return amount * 60
+        case "d":
+            return amount * 60 * 24
+        case "w":
+            return amount * 60 * 24 * 7
+        default:
+            return nil
+        }
     }
 
     private static func looksGeminiNotLoggedIn(_ text: String) -> Bool {
@@ -1436,8 +2418,24 @@ actor ExternalUsageMonitor {
     }
 
     private static func stripANSICodes(_ text: String) -> String {
-        text.replacingOccurrences(
-            of: #"\u{001B}\[[0-9;]*[A-Za-z]"#,
+        let withoutCSI = text.replacingOccurrences(
+            of: #"\u{001B}\[[0-9;?]*[ -/]*[@-~]"#,
+            with: "",
+            options: .regularExpression
+        )
+        let withoutOSC = withoutCSI.replacingOccurrences(
+            of: #"\u{001B}\][^\u{0007}]*\u{0007}"#,
+            with: "",
+            options: .regularExpression
+        )
+        let withoutEscape = withoutOSC.replacingOccurrences(of: "\u{001B}", with: "")
+        let withoutBareCSI = withoutEscape.replacingOccurrences(
+            of: #"\[[0-9;?]*[ -/]*[@-~]"#,
+            with: "",
+            options: .regularExpression
+        )
+        return withoutBareCSI.replacingOccurrences(
+            of: #"[\u{0000}-\u{0008}\u{000B}\u{000C}\u{000E}-\u{001F}\u{007F}]"#,
             with: "",
             options: .regularExpression
         )
@@ -1446,7 +2444,8 @@ actor ExternalUsageMonitor {
     private static func runProcess(
         executable: String,
         arguments: [String],
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        captureOutputOnTimeout: Bool = false
     ) -> (output: String, exitCode: Int32)? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -1471,13 +2470,21 @@ actor ExternalUsageMonitor {
         if waitResult == .timedOut {
             process.terminate()
             _ = group.wait(timeout: .now() + 1)
-            return nil
+            if !captureOutputOnTimeout {
+                return nil
+            }
         }
 
         let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
         let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
         let outputText = String(data: outputData + errorData, encoding: .utf8) ?? ""
-        return (outputText, process.terminationStatus)
+        let status: Int32
+        if process.isRunning {
+            status = -1
+        } else {
+            status = process.terminationStatus
+        }
+        return (outputText, status)
     }
 
     private static func dayKeyFromFilename(_ filename: String) -> String? {
@@ -1498,21 +2505,48 @@ actor ExternalUsageMonitor {
     }
 
     private static func dayKeyFromTimestamp(_ text: String) -> String? {
+        if let parsed = parseDateFlexible(text) {
+            return DayRange.dayKey(from: parsed)
+        }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count >= 10 {
+            let prefix = String(trimmed.prefix(10))
+            if prefix.range(of: "^\\d{4}-\\d{2}-\\d{2}$", options: .regularExpression) != nil {
+                return prefix
+            }
+        }
+        return nil
+    }
+
+    private static func parseDateFlexible(_ value: Any?) -> Date? {
+        if let date = value as? Date {
+            return date
+        }
+        if let number = parseDouble(value), let date = parseUnixTimestamp(number) {
+            return date
+        }
+        if let text = value as? String {
+            return parseDateFlexible(text)
+        }
+        return nil
+    }
+
+    private static func parseDateFlexible(_ text: String) -> Date? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
         if let unix = Double(trimmed), let date = parseUnixTimestamp(unix) {
-            return DayRange.dayKey(from: date)
+            return date
         }
 
         let fractionalISO = ISO8601DateFormatter()
         fractionalISO.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let basicISO = ISO8601DateFormatter()
         basicISO.formatOptions = [.withInternetDateTime]
-
         if let parsed = fractionalISO.date(from: trimmed)
             ?? basicISO.date(from: trimmed) {
-            return DayRange.dayKey(from: parsed)
+            return parsed
         }
 
         for format in fallbackDateFormats {
@@ -1521,14 +2555,7 @@ actor ExternalUsageMonitor {
             formatter.timeZone = TimeZone(secondsFromGMT: 0)
             formatter.dateFormat = format
             if let parsed = formatter.date(from: trimmed) {
-                return DayRange.dayKey(from: parsed)
-            }
-        }
-
-        if trimmed.count >= 10 {
-            let prefix = String(trimmed.prefix(10))
-            if prefix.range(of: "^\\d{4}-\\d{2}-\\d{2}$", options: .regularExpression) != nil {
-                return prefix
+                return parsed
             }
         }
         return nil

@@ -27,6 +27,7 @@ struct SettingsView: View {
 
     @State var selectedSection: SettingsSection = .aiModel
     @State private var searchText: String = ""
+    @State private var usageDashboardSessionCache = UsageDashboardSessionCache()
 
     var body: some View {
         NavigationSplitView {
@@ -61,7 +62,12 @@ struct SettingsView: View {
 
         case .usage:
             if let metricsCollector {
-                UsageDashboardView(metricsCollector: metricsCollector, settings: settings, resourceOptimizer: resourceOptimizer)
+                UsageDashboardView(
+                    metricsCollector: metricsCollector,
+                    settings: settings,
+                    resourceOptimizer: resourceOptimizer,
+                    sessionCache: usageDashboardSessionCache
+                )
             } else {
                 unavailableView(title: "사용량", message: "메트릭 수집기가 초기화되지 않았습니다.")
             }

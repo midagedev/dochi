@@ -105,6 +105,7 @@ struct ContentView: View {
     @State private var selectedToolSessionId: UUID?
     @State private var selectedToolProfileId: UUID?
     @State private var isStartingToolSession = false
+    @State private var externalToolListSessionCache = ExternalToolListSessionCache()
 
     var body: some View {
         mainContent
@@ -750,6 +751,7 @@ struct ContentView: View {
                     ExternalToolListView(
                         manager: manager,
                         resourceOptimizer: viewModel.resourceOptimizer,
+                        sessionCache: externalToolListSessionCache,
                         selectedSessionId: $selectedToolSessionId,
                         selectedProfileId: $selectedToolProfileId
                     )

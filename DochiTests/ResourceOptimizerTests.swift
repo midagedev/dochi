@@ -998,6 +998,221 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(util.usedTokens, 186) // (100+20) + (60+6)
     }
 
+    func testMonitoringSnapshotCodexIncludesPrimaryAndWeeklyWindows() async throws {
+        let codexRoot = tempDir.appendingPathComponent("codex-windows")
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        let resetPrimary = Int(now.addingTimeInterval(90 * 60).timeIntervalSince1970)
+        let resetWeekly = Int(now.addingTimeInterval(2 * 24 * 60 * 60).timeIntervalSince1970)
+
+        let lines = [
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"sess-window\"}}",
+            "{\"type\":\"event_msg\",\"timestamp\":\"\(iso.string(from: now))\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":500,\"cached_input_tokens\":100,\"output_tokens\":220}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":12.5,\"window_minutes\":300,\"resets_at\":\(resetPrimary)},\"secondary\":{\"used_percent\":41.0,\"window_minutes\":10080,\"resets_at\":\(resetWeekly)}}}}",
+            "{\"type\":\"event_msg\",\"timestamp\":\"\(iso.string(from: now))\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":500,\"cached_input_tokens\":100,\"output_tokens\":220}},\"rate_limits\":{\"limit_id\":\"codex_bengalfox\",\"primary\":{\"used_percent\":0.0,\"window_minutes\":300,\"resets_at\":\(resetPrimary + 5)},\"secondary\":{\"used_percent\":0.0,\"window_minutes\":10080,\"resets_at\":\(resetWeekly + 5)}}}}",
+        ].joined(separator: "\n")
+        try lines.write(to: codexRoot.appendingPathComponent("session-window.jsonl"), atomically: true, encoding: .utf8)
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-codex-windows"),
+            usageStore: nil,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [codexRoot]
+        )
+
+        let plan = SubscriptionPlan(
+            providerName: "ChatGPT Pro",
+            planName: "Plus",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+
+        let snapshot = await sourceService.monitoringSnapshot(for: plan)
+        XCTAssertEqual(snapshot.statusCode, "ok_log_scan")
+        XCTAssertEqual(snapshot.primaryWindow?.windowMinutes, 300)
+        XCTAssertEqual(snapshot.secondaryWindow?.windowMinutes, 10_080)
+        XCTAssertEqual(snapshot.primaryWindow?.usedPercent ?? -1, 12.5, accuracy: 0.001)
+        XCTAssertEqual(snapshot.secondaryWindow?.usedPercent ?? -1, 41.0, accuracy: 0.001)
+        XCTAssertNotNil(snapshot.primaryWindow?.resetsAt)
+        XCTAssertNotNil(snapshot.secondaryWindow?.resetsAt)
+    }
+
+    func testExternalUsageMonitorClaudeIncludesSessionAndWeeklyWindowsFromCLIUsage() async throws {
+        let claudeRoot = tempDir.appendingPathComponent("claude-usage-windows")
+        let projectDir = claudeRoot.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        let line = """
+        {"type":"assistant","timestamp":"\(iso.string(from: now))","requestId":"req-claude-window","message":{"id":"msg-claude-window","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":20}}}
+        """
+        try line.write(to: projectDir.appendingPathComponent("session.jsonl"), atomically: true, encoding: .utf8)
+
+        let cliOutput = """
+        Settings: Usage
+        Current session
+        38% left
+        Resets in 2h
+        Current week (all models)
+        71% left
+        Resets in 3d
+        """
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [claudeRoot],
+            cacheURL: tempDir.appendingPathComponent("claude-window-cache.json"),
+            refreshMinIntervalSeconds: 0,
+            claudeCommandRunner: { _, _, _ in
+                (cliOutput, 0)
+            }
+        )
+
+        let used = await monitor.tokensUsed(
+            provider: .claude,
+            since: now.addingTimeInterval(-3600),
+            now: now
+        )
+
+        XCTAssertEqual(used, 120)
+        let status = await monitor.status(provider: .claude)
+        XCTAssertEqual(status?.code, "ok_log_scan_cli")
+        XCTAssertEqual(status?.primaryWindow?.windowMinutes, 300)
+        XCTAssertEqual(status?.secondaryWindow?.windowMinutes, 10_080)
+        XCTAssertEqual(status?.primaryWindow?.usedPercent ?? -1, 62.0, accuracy: 0.001)
+        XCTAssertEqual(status?.secondaryWindow?.usedPercent ?? -1, 29.0, accuracy: 0.001)
+        XCTAssertEqual(status?.primaryWindow?.resetDescription, "Resets in 2h")
+        XCTAssertEqual(status?.secondaryWindow?.resetDescription, "Resets in 3d")
+    }
+
+    func testExternalUsageMonitorClaudeParsesAnsiGarbledUsagePanel() async throws {
+        let claudeRoot = tempDir.appendingPathComponent("claude-usage-ansi")
+        let projectDir = claudeRoot.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        let line = """
+        {"type":"assistant","timestamp":"\(iso.string(from: now))","requestId":"req-claude-ansi","message":{"id":"msg-claude-ansi","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":20}}}
+        """
+        try line.write(to: projectDir.appendingPathComponent("session.jsonl"), atomically: true, encoding: .utf8)
+
+        let cliOutput = """
+        Settings: Usage
+        Curre\u{001B}[1Ct\u{001B}[1Csession
+        68% used
+        Rese\u{001B}[1Cs\u{001B}[1C2m (Asia/Seoul)
+        Current\u{001B}[1Cweek\u{001B}[1C(all\u{001B}[1Cmodels)
+        81% used
+        Resets\u{001B}[1CFeb\u{001B}[1C25\u{001B}[1Cat\u{001B}[1C2pm (Asia/Seoul)
+        """
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [claudeRoot],
+            cacheURL: tempDir.appendingPathComponent("claude-window-ansi-cache.json"),
+            refreshMinIntervalSeconds: 0,
+            claudeCommandRunner: { _, _, _ in
+                (cliOutput, 0)
+            }
+        )
+
+        _ = await monitor.tokensUsed(
+            provider: .claude,
+            since: now.addingTimeInterval(-3600),
+            now: now
+        )
+
+        let status = await monitor.status(provider: .claude)
+        XCTAssertEqual(status?.code, "ok_log_scan_cli")
+        XCTAssertEqual(status?.primaryWindow?.windowMinutes, 300)
+        XCTAssertEqual(status?.secondaryWindow?.windowMinutes, 10_080)
+        XCTAssertEqual(status?.primaryWindow?.usedPercent ?? -1, 68.0, accuracy: 0.001)
+        XCTAssertEqual(status?.secondaryWindow?.usedPercent ?? -1, 81.0, accuracy: 0.001)
+        XCTAssertEqual(status?.primaryWindow?.resetDescription, "Resets 2m (Asia/Seoul)")
+        XCTAssertEqual(status?.secondaryWindow?.resetDescription, "Resets Feb25at2pm (Asia/Seoul)")
+    }
+
+    func testExternalUsageMonitorClaudeWindowProbeFailureKeepsTokenScan() async throws {
+        let claudeRoot = tempDir.appendingPathComponent("claude-window-failure")
+        let projectDir = claudeRoot.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        let line = """
+        {"type":"assistant","timestamp":"\(iso.string(from: now))","requestId":"req-claude-failure","message":{"id":"msg-claude-failure","usage":{"input_tokens":55,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":45}}}
+        """
+        try line.write(to: projectDir.appendingPathComponent("session.jsonl"), atomically: true, encoding: .utf8)
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [claudeRoot],
+            cacheURL: tempDir.appendingPathComponent("claude-window-failure-cache.json"),
+            refreshMinIntervalSeconds: 0,
+            claudeCommandRunner: { _, _, _ in
+                ("Failed to load usage data: token_expired", 0)
+            }
+        )
+
+        let used = await monitor.tokensUsed(
+            provider: .claude,
+            since: now.addingTimeInterval(-3600),
+            now: now
+        )
+
+        XCTAssertEqual(used, 100)
+        let status = await monitor.status(provider: .claude)
+        XCTAssertEqual(status?.code, "window_probe_failed")
+        XCTAssertNil(status?.primaryWindow)
+        XCTAssertNil(status?.secondaryWindow)
+    }
+
+    func testExternalUsageMonitorClaudeWeeklyBannerFallbackWhenUsagePanelMissing() async throws {
+        let claudeRoot = tempDir.appendingPathComponent("claude-weekly-banner-fallback")
+        let projectDir = claudeRoot.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        let line = """
+        {"type":"assistant","timestamp":"\(iso.string(from: now))","requestId":"req-claude-banner","message":{"id":"msg-claude-banner","usage":{"input_tokens":40,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":10}}}
+        """
+        try line.write(to: projectDir.appendingPathComponent("session.jsonl"), atomically: true, encoding: .utf8)
+
+        let cliOutput = """
+        Claude Code v2.1.50
+        You'veused80%ofyourweeklylimit·resetsFeb25at2pm(Asia/Seoul)
+        /usage
+        """
+
+        let monitor = ExternalUsageMonitor(
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            claudeProjectsRoots: [claudeRoot],
+            cacheURL: tempDir.appendingPathComponent("claude-weekly-banner-cache.json"),
+            refreshMinIntervalSeconds: 0,
+            claudeCommandRunner: { _, _, _ in
+                (cliOutput, 0)
+            }
+        )
+
+        let used = await monitor.tokensUsed(
+            provider: .claude,
+            since: now.addingTimeInterval(-3600),
+            now: now
+        )
+
+        XCTAssertEqual(used, 50)
+        let status = await monitor.status(provider: .claude)
+        XCTAssertEqual(status?.code, "ok_log_scan_cli_partial")
+        XCTAssertNil(status?.primaryWindow)
+        XCTAssertEqual(status?.secondaryWindow?.windowMinutes, 10_080)
+        XCTAssertEqual(status?.secondaryWindow?.usedPercent ?? -1, 80.0, accuracy: 0.001)
+        XCTAssertEqual(status?.secondaryWindow?.resetDescription, "Resets Feb25at2pm(Asia/Seoul)")
+    }
+
     func testExternalToolLogsCodexDedupesArchivedSessionBySessionID() async throws {
         let codexHome = tempDir.appendingPathComponent("codex-home")
         let sessionsRoot = codexHome.appendingPathComponent("sessions")
@@ -1207,6 +1422,9 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(used, 250)
         let status = await monitor.status(provider: .gemini)
         XCTAssertEqual(status?.code, "ok_cli")
+        XCTAssertEqual(status?.primaryWindow?.windowMinutes, 720)
+        XCTAssertEqual(status?.primaryWindow?.usedPercent ?? -1, 25.0, accuracy: 0.001)
+        XCTAssertEqual(status?.primaryWindow?.resetDescription, "Resets in 12h")
     }
 
     func testExternalUsageMonitorGeminiNotLoggedInStatus() async throws {
@@ -1323,7 +1541,7 @@ final class ResourceOptimizerTests: XCTestCase {
             case ("cloudcode-pa.googleapis.com", "/v1internal:retrieveUserQuota"):
                 let auth = request.value(forHTTPHeaderField: "Authorization") ?? ""
                 if auth == "Bearer fresh-token" {
-                    let body = #"{"buckets":[{"modelId":"gemini-2.5-pro","remainingFraction":0.4}]}"#
+                    let body = #"{"buckets":[{"modelId":"gemini-2.5-pro","remainingFraction":0.4,"resetTime":"2026-03-01T09:30:00Z"}]}"#
                         .data(using: .utf8)!
                     return (body, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
                 }
@@ -1354,6 +1572,8 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(used, 600)
         let status = await monitor.status(provider: .gemini)
         XCTAssertEqual(status?.code, "ok_api")
+        XCTAssertEqual(status?.primaryWindow?.usedPercent ?? -1, 60.0, accuracy: 0.001)
+        XCTAssertNotNil(status?.primaryWindow?.resetsAt)
 
         let updatedCredsData = try Data(contentsOf: geminiRoot.appendingPathComponent("oauth_creds.json"))
         let updatedObject = try XCTUnwrap(

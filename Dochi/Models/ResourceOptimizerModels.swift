@@ -146,6 +146,32 @@ struct ResourceUtilization: Sendable {
 
 // MARK: - Monitoring Snapshot
 
+struct MonitoringUsageWindowSnapshot: Sendable, Equatable {
+    let label: String
+    let usedPercent: Double
+    let windowMinutes: Int?
+    let resetsAt: Date?
+    let resetDescription: String?
+
+    init(
+        label: String,
+        usedPercent: Double,
+        windowMinutes: Int? = nil,
+        resetsAt: Date? = nil,
+        resetDescription: String? = nil
+    ) {
+        self.label = label
+        self.usedPercent = min(100, max(0, usedPercent))
+        self.windowMinutes = windowMinutes
+        self.resetsAt = resetsAt
+        self.resetDescription = resetDescription
+    }
+
+    var usedRatio: Double {
+        min(1, max(0, usedPercent / 100))
+    }
+}
+
 struct SubscriptionMonitoringSnapshot: Sendable, Equatable {
     let subscriptionID: UUID
     let source: SubscriptionUsageSource
@@ -153,6 +179,8 @@ struct SubscriptionMonitoringSnapshot: Sendable, Equatable {
     let statusCode: String
     let statusMessage: String?
     let lastCollectedAt: Date?
+    let primaryWindow: MonitoringUsageWindowSnapshot?
+    let secondaryWindow: MonitoringUsageWindowSnapshot?
 
     init(
         subscriptionID: UUID,
@@ -160,7 +188,9 @@ struct SubscriptionMonitoringSnapshot: Sendable, Equatable {
         provider: String,
         statusCode: String,
         statusMessage: String? = nil,
-        lastCollectedAt: Date? = nil
+        lastCollectedAt: Date? = nil,
+        primaryWindow: MonitoringUsageWindowSnapshot? = nil,
+        secondaryWindow: MonitoringUsageWindowSnapshot? = nil
     ) {
         self.subscriptionID = subscriptionID
         self.source = source
@@ -168,6 +198,8 @@ struct SubscriptionMonitoringSnapshot: Sendable, Equatable {
         self.statusCode = statusCode
         self.statusMessage = statusMessage
         self.lastCollectedAt = lastCollectedAt
+        self.primaryWindow = primaryWindow
+        self.secondaryWindow = secondaryWindow
     }
 
     var statusPresentation: MonitoringStatusPresentation {
@@ -189,6 +221,18 @@ struct SubscriptionMonitoringSnapshot: Sendable, Equatable {
                 label: "로그 스캔 정상",
                 detail: statusMessage,
                 tone: .success
+            )
+        case "ok_log_scan_cli":
+            return MonitoringStatusPresentation(
+                label: "로그+CLI 정상",
+                detail: statusMessage ?? "토큰 집계는 로그에서, 세션/주간 윈도우는 Claude CLI에서 수집했습니다.",
+                tone: .success
+            )
+        case "ok_log_scan_cli_partial":
+            return MonitoringStatusPresentation(
+                label: "로그+CLI 부분수집",
+                detail: statusMessage ?? "Claude CLI 제한으로 주간 윈도우만 수집했습니다.",
+                tone: .warning
             )
         case "ok_store":
             return MonitoringStatusPresentation(
@@ -225,6 +269,18 @@ struct SubscriptionMonitoringSnapshot: Sendable, Equatable {
                 label: "응답 해석 실패",
                 detail: statusMessage ?? "모니터링 응답 포맷이 예상과 달라 해석에 실패했습니다.",
                 tone: .error
+            )
+        case "window_probe_failed":
+            return MonitoringStatusPresentation(
+                label: "윈도우 수집 실패",
+                detail: statusMessage ?? "Claude 세션/주간 사용량을 수집하지 못했습니다.",
+                tone: .warning
+            )
+        case "window_probe_unavailable":
+            return MonitoringStatusPresentation(
+                label: "윈도우 수집 불가",
+                detail: statusMessage ?? "현재 환경에서 Claude 세션/주간 수집기를 실행할 수 없습니다.",
+                tone: .warning
             )
         case "unsupported_provider":
             return MonitoringStatusPresentation(
