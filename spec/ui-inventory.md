@@ -149,11 +149,13 @@ DochiApp (entry point)
 
 | 화면 | 파일 | 접근 방법 | 설명 |
 |------|------|-----------|------|
-| ExternalToolListView | `Views/Sidebar/ExternalToolListView.swift` | 사이드바 "도구" 탭 | 3섹션 리스트: 실행 중 세션, 중지된 세션, 미실행 프로파일. 상태 인디케이터 (색상 원). 컨텍스트 메뉴 (시작/편집/삭제) |
+| ExternalToolListView | `Views/Sidebar/ExternalToolListView.swift` | 사이드바 "도구" 탭 | 오케스트레이션 콘솔 레이아웃: 상단 Command Bar + Workboard(Queued/Running/Review/Blocked/Done) + Live Monitor + 하단 Action Queue. Blocked/Failing 우선 노출. 상세는 인라인 선택 패턴. |
 | ExternalToolDashboardView | `Views/ExternalToolDashboardView.swift` | 도구 탭에서 세션 선택 | 헤더 (아이콘, 이름, 상태, 작업 디렉토리, 경과 시간, 중지/재시작 버튼), 출력 영역 (모노스페이스 ScrollView, 자동 스크롤), 명령 입력 TextField |
 | ExternalToolEmptyDashboardView | `Views/ExternalToolDashboardView.swift` | 도구 탭에서 선택 없음 | 빈 상태: "외부 도구를 선택하세요" |
 | ExternalToolProfileEditorView | `Views/ExternalToolProfileEditorView.swift` | 설정 > 외부 도구 > 프로파일 추가/편집 | 폼: 기본 (이름/아이콘/명령/인자/작업디렉토리), 연결 (로컬/SSH), 헬스체크 패턴, 프리셋 (Claude Code/Codex CLI/aider/Custom) |
 | ExternalToolSettingsView | `Views/Settings/ExternalToolSettingsView.swift` | 설정 > 외부 도구 | 마스터 토글, tmux 경고, 헬스체크 설정 (간격/캡처줄수/자동재시작), 프로파일 목록 (편집/삭제), tmux 설정 (경로/접두사) |
+
+K-4 오케스트레이션 콘솔 레이아웃 상세: `spec/ux/k4-orchestration-console-layout.md`
 
 ### 칸반
 

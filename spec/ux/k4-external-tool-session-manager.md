@@ -3,6 +3,7 @@
 > 상태: 설계 완료
 > 관련: TerminalService (K-1), HeartbeatService, DelegationManager (J-2), BuiltInToolService
 > 이슈: #167
+> 2026-02 레이아웃 업데이트: `spec/ux/k4-orchestration-console-layout.md` 참고
 
 ---
 
