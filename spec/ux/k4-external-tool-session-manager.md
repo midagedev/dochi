@@ -81,6 +81,9 @@ SystemHealthBarView에 외부 도구 상태 요약 아이콘 추가:
 
 새 파일: `Views/Sidebar/ExternalToolListView.swift`
 
+> 참고: 아래 구조는 K-4 최초 릴리스 레이아웃(기록용)이다.  
+> 2026-02 이후 오케스트레이션 콘솔 레이아웃 정본은 `spec/ux/k4-orchestration-console-layout.md`를 따른다.
+
 ```
 ┌─────────────────────────────────┐
 │  [검색...]                       │
