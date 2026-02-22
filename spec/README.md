@@ -29,6 +29,7 @@
 | [voice-and-audio.md](./voice-and-audio.md) | 웨이크워드, STT, TTS, 에이전트 라우팅 |
 | [tools.md](./tools.md) | 내장 도구 스키마 (정본) |
 | [project-context-proactive-ux.md](./project-context-proactive-ux.md) | 프로젝트 컨텍스트/프로액티브/유휴토큰 UX 명세 (MVP) |
+| [always-on-agent-ops-scenarios.md](./always-on-agent-ops-scenarios.md) | 코딩 에이전트 상시 운영 시나리오 정본 (알림 루프/메모리 루프/레포 자율도) |
 | [security.md](./security.md) | 보안, 권한 분류, 확인 UX |
 | [supabase.md](./supabase.md) | 클라우드 테이블, 동기화 정책, RLS |
 | [open-questions.md](./open-questions.md) | 미결 과제 |
