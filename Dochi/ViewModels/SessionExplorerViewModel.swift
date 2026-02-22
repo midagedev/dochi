@@ -36,6 +36,25 @@ struct RepositorySessionGroup: Identifiable, Sendable, Equatable {
     let sessions: [UnifiedCodingSession]
 }
 
+enum OrchestrationWorkboardLane: String, CaseIterable, Sendable {
+    case blocked
+    case running
+    case review
+    case queued
+    case done
+
+    static var displayOrder: [OrchestrationWorkboardLane] {
+        [.blocked, .running, .review, .queued, .done]
+    }
+}
+
+struct OrchestrationWorkboardGroup: Identifiable, Sendable, Equatable {
+    let lane: OrchestrationWorkboardLane
+    let sessions: [UnifiedCodingSession]
+
+    var id: String { lane.rawValue }
+}
+
 enum SessionExplorerViewStateBuilder {
     private static func normalizedRepositoryPath(_ path: String?) -> String? {
         guard let path else { return nil }
@@ -178,6 +197,41 @@ enum SessionExplorerViewStateBuilder {
             }
             return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
         })
+    }
+
+    static func orchestrationWorkboardLane(
+        for session: UnifiedCodingSession
+    ) -> OrchestrationWorkboardLane {
+        if session.activityState == .dead || session.activitySignals.errorPenaltyScore > 0 {
+            return .blocked
+        }
+        if session.isUnassigned {
+            return .queued
+        }
+        if session.activityState == .active {
+            return .running
+        }
+        if session.activityState == .idle && session.activityScore >= 70 {
+            return .done
+        }
+        return .review
+    }
+
+    static func orchestrationWorkboardGroups(
+        sessions: [UnifiedCodingSession],
+        sort: SessionExplorerSortOption = .activity
+    ) -> [OrchestrationWorkboardGroup] {
+        let sorted = sortSessions(sessions, sort: sort)
+        var grouped: [OrchestrationWorkboardLane: [UnifiedCodingSession]] = [:]
+        for session in sorted {
+            let lane = orchestrationWorkboardLane(for: session)
+            grouped[lane, default: []].append(session)
+        }
+
+        return OrchestrationWorkboardLane.displayOrder.compactMap { lane in
+            guard let laneSessions = grouped[lane], !laneSessions.isEmpty else { return nil }
+            return OrchestrationWorkboardGroup(lane: lane, sessions: laneSessions)
+        }
     }
 
     static func preferredSession(

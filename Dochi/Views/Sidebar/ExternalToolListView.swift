@@ -38,6 +38,41 @@ private enum SessionHistoryTimeFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private enum OrchestrationMonitorSeverity: Int {
+    case error = 0
+    case warning = 1
+    case info = 2
+
+    var color: Color {
+        switch self {
+        case .error:
+            return .red
+        case .warning:
+            return .orange
+        case .info:
+            return .secondary
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .error:
+            return "error"
+        case .warning:
+            return "warning"
+        case .info:
+            return "info"
+        }
+    }
+}
+
+private struct OrchestrationMonitorEvent: Identifiable {
+    let id: String
+    let severity: OrchestrationMonitorSeverity
+    let summary: String
+    let timestamp: Date
+}
+
 struct ExternalToolListView: View {
     let manager: ExternalToolSessionManagerProtocol
     @Binding var selectedSessionId: UUID?
@@ -94,6 +129,8 @@ struct ExternalToolListView: View {
     @State private var orchestrationOutputLines: [String] = []
     @State private var orchestrationBusy = false
     @State private var orchestrationErrorMessage: String?
+    @State private var workboardLaneFilter: OrchestrationWorkboardLane?
+    @State private var showExtendedInspectorSections = false
     private let orchestrationSummaryService = OrchestrationSummaryService()
     private static let orchestrationStatusCaptureLines = 120
     private static let orchestrationSummarizeCaptureLines = 160
@@ -233,6 +270,110 @@ struct ExternalToolListView: View {
 
     private var providerFilterOptions: [String] {
         Array(Set(unifiedSessions.map(\.provider))).sorted()
+    }
+
+    private var orchestrationWorkboardGroups: [OrchestrationWorkboardGroup] {
+        let groups = SessionExplorerViewStateBuilder.orchestrationWorkboardGroups(
+            sessions: filteredUnifiedSessions
+        )
+        guard let workboardLaneFilter else { return groups }
+        return groups.filter { $0.lane == workboardLaneFilter }
+    }
+
+    private var orchestrationMonitorEvents: [OrchestrationMonitorEvent] {
+        var events: [OrchestrationMonitorEvent] = []
+        let now = Date()
+
+        let blockedCount = filteredUnifiedSessions.filter {
+            SessionExplorerViewStateBuilder.orchestrationWorkboardLane(for: $0) == .blocked
+        }.count
+        if blockedCount > 0 {
+            events.append(
+                OrchestrationMonitorEvent(
+                    id: "blocked-count",
+                    severity: .warning,
+                    summary: "Blocked/Failing 세션 \(blockedCount)개",
+                    timestamp: now
+                )
+            )
+        }
+
+        let runningCount = filteredUnifiedSessions.filter { $0.activityState == .active }.count
+        if runningCount > 0 {
+            events.append(
+                OrchestrationMonitorEvent(
+                    id: "running-count",
+                    severity: .info,
+                    summary: "Running 세션 \(runningCount)개",
+                    timestamp: now
+                )
+            )
+        }
+
+        if let guardDecision = orchestrationGuardDecision {
+            events.append(
+                OrchestrationMonitorEvent(
+                    id: "guard-decision",
+                    severity: guardDecision.kind == .denied ? .error : .warning,
+                    summary: "guard \(guardDecision.kind.rawValue) · \(guardDecision.reason)",
+                    timestamp: now
+                )
+            )
+        }
+
+        if let status = orchestrationStatusContract {
+            events.append(
+                OrchestrationMonitorEvent(
+                    id: "status-contract",
+                    severity: monitorSeverity(for: status.resultKind),
+                    summary: "status \(status.resultKind) · \(status.summary)",
+                    timestamp: now
+                )
+            )
+        }
+
+        if let summarized = orchestrationSummarizeContract {
+            events.append(
+                OrchestrationMonitorEvent(
+                    id: "summary-contract",
+                    severity: monitorSeverity(for: summarized.resultKind),
+                    summary: "summary \(summarized.resultKind) · \(summarized.summary)",
+                    timestamp: now
+                )
+            )
+        }
+
+        if let orchestrationErrorMessage {
+            events.append(
+                OrchestrationMonitorEvent(
+                    id: "orchestration-error",
+                    severity: .error,
+                    summary: orchestrationErrorMessage,
+                    timestamp: now
+                )
+            )
+        }
+
+        for (index, line) in orchestrationOutputLines.suffix(4).enumerated() {
+            events.append(
+                OrchestrationMonitorEvent(
+                    id: "output-\(index)",
+                    severity: .info,
+                    summary: line,
+                    timestamp: now.addingTimeInterval(Double(-index))
+                )
+            )
+        }
+
+        return events.sorted { lhs, rhs in
+            if lhs.severity != rhs.severity {
+                return lhs.severity.rawValue < rhs.severity.rawValue
+            }
+            if lhs.timestamp != rhs.timestamp {
+                return lhs.timestamp > rhs.timestamp
+            }
+            return lhs.id < rhs.id
+        }
     }
 
     var body: some View {
@@ -377,11 +518,218 @@ struct ExternalToolListView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 observabilitySectionHeader
+                orchestrationLoopSection
+                orchestrationWorkboardSection
+                orchestrationLiveMonitorSection
+                orchestrationActionQueueSection
+                extendedInspectorSection
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var orchestrationWorkboardSection: some View {
+        sectionHeader("Workboard")
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Menu("Lane") {
+                    Button("전체") { workboardLaneFilter = nil }
+                    ForEach(OrchestrationWorkboardLane.displayOrder, id: \.rawValue) { lane in
+                        Button(workboardLaneTitle(lane)) {
+                            workboardLaneFilter = lane
+                        }
+                    }
+                }
+                .font(.system(size: 10))
+
+                Spacer()
+
+                Text("\(filteredUnifiedSessions.count)개 세션")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+
+            if orchestrationWorkboardGroups.isEmpty {
+                Text("표시할 Workboard 항목이 없습니다.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(orchestrationWorkboardGroups) { group in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(workboardLaneColor(group.lane))
+                                .frame(width: 7, height: 7)
+                            Text(workboardLaneTitle(group.lane))
+                                .font(.system(size: 10, weight: .semibold))
+                            Spacer()
+                            Text("\(group.sessions.count)")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.top, 6)
+
+                        ForEach(
+                            group.sessions.prefix(6).map {
+                                (key: ExternalToolSessionManager.sessionStableKey($0), value: $0)
+                            },
+                            id: \.key
+                        ) { item in
+                            unifiedSessionRow(item.value)
+                        }
+
+                        if group.sessions.count > 6 {
+                            Text("추가 \(group.sessions.count - 6)개 항목은 필터로 확인하세요.")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 10)
+                                .padding(.bottom, 4)
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(workboardLaneColor(group.lane).opacity(0.2), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 10)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private var orchestrationLiveMonitorSection: some View {
+        sectionHeader("Live Monitor")
+
+        if orchestrationMonitorEvents.isEmpty {
+            Text("최근 이벤트가 없습니다.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(orchestrationMonitorEvents.prefix(12)) { event in
+                    HStack(alignment: .top, spacing: 6) {
+                        Circle()
+                            .fill(event.severity.color)
+                            .frame(width: 6, height: 6)
+                            .padding(.top, 4)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.summary)
+                                .font(.system(size: 10))
+                                .lineLimit(2)
+                            Text("\(event.severity.label) · \(relativeTimestamp(event.timestamp))")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
+        }
+    }
+
+    @ViewBuilder
+    private var orchestrationActionQueueSection: some View {
+        sectionHeader("Action Queue")
+
+        VStack(alignment: .leading, spacing: 4) {
+            if let command = nonEmptyOrchestrationCommand() {
+                Text("명령: \(command)")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+
+            if orchestrationBusy {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("오케스트레이션 액션 실행 중")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let selection = orchestrationSelection {
+                Text("selection \(selection.action.rawValue) · \(selection.reason)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            if let guardDecision = orchestrationGuardDecision {
+                Text("guard \(guardDecision.kind.rawValue) · \(guardDecision.policyCode.rawValue)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(guardDecision.kind == .denied ? .red : .secondary)
+                    .lineLimit(1)
+            }
+
+            if let status = orchestrationStatusContract {
+                Text("status \(status.resultKind): \(status.summary)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            if let summarized = orchestrationSummarizeContract {
+                Text("summary \(summarized.resultKind): \(summarized.summary)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            if !orchestrationOutputLines.isEmpty {
+                Text("output \(orchestrationOutputLines.suffix(Self.orchestrationOutputPreviewLines).joined(separator: " ⏎ "))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+
+            if let orchestrationErrorMessage {
+                Text(orchestrationErrorMessage)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private var extendedInspectorSection: some View {
+        sectionHeader("Extended Inspector")
+
+        DisclosureGroup(
+            isExpanded: $showExtendedInspectorSections,
+            content: {
                 repoDashboardSection
                 sessionExplorerSection
                 selectionDetailSection
                 discoveredSessionSection
-                orchestrationLoopSection
                 unassignedQueueSection
                 sessionHistorySection
 
@@ -389,7 +737,6 @@ struct ExternalToolListView: View {
                     .padding(.top, 10)
                     .padding(.bottom, 6)
 
-                // Running sessions
                 if !runningSessions.isEmpty {
                     sectionHeader("실행 중")
                     ForEach(runningSessions) { session in
@@ -397,7 +744,6 @@ struct ExternalToolListView: View {
                     }
                 }
 
-                // Stopped sessions
                 if !stoppedSessions.isEmpty {
                     sectionHeader("중지됨")
                     ForEach(stoppedSessions) { session in
@@ -405,25 +751,29 @@ struct ExternalToolListView: View {
                     }
                 }
 
-                // Unlaunched profiles
                 if !unlaunchedProfiles.isEmpty {
                     sectionHeader("프로파일")
                     ForEach(unlaunchedProfiles) { profile in
                         profileRow(profile: profile)
                     }
                 }
+            },
+            label: {
+                Text("세션 탐색/히스토리/레거시 리스트 펼치기")
+                    .font(.system(size: 11, weight: .semibold))
             }
-            .padding(.vertical, 4)
-        }
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
     private var observabilitySectionHeader: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("세션 탐색기")
+                Text("오케스트레이션 콘솔")
                     .font(.system(size: 13, weight: .semibold))
-                Text("Repo-first 탐색 / 세션 메타 / Git 변화 지표")
+                Text("상태 파악 → 개입 → 결과 확인 루프")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -967,7 +1317,7 @@ struct ExternalToolListView: View {
 
     @ViewBuilder
     private var orchestrationLoopSection: some View {
-        sectionHeader("Orchestration Loop")
+        sectionHeader("Command Bar")
 
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -977,9 +1327,33 @@ struct ExternalToolListView: View {
                         Button(root) { orchestrationRepositoryRoot = root }
                     }
                 }
+                Menu("필터") {
+                    Button("전체") {
+                        applyWorkboardLaneFilter(nil)
+                    }
+                    Button("Blocked/Failing") {
+                        applyWorkboardLaneFilter(.blocked)
+                    }
+                    Button("Running") {
+                        applyWorkboardLaneFilter(.running)
+                    }
+                    Button("Needs Review") {
+                        applyWorkboardLaneFilter(.review)
+                    }
+                }
+                TextField("세션 검색 (provider/id/path)", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+            }
+
+            HStack(spacing: 6) {
                 TextField("실행 명령", text: $orchestrationCommandText)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11))
+                if orchestrationBusy {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
             }
 
             HStack(spacing: 6) {
@@ -987,10 +1361,6 @@ struct ExternalToolListView: View {
                     .toggleStyle(.checkbox)
                     .font(.system(size: 10))
                 Spacer()
-                if orchestrationBusy {
-                    ProgressView()
-                        .controlSize(.mini)
-                }
                 Button("선택") {
                     Task { await orchestrationSelectFromUI() }
                 }
@@ -1021,63 +1391,27 @@ struct ExternalToolListView: View {
             }
 
             if let selection = orchestrationSelection {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("action \(selection.action.rawValue)")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(selection.reason)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    if let selected = selection.selectedSession {
-                        Text("[\(selected.provider)] \(selected.nativeSessionId) · tier \(selected.controllabilityTier.rawValue) · state \(selected.activityState.rawValue)")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
+                Text("선택 결과: \(selection.action.rawValue) · \(selection.reason)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
 
             if let guardDecision = orchestrationGuardDecision {
-                Text("guard \(guardDecision.kind.rawValue) · \(guardDecision.policyCode.rawValue) · \(guardDecision.reason)")
+                Text("guard \(guardDecision.kind.rawValue) · \(guardDecision.reason)")
                     .font(.system(size: 9))
                     .foregroundStyle(guardDecision.kind == .denied ? .red : .secondary)
                     .lineLimit(2)
             }
-
-            if let status = orchestrationStatusContract {
-                Text("status \(status.resultKind): \(status.summary)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            if let summarized = orchestrationSummarizeContract {
-                Text("summary \(summarized.resultKind): \(summarized.summary)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                if !summarized.highlights.isEmpty {
-                    Text(summarized.highlights.joined(separator: " | "))
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(2)
-                }
-            }
-
-            if !orchestrationOutputLines.isEmpty {
-                Text(orchestrationOutputLines.suffix(Self.orchestrationOutputPreviewLines).joined(separator: " ⏎ "))
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
-
-            if let orchestrationErrorMessage {
-                Text(orchestrationErrorMessage)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-            }
         }
         .padding(.horizontal, 10)
-        .padding(.bottom, 8)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -2235,8 +2569,55 @@ struct ExternalToolListView: View {
         return Self.relativeDateFormatter.localizedString(for: date, relativeTo: Date())
     }
 
+    private func applyWorkboardLaneFilter(_ lane: OrchestrationWorkboardLane?) {
+        explorerFilter.activeOnly = false
+        explorerFilter.unassignedOnly = false
+        workboardLaneFilter = lane
+    }
+
     private func normalizedRepositoryPath(_ path: String) -> String {
         URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private func workboardLaneTitle(_ lane: OrchestrationWorkboardLane) -> String {
+        switch lane {
+        case .blocked:
+            return "Blocked"
+        case .running:
+            return "Running"
+        case .review:
+            return "Review"
+        case .queued:
+            return "Queued"
+        case .done:
+            return "Done"
+        }
+    }
+
+    private func workboardLaneColor(_ lane: OrchestrationWorkboardLane) -> Color {
+        switch lane {
+        case .blocked:
+            return .red
+        case .running:
+            return .green
+        case .review:
+            return .orange
+        case .queued:
+            return .blue
+        case .done:
+            return .secondary
+        }
+    }
+
+    private func monitorSeverity(for resultKind: String) -> OrchestrationMonitorSeverity {
+        let normalized = resultKind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.contains("fail") || normalized.contains("error") {
+            return .error
+        }
+        if normalized.contains("running") || normalized.contains("unknown") {
+            return .warning
+        }
+        return .info
     }
 
     private func activityColor(_ state: CodingSessionActivityState) -> Color {
