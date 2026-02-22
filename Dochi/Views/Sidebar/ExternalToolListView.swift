@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 private enum SessionHistoryTimeFilter: String, CaseIterable, Identifiable {
     case day1 = "1d"
@@ -57,6 +60,7 @@ struct ExternalToolListView: View {
     @State private var selectedUnifiedSessionKey: String?
     @State private var hoveredRepositoryKey: String?
     @State private var hoveredUnifiedSessionKey: String?
+    @State private var interactionErrorMessage: String?
     @State private var historyQueryText = ""
     @State private var historyRepositoryFilter: String?
     @State private var historyBranchFilter = ""
@@ -122,17 +126,32 @@ struct ExternalToolListView: View {
     }
 
     private var gitInsightByRepositoryPath: [String: GitRepositoryInsight] {
-        Dictionary(
-            uniqueKeysWithValues: gitInsights.map { insight in
-                (normalizedRepositoryPath(insight.path), insight)
-            }
-        )
+        var mapped: [String: GitRepositoryInsight] = [:]
+        for insight in gitInsights {
+            mapped[normalizedRepositoryPath(insight.path)] = insight
+        }
+        return mapped
     }
 
     private var repositorySessionGroups: [RepositorySessionGroup] {
         SessionExplorerViewStateBuilder.repositoryGroups(
             sessions: filteredUnifiedSessions.filter { !$0.isUnassigned },
             sort: sortOption
+        )
+    }
+
+    private var selectedUnifiedSession: UnifiedCodingSession? {
+        SessionExplorerViewStateBuilder.selectedSession(
+            sessions: unifiedSessions,
+            selectedSessionKey: selectedUnifiedSessionKey,
+            selectedSessionId: selectedSessionId
+        )
+    }
+
+    private var focusedRepositorySummary: RepositoryDashboardSummary? {
+        SessionExplorerViewStateBuilder.selectedRepositorySummary(
+            summaries: repositorySummaries,
+            focusedRepositoryKey: focusedRepositoryKey
         )
     }
 
@@ -274,6 +293,23 @@ struct ExternalToolListView: View {
                 Text(mappingNotice ?? "")
             }
         )
+        .alert(
+            "동작 실행 실패",
+            isPresented: Binding(
+                get: { interactionErrorMessage != nil },
+                set: { newValue in
+                    if !newValue { interactionErrorMessage = nil }
+                }
+            ),
+            actions: {
+                Button("확인", role: .cancel) {
+                    interactionErrorMessage = nil
+                }
+            },
+            message: {
+                Text(interactionErrorMessage ?? "")
+            }
+        )
         .task {
             await refreshUnifiedSessions()
             refreshHistoryIndexStatus()
@@ -323,6 +359,7 @@ struct ExternalToolListView: View {
                 observabilitySectionHeader
                 repoDashboardSection
                 sessionExplorerSection
+                selectionDetailSection
                 discoveredSessionSection
                 orchestrationLoopSection
                 unassignedQueueSection
@@ -624,6 +661,188 @@ struct ExternalToolListView: View {
                 repositoryGroupRow(group)
             }
         }
+    }
+
+    @ViewBuilder
+    private var selectionDetailSection: some View {
+        sectionHeader("Selection Detail")
+
+        if let session = selectedUnifiedSession {
+            selectedSessionDetailCard(session)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+        } else if let repository = focusedRepositorySummary {
+            selectedRepositoryDetailCard(repository)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+        } else {
+            Text("상세를 보려면 세션 또는 레포를 선택하세요.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        }
+    }
+
+    @ViewBuilder
+    private func selectedSessionDetailCard(_ session: UnifiedCodingSession) -> some View {
+        let runtimeUUID = session.runtimeSessionId.flatMap(UUID.init(uuidString:))
+        let canOpenTerminal = runtimeUUID.map { runtimeId in
+            manager.sessions.contains(where: { $0.id == runtimeId })
+        } ?? false
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("[\(session.provider)] \(session.nativeSessionId)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                Text(session.activityState.rawValue)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                Spacer()
+                Text("업데이트 \(relativeTimestamp(session.updatedAt))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Text("현재 작업: \(sessionWorkSummary(session) ?? "현재 작업 정보 없음")")
+                .font(.system(size: 10))
+                .foregroundStyle(workSummaryColor(session))
+                .lineLimit(2)
+
+            Text("최근 커밋: \(repositoryCommitContext(for: session.repositoryRoot) ?? "최근 커밋 정보 없음")")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text("경로: \(session.workingDirectory ?? session.path)")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+
+            HStack(spacing: 6) {
+                if canOpenTerminal, let runtimeUUID {
+                    Button("터미널 열기") {
+                        Task { await openSessionInTerminal(runtimeUUID: runtimeUUID) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                    .keyboardShortcut(.defaultAction)
+                }
+
+                if let repositoryRoot = session.repositoryRoot {
+                    Button("레포 열기") {
+                        openRepositoryInFinder(path: repositoryRoot)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+
+                Button("경로 복사") {
+                    copyToPasteboard(session.workingDirectory ?? session.path)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+
+                Button("히스토리 점프") {
+                    Task { await jumpToSessionHistory(session) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func selectedRepositoryDetailCard(_ repository: RepositoryDashboardSummary) -> some View {
+        let representative = representativeSession(for: repository.repositoryRoot)
+        let commitContext = repositoryCommitContext(for: repository.repositoryRoot)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(repository.displayName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                Text("세션 \(repository.sessionCount) · 활성 \(repository.activeSessionCount) · 오류 \(repository.errorSessionCount)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                Text("업데이트 \(relativeTimestamp(repository.lastActivityAt))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+
+            if let representative {
+                Text("대표 세션: [\(representative.provider)] \(representative.nativeSessionId)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text("현재 작업: \(sessionWorkSummary(representative) ?? "현재 작업 정보 없음")")
+                    .font(.system(size: 9))
+                    .foregroundStyle(workSummaryColor(representative))
+                    .lineLimit(2)
+            } else {
+                Text("대표 세션 정보가 없습니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Text("최근 커밋: \(commitContext ?? "최근 커밋 정보 없음")")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+
+            if let repositoryRoot = repository.repositoryRoot {
+                Text("경로: \(repositoryRoot)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Button("레포 열기") {
+                        openRepositoryInFinder(path: repositoryRoot)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                    .keyboardShortcut(.defaultAction)
+
+                    Button("세션 추천") {
+                        Task { await recommendAttachableSession(for: repositoryRoot) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+
+                    Button("경로 복사") {
+                        copyToPasteboard(repositoryRoot)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.accentColor.opacity(0.2), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -1668,6 +1887,47 @@ struct ExternalToolListView: View {
         } else {
             selectedSessionId = nil
         }
+    }
+
+    @MainActor
+    private func openSessionInTerminal(runtimeUUID: UUID) async {
+        do {
+            try await manager.openInTerminal(sessionId: runtimeUUID)
+            mappingNotice = "선택한 세션을 외부 터미널에서 열었습니다."
+        } catch {
+            interactionErrorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func jumpToSessionHistory(_ session: UnifiedCodingSession) async {
+        historyQueryText = session.nativeSessionId
+        if let repositoryRoot = session.repositoryRoot {
+            historyRepositoryFilter = normalizedRepositoryPath(repositoryRoot)
+        } else {
+            historyRepositoryFilter = nil
+        }
+        historyTimeFilter = .day30
+        await searchSessionHistoryFromUI()
+        mappingNotice = "세션 히스토리 필터를 적용했습니다."
+    }
+
+    private func openRepositoryInFinder(path: String) {
+#if os(macOS)
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        let url = URL(fileURLWithPath: standardized, isDirectory: true)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+#endif
+        mappingNotice = "레포 경로를 열었습니다."
+    }
+
+    private func copyToPasteboard(_ value: String) {
+#if os(macOS)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(value, forType: .string)
+#endif
+        mappingNotice = "경로를 클립보드에 복사했습니다."
     }
 
     private func normalizedSessionTitle(_ session: UnifiedCodingSession) -> String? {

@@ -192,6 +192,55 @@ enum SessionExplorerViewStateBuilder {
         return sortSessions(scoped, sort: .activity).first
     }
 
+    static func selectedSession(
+        sessions: [UnifiedCodingSession],
+        selectedSessionKey: String?,
+        selectedSessionId: UUID?
+    ) -> UnifiedCodingSession? {
+        if let selectedSessionKey {
+            if let matchedByKey = sessions.first(where: {
+                ExternalToolSessionManager.sessionStableKey($0) == selectedSessionKey
+            }) {
+                return matchedByKey
+            }
+        }
+
+        if let selectedSessionId {
+            if let matchedByRuntime = sessions.first(where: { session in
+                guard let runtimeSessionId = session.runtimeSessionId,
+                      let runtimeUUID = UUID(uuidString: runtimeSessionId) else {
+                    return false
+                }
+                return runtimeUUID == selectedSessionId
+            }) {
+                return matchedByRuntime
+            }
+        }
+
+        return nil
+    }
+
+    static func selectedRepositorySummary(
+        summaries: [RepositoryDashboardSummary],
+        focusedRepositoryKey: String?
+    ) -> RepositoryDashboardSummary? {
+        guard let focusedRepositoryKey, !focusedRepositoryKey.isEmpty else { return nil }
+
+        if let exact = summaries.first(where: { $0.id == focusedRepositoryKey }) {
+            return exact
+        }
+
+        if focusedRepositoryKey == "unassigned" {
+            return summaries.first(where: { $0.repositoryRoot == nil })
+        }
+
+        guard let normalized = normalizedRepositoryPath(focusedRepositoryKey) else { return nil }
+        return summaries.first(where: { summary in
+            guard let repositoryRoot = summary.repositoryRoot else { return false }
+            return normalizedRepositoryPath(repositoryRoot) == normalized
+        })
+    }
+
     static func selectionFilter(for repositoryRoot: String?) -> SessionExplorerFilter {
         let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
         return SessionExplorerFilter(
