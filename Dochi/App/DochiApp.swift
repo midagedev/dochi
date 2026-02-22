@@ -178,6 +178,7 @@ struct DochiApp: App {
         let toolContextStore = ToolContextStore(baseURL: appSupportURL)
         self.toolContextStore = toolContextStore
         let heartbeatChangeJournalService = HeartbeatChangeJournalService(baseURL: appSupportURL)
+        let workQueueService = WorkQueueService(baseURL: appSupportURL)
         self.heartbeatChangeJournalService = heartbeatChangeJournalService
 
         // Plugin Manager (J-4)
@@ -307,6 +308,7 @@ struct DochiApp: App {
         heartbeatService.configure(contextService: contextService, sessionContext: sessionContext)
         heartbeatService.setNotificationManager(notificationManager)
         heartbeatService.setChangeJournalService(heartbeatChangeJournalService)
+        heartbeatService.setWorkQueueService(workQueueService)
         heartbeatService.setProactiveHandler { [weak viewModel] message in
             guard let viewModel else { return }
             Log.app.info("Heartbeat proactive message: \(message)")

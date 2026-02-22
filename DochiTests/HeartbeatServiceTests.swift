@@ -20,6 +20,53 @@ final class HeartbeatServiceTests: XCTestCase {
         }
     }
 
+    private final class MockWorkQueueService: WorkQueueServiceProtocol {
+        private(set) var items: [WorkItem] = []
+        private(set) var enqueueCallCount = 0
+        private(set) var enqueuedDrafts: [WorkItemDraft] = []
+
+        @discardableResult
+        func enqueue(_ draft: WorkItemDraft, now: Date) -> WorkItem? {
+            enqueueCallCount += 1
+            enqueuedDrafts.append(draft)
+            let item = WorkItem(
+                source: draft.source,
+                title: draft.title,
+                detail: draft.detail,
+                repositoryRoot: draft.repositoryRoot,
+                severity: draft.severity,
+                suggestedAction: draft.suggestedAction,
+                dedupeKey: draft.dedupeKey,
+                createdAt: now,
+                dueAt: draft.dueAt,
+                expiresAt: draft.ttl.map { now.addingTimeInterval($0) },
+                updatedAt: now
+            )
+            items.append(item)
+            return item
+        }
+
+        @discardableResult
+        func transitionItem(id: UUID, to status: WorkItemStatus, now: Date) -> WorkItem? {
+            guard let index = items.firstIndex(where: { $0.id == id }) else { return nil }
+            var updated = items[index]
+            updated.status = status
+            updated.updatedAt = now
+            items[index] = updated
+            return updated
+        }
+
+        func recentItems(limit: Int, status: WorkItemStatus?, now _: Date) -> [WorkItem] {
+            guard limit > 0 else { return [] }
+            let filtered = status.map { target in
+                items.filter { $0.status == target }
+            } ?? items
+            return Array(filtered.suffix(limit).reversed())
+        }
+
+        func pruneExpiredItems(now _: Date) {}
+    }
+
     private func makeViewModelForOpportunityTests() -> DochiViewModel {
         let contextService = MockContextService()
         let settings = AppSettings()
@@ -558,6 +605,48 @@ final class HeartbeatServiceTests: XCTestCase {
 
         XCTAssertGreaterThan(journal.appendCallCount, 0)
         XCTAssertTrue(journal.entries.contains { $0.event.eventType == .codingSessionEnded })
+    }
+
+    func testTickBridgesDetectedChangesIntoWorkQueue() async throws {
+        let settings = AppSettings()
+        settings.heartbeatEnabled = true
+        settings.heartbeatCheckCalendar = false
+        settings.heartbeatCheckKanban = false
+        settings.heartbeatCheckReminders = false
+        settings.heartbeatTrackGitChanges = true
+        settings.heartbeatTrackCodingSessionChanges = true
+        settings.heartbeatQuietHoursStart = 0
+        settings.heartbeatQuietHoursEnd = 0
+
+        let service = HeartbeatService(settings: settings)
+        let externalToolManager = MockExternalToolSessionManager()
+        let workQueue = MockWorkQueueService()
+        service.setExternalToolManager(externalToolManager)
+        service.setWorkQueueService(workQueue)
+
+        externalToolManager.mockGitRepositoryInsights = [makeGitInsight(path: "/tmp/repo-a")]
+        externalToolManager.mockUnifiedCodingSessions = [
+            makeUnifiedSession(
+                nativeSessionId: "session-1",
+                path: "tmux://session-1",
+                repositoryRoot: "/tmp/repo-a",
+                activityState: .active
+            ),
+        ]
+        await service.runTickForTesting() // baseline
+
+        externalToolManager.mockUnifiedCodingSessions = []
+        await service.runTickForTesting() // session ended
+
+        XCTAssertGreaterThan(workQueue.enqueueCallCount, 0)
+        let endedDraft = try XCTUnwrap(
+            workQueue.enqueuedDrafts.first(where: {
+                $0.dedupeKey.contains(HeartbeatChangeEventType.codingSessionEnded.rawValue)
+            })
+        )
+        XCTAssertEqual(endedDraft.source, .heartbeat)
+        XCTAssertEqual(endedDraft.repositoryRoot, "/tmp/repo-a")
+        XCTAssertEqual(endedDraft.suggestedAction, "bridge.orchestrator.status")
     }
 
     func testTickSendsChangeAlertToTelegramWhenEnabled() async {
