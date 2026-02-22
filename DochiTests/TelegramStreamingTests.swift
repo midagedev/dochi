@@ -329,6 +329,78 @@ final class TelegramStreamingTests: XCTestCase {
         XCTAssertNil(body)
     }
 
+    // MARK: - TelegramService Fallback
+
+    func testTelegramServiceRetriesWithoutMarkdownOnParseError() async throws {
+        let parseErrorBody = """
+        {"ok":false,"error_code":400,"description":"Bad Request: can't parse entities: Can't find end of the entity"}
+        """.data(using: .utf8)!
+        let successBody = """
+        {"ok":true,"result":{"message_id":77}}
+        """.data(using: .utf8)!
+
+        let lock = NSLock()
+        var requestBodies: [[String: Any]] = []
+
+        TelegramURLProtocolStub.reset()
+        defer { TelegramURLProtocolStub.reset() }
+        TelegramURLProtocolStub.enqueue { request in
+            let body = try Self.decodeJSONBody(from: request)
+            lock.lock()
+            requestBodies.append(body)
+            lock.unlock()
+            return (200, parseErrorBody)
+        }
+        TelegramURLProtocolStub.enqueue { request in
+            let body = try Self.decodeJSONBody(from: request)
+            lock.lock()
+            requestBodies.append(body)
+            lock.unlock()
+            return (200, successBody)
+        }
+
+        let service = TelegramService(
+            token: "test-token",
+            session: makeStubbedSession()
+        )
+        let messageId = try await service.sendMessage(chatId: 42, text: "*broken markdown")
+
+        XCTAssertEqual(messageId, 77)
+        XCTAssertEqual(requestBodies.count, 2)
+        XCTAssertEqual(requestBodies[0]["parse_mode"] as? String, "Markdown")
+        XCTAssertNil(requestBodies[1]["parse_mode"])
+    }
+
+    func testTelegramServiceClampsVeryLongMessages() async throws {
+        let successBody = """
+        {"ok":true,"result":{"message_id":88}}
+        """.data(using: .utf8)!
+        let longText = String(repeating: "a", count: 5_000)
+
+        let lock = NSLock()
+        var sentText: String?
+
+        TelegramURLProtocolStub.reset()
+        defer { TelegramURLProtocolStub.reset() }
+        TelegramURLProtocolStub.enqueue { request in
+            let body = try Self.decodeJSONBody(from: request)
+            lock.lock()
+            sentText = body["text"] as? String
+            lock.unlock()
+            return (200, successBody)
+        }
+
+        let service = TelegramService(
+            token: "test-token",
+            session: makeStubbedSession()
+        )
+        _ = try await service.sendMessage(chatId: 42, text: longText)
+
+        let delivered = try XCTUnwrap(sentText)
+        XCTAssertLessThanOrEqual(delivered.count, 4_096)
+        XCTAssertTrue(delivered.contains("생략되었습니다"))
+    }
+
     // Helper: replicates TelegramService.offsetKey logic for testing
     private func offsetKey(for token: String) -> String {
         let hash = SHA256.hash(data: Data(token.utf8))
@@ -336,4 +408,117 @@ final class TelegramStreamingTests: XCTestCase {
         return "telegram_offset_\(prefix)"
     }
 
+    private func makeStubbedSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TelegramURLProtocolStub.self]
+        return URLSession(configuration: config)
+    }
+
+    private static func decodeJSONBody(from request: URLRequest) throws -> [String: Any] {
+        let body: Data
+        if let inline = request.httpBody {
+            body = inline
+        } else if let stream = request.httpBodyStream {
+            body = try readAll(from: stream)
+        } else {
+            throw NSError(domain: "TelegramStreamingTests", code: -1, userInfo: [NSLocalizedDescriptionKey: "Request body missing"])
+        }
+        guard let json = try JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            throw NSError(domain: "TelegramStreamingTests", code: -2, userInfo: [NSLocalizedDescriptionKey: "Invalid JSON body"])
+        }
+        return json
+    }
+
+    private static func readAll(from stream: InputStream) throws -> Data {
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 4096
+        var buffer = [UInt8](repeating: 0, count: bufferSize)
+
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: bufferSize)
+            if read < 0 {
+                throw stream.streamError ?? NSError(
+                    domain: "TelegramStreamingTests",
+                    code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to read request body stream"]
+                )
+            }
+            if read == 0 {
+                break
+            }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
+
+}
+
+private final class TelegramURLProtocolStub: URLProtocol {
+    nonisolated(unsafe) private static let lock = NSLock()
+    nonisolated(unsafe) private static var handlers: [(URLRequest) throws -> (Int, Data)] = []
+
+    static func enqueue(_ handler: @escaping (URLRequest) throws -> (Int, Data)) {
+        lock.lock()
+        handlers.append(handler)
+        lock.unlock()
+    }
+
+    static func reset() {
+        lock.lock()
+        handlers.removeAll()
+        lock.unlock()
+    }
+
+    private static func dequeue() -> ((URLRequest) throws -> (Int, Data))? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !handlers.isEmpty else { return nil }
+        return handlers.removeFirst()
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.dequeue() else {
+            client?.urlProtocol(
+                self,
+                didFailWithError: NSError(
+                    domain: "TelegramURLProtocolStub",
+                    code: -1000,
+                    userInfo: [NSLocalizedDescriptionKey: "No queued stub response"]
+                )
+            )
+            return
+        }
+
+        do {
+            let (statusCode, data) = try handler(request)
+            guard let url = request.url,
+                  let response = HTTPURLResponse(
+                      url: url,
+                      statusCode: statusCode,
+                      httpVersion: nil,
+                      headerFields: ["Content-Type": "application/json"]
+                  ) else {
+                throw NSError(domain: "TelegramURLProtocolStub", code: -1001, userInfo: nil)
+            }
+
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

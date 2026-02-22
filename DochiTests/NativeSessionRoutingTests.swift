@@ -356,6 +356,46 @@ final class NativeSessionRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testTelegramMessageSendsFailureNoticeOnNativeLoopThrow() async {
+        let adapter = StubNativeProviderAdapter(
+            provider: .anthropic,
+            eventsPerRequest: [[]],
+            errorsPerRequest: [
+                NativeLLMError(
+                    code: .network,
+                    message: "network down",
+                    statusCode: nil,
+                    retryAfterSeconds: nil
+                ),
+            ]
+        )
+        let nativeService = NativeAgentLoopService(
+            adapters: [adapter],
+            toolService: MockBuiltInToolService()
+        )
+
+        let viewModel = makeViewModel(
+            provider: .anthropic,
+            nativeLoopService: nativeService,
+            telegramStreamReplies: false
+        )
+        let telegram = MockTelegramService()
+        viewModel.setTelegramService(telegram)
+
+        await viewModel.handleTelegramMessage(TelegramUpdate(
+            updateId: 99,
+            chatId: 123_456,
+            senderId: 42,
+            senderUsername: "tester",
+            text: "ping"
+        ))
+
+        XCTAssertEqual(adapter.callCount, 1)
+        XCTAssertEqual(telegram.sentMessages.last?.chatId, 123_456)
+        XCTAssertTrue(telegram.sentMessages.last?.text.contains("요청 처리 중 오류가 발생했습니다") == true)
+    }
+
+    @MainActor
     func testTelegramBridgeCommandBypassesNativeLoop() async throws {
         let adapter = StubNativeProviderAdapter(
             provider: .anthropic,

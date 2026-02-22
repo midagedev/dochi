@@ -135,6 +135,8 @@ private enum TelegramConstants {
     static let baseURL = "https://api.telegram.org/bot"
     static let pollTimeout = 30
     static let reconnectDelay: UInt64 = 5_000_000_000 // 5초 (nanoseconds)
+    static let maxMessageLength = 4_096
+    static let truncatedMessageSuffix = "\n\n… (메시지가 길어 일부가 생략되었습니다)"
 }
 
 // MARK: - TelegramService
@@ -157,7 +159,13 @@ final class TelegramService: TelegramServiceProtocol {
 
     // MARK: - Init
 
-    init() {
+    init(token: String? = nil, session: URLSession? = nil) {
+        self.token = token
+        if let session {
+            self.session = session
+            return
+        }
+
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = TimeInterval(TelegramConstants.pollTimeout + 10)
         self.session = URLSession(configuration: config)
@@ -197,40 +205,50 @@ final class TelegramService: TelegramServiceProtocol {
 
     func sendMessage(chatId: Int64, text: String) async throws -> Int64 {
         guard let token else { throw TelegramError.invalidToken }
+        let clampedText = Self.clampMessageLength(text)
 
-        let params: [String: Any] = [
-            "chat_id": chatId,
-            "text": text,
-            "parse_mode": "Markdown"
-        ]
-
-        let result: APISendMessageResult = try await callAPI(
-            token: token,
-            method: "sendMessage",
-            params: params
-        )
-
-        Log.telegram.debug("메시지 전송 완료: chatId=\(chatId), messageId=\(result.messageId)")
-        return result.messageId
+        do {
+            let result: APISendMessageResult = try await callAPI(
+                token: token,
+                method: "sendMessage",
+                params: Self.makeTextParams(chatId: chatId, messageId: nil, text: clampedText, useMarkdown: true)
+            )
+            Log.telegram.debug("메시지 전송 완료: chatId=\(chatId), messageId=\(result.messageId)")
+            return result.messageId
+        } catch let TelegramError.apiError(code, description)
+            where Self.shouldRetryWithoutMarkdown(code: code, description: description) {
+            Log.telegram.warning("Markdown 파싱 실패로 일반 텍스트 재시도: \(description)")
+            let result: APISendMessageResult = try await callAPI(
+                token: token,
+                method: "sendMessage",
+                params: Self.makeTextParams(chatId: chatId, messageId: nil, text: clampedText, useMarkdown: false)
+            )
+            Log.telegram.debug("메시지 전송 완료(plain): chatId=\(chatId), messageId=\(result.messageId)")
+            return result.messageId
+        }
     }
 
     func editMessage(chatId: Int64, messageId: Int64, text: String) async throws {
         guard let token else { throw TelegramError.invalidToken }
+        let clampedText = Self.clampMessageLength(text)
 
-        let params: [String: Any] = [
-            "chat_id": chatId,
-            "message_id": messageId,
-            "text": text,
-            "parse_mode": "Markdown"
-        ]
-
-        let _: APISendMessageResult = try await callAPI(
-            token: token,
-            method: "editMessageText",
-            params: params
-        )
-
-        Log.telegram.debug("메시지 수정 완료: chatId=\(chatId), messageId=\(messageId)")
+        do {
+            let _: APISendMessageResult = try await callAPI(
+                token: token,
+                method: "editMessageText",
+                params: Self.makeTextParams(chatId: chatId, messageId: messageId, text: clampedText, useMarkdown: true)
+            )
+            Log.telegram.debug("메시지 수정 완료: chatId=\(chatId), messageId=\(messageId)")
+        } catch let TelegramError.apiError(code, description)
+            where Self.shouldRetryWithoutMarkdown(code: code, description: description) {
+            Log.telegram.warning("Markdown 파싱 실패로 일반 텍스트 수정 재시도: \(description)")
+            let _: APISendMessageResult = try await callAPI(
+                token: token,
+                method: "editMessageText",
+                params: Self.makeTextParams(chatId: chatId, messageId: messageId, text: clampedText, useMarkdown: false)
+            )
+            Log.telegram.debug("메시지 수정 완료(plain): chatId=\(chatId), messageId=\(messageId)")
+        }
     }
 
     func sendChatAction(chatId: Int64, action: String) async throws {
@@ -659,6 +677,40 @@ final class TelegramService: TelegramServiceProtocol {
     }
 
     // MARK: - Private: API Call
+
+    private nonisolated static func makeTextParams(
+        chatId: Int64,
+        messageId: Int64?,
+        text: String,
+        useMarkdown: Bool
+    ) -> [String: Any] {
+        var params: [String: Any] = [
+            "chat_id": chatId,
+            "text": text
+        ]
+        if let messageId {
+            params["message_id"] = messageId
+        }
+        if useMarkdown {
+            params["parse_mode"] = "Markdown"
+        }
+        return params
+    }
+
+    private nonisolated static func shouldRetryWithoutMarkdown(code: Int, description: String) -> Bool {
+        guard code == 400 else { return false }
+        let lowered = description.lowercased()
+        return lowered.contains("parse entities")
+            || lowered.contains("can't find end of")
+            || lowered.contains("entity")
+    }
+
+    private nonisolated static func clampMessageLength(_ text: String) -> String {
+        guard text.count > TelegramConstants.maxMessageLength else { return text }
+        let suffix = TelegramConstants.truncatedMessageSuffix
+        let maxPrefixCount = max(0, TelegramConstants.maxMessageLength - suffix.count)
+        return String(text.prefix(maxPrefixCount)) + suffix
+    }
 
     private nonisolated func callAPI<T: Decodable>(
         token: String,

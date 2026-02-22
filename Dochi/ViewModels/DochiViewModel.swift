@@ -2910,6 +2910,12 @@ final class DochiViewModel {
             }
         } catch {
             Log.telegram.error("Telegram response failed: \(error.localizedDescription)")
+            if let tg = getTelegramService() {
+                _ = try? await tg.sendMessage(
+                    chatId: update.chatId,
+                    text: "요청 처리 중 오류가 발생했습니다: \(error.localizedDescription)"
+                )
+            }
         }
     }
 
