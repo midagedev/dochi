@@ -8,6 +8,7 @@ struct SubscriptionEditSheet: View {
 
     @State private var providerName: String = ""
     @State private var planName: String = ""
+    @State private var usageSource: SubscriptionUsageSource = .externalToolLogs
     @State private var isUnlimited: Bool = false
     @State private var monthlyTokenLimit: String = ""
     @State private var resetDay: Int = 1
@@ -39,6 +40,19 @@ struct SubscriptionEditSheet: View {
                 // Plan name
                 TextField("플랜명", text: $planName)
                     .textFieldStyle(.roundedBorder)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker("사용량 소스", selection: $usageSource) {
+                        ForEach(SubscriptionUsageSource.allCases, id: \.self) { source in
+                            Text(source.displayName).tag(source)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(usageSource.detailText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
 
                 // Token limit
                 Toggle("무제한", isOn: $isUnlimited)
@@ -93,34 +107,59 @@ struct SubscriptionEditSheet: View {
             }
             .padding()
         }
-        .frame(width: 420, height: 380)
+        .frame(width: 420, height: 430)
         .onAppear {
             if let sub = subscription {
                 providerName = sub.providerName
                 planName = sub.planName
+                usageSource = sub.usageSource
                 isUnlimited = sub.monthlyTokenLimit == nil
                 monthlyTokenLimit = sub.monthlyTokenLimit.map(String.init) ?? ""
                 resetDay = sub.resetDayOfMonth
                 monthlyCost = String(format: "%.2f", sub.monthlyCostUSD)
             } else {
                 providerName = providerOptions[0]
+                usageSource = .externalToolLogs
             }
         }
     }
 
     private func save() {
+        let plan = Self.makePlan(
+            subscription: subscription,
+            providerName: providerName,
+            planName: planName,
+            usageSource: usageSource,
+            isUnlimited: isUnlimited,
+            monthlyTokenLimit: monthlyTokenLimit,
+            resetDay: resetDay,
+            monthlyCost: monthlyCost
+        )
+        onSave(plan)
+    }
+
+    static func makePlan(
+        subscription: SubscriptionPlan?,
+        providerName: String,
+        planName: String,
+        usageSource: SubscriptionUsageSource,
+        isUnlimited: Bool,
+        monthlyTokenLimit: String,
+        resetDay: Int,
+        monthlyCost: String
+    ) -> SubscriptionPlan {
         let tokenLimit: Int? = isUnlimited ? nil : Int(monthlyTokenLimit)
         let cost = Double(monthlyCost) ?? 0
 
-        let plan = SubscriptionPlan(
+        return SubscriptionPlan(
             id: subscription?.id ?? UUID(),
             providerName: providerName,
             planName: planName,
+            usageSource: usageSource,
             monthlyTokenLimit: tokenLimit,
             resetDayOfMonth: resetDay,
             monthlyCostUSD: cost,
             createdAt: subscription?.createdAt ?? Date()
         )
-        onSave(plan)
     }
 }
