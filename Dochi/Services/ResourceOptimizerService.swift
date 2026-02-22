@@ -257,7 +257,9 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
             gitCandidates = []
         }
 
-        let utilizations = await allUtilizations()
+        let utilizations = (await allUtilizations()).filter {
+            $0.subscription.usageSource == .externalToolLogs
+        }
         let now = Date()
         var queuedCount = 0
 
