@@ -60,6 +60,37 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertGreaterThan(GitRepositoryInsightScorer.score(dirty), GitRepositoryInsightScorer.score(clean))
     }
 
+    func testDiscoverIncludesLatestCommitHeadlineContext() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-insight-headline-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let repoPath = tempRoot.appendingPathComponent("headline-repo", isDirectory: true).path
+        let initializedPath = try ExternalToolSessionManager.initializeGitRepository(
+            atPath: repoPath,
+            defaultBranch: "main",
+            createReadme: false,
+            createGitignore: false
+        )
+
+        try runGit(args: ["config", "user.email", "dochi-tests@example.com"], at: initializedPath)
+        try runGit(args: ["config", "user.name", "Dochi Tests"], at: initializedPath)
+
+        let noteURL = URL(fileURLWithPath: initializedPath).appendingPathComponent("note.txt")
+        try "hello".data(using: .utf8)?.write(to: noteURL)
+        try runGit(args: ["add", "note.txt"], at: initializedPath)
+        try runGit(args: ["commit", "-m", "feat: expose latest commit context in explorer"], at: initializedPath)
+
+        let insights = GitRepositoryInsightScanner.discover(
+            searchPaths: [initializedPath],
+            limit: 10
+        )
+        let insight = try XCTUnwrap(insights.first(where: { $0.path == initializedPath }))
+        XCTAssertEqual(insight.lastCommitSubject, "feat: expose latest commit context in explorer")
+        XCTAssertNotNil(insight.lastCommitShortHash)
+        XCTAssertFalse(insight.lastCommitShortHash?.isEmpty ?? true)
+    }
+
     func testInitializeGitRepositoryCreatesExpectedFiles() throws {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("dochi-repo-init-\(UUID().uuidString)", isDirectory: true)
@@ -1314,5 +1345,22 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertEqual(item?.title, "브랜치 기반 매핑")
         XCTAssertEqual(item?.titleSource, "claude_sessions_index_git_branch_match")
         XCTAssertNotNil(item?.titleConfidence)
+    }
+
+    private func runGit(args: [String], at path: String) throws {
+        let process = Process()
+        let outputPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git", "-C", path] + args
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus != 0 {
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            XCTFail("git command failed: git -C \(path) \(args.joined(separator: " "))\n\(output)")
+        }
     }
 }

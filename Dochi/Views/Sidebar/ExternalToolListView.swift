@@ -45,6 +45,8 @@ struct ExternalToolListView: View {
     @State private var startingProfileId: UUID?
     @State private var startErrorMessage: String?
     @State private var unifiedSessions: [UnifiedCodingSession] = []
+    @State private var discoveredSessions: [DiscoveredCodingSession] = []
+    @State private var gitInsights: [GitRepositoryInsight] = []
     @State private var isRefreshingUnified = false
     @State private var explorerFilter = SessionExplorerFilter()
     @State private var sortOption: SessionExplorerSortOption = .activity
@@ -119,6 +121,14 @@ struct ExternalToolListView: View {
         SessionExplorerViewStateBuilder.repositorySummaries(from: unifiedSessions)
     }
 
+    private var gitInsightByRepositoryPath: [String: GitRepositoryInsight] {
+        Dictionary(
+            uniqueKeysWithValues: gitInsights.map { insight in
+                (normalizedRepositoryPath(insight.path), insight)
+            }
+        )
+    }
+
     private var repositorySessionGroups: [RepositorySessionGroup] {
         SessionExplorerViewStateBuilder.repositoryGroups(
             sessions: filteredUnifiedSessions.filter { !$0.isUnassigned },
@@ -155,6 +165,28 @@ struct ExternalToolListView: View {
         unifiedSessions
             .filter(\.isUnassigned)
             .sorted(by: ExternalToolSessionManager.isPreferredUnifiedSessionOrder(_:_:))
+    }
+
+    private var recentDiscoveredSessions: [DiscoveredCodingSession] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let filtered = discoveredSessions.filter { session in
+            guard !query.isEmpty else { return true }
+            let haystack = [
+                session.provider,
+                session.sessionId,
+                session.path,
+                session.workingDirectory ?? "",
+                session.title ?? "",
+                session.summary ?? "",
+                session.originator ?? "",
+                session.sessionSource ?? "",
+                session.clientKind ?? "",
+            ]
+            .joined(separator: " ")
+            .lowercased()
+            return haystack.contains(query)
+        }
+        return Array(filtered.prefix(20))
     }
 
     private var repositoryFilterOptions: [String] {
@@ -291,6 +323,7 @@ struct ExternalToolListView: View {
                 observabilitySectionHeader
                 repoDashboardSection
                 sessionExplorerSection
+                discoveredSessionSection
                 orchestrationLoopSection
                 unassignedQueueSection
                 sessionHistorySection
@@ -333,7 +366,7 @@ struct ExternalToolListView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("세션 탐색기")
                     .font(.system(size: 13, weight: .semibold))
-                Text("Repo-first 탐색 / quick action / Unassigned 매핑")
+                Text("Repo-first 탐색 / 세션 메타 / Git 변화 지표")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -368,6 +401,9 @@ struct ExternalToolListView: View {
                     ForEach(repositorySummaries) { summary in
                         let representative = representativeSession(for: summary.repositoryRoot)
                         let workSummary = representative.flatMap { sessionWorkSummary($0) }
+                        let insight = summary.repositoryRoot.flatMap { root in
+                            gitInsightByRepositoryPath[normalizedRepositoryPath(root)]
+                        }
                         let isFocused = focusedRepositoryKey == summary.id
                         let isHovered = hoveredRepositoryKey == summary.id
                         Button {
@@ -386,18 +422,30 @@ struct ExternalToolListView: View {
                                         .foregroundStyle(workSummaryColor(representative))
                                         .lineLimit(2)
                                 } else {
-                                    Text("현재 작업: 정보 없음")
+                                    Text("현재 작업: 현재 작업 정보 없음")
                                         .font(.system(size: 9))
                                         .foregroundStyle(.tertiary)
                                         .lineLimit(1)
                                 }
                                 if let repositoryRoot = summary.repositoryRoot {
-                                    let branch = managedRepositories.first(where: {
-                                        URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path == repositoryRoot
-                                    })?.defaultBranch ?? "-"
+                                    let managedBranch = managedRepositories.first(where: {
+                                        normalizedRepositoryPath($0.rootPath) == normalizedRepositoryPath(repositoryRoot)
+                                    })?.defaultBranch
+                                    let branch = insight?.branch ?? managedBranch ?? "-"
                                     Text("브랜치 \(branch) · 업데이트 \(relativeTimestamp(representative?.updatedAt ?? summary.lastActivityAt))")
                                         .font(.system(size: 9))
                                         .foregroundStyle(.tertiary)
+                                    if let commitContext = repositoryCommitContext(insight) {
+                                        Text("최근 커밋: \(commitContext)")
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.tertiary)
+                                            .lineLimit(1)
+                                    } else {
+                                        Text("최근 커밋: 최근 커밋 정보 없음")
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.tertiary)
+                                            .lineLimit(1)
+                                    }
                                 } else {
                                     Text("Unassigned · 업데이트 \(relativeTimestamp(representative?.updatedAt ?? summary.lastActivityAt))")
                                         .font(.system(size: 9))
@@ -453,6 +501,63 @@ struct ExternalToolListView: View {
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private var discoveredSessionSection: some View {
+        sectionHeader("Recent File Sessions")
+
+        if recentDiscoveredSessions.isEmpty {
+            Text("표시할 최근 파일 세션이 없습니다.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        } else {
+            ForEach(recentDiscoveredSessions, id: \.path) { session in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("[\(session.provider)] \(session.sessionId)")
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                        Text("file")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+
+                    if let title = normalizedDiscoveredTitle(session) {
+                        Text(title)
+                            .font(.system(size: 10))
+                            .lineLimit(1)
+                    }
+
+                    if let summary = normalizedDiscoveredSummary(session) {
+                        Text(summary)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    if let descriptor = discoveredClientDescriptor(session) {
+                        Text(descriptor)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Text("업데이트 \(relativeTimestamp(session.updatedAt)) · \(session.workingDirectory ?? session.path)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+        }
     }
 
     @ViewBuilder
@@ -954,6 +1059,23 @@ struct ExternalToolListView: View {
                                 .font(.system(size: 9))
                                 .foregroundStyle(workSummaryColor(session))
                                 .lineLimit(2)
+                        } else {
+                            Text("현재 작업: 현재 작업 정보 없음")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+
+                        if let commitContext = repositoryCommitContext(for: session.repositoryRoot) {
+                            Text("최근 커밋: \(commitContext)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        } else {
+                            Text("최근 커밋: 최근 커밋 정보 없음")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
                         }
 
                         if let clientDescriptor = sessionClientDescriptor(session) {
@@ -965,7 +1087,7 @@ struct ExternalToolListView: View {
 
                         Text("state=\(session.activityState.rawValue), score=\(session.activityScore), repo=\(session.repositoryRoot ?? "(unassigned)")")
                             .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tertiary)
                             .lineLimit(1)
 
                         Text("업데이트 \(relativeTimestamp(session.updatedAt))")
@@ -1152,7 +1274,12 @@ struct ExternalToolListView: View {
     private func refreshUnifiedSessions() async {
         guard !isRefreshingUnified else { return }
         isRefreshingUnified = true
-        unifiedSessions = await manager.listUnifiedCodingSessions(limit: 180)
+        async let unified = manager.listUnifiedCodingSessions(limit: 180)
+        async let discovered = manager.discoverLocalCodingSessions(limit: 120)
+        async let insights = manager.discoverGitRepositoryInsights(searchPaths: nil, limit: 60)
+        unifiedSessions = await unified
+        discoveredSessions = await discovered
+        gitInsights = await insights
         if let repositoryRoot = explorerFilter.repositoryRoot {
             explorerFilter.repositoryRoot = normalizedRepositoryPath(repositoryRoot)
         }
@@ -1601,7 +1728,91 @@ struct ExternalToolListView: View {
         return .secondary
     }
 
+    private func repositoryCommitContext(for repositoryRoot: String?) -> String? {
+        guard let repositoryRoot else { return nil }
+        let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
+        guard let insight = gitInsightByRepositoryPath[normalizedRoot] else { return nil }
+        return repositoryCommitContext(insight)
+    }
+
+    private func repositoryCommitContext(_ insight: GitRepositoryInsight?) -> String? {
+        guard let insight else { return nil }
+        let shortHash = insight.lastCommitShortHash?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = insight.lastCommitSubject?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        let relative = insight.lastCommitRelative.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let shortHash, !shortHash.isEmpty,
+           let subject, !subject.isEmpty {
+            return "\(shortHash) \(String(subject.prefix(90))) · \(relative)"
+        }
+        if let subject, !subject.isEmpty {
+            return "\(String(subject.prefix(90))) · \(relative)"
+        }
+        if let shortHash, !shortHash.isEmpty {
+            return "\(shortHash) · \(relative)"
+        }
+        if !relative.isEmpty, relative != "-" {
+            return relative
+        }
+        return nil
+    }
+
+    private func normalizedDiscoveredTitle(_ session: DiscoveredCodingSession) -> String? {
+        let raw = session.title ?? session.summary
+        let normalized = raw?
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let normalized, !normalized.isEmpty else { return nil }
+        return String(normalized.prefix(100))
+    }
+
+    private func normalizedDiscoveredSummary(_ session: DiscoveredCodingSession) -> String? {
+        guard let raw = session.summary else { return nil }
+        let normalized = raw
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        if let title = normalizedDiscoveredTitle(session), title == normalized {
+            return nil
+        }
+        return String(normalized.prefix(160))
+    }
+
     private func sessionClientDescriptor(_ session: UnifiedCodingSession) -> String? {
+        var parts: [String] = []
+        if session.provider.lowercased() == "codex" {
+            switch session.clientKind {
+            case "desktop":
+                parts.append("Codex Desktop")
+            case "cli":
+                parts.append("Codex CLI")
+            case "unknown":
+                parts.append("Codex")
+            default:
+                if let originator = session.originator {
+                    parts.append(originator)
+                }
+            }
+        } else if let originator = session.originator {
+            parts.append(originator)
+        }
+
+        if let sessionSource = session.sessionSource, !sessionSource.isEmpty {
+            parts.append("src=\(sessionSource)")
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " · ")
+    }
+
+    private func discoveredClientDescriptor(_ session: DiscoveredCodingSession) -> String? {
         var parts: [String] = []
         if session.provider.lowercased() == "codex" {
             switch session.clientKind {

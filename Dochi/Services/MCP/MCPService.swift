@@ -771,21 +771,12 @@ final class MCPService: MCPServiceProtocol {
             return "[image: \(mimeType), \(data.count) bytes]"
         case .audio(let data, let mimeType):
             return "[audio: \(mimeType), \(data.count) bytes]"
-        case .resource(let resource, _, _):
-            if let text = resource.text, !text.isEmpty {
+        case let .resource(uri, mimeType, text):
+            if let text, !text.isEmpty {
                 return text
             }
-            let mimeType = resource.mimeType ?? "unknown"
-            if let blob = resource.blob, !blob.isEmpty {
-                return "[resource: \(resource.uri), \(mimeType), \(blob.count) chars(base64)]"
-            }
-            return "[resource: \(resource.uri), \(mimeType)]"
-        case let .resourceLink(uri, name, title, _, mimeType, _):
-            let label = title ?? name
-            if let mimeType, !mimeType.isEmpty {
-                return "[resource-link: \(label), \(mimeType), \(uri)]"
-            }
-            return "[resource-link: \(label), \(uri)]"
+            let effectiveMimeType = mimeType.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "[resource: \(uri), \(effectiveMimeType.isEmpty ? "unknown" : effectiveMimeType)]"
         }
     }
 
