@@ -412,6 +412,7 @@ final class ResourceOptimizerTests: XCTestCase {
 
         XCTAssertEqual(decoded.providerName, "OpenAI")
         XCTAssertEqual(decoded.planName, "Pro")
+        XCTAssertEqual(decoded.usageSource, .dochiUsageStore)
         XCTAssertNil(decoded.monthlyTokenLimit)
         XCTAssertEqual(decoded.resetDayOfMonth, 1)
         XCTAssertEqual(decoded.monthlyCostUSD, 0)
@@ -481,6 +482,80 @@ final class ResourceOptimizerTests: XCTestCase {
 
         XCTAssertEqual(util.usageRatio, 0)
         XCTAssertEqual(util.currentUnusedPercent, 0)
+    }
+
+    func testUtilizationUsesDochiUsageStoreWhenSourceIsDochiUsageStore() async {
+        let usageDir = tempDir.appendingPathComponent("usage-source-store")
+        try? FileManager.default.createDirectory(at: usageDir, withIntermediateDirectories: true)
+        let store = UsageStore(baseURL: usageDir)
+        let now = Date()
+
+        await store.record(ExchangeMetrics(
+            provider: "openai",
+            model: "gpt-4o",
+            inputTokens: 120,
+            outputTokens: 80,
+            totalTokens: 200,
+            firstByteLatency: 0.1,
+            totalLatency: 0.3,
+            timestamp: now,
+            wasFallback: false,
+            agentName: "도치"
+        ))
+        await store.flushToDisk()
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-store-source"),
+            usageStore: store,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")]
+        )
+        let plan = SubscriptionPlan(
+            providerName: "openai",
+            planName: "Metered",
+            usageSource: .dochiUsageStore,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+
+        let util = await sourceService.utilization(for: plan)
+        XCTAssertEqual(util.usedTokens, 200)
+    }
+
+    func testUtilizationUsesExternalToolLogsWhenSourceIsExternalToolLogs() async throws {
+        let claudeRoot = tempDir.appendingPathComponent("claude-projects")
+        let codexRoot = tempDir.appendingPathComponent("codex-sessions")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+
+        let activeTime = Date()
+        let inactiveTime = activeTime.addingTimeInterval(-40 * 24 * 60 * 60)
+        let iso = ISO8601DateFormatter()
+
+        let sessionURL = codexRoot.appendingPathComponent("session-1.jsonl")
+        let lines = [
+            "{\"timestamp\":\"\(iso.string(from: activeTime))\",\"usage\":{\"input_tokens\":300,\"output_tokens\":120}}",
+            "{\"timestamp\":\"\(iso.string(from: inactiveTime))\",\"usage\":{\"input_tokens\":999,\"output_tokens\":999}}",
+        ].joined(separator: "\n")
+        try lines.write(to: sessionURL, atomically: true, encoding: .utf8)
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-external-source"),
+            usageStore: nil,
+            claudeProjectsRoots: [claudeRoot],
+            codexSessionsRoots: [codexRoot]
+        )
+
+        let plan = SubscriptionPlan(
+            providerName: "ChatGPT Pro",
+            planName: "Plus",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+
+        let util = await sourceService.utilization(for: plan)
+        XCTAssertEqual(util.usedTokens, 420)
     }
 
     // MARK: - Mock Tests
