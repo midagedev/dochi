@@ -259,6 +259,107 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertTrue(filter.unassignedOnly)
     }
 
+    func testSelectedSessionPrefersStableKeyMatch() {
+        let sessions = [
+            makeSession(
+                provider: "codex",
+                nativeId: "repo-a",
+                repo: "/tmp/repo-a",
+                tier: .t0Full,
+                state: .active,
+                score: 90
+            ),
+            makeSession(
+                provider: "claude",
+                nativeId: "repo-b",
+                repo: "/tmp/repo-b",
+                tier: .t1Attach,
+                state: .idle,
+                score: 61
+            ),
+        ]
+        let selectedKey = ExternalToolSessionManager.sessionStableKey(sessions[1])
+
+        let selected = SessionExplorerViewStateBuilder.selectedSession(
+            sessions: sessions,
+            selectedSessionKey: selectedKey,
+            selectedSessionId: nil
+        )
+
+        XCTAssertEqual(selected?.nativeSessionId, "repo-b")
+    }
+
+    func testSelectedSessionFallsBackToRuntimeSessionId() {
+        let runtimeUUID = UUID()
+        let target = UnifiedCodingSession(
+            source: "runtime",
+            runtimeType: .process,
+            controllabilityTier: .t1Attach,
+            provider: "codex",
+            nativeSessionId: "pid-999",
+            runtimeSessionId: runtimeUUID.uuidString,
+            workingDirectory: "/tmp/repo-a",
+            repositoryRoot: "/tmp/repo-a",
+            path: "/tmp/pid-999",
+            updatedAt: Date(),
+            isActive: true,
+            activityScore: 58,
+            activityState: .idle
+        )
+        let sessions = [
+            makeSession(
+                provider: "claude",
+                nativeId: "other",
+                repo: "/tmp/repo-b",
+                tier: .t2Observe,
+                state: .stale,
+                score: 20
+            ),
+            target,
+        ]
+
+        let selected = SessionExplorerViewStateBuilder.selectedSession(
+            sessions: sessions,
+            selectedSessionKey: nil,
+            selectedSessionId: runtimeUUID
+        )
+
+        XCTAssertEqual(selected?.nativeSessionId, "pid-999")
+    }
+
+    func testSelectedRepositorySummaryMatchesNormalizedFocusedKey() {
+        let summaries = SessionExplorerViewStateBuilder.repositorySummaries(from: [
+            makeSession(
+                provider: "codex",
+                nativeId: "repo-a",
+                repo: "/tmp/repo-a",
+                tier: .t0Full,
+                state: .active,
+                score: 88
+            ),
+            makeSession(
+                provider: "claude",
+                nativeId: "unassigned",
+                repo: nil,
+                tier: .t2Observe,
+                state: .idle,
+                score: 52
+            ),
+        ])
+
+        let selectedRepo = SessionExplorerViewStateBuilder.selectedRepositorySummary(
+            summaries: summaries,
+            focusedRepositoryKey: "/tmp/repo-a/../repo-a"
+        )
+        let selectedUnassigned = SessionExplorerViewStateBuilder.selectedRepositorySummary(
+            summaries: summaries,
+            focusedRepositoryKey: "unassigned"
+        )
+
+        XCTAssertEqual(selectedRepo?.repositoryRoot, "/tmp/repo-a")
+        XCTAssertNil(selectedUnassigned?.repositoryRoot)
+    }
+
     func testFilteredSessionsNormalizesRepositoryRootComparison() {
         let sessions = [
             makeSession(
