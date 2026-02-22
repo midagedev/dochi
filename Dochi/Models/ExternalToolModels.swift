@@ -22,9 +22,11 @@ struct DiscoveredCodingSession: Sendable, Equatable {
     let provider: String
     let sessionId: String
     let workingDirectory: String?
+    let gitBranch: String?
     let path: String
     let updatedAt: Date
     let isActive: Bool
+    let sessionHintKeys: [String]
     let title: String?
     let summary: String?
     let titleSource: String?
@@ -38,9 +40,11 @@ struct DiscoveredCodingSession: Sendable, Equatable {
         provider: String,
         sessionId: String,
         workingDirectory: String?,
+        gitBranch: String? = nil,
         path: String,
         updatedAt: Date,
         isActive: Bool,
+        sessionHintKeys: [String] = [],
         title: String? = nil,
         summary: String? = nil,
         titleSource: String? = nil,
@@ -53,9 +57,11 @@ struct DiscoveredCodingSession: Sendable, Equatable {
         self.provider = provider
         self.sessionId = sessionId
         self.workingDirectory = workingDirectory
+        self.gitBranch = gitBranch
         self.path = path
         self.updatedAt = updatedAt
         self.isActive = isActive
+        self.sessionHintKeys = sessionHintKeys
         self.title = title
         self.summary = summary
         self.titleSource = titleSource
