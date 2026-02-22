@@ -50,4 +50,19 @@ final class MCPServiceContentExtractionTests: XCTestCase {
 
         XCTAssertEqual(summary, "[resource-link: Spec Document, text/html, https://example.com/spec]")
     }
+
+    func testSummarizedToolContentFormatsResourceLinkFallback() {
+        let content: Tool.Content = .resourceLink(
+            uri: "https://example.com/no-meta",
+            name: "fallback-name",
+            title: nil,
+            description: nil,
+            mimeType: nil,
+            annotations: nil
+        )
+
+        let summary = MCPService.summarizedToolContent(content)
+
+        XCTAssertEqual(summary, "[resource-link: fallback-name, https://example.com/no-meta]")
+    }
 }
