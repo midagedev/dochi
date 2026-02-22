@@ -473,6 +473,73 @@ final class ExternalToolSessionManagerMergeTests: XCTestCase {
         XCTAssertEqual(session.summary, "session-file summary")
     }
 
+    func testMergeUnifiedCodingSessionsGeneratesReadableFallbackTitleForOpaqueSessionId() {
+        let now = Date(timeIntervalSince1970: 1_771_640_000)
+        let discovered = DiscoveredCodingSession(
+            source: .codexSessionFile,
+            provider: "codex",
+            sessionId: "019c83ec-61b9-7f12-91e1-e35a58631234",
+            workingDirectory: "/tmp/repo-a",
+            path: "/tmp/codex-session.jsonl",
+            updatedAt: now.addingTimeInterval(-60),
+            isActive: true,
+            sessionHintKeys: ["019c83ec-61b9-7f12-91e1-e35a58631234"],
+            title: nil,
+            summary: nil
+        )
+
+        let merged = ExternalToolSessionManager.mergeUnifiedCodingSessions(
+            runtimeSessions: [],
+            discoveredSessions: [discovered],
+            managedRepositoryRoots: ["/tmp/repo-a"],
+            limit: 10,
+            now: now,
+            config: .standard,
+            includeUnmatchedProcessRuntime: false
+        )
+
+        let session = try? XCTUnwrap(merged.first)
+        XCTAssertNotNil(session)
+        XCTAssertFalse(session?.title?.contains("019c83ec-61b9-7f12-91e1-e35a58631234") ?? true)
+        XCTAssertTrue(session?.title?.contains("repo-a") ?? false)
+        XCTAssertEqual(session?.titleSource, "generated_session_title")
+        XCTAssertNotNil(session?.titleConfidence)
+    }
+
+    func testMergeUnifiedCodingSessionsUsesSummaryFallbackWhenExplicitTitleIsOpaque() {
+        let now = Date(timeIntervalSince1970: 1_771_640_000)
+        let discovered = DiscoveredCodingSession(
+            source: .claudeProjectFile,
+            provider: "claude",
+            sessionId: "session-plain-id",
+            workingDirectory: "/tmp/repo-b",
+            path: "/tmp/claude-session.jsonl",
+            updatedAt: now.addingTimeInterval(-40),
+            isActive: true,
+            sessionHintKeys: ["session-plain-id"],
+            title: "019c83ec-61b9-7f12-91e1-e35a58631234",
+            summary: "ToolRegistryTests 실패 원인 분석",
+            titleSource: nil,
+            titleConfidence: nil
+        )
+
+        let merged = ExternalToolSessionManager.mergeUnifiedCodingSessions(
+            runtimeSessions: [],
+            discoveredSessions: [discovered],
+            managedRepositoryRoots: ["/tmp/repo-b"],
+            limit: 10,
+            now: now,
+            config: .standard,
+            includeUnmatchedProcessRuntime: false
+        )
+
+        let session = try? XCTUnwrap(merged.first)
+        XCTAssertNotNil(session)
+        XCTAssertEqual(session?.title, "ToolRegistryTests 실패 원인 분석")
+        XCTAssertEqual(session?.titleSource, "session_summary_fallback")
+        XCTAssertGreaterThanOrEqual(session?.titleConfidence ?? 0, 0.58)
+    }
+
     func testMergeUnifiedCodingSessionsCanExcludeUnmatchedProcessRuntime() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let processRuntime = ExternalToolSessionManager.RuntimeSessionSnapshot(

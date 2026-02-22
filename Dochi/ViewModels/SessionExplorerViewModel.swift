@@ -251,4 +251,159 @@ enum SessionExplorerViewStateBuilder {
             unassignedOnly: normalizedRoot == nil
         )
     }
+
+    static func displaySessionTitle(for session: UnifiedCodingSession) -> String {
+        if let explicitTitle = normalizedCompactText(session.title, maxLength: 96),
+           !looksLikeOpaqueSessionIdentifier(explicitTitle) {
+            return explicitTitle
+        }
+
+        if let summary = normalizedCompactText(session.summary, maxLength: 96),
+           !looksLikeOpaqueSessionIdentifier(summary) {
+            return summary
+        }
+
+        let repositoryName = normalizedRepositoryPath(session.repositoryRoot ?? session.workingDirectory)
+            .map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Unassigned"
+        let providerLabel = sessionProviderLabel(provider: session.provider, clientKind: session.clientKind)
+        let action = defaultActivityAction(for: session.activityState)
+        return "\(repositoryName) · \(providerLabel) · \(action)"
+    }
+
+    static func displaySessionIdentity(for session: UnifiedCodingSession) -> String {
+        "[\(session.provider)] \(session.nativeSessionId)"
+    }
+
+    static func sessionWorkLine(for session: UnifiedCodingSession) -> String {
+        if let summary = normalizedCompactText(session.summary, maxLength: 120),
+           !looksLikeOpaqueSessionIdentifier(summary),
+           summary != displaySessionTitle(for: session) {
+            return summary
+        }
+        return defaultActivityAction(for: session.activityState)
+    }
+
+    static func sessionResultLine(for session: UnifiedCodingSession) -> String {
+        let stateText: String
+        switch session.activityState {
+        case .active:
+            stateText = "진행 중"
+        case .idle:
+            stateText = "입력 대기"
+        case .stale:
+            stateText = "업데이트 지연"
+        case .dead:
+            stateText = "세션 종료"
+        }
+        if session.activitySignals.errorPenaltyScore > 0 {
+            return "오류 신호 · \(stateText)"
+        }
+        return stateText
+    }
+
+    static func sessionChangeLine(session: UnifiedCodingSession, insight: GitRepositoryInsight?) -> String {
+        guard session.repositoryRoot != nil else { return "레포 미할당" }
+        guard let insight else { return "변경 정보 없음" }
+        return repositoryWorkingTreeLine(for: insight)
+    }
+
+    static func repositoryCommitFeedLines(for insight: GitRepositoryInsight?, limit: Int = 5) -> [String] {
+        guard let insight else { return [] }
+        let normalizedLimit = max(1, min(8, limit))
+
+        if let previews = insight.recentCommitPreviews, !previews.isEmpty {
+            return previews.prefix(normalizedLimit).map { preview in
+                "\(preview.shortHash) \(preview.subject) · \(preview.relative)"
+            }
+        }
+
+        let shortHash = insight.lastCommitShortHash?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = insight.lastCommitSubject?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let relative = insight.lastCommitRelative.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let shortHash, !shortHash.isEmpty,
+           let subject, !subject.isEmpty {
+            return ["\(shortHash) \(subject) · \(relative)"]
+        }
+        return []
+    }
+
+    static func repositoryWorkingTreeLine(for insight: GitRepositoryInsight?) -> String {
+        guard let insight else { return "워킹트리 정보 없음" }
+        let changed = max(0, insight.changedFileCount)
+        let untracked = max(0, insight.untrackedFileCount)
+        let total = changed + untracked
+        guard total > 0 else { return "워킹트리 변경 없음" }
+
+        let preview = Array((insight.changedPathPreview ?? [String]()).prefix(3))
+        if !preview.isEmpty {
+            let remained = max(0, total - preview.count)
+            let suffix = remained > 0 ? " 외 \(remained)개" : ""
+            return "\(preview.joined(separator: ", "))\(suffix)"
+        }
+        return "수정 \(changed) · 신규 \(untracked)"
+    }
+
+    private static func normalizedCompactText(_ raw: String?, maxLength: Int) -> String? {
+        guard let raw else { return nil }
+        let normalized = raw
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        return String(normalized.prefix(max(20, maxLength)))
+    }
+
+    private static func sessionProviderLabel(provider: String, clientKind: String?) -> String {
+        let normalizedProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedProvider == "codex" {
+            switch clientKind {
+            case "desktop":
+                return "Codex Desktop"
+            case "cli":
+                return "Codex CLI"
+            default:
+                return "Codex"
+            }
+        }
+
+        let compact = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        return compact.isEmpty ? "Session" : compact.capitalized
+    }
+
+    private static func defaultActivityAction(for state: CodingSessionActivityState) -> String {
+        switch state {
+        case .active:
+            return "작업 진행 중"
+        case .idle:
+            return "입력 대기 중"
+        case .stale:
+            return "최근 작업 정보가 지연됨"
+        case .dead:
+            return "세션이 종료됨"
+        }
+    }
+
+    private static func looksLikeOpaqueSessionIdentifier(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+
+        if trimmed.range(
+            of: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+
+        let compact = trimmed.lowercased().replacingOccurrences(of: "-", with: "")
+        if compact.count >= 24 {
+            let isHexLike = compact.unicodeScalars.allSatisfy {
+                CharacterSet(charactersIn: "0123456789abcdef").contains($0)
+            }
+            if isHexLike {
+                return true
+            }
+        }
+        return false
+    }
 }

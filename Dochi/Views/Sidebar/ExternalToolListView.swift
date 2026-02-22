@@ -60,6 +60,7 @@ struct ExternalToolListView: View {
     @State private var selectedUnifiedSessionKey: String?
     @State private var hoveredRepositoryKey: String?
     @State private var hoveredUnifiedSessionKey: String?
+    @State private var selectedSessionDebugExpanded = false
     @State private var interactionErrorMessage: String?
     @State private var historyQueryText = ""
     @State private var historyRepositoryFilter: String?
@@ -153,6 +154,22 @@ struct ExternalToolListView: View {
             summaries: repositorySummaries,
             focusedRepositoryKey: focusedRepositoryKey
         )
+    }
+
+    private var dashboardChangeFeedTarget: (summary: RepositoryDashboardSummary, insight: GitRepositoryInsight?)? {
+        if let focusedRepositorySummary {
+            return (
+                focusedRepositorySummary,
+                repositoryInsight(for: focusedRepositorySummary.repositoryRoot)
+            )
+        }
+        if let firstAssigned = repositorySummaries.first(where: { $0.repositoryRoot != nil }) {
+            return (
+                firstAssigned,
+                repositoryInsight(for: firstAssigned.repositoryRoot)
+            )
+        }
+        return nil
     }
 
     private var filteredUnifiedSessions: [UnifiedCodingSession] {
@@ -325,6 +342,9 @@ struct ExternalToolListView: View {
         .onChange(of: explorerFilter.activeOnly) { _, _ in
             Task { await refreshUnifiedSessions() }
         }
+        .onChange(of: selectedUnifiedSessionKey) { _, _ in
+            selectedSessionDebugExpanded = false
+        }
     }
 
     @ViewBuilder
@@ -472,13 +492,19 @@ struct ExternalToolListView: View {
                                     Text("브랜치 \(branch) · 업데이트 \(relativeTimestamp(representative?.updatedAt ?? summary.lastActivityAt))")
                                         .font(.system(size: 9))
                                         .foregroundStyle(.tertiary)
-                                    if let commitContext = repositoryCommitContext(insight) {
-                                        Text("최근 커밋: \(commitContext)")
+                                    Text("변경: \(SessionExplorerViewStateBuilder.repositoryWorkingTreeLine(for: insight))")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                    if let recentCommitLine = SessionExplorerViewStateBuilder
+                                        .repositoryCommitFeedLines(for: insight, limit: 1)
+                                        .first {
+                                        Text("커밋: \(recentCommitLine)")
                                             .font(.system(size: 9))
                                             .foregroundStyle(.tertiary)
                                             .lineLimit(1)
                                     } else {
-                                        Text("최근 커밋: 최근 커밋 정보 없음")
+                                        Text("커밋: 최근 커밋 정보 없음")
                                             .font(.system(size: 9))
                                             .foregroundStyle(.tertiary)
                                             .lineLimit(1)
@@ -517,6 +543,10 @@ struct ExternalToolListView: View {
                 .padding(.horizontal, 10)
             }
             .padding(.bottom, 4)
+
+            repositoryRecentChangeFeedSection
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
         }
 
         HStack(spacing: 8) {
@@ -538,6 +568,48 @@ struct ExternalToolListView: View {
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private var repositoryRecentChangeFeedSection: some View {
+        if let target = dashboardChangeFeedTarget {
+            let commitLines = SessionExplorerViewStateBuilder.repositoryCommitFeedLines(
+                for: target.insight,
+                limit: 5
+            )
+            let workingTreeLine = SessionExplorerViewStateBuilder.repositoryWorkingTreeLine(
+                for: target.insight
+            )
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("최근 변경사항 · \(target.summary.displayName)")
+                    .font(.system(size: 10, weight: .semibold))
+
+                if commitLines.isEmpty {
+                    Text("커밋: 최근 커밋 정보 없음")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(commitLines.enumerated()), id: \.offset) { index, line in
+                        Text("커밋 \(index + 1): \(line)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Text("워킹트리: \(workingTreeLine)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+        }
     }
 
     @ViewBuilder
@@ -690,17 +762,25 @@ struct ExternalToolListView: View {
         let canOpenTerminal = runtimeUUID.map { runtimeId in
             manager.sessions.contains(where: { $0.id == runtimeId })
         } ?? false
+        let sessionTitle = SessionExplorerViewStateBuilder.displaySessionTitle(for: session)
+        let sessionIdentity = SessionExplorerViewStateBuilder.displaySessionIdentity(for: session)
+        let sessionWorkLine = sessionWorkSummary(session) ?? SessionExplorerViewStateBuilder.sessionWorkLine(for: session)
+        let sessionResultLine = SessionExplorerViewStateBuilder.sessionResultLine(for: session)
+        let sessionChangeLine = SessionExplorerViewStateBuilder.sessionChangeLine(
+            session: session,
+            insight: repositoryInsight(for: session.repositoryRoot)
+        )
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text("[\(session.provider)] \(session.nativeSessionId)")
+                Text(sessionTitle)
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
-                Text(session.activityState.rawValue)
+                Text(sessionStatusBadgeLabel(session))
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(activityColor(session.activityState))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.12))
+                    .background(activityColor(session.activityState).opacity(0.16))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 Spacer()
                 Text("업데이트 \(relativeTimestamp(session.updatedAt))")
@@ -708,20 +788,41 @@ struct ExternalToolListView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            Text("현재 작업: \(sessionWorkSummary(session) ?? "현재 작업 정보 없음")")
+            Text(sessionIdentity)
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+
+            Text("진행: \(sessionWorkLine)")
                 .font(.system(size: 10))
                 .foregroundStyle(workSummaryColor(session))
                 .lineLimit(2)
 
-            Text("최근 커밋: \(repositoryCommitContext(for: session.repositoryRoot) ?? "최근 커밋 정보 없음")")
+            Text("결과: \(sessionResultLine)")
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            Text("경로: \(session.workingDirectory ?? session.path)")
+            Text("변경: \(sessionChangeLine)")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text("활동: \(relativeTimestamp(session.updatedAt))")
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
+
+            DisclosureGroup("디버그 메타", isExpanded: $selectedSessionDebugExpanded) {
+                Text(
+                    "state=\(session.activityState.rawValue), score=\(session.activityScore), tier=\(session.controllabilityTier.rawValue), source=\(session.source), repo=\(session.repositoryRoot ?? "(unassigned)")"
+                )
+                .font(.system(size: 8))
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+            }
+            .font(.system(size: 9))
+            .tint(.secondary)
 
             HStack(spacing: 6) {
                 if canOpenTerminal, let runtimeUUID {
@@ -769,7 +870,12 @@ struct ExternalToolListView: View {
     @ViewBuilder
     private func selectedRepositoryDetailCard(_ repository: RepositoryDashboardSummary) -> some View {
         let representative = representativeSession(for: repository.repositoryRoot)
-        let commitContext = repositoryCommitContext(for: repository.repositoryRoot)
+        let insight = repositoryInsight(for: repository.repositoryRoot)
+        let workingTreeLine = SessionExplorerViewStateBuilder.repositoryWorkingTreeLine(for: insight)
+        let commitFeedLines = SessionExplorerViewStateBuilder.repositoryCommitFeedLines(
+            for: insight,
+            limit: 3
+        )
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(repository.displayName)
@@ -801,7 +907,21 @@ struct ExternalToolListView: View {
                     .lineLimit(1)
             }
 
-            Text("최근 커밋: \(commitContext ?? "최근 커밋 정보 없음")")
+            if commitFeedLines.isEmpty {
+                Text("커밋: 최근 커밋 정보 없음")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            } else {
+                ForEach(Array(commitFeedLines.enumerated()), id: \.offset) { index, line in
+                    Text("커밋 \(index + 1): \(line)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+
+            Text("워킹트리: \(workingTreeLine)")
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -1242,8 +1362,14 @@ struct ExternalToolListView: View {
         let runtimeUUID = session.runtimeSessionId.flatMap(UUID.init(uuidString:))
         let isSelected = selectedUnifiedSessionKey == sessionKey || runtimeUUID == selectedSessionId
         let isHovered = hoveredUnifiedSessionKey == sessionKey
-        let sessionTitle = normalizedSessionTitle(session)
-        let workSummary = sessionWorkSummary(session)
+        let sessionTitle = SessionExplorerViewStateBuilder.displaySessionTitle(for: session)
+        let sessionIdentity = SessionExplorerViewStateBuilder.displaySessionIdentity(for: session)
+        let workSummary = sessionWorkSummary(session) ?? SessionExplorerViewStateBuilder.sessionWorkLine(for: session)
+        let resultSummary = SessionExplorerViewStateBuilder.sessionResultLine(for: session)
+        let changeSummary = SessionExplorerViewStateBuilder.sessionChangeLine(
+            session: session,
+            insight: repositoryInsight(for: session.repositoryRoot)
+        )
         HStack(spacing: 8) {
             Button {
                 handleUnifiedSessionTap(session)
@@ -1255,9 +1381,16 @@ struct ExternalToolListView: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
-                            Text("[\(session.provider)] \(session.nativeSessionId)")
-                                .font(.system(size: 11, weight: .medium))
+                            Text(sessionTitle)
+                                .font(.system(size: 11, weight: .semibold))
                                 .lineLimit(1)
+                            Text(sessionStatusBadgeLabel(session))
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(activityColor(session.activityState))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(activityColor(session.activityState).opacity(0.16))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
                             Text(session.controllabilityTier.rawValue)
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(.secondary)
@@ -1267,49 +1400,27 @@ struct ExternalToolListView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 3))
                         }
 
-                        if let sessionTitle {
-                            Text(sessionTitle)
-                                .font(.system(size: 10))
-                                .lineLimit(1)
-                        }
-
-                        if let workSummary {
-                            Text("현재 작업: \(workSummary)")
-                                .font(.system(size: 9))
-                                .foregroundStyle(workSummaryColor(session))
-                                .lineLimit(2)
-                        } else {
-                            Text("현재 작업: 현재 작업 정보 없음")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                        }
-
-                        if let commitContext = repositoryCommitContext(for: session.repositoryRoot) {
-                            Text("최근 커밋: \(commitContext)")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                        } else {
-                            Text("최근 커밋: 최근 커밋 정보 없음")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                        }
-
-                        if let clientDescriptor = sessionClientDescriptor(session) {
-                            Text(clientDescriptor)
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-
-                        Text("state=\(session.activityState.rawValue), score=\(session.activityScore), repo=\(session.repositoryRoot ?? "(unassigned)")")
+                        Text(sessionIdentity)
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
 
-                        Text("업데이트 \(relativeTimestamp(session.updatedAt))")
+                        Text("진행: \(workSummary)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(workSummaryColor(session))
+                            .lineLimit(2)
+
+                        Text("결과: \(resultSummary)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Text("변경: \(changeSummary)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+
+                        Text("활동: \(relativeTimestamp(session.updatedAt))")
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
                     }
@@ -1988,6 +2099,24 @@ struct ExternalToolListView: View {
             return .gray
         }
         return .secondary
+    }
+
+    private func repositoryInsight(for repositoryRoot: String?) -> GitRepositoryInsight? {
+        guard let repositoryRoot else { return nil }
+        return gitInsightByRepositoryPath[normalizedRepositoryPath(repositoryRoot)]
+    }
+
+    private func sessionStatusBadgeLabel(_ session: UnifiedCodingSession) -> String {
+        switch session.activityState {
+        case .active:
+            return "작업중"
+        case .idle:
+            return "대기"
+        case .stale:
+            return "지연"
+        case .dead:
+            return "종료"
+        }
     }
 
     private func repositoryCommitContext(for repositoryRoot: String?) -> String? {
