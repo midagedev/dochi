@@ -1016,6 +1016,9 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         lastIndexedAt: nil,
         latestChunkEndAt: nil
     )
+    var lastEvaluateGuardTier: CodingSessionControllabilityTier?
+    var lastEvaluateGuardCommand: String?
+    var lastEvaluateGuardRepositoryRoot: String?
 
     func loadProfiles() {
         loadProfilesCallCount += 1
@@ -1215,9 +1218,12 @@ final class MockExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     func evaluateOrchestrationExecutionGuard(
         tier: CodingSessionControllabilityTier,
-        command: String
+        command: String,
+        repositoryRoot: String?
     ) -> OrchestrationExecutionDecision {
-        _ = (tier, command)
+        lastEvaluateGuardTier = tier
+        lastEvaluateGuardCommand = command
+        lastEvaluateGuardRepositoryRoot = repositoryRoot
         evaluateOrchestrationExecutionGuardCallCount += 1
         return mockOrchestrationDecision
     }

@@ -67,7 +67,8 @@ protocol ExternalToolSessionManagerProtocol: AnyObject, Sendable {
     func orchestrationGuardPolicyRules() -> [OrchestrationGuardPolicyRule]
     func evaluateOrchestrationExecutionGuard(
         tier: CodingSessionControllabilityTier,
-        command: String
+        command: String,
+        repositoryRoot: String?
     ) -> OrchestrationExecutionDecision
 
     // Session history RAG
@@ -154,7 +155,8 @@ extension ExternalToolSessionManagerProtocol {
 
     func evaluateOrchestrationExecutionGuard(
         tier: CodingSessionControllabilityTier,
-        command: String
+        command: String,
+        repositoryRoot _: String?
     ) -> OrchestrationExecutionDecision {
         _ = (tier, command)
         return OrchestrationExecutionDecision(
@@ -163,6 +165,17 @@ extension ExternalToolSessionManagerProtocol {
             commandClass: .nonDestructive,
             reason: "실행 가드를 지원하지 않습니다.",
             isDestructiveCommand: false
+        )
+    }
+
+    func evaluateOrchestrationExecutionGuard(
+        tier: CodingSessionControllabilityTier,
+        command: String
+    ) -> OrchestrationExecutionDecision {
+        evaluateOrchestrationExecutionGuard(
+            tier: tier,
+            command: command,
+            repositoryRoot: nil
         )
     }
 
@@ -547,6 +560,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         source: ManagedGitRepositorySource
     ) -> ManagedGitRepository {
         let normalizedRootPath = URL(fileURLWithPath: rootPath).standardizedFileURL.path
+        let inferredTrustDomain = Self.inferRepositoryTrustDomain(for: normalizedRootPath)
         let branch = Self.gitOutput(repoPath: normalizedRootPath, args: ["rev-parse", "--abbrev-ref", "HEAD"])
         let originURL = Self.gitOutput(repoPath: normalizedRootPath, args: ["remote", "get-url", "origin"])
         let name = URL(fileURLWithPath: normalizedRootPath).lastPathComponent
@@ -558,6 +572,9 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             existing.source = source
             existing.defaultBranch = branch
             existing.originURL = originURL
+            if inferredTrustDomain != .unknown || existing.trustDomain == .unknown {
+                existing.trustDomain = inferredTrustDomain
+            }
             existing.isArchived = false
             existing.updatedAt = now
             managedRepositories[index] = existing
@@ -570,6 +587,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             name: name,
             rootPath: normalizedRootPath,
             source: source,
+            trustDomain: inferredTrustDomain,
             originURL: originURL,
             defaultBranch: branch,
             isArchived: false,
@@ -580,6 +598,27 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         managedRepositories.sort(by: { $0.updatedAt > $1.updatedAt })
         persistManagedRepositories()
         return created
+    }
+
+    private func repositoryTrustDomain(for repositoryRoot: String?) -> RepositoryTrustDomain {
+        guard let repositoryRoot,
+              !repositoryRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .unknown
+        }
+
+        let normalizedRoot = URL(fileURLWithPath: repositoryRoot).standardizedFileURL.path
+        let candidates = managedRepositories
+            .filter { !$0.isArchived }
+            .sorted { $0.rootPath.count > $1.rootPath.count }
+
+        for repository in candidates {
+            let normalizedManagedRoot = URL(fileURLWithPath: repository.rootPath).standardizedFileURL.path
+            if normalizedRoot == normalizedManagedRoot || normalizedRoot.hasPrefix(normalizedManagedRoot + "/") {
+                return repository.trustDomain
+            }
+        }
+
+        return Self.inferRepositoryTrustDomain(for: normalizedRoot)
     }
 
     // MARK: - Session Lifecycle
@@ -1032,9 +1071,15 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
     func evaluateOrchestrationExecutionGuard(
         tier: CodingSessionControllabilityTier,
-        command: String
+        command: String,
+        repositoryRoot: String?
     ) -> OrchestrationExecutionDecision {
-        Self.evaluateOrchestrationExecutionGuard(tier: tier, command: command)
+        let trustDomain = repositoryTrustDomain(for: repositoryRoot)
+        return Self.evaluateOrchestrationExecutionGuard(
+            tier: tier,
+            command: command,
+            repositoryTrustDomain: trustDomain
+        )
     }
 
     func sessionHistoryMaskingRules() -> [SessionHistoryMaskingRule] {
@@ -1300,21 +1345,64 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         return false
     }
 
+    nonisolated static func inferRepositoryTrustDomain(for rootPath: String) -> RepositoryTrustDomain {
+        let normalizedRoot = URL(fileURLWithPath: rootPath).standardizedFileURL.path
+        let insights = GitRepositoryInsightScanner.discover(
+            searchPaths: [normalizedRoot],
+            limit: 1
+        )
+        guard let insight = insights.first(where: {
+            URL(fileURLWithPath: $0.path).standardizedFileURL.path == normalizedRoot
+        }) ?? insights.first else {
+            return .unknown
+        }
+        return RepositoryTrustDomain(workDomain: insight.workDomain)
+    }
+
     nonisolated static func evaluateOrchestrationExecutionGuard(
         tier: CodingSessionControllabilityTier,
         command: String
+    ) -> OrchestrationExecutionDecision {
+        evaluateOrchestrationExecutionGuard(
+            tier: tier,
+            command: command,
+            repositoryTrustDomain: .unknown
+        )
+    }
+
+    nonisolated static func evaluateOrchestrationExecutionGuard(
+        tier: CodingSessionControllabilityTier,
+        command: String,
+        repositoryTrustDomain: RepositoryTrustDomain
     ) -> OrchestrationExecutionDecision {
         let commandClass = orchestrationCommandClass(command)
         let rule = orchestrationGuardPolicyMatrix().first(where: {
             $0.tier == tier && $0.commandClass == commandClass
         }) ?? fallbackOrchestrationGuardRule(for: tier, commandClass: commandClass)
-        return OrchestrationExecutionDecision(
+
+        var decision = OrchestrationExecutionDecision(
             kind: rule.decisionKind,
             policyCode: rule.policyCode,
             commandClass: commandClass,
             reason: rule.reason,
             isDestructiveCommand: commandClass == .destructive
         )
+
+        let repositoryPolicy = RepositoryAutonomyPolicy.default(for: repositoryTrustDomain)
+        if repositoryPolicy.trustDomain == .company,
+           decision.kind == .allowed,
+           commandClass == .destructive,
+           repositoryPolicy.requireConfirmDestructive {
+            decision = OrchestrationExecutionDecision(
+                kind: .confirmationRequired,
+                policyCode: .domainCompanyConfirmDestructive,
+                commandClass: commandClass,
+                reason: "회사 레포지토리의 파괴적 명령은 추가 확인이 필요합니다.",
+                isDestructiveCommand: true
+            )
+        }
+
+        return decision
     }
 
     nonisolated static func orchestrationGuardPolicyMatrix() -> [OrchestrationGuardPolicyRule] {
