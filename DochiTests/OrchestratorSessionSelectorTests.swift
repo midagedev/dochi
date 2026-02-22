@@ -154,6 +154,32 @@ final class OrchestratorSessionSelectorTests: XCTestCase {
         XCTAssertFalse(decision.isDestructiveCommand)
     }
 
+    func testExecutionGuardRequiresAdditionalConfirmationForCompanyDestructiveT0Command() {
+        let decision = ExternalToolSessionManager.evaluateOrchestrationExecutionGuard(
+            tier: .t0Full,
+            command: "git reset --hard HEAD~1",
+            repositoryTrustDomain: .company
+        )
+
+        XCTAssertEqual(decision.kind, .confirmationRequired)
+        XCTAssertEqual(decision.policyCode, .domainCompanyConfirmDestructive)
+        XCTAssertEqual(decision.commandClass, .destructive)
+        XCTAssertTrue(decision.isDestructiveCommand)
+    }
+
+    func testExecutionGuardKeepsPersonalDestructiveT0Allowed() {
+        let decision = ExternalToolSessionManager.evaluateOrchestrationExecutionGuard(
+            tier: .t0Full,
+            command: "git reset --hard HEAD~1",
+            repositoryTrustDomain: .personal
+        )
+
+        XCTAssertEqual(decision.kind, .allowed)
+        XCTAssertEqual(decision.policyCode, .t0AllowAll)
+        XCTAssertEqual(decision.commandClass, .destructive)
+        XCTAssertTrue(decision.isDestructiveCommand)
+    }
+
     func testOrchestrationPolicyMatrixCoversAllTierAndCommandClasses() {
         let matrix = ExternalToolSessionManager.orchestrationGuardPolicyMatrix()
         let tiers: [CodingSessionControllabilityTier] = [.t0Full, .t1Attach, .t2Observe, .t3Unknown]
@@ -254,6 +280,7 @@ final class DochiAppOrchestratorBridgeFlowTests: XCTestCase {
         XCTAssertEqual(result.result["status"] as? String, "sent")
         XCTAssertEqual(manager.sendCommandCallCount, 1)
         XCTAssertEqual(manager.lastSentCommand, "git status")
+        XCTAssertEqual(manager.lastEvaluateGuardRepositoryRoot, "/tmp/repo")
 
         let selection = try XCTUnwrap(result.result["selection"] as? [String: Any])
         XCTAssertEqual(selection["action"] as? String, "attach_t1")

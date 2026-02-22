@@ -1603,7 +1603,8 @@ struct ExternalToolListView: View {
            let command = nonEmptyOrchestrationCommand() {
             orchestrationGuardDecision = manager.evaluateOrchestrationExecutionGuard(
                 tier: selected.controllabilityTier,
-                command: command
+                command: command,
+                repositoryRoot: selected.repositoryRoot ?? orchestrationRepositoryRoot
             )
         }
 
@@ -1640,7 +1641,8 @@ struct ExternalToolListView: View {
             }
             let decision = manager.evaluateOrchestrationExecutionGuard(
                 tier: selected.controllabilityTier,
-                command: command
+                command: command,
+                repositoryRoot: selected.repositoryRoot ?? orchestrationRepositoryRoot
             )
             orchestrationGuardDecision = decision
             if decision.kind == .denied {

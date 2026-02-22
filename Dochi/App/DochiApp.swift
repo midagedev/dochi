@@ -1797,11 +1797,13 @@ struct DochiApp: App {
         guard let command = nonEmptyString(params["command"]) else {
             return .failure(code: "missing_command", message: "command가 필요합니다.")
         }
+        let repositoryRoot = nonEmptyString(params["repository_root"])
 
         let decision = await MainActor.run {
             externalToolManager.evaluateOrchestrationExecutionGuard(
                 tier: tier,
-                command: command
+                command: command,
+                repositoryRoot: repositoryRoot
             )
         }
 
@@ -1848,7 +1850,8 @@ struct DochiApp: App {
             let decision = await MainActor.run {
                 externalToolManager.evaluateOrchestrationExecutionGuard(
                     tier: session.controllabilityTier,
-                    command: command
+                    command: command,
+                    repositoryRoot: session.repositoryRoot ?? repositoryRoot
                 )
             }
 
@@ -1918,7 +1921,8 @@ struct DochiApp: App {
                 let decision = await MainActor.run {
                     externalToolManager.evaluateOrchestrationExecutionGuard(
                         tier: session.controllabilityTier,
-                        command: command
+                        command: command,
+                        repositoryRoot: session.repositoryRoot ?? repositoryRoot
                     )
                 }
                 return .failure(code: decision.policyCode.rawValue, message: decision.reason)
@@ -2223,6 +2227,7 @@ struct DochiApp: App {
             "name": repository.name,
             "root_path": repository.rootPath,
             "source": repository.source.rawValue,
+            "trust_domain": repository.trustDomain.rawValue,
             "origin_url": repository.originURL ?? NSNull(),
             "default_branch": repository.defaultBranch ?? NSNull(),
             "is_archived": repository.isArchived,

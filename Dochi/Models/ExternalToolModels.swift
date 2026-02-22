@@ -78,11 +78,30 @@ enum ManagedGitRepositorySource: String, Codable, Sendable {
     case attached = "attached"
 }
 
+enum RepositoryTrustDomain: String, Codable, Sendable {
+    case personal
+    case company
+    case unknown
+
+    init(workDomain: String?) {
+        let normalized = workDomain?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        switch normalized {
+        case "personal":
+            self = .personal
+        case "company":
+            self = .company
+        default:
+            self = .unknown
+        }
+    }
+}
+
 struct ManagedGitRepository: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var name: String
     var rootPath: String
     var source: ManagedGitRepositorySource
+    var trustDomain: RepositoryTrustDomain
     var originURL: String?
     var defaultBranch: String?
     var isArchived: Bool
@@ -94,6 +113,7 @@ struct ManagedGitRepository: Identifiable, Codable, Sendable, Equatable {
         name: String,
         rootPath: String,
         source: ManagedGitRepositorySource,
+        trustDomain: RepositoryTrustDomain = .unknown,
         originURL: String?,
         defaultBranch: String?,
         isArchived: Bool = false,
@@ -104,11 +124,53 @@ struct ManagedGitRepository: Identifiable, Codable, Sendable, Equatable {
         self.name = name
         self.rootPath = rootPath
         self.source = source
+        self.trustDomain = trustDomain
         self.originURL = originURL
         self.defaultBranch = defaultBranch
         self.isArchived = isArchived
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case rootPath
+        case source
+        case trustDomain
+        case originURL
+        case defaultBranch
+        case isArchived
+        case createdAt
+        case updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        rootPath = try container.decode(String.self, forKey: .rootPath)
+        source = try container.decode(ManagedGitRepositorySource.self, forKey: .source)
+        trustDomain = try container.decodeIfPresent(RepositoryTrustDomain.self, forKey: .trustDomain) ?? .unknown
+        originURL = try container.decodeIfPresent(String.self, forKey: .originURL)
+        defaultBranch = try container.decodeIfPresent(String.self, forKey: .defaultBranch)
+        isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(rootPath, forKey: .rootPath)
+        try container.encode(source, forKey: .source)
+        try container.encode(trustDomain, forKey: .trustDomain)
+        try container.encodeIfPresent(originURL, forKey: .originURL)
+        try container.encodeIfPresent(defaultBranch, forKey: .defaultBranch)
+        try container.encode(isArchived, forKey: .isArchived)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
     }
 }
 
@@ -357,6 +419,42 @@ enum OrchestrationGuardPolicyCode: String, Codable, Sendable {
     case t1ConfirmDestructive = "policy_t1_confirm_destructive"
     case t2DenyExecution = "policy_t2_deny_execution"
     case t3DenyExecution = "policy_t3_deny_execution"
+    case domainCompanyConfirmDestructive = "policy_domain_company_confirm_destructive"
+}
+
+struct RepositoryAutonomyPolicy: Sendable, Equatable {
+    let trustDomain: RepositoryTrustDomain
+    let allowAutoNonDestructive: Bool
+    let requireConfirmDestructive: Bool
+
+    static let personal = RepositoryAutonomyPolicy(
+        trustDomain: .personal,
+        allowAutoNonDestructive: true,
+        requireConfirmDestructive: true
+    )
+
+    static let company = RepositoryAutonomyPolicy(
+        trustDomain: .company,
+        allowAutoNonDestructive: true,
+        requireConfirmDestructive: true
+    )
+
+    static let unknown = RepositoryAutonomyPolicy(
+        trustDomain: .unknown,
+        allowAutoNonDestructive: true,
+        requireConfirmDestructive: true
+    )
+
+    static func `default`(for trustDomain: RepositoryTrustDomain) -> RepositoryAutonomyPolicy {
+        switch trustDomain {
+        case .personal:
+            return .personal
+        case .company:
+            return .company
+        case .unknown:
+            return .unknown
+        }
+    }
 }
 
 struct OrchestrationGuardPolicyRule: Sendable, Equatable {
