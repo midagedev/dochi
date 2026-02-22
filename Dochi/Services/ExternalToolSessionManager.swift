@@ -929,6 +929,11 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             let provider = Self.normalizedProvider(fromCommand: providerCommand)
             let workingDirectory = profile?.workingDirectory
             let updatedAt = session.lastHealthCheckDate ?? session.startedAt ?? .distantPast
+            let runtimeSummary = Self.runtimeSessionSummary(
+                status: session.status,
+                lastOutput: session.lastOutput,
+                lastActivityText: session.lastActivityText
+            )
             return RuntimeSessionSnapshot(
                 provider: provider.isEmpty ? "tmux" : provider,
                 nativeSessionId: session.tmuxSessionName,
@@ -945,7 +950,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 controllabilityTier: .t0Full,
                 source: "tmux_runtime",
                 title: session.lastTerminalTitle,
-                summary: nil,
+                summary: runtimeSummary,
                 titleSource: session.lastTerminalTitle == nil ? nil : "terminal_osc",
                 titleConfidence: session.lastTerminalTitle == nil ? nil : 0.95,
                 originator: nil,
@@ -3835,6 +3840,92 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         }
 
         return latest
+    }
+
+    nonisolated static func runtimeSessionSummary(
+        status: ExternalToolStatus,
+        lastOutput: [String],
+        lastActivityText: String?
+    ) -> String? {
+        let waitingWindow = Array(lastOutput.suffix(8))
+        if let waitingLine = waitingWindow.reversed().first(where: { containsWaitingPrompt($0) }),
+           let normalizedWaiting = normalizedRuntimeOutputLine(waitingLine, maxLength: 220) {
+            return normalizedWaiting
+        }
+
+        for line in lastOutput.reversed() {
+            guard let normalized = normalizedRuntimeOutputLine(line, maxLength: 220) else {
+                continue
+            }
+            if isRuntimeNoiseLine(normalized) {
+                continue
+            }
+            return normalized
+        }
+
+        if let lastActivityText,
+           let normalizedActivity = normalizedRuntimeOutputLine(lastActivityText, maxLength: 160),
+           !normalizedActivity.isEmpty,
+           normalizedActivity != "^C interrupt" {
+            return "명령: \(normalizedActivity)"
+        }
+
+        switch status {
+        case .waiting:
+            return "사용자 입력 대기 중"
+        case .busy:
+            return "작업 진행 중"
+        case .error:
+            return "오류 신호 감지"
+        default:
+            return nil
+        }
+    }
+
+    nonisolated private static func containsWaitingPrompt(_ line: String) -> Bool {
+        let normalized = line.lowercased()
+        return normalized.contains("[y/n]") ||
+            normalized.contains("[y/N]".lowercased()) ||
+            normalized.contains("(y/n)") ||
+            normalized.contains("(yes/no)")
+    }
+
+    nonisolated private static func normalizedRuntimeOutputLine(
+        _ raw: String,
+        maxLength: Int
+    ) -> String? {
+        let stripped = stripANSIEscapeSequences(raw)
+        return normalizedSessionText(stripped, maxLength: maxLength)
+    }
+
+    nonisolated private static func isRuntimeNoiseLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        if trimmed == ">" || trimmed == "$" || trimmed == "#" || trimmed == "❯" || trimmed == "…" {
+            return true
+        }
+        if trimmed.hasPrefix("tmux://") {
+            return true
+        }
+        let lowercased = trimmed.lowercased()
+        if lowercased == "ready" {
+            return true
+        }
+        return false
+    }
+
+    nonisolated private static func stripANSIEscapeSequences(_ raw: String) -> String {
+        let patterns = [
+            "\u{001B}\\[[0-?]*[ -/]*[@-~]",
+            "\u{001B}\\][^\\u{0007}\\u{001B}]*(?:\\u{0007}|\\u{001B}\\\\)"
+        ]
+        var value = raw
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(value.startIndex..<value.endIndex, in: value)
+            value = regex.stringByReplacingMatches(in: value, range: range, withTemplate: "")
+        }
+        return value
     }
 
     nonisolated private static func normalizedSessionText(_ value: Any?, maxLength: Int) -> String? {
