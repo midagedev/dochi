@@ -713,8 +713,9 @@ final class ResourceOptimizerTests: XCTestCase {
 
         let sessionURL = codexRoot.appendingPathComponent("session-1.jsonl")
         let lines = [
-            "{\"timestamp\":\"\(iso.string(from: activeTime))\",\"usage\":{\"input_tokens\":300,\"output_tokens\":120}}",
-            "{\"timestamp\":\"\(iso.string(from: inactiveTime))\",\"usage\":{\"input_tokens\":999,\"output_tokens\":999}}",
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"sess-1\"}}",
+            "{\"type\":\"event_msg\",\"timestamp\":\"\(iso.string(from: inactiveTime))\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":100,\"output_tokens\":1000}}}}",
+            "{\"type\":\"event_msg\",\"timestamp\":\"\(iso.string(from: activeTime))\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1300,\"cached_input_tokens\":140,\"output_tokens\":1120}}}}",
         ].joined(separator: "\n")
         try lines.write(to: sessionURL, atomically: true, encoding: .utf8)
 
@@ -735,6 +736,107 @@ final class ResourceOptimizerTests: XCTestCase {
 
         let util = await sourceService.utilization(for: plan)
         XCTAssertEqual(util.usedTokens, 420)
+    }
+
+    func testExternalToolLogsCodexUsesDeltaFromTotalTokenUsage() async throws {
+        let codexRoot = tempDir.appendingPathComponent("codex-delta")
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+
+        let sessionURL = codexRoot.appendingPathComponent("session-delta.jsonl")
+        let lines = [
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"sess-delta\"}}",
+            "{\"type\":\"event_msg\",\"timestamp\":\"\(iso.string(from: now.addingTimeInterval(-20)))\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":100,\"cached_input_tokens\":10,\"output_tokens\":20}}}}",
+            "{\"type\":\"event_msg\",\"timestamp\":\"\(iso.string(from: now.addingTimeInterval(-10)))\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":160,\"cached_input_tokens\":30,\"output_tokens\":26}}}}",
+        ].joined(separator: "\n")
+        try lines.write(to: sessionURL, atomically: true, encoding: .utf8)
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-codex-delta"),
+            usageStore: nil,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [codexRoot]
+        )
+
+        let plan = SubscriptionPlan(
+            providerName: "ChatGPT Pro",
+            planName: "Plus",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+
+        let util = await sourceService.utilization(for: plan)
+        XCTAssertEqual(util.usedTokens, 186) // (100+20) + (60+6)
+    }
+
+    func testExternalToolLogsCodexDedupesArchivedSessionBySessionID() async throws {
+        let codexHome = tempDir.appendingPathComponent("codex-home")
+        let sessionsRoot = codexHome.appendingPathComponent("sessions")
+        let archivedRoot = codexHome.appendingPathComponent("archived_sessions")
+        try FileManager.default.createDirectory(at: sessionsRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: archivedRoot, withIntermediateDirectories: true)
+
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        let payload = [
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"sess-shared\"}}",
+            "{\"type\":\"event_msg\",\"timestamp\":\"\(iso.string(from: now))\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":300,\"cached_input_tokens\":20,\"output_tokens\":120}}}}",
+        ].joined(separator: "\n")
+
+        try payload.write(to: sessionsRoot.appendingPathComponent("shared.jsonl"), atomically: true, encoding: .utf8)
+        try payload.write(to: archivedRoot.appendingPathComponent("shared-archived.jsonl"), atomically: true, encoding: .utf8)
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-codex-archived"),
+            usageStore: nil,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [sessionsRoot]
+        )
+
+        let plan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "Pro",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+
+        let util = await sourceService.utilization(for: plan)
+        XCTAssertEqual(util.usedTokens, 420)
+    }
+
+    func testExternalToolLogsClaudeDedupesStreamingChunks() async throws {
+        let claudeRoot = tempDir.appendingPathComponent("claude-stream")
+        let projectDir = claudeRoot.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+
+        let chunkA = "{\"type\":\"assistant\",\"timestamp\":\"\(iso.string(from: now.addingTimeInterval(-20)))\",\"requestId\":\"req-1\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":100,\"cache_creation_input_tokens\":50,\"cache_read_input_tokens\":25,\"output_tokens\":10}}}"
+        let chunkB = "{\"type\":\"assistant\",\"timestamp\":\"\(iso.string(from: now.addingTimeInterval(-10)))\",\"requestId\":\"req-1\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":100,\"cache_creation_input_tokens\":50,\"cache_read_input_tokens\":25,\"output_tokens\":10}}}"
+        let distinct = "{\"type\":\"assistant\",\"timestamp\":\"\(iso.string(from: now))\",\"requestId\":\"req-2\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":20,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":5}}}"
+        let content = [chunkA, chunkB, distinct].joined(separator: "\n")
+        try content.write(to: projectDir.appendingPathComponent("session.jsonl"), atomically: true, encoding: .utf8)
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-claude-stream"),
+            usageStore: nil,
+            claudeProjectsRoots: [claudeRoot],
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")]
+        )
+
+        let plan = SubscriptionPlan(
+            providerName: "Claude Max",
+            planName: "Max",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+
+        let util = await sourceService.utilization(for: plan)
+        XCTAssertEqual(util.usedTokens, 210) // 185 + 25
     }
 
     // MARK: - Mock Tests
