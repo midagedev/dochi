@@ -362,6 +362,8 @@ struct ExternalToolListView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(repositorySummaries) { summary in
+                        let representative = representativeSession(for: summary.repositoryRoot)
+                        let workSummary = representative.flatMap { sessionWorkSummary($0) }
                         VStack(alignment: .leading, spacing: 4) {
                             Text(summary.displayName)
                                 .font(.system(size: 11, weight: .semibold))
@@ -369,21 +371,32 @@ struct ExternalToolListView: View {
                             Text("세션 \(summary.sessionCount) · 활성 \(summary.activeSessionCount) · 오류 \(summary.errorSessionCount)")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
+                            if let workSummary, let representative {
+                                Text("현재 작업: \(workSummary)")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(workSummaryColor(representative))
+                                    .lineLimit(2)
+                            } else {
+                                Text("현재 작업: 정보 없음")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                            }
                             if let repositoryRoot = summary.repositoryRoot {
                                 let branch = managedRepositories.first(where: {
                                     URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path == repositoryRoot
                                 })?.defaultBranch ?? "-"
-                                Text("브랜치 \(branch)")
+                                Text("브랜치 \(branch) · 업데이트 \(relativeTimestamp(representative?.updatedAt ?? summary.lastActivityAt))")
                                     .font(.system(size: 9))
                                     .foregroundStyle(.tertiary)
                             } else {
-                                Text("Unassigned")
+                                Text("Unassigned · 업데이트 \(relativeTimestamp(representative?.updatedAt ?? summary.lastActivityAt))")
                                     .font(.system(size: 9))
                                     .foregroundStyle(.tertiary)
                             }
                         }
                         .padding(8)
-                        .frame(width: 170, alignment: .leading)
+                        .frame(width: 210, alignment: .leading)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
                                 .fill(Color(nsColor: .controlBackgroundColor))
@@ -850,6 +863,7 @@ struct ExternalToolListView: View {
     @ViewBuilder
     private func unifiedSessionRow(_ session: UnifiedCodingSession) -> some View {
         let sessionTitle = normalizedSessionTitle(session)
+        let workSummary = sessionWorkSummary(session)
         HStack(spacing: 8) {
             Circle()
                 .fill(activityColor(session.activityState))
@@ -873,6 +887,13 @@ struct ExternalToolListView: View {
                     Text(sessionTitle)
                         .font(.system(size: 10))
                         .lineLimit(1)
+                }
+
+                if let workSummary {
+                    Text("현재 작업: \(workSummary)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(workSummaryColor(session))
+                        .lineLimit(2)
                 }
 
                 if let clientDescriptor = sessionClientDescriptor(session) {
@@ -1381,7 +1402,7 @@ struct ExternalToolListView: View {
     }
 
     private func normalizedSessionTitle(_ session: UnifiedCodingSession) -> String? {
-        guard let raw = session.title ?? session.summary else { return nil }
+        guard let raw = session.title else { return nil }
         let normalized = raw
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
@@ -1389,6 +1410,60 @@ struct ExternalToolListView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return nil }
         return String(normalized.prefix(100))
+    }
+
+    private func normalizedSessionSummary(_ session: UnifiedCodingSession) -> String? {
+        guard let raw = session.summary else { return nil }
+        let normalized = raw
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        return String(normalized.prefix(140))
+    }
+
+    private func sessionWorkSummary(_ session: UnifiedCodingSession) -> String? {
+        // 오래된 stale/dead 세션은 요약 노이즈를 숨긴다.
+        if session.activityState == .stale || session.activityState == .dead {
+            if Date().timeIntervalSince(session.updatedAt) > 60 * 60 * 3 {
+                return nil
+            }
+        }
+        if let summary = normalizedSessionSummary(session) {
+            return summary
+        }
+        switch session.activityState {
+        case .active:
+            return "작업 진행 중"
+        case .idle:
+            return "입력 대기 중"
+        case .stale:
+            return "최근 작업 정보가 오래되었습니다"
+        case .dead:
+            return "세션이 종료되었습니다"
+        }
+    }
+
+    private func representativeSession(for repositoryRoot: String?) -> UnifiedCodingSession? {
+        let scoped = unifiedSessions.filter { session in
+            switch (repositoryRoot, session.repositoryRoot) {
+            case (.none, .none):
+                return true
+            case let (.some(left), .some(right)):
+                return normalizedRepositoryPath(left) == normalizedRepositoryPath(right)
+            default:
+                return false
+            }
+        }
+        return scoped.sorted(by: ExternalToolSessionManager.isPreferredUnifiedSessionOrder(_:_:)).first
+    }
+
+    private func workSummaryColor(_ session: UnifiedCodingSession) -> Color {
+        if session.activityState == .stale || session.activityState == .dead {
+            return .gray
+        }
+        return .secondary
     }
 
     private func sessionClientDescriptor(_ session: UnifiedCodingSession) -> String? {
