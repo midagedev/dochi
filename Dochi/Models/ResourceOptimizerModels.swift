@@ -1,11 +1,37 @@
 import Foundation
 
+// MARK: - SubscriptionUsageSource
+
+enum SubscriptionUsageSource: String, Codable, CaseIterable, Sendable {
+    case externalToolLogs = "external_tool_logs"
+    case dochiUsageStore = "dochi_usage_store"
+
+    var displayName: String {
+        switch self {
+        case .externalToolLogs:
+            return "외부 구독 로그"
+        case .dochiUsageStore:
+            return "도치 종량제"
+        }
+    }
+
+    var detailText: String {
+        switch self {
+        case .externalToolLogs:
+            return "Claude/Codex 로컬 세션 로그에서 집계"
+        case .dochiUsageStore:
+            return "Dochi UsageStore 기반 집계"
+        }
+    }
+}
+
 // MARK: - SubscriptionPlan
 
 struct SubscriptionPlan: Codable, Sendable, Identifiable {
     let id: UUID
     var providerName: String
     var planName: String
+    var usageSource: SubscriptionUsageSource
     var monthlyTokenLimit: Int?  // nil = 무제한
     var resetDayOfMonth: Int     // 매월 N일 리셋
     var monthlyCostUSD: Double
@@ -15,6 +41,7 @@ struct SubscriptionPlan: Codable, Sendable, Identifiable {
         id: UUID = UUID(),
         providerName: String,
         planName: String,
+        usageSource: SubscriptionUsageSource = .dochiUsageStore,
         monthlyTokenLimit: Int? = nil,
         resetDayOfMonth: Int = 1,
         monthlyCostUSD: Double = 0,
@@ -23,6 +50,7 @@ struct SubscriptionPlan: Codable, Sendable, Identifiable {
         self.id = id
         self.providerName = providerName
         self.planName = planName
+        self.usageSource = usageSource
         self.monthlyTokenLimit = monthlyTokenLimit
         self.resetDayOfMonth = resetDayOfMonth
         self.monthlyCostUSD = monthlyCostUSD
@@ -34,6 +62,7 @@ struct SubscriptionPlan: Codable, Sendable, Identifiable {
         id = try container.decode(UUID.self, forKey: .id)
         providerName = try container.decode(String.self, forKey: .providerName)
         planName = try container.decode(String.self, forKey: .planName)
+        usageSource = try container.decodeIfPresent(SubscriptionUsageSource.self, forKey: .usageSource) ?? .dochiUsageStore
         monthlyTokenLimit = try container.decodeIfPresent(Int.self, forKey: .monthlyTokenLimit)
         resetDayOfMonth = try container.decodeIfPresent(Int.self, forKey: .resetDayOfMonth) ?? 1
         monthlyCostUSD = try container.decodeIfPresent(Double.self, forKey: .monthlyCostUSD) ?? 0
