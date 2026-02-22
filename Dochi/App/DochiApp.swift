@@ -1786,7 +1786,7 @@ struct DochiApp: App {
         ])
     }
 
-    nonisolated private static func handleBridgeOrchestratorGuardCommand(
+    nonisolated static func handleBridgeOrchestratorGuardCommand(
         params: [String: Any],
         externalToolManager: ExternalToolSessionManagerProtocol
     ) async -> LocalControlPlaneMethodResult {
