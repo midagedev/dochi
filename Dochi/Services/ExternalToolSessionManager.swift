@@ -974,6 +974,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             .filter { !$0.isArchived }
             .map { URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path }
         let manualBindings = manualRepositoryBindings
+        let includeUnmatchedProcessRuntime = !trackKPI
 
         let merged = await Task.detached(priority: .utility) {
             Self.mergeUnifiedCodingSessions(
@@ -983,7 +984,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
                 limit: effectiveLimit,
                 now: now,
                 config: .standard,
-                includeUnmatchedProcessRuntime: false
+                includeUnmatchedProcessRuntime: includeUnmatchedProcessRuntime
             )
         }.value
 
