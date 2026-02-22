@@ -589,7 +589,35 @@ final class SyncModelsTests: XCTestCase {
 @MainActor
 final class AppSettingsSyncTests: XCTestCase {
 
+    private let syncDefaultKeys = [
+        "autoSyncEnabled",
+        "realtimeSyncEnabled",
+        "syncConversations",
+        "syncMemory",
+        "syncKanban",
+        "syncProfiles",
+        "conflictResolutionStrategy",
+    ]
+
     func testDefaultSyncSettings() {
+        let defaults = UserDefaults.standard
+        var snapshot: [String: Any] = [:]
+        for key in syncDefaultKeys {
+            if let value = defaults.object(forKey: key) {
+                snapshot[key] = value
+            }
+            defaults.removeObject(forKey: key)
+        }
+        defer {
+            for key in syncDefaultKeys {
+                if let value = snapshot[key] {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+        }
+
         let settings = AppSettings()
         XCTAssertTrue(settings.autoSyncEnabled)
         XCTAssertTrue(settings.realtimeSyncEnabled)
