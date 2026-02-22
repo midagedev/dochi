@@ -48,6 +48,12 @@ struct UsageDashboardView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
 
+                usageAxisHeader(
+                    title: "종량제 (Dochi API)",
+                    detail: "UsageStore 기반 토큰/비용 집계"
+                )
+                .padding(.horizontal)
+
                 if isLoading {
                     ProgressView("로딩 중...")
                         .frame(maxWidth: .infinity, minHeight: 200)
@@ -147,6 +153,16 @@ struct UsageDashboardView: View {
     }
 
     // MARK: - Summary Cards
+
+    private func usageAxisHeader(title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+            Text(detail)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
 
     private func summaryCards(_ summary: MonthlyUsageSummary) -> some View {
         let filtered = filteredDays(from: summary)
@@ -542,8 +558,10 @@ struct UsageDashboardView: View {
 
     private func subscriptionCardsSection(_ optimizer: any ResourceOptimizerProtocol) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("구독 플랜 사용률")
-                .font(.system(size: 13, weight: .semibold))
+            usageAxisHeader(
+                title: "구독제 (Subscription)",
+                detail: "구독 플랜별 잔여량과 낭비 위험 추적"
+            )
 
             if utilizations.isEmpty {
                 VStack(spacing: 8) {
@@ -586,6 +604,14 @@ struct UsageDashboardView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 riskBadge(util.riskLevel)
+            }
+
+            HStack(spacing: 6) {
+                usageSourceBadge(util.subscription.usageSource)
+                Text(util.subscription.usageSource.detailText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
             // Usage gauge
@@ -653,6 +679,25 @@ struct UsageDashboardView: View {
         case .caution: return .yellow
         case .wasteRisk: return .red
         case .normal: return .blue
+        }
+    }
+
+    private func usageSourceBadge(_ source: SubscriptionUsageSource) -> some View {
+        Text(source.displayName)
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(usageSourceColor(source).opacity(0.14))
+            .foregroundStyle(usageSourceColor(source))
+            .clipShape(Capsule())
+    }
+
+    private func usageSourceColor(_ source: SubscriptionUsageSource) -> Color {
+        switch source {
+        case .externalToolLogs:
+            return .indigo
+        case .dochiUsageStore:
+            return .teal
         }
     }
 
@@ -781,25 +826,29 @@ struct UsageDashboardView: View {
                     HStack(spacing: 8) {
                         Text(sub.providerName)
                             .font(.system(size: 11, weight: .medium))
-                            .frame(width: 80, alignment: .leading)
+                            .frame(width: 76, alignment: .leading)
                         Text(sub.planName)
                             .font(.system(size: 11))
-                            .frame(width: 80, alignment: .leading)
+                            .frame(width: 72, alignment: .leading)
                             .lineLimit(1)
+                        Text(sub.usageSource.displayName)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 82, alignment: .leading)
                         if let limit = sub.monthlyTokenLimit {
                             Text(formatTokens(limit))
                                 .font(.system(size: 10, design: .monospaced))
-                                .frame(width: 60, alignment: .trailing)
+                                .frame(width: 56, alignment: .trailing)
                         } else {
                             Text("무제한")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
-                                .frame(width: 60, alignment: .trailing)
+                                .frame(width: 56, alignment: .trailing)
                         }
                         Text("매월 \(sub.resetDayOfMonth)일")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
-                            .frame(width: 60, alignment: .trailing)
+                            .frame(width: 54, alignment: .trailing)
                         Spacer()
                         Button {
                             editingSubscription = sub

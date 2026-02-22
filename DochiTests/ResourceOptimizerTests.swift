@@ -375,6 +375,7 @@ final class ResourceOptimizerTests: XCTestCase {
         let plan = SubscriptionPlan(
             providerName: "OpenAI",
             planName: "Pro",
+            usageSource: .externalToolLogs,
             monthlyTokenLimit: 1_000_000,
             resetDayOfMonth: 15,
             monthlyCostUSD: 20.0
@@ -391,6 +392,7 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(decoded.id, plan.id)
         XCTAssertEqual(decoded.providerName, "OpenAI")
         XCTAssertEqual(decoded.planName, "Pro")
+        XCTAssertEqual(decoded.usageSource, .externalToolLogs)
         XCTAssertEqual(decoded.monthlyTokenLimit, 1_000_000)
         XCTAssertEqual(decoded.resetDayOfMonth, 15)
         XCTAssertEqual(decoded.monthlyCostUSD, 20.0)
@@ -416,6 +418,74 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertNil(decoded.monthlyTokenLimit)
         XCTAssertEqual(decoded.resetDayOfMonth, 1)
         XCTAssertEqual(decoded.monthlyCostUSD, 0)
+    }
+
+    func testSubscriptionEditSheetMakePlanUsesSelectedUsageSourceAndValues() {
+        let plan = SubscriptionEditSheet.makePlan(
+            subscription: nil,
+            providerName: "OpenAI",
+            planName: "Pro",
+            usageSource: .externalToolLogs,
+            isUnlimited: false,
+            monthlyTokenLimit: "1200000",
+            resetDay: 7,
+            monthlyCost: "20.50"
+        )
+
+        XCTAssertEqual(plan.providerName, "OpenAI")
+        XCTAssertEqual(plan.planName, "Pro")
+        XCTAssertEqual(plan.usageSource, .externalToolLogs)
+        XCTAssertEqual(plan.monthlyTokenLimit, 1_200_000)
+        XCTAssertEqual(plan.resetDayOfMonth, 7)
+        XCTAssertEqual(plan.monthlyCostUSD, 20.5, accuracy: 0.0001)
+    }
+
+    func testSubscriptionEditSheetMakePlanPreservesIdentityWhenEditing() {
+        let originalCreatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let original = SubscriptionPlan(
+            id: UUID(),
+            providerName: "Anthropic",
+            planName: "Max",
+            usageSource: .dochiUsageStore,
+            monthlyTokenLimit: nil,
+            resetDayOfMonth: 1,
+            monthlyCostUSD: 30,
+            createdAt: originalCreatedAt
+        )
+
+        let edited = SubscriptionEditSheet.makePlan(
+            subscription: original,
+            providerName: "Anthropic",
+            planName: "Max Plus",
+            usageSource: .externalToolLogs,
+            isUnlimited: true,
+            monthlyTokenLimit: "999999",
+            resetDay: 1,
+            monthlyCost: "40"
+        )
+
+        XCTAssertEqual(edited.id, original.id)
+        XCTAssertEqual(edited.createdAt, originalCreatedAt)
+        XCTAssertEqual(edited.usageSource, .externalToolLogs)
+        XCTAssertEqual(edited.planName, "Max Plus")
+        XCTAssertNil(edited.monthlyTokenLimit)
+    }
+
+    func testSubscriptionEditSheetMakePlanUnlimitedDropsTokenLimitAndHandlesInvalidCost() {
+        let plan = SubscriptionEditSheet.makePlan(
+            subscription: nil,
+            providerName: "OpenAI",
+            planName: "Unlimited",
+            usageSource: .dochiUsageStore,
+            isUnlimited: true,
+            monthlyTokenLimit: "not-a-number",
+            resetDay: 12,
+            monthlyCost: "abc"
+        )
+
+        XCTAssertNil(plan.monthlyTokenLimit)
+        XCTAssertEqual(plan.monthlyCostUSD, 0, accuracy: 0.0001)
+        XCTAssertEqual(plan.usageSource, .dochiUsageStore)
     }
 
     func testAutoTaskRecordCodable() throws {
