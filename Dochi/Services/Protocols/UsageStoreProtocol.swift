@@ -17,4 +17,7 @@ protocol UsageStoreProtocol: Sendable {
 
     /// Get total cost for the current month.
     func currentMonthCost() async -> Double
+
+    /// Get latest recorded day for a provider.
+    func latestRecordDay(for provider: String) async -> Date?
 }

@@ -6,10 +6,17 @@ import os
 @MainActor
 @Observable
 final class UsageStore: UsageStoreProtocol {
+    private struct ProviderLatestIndexFile: Codable, Sendable {
+        var version: Int = 1
+        var latestDayByProvider: [String: String] = [:]
+    }
 
     private let baseURL: URL
     private var cache: [String: MonthlyUsageFile] = [:]
     private var dirtyMonths: Set<String> = []
+    private var providerLatestDayIndex: [String: String] = [:]
+    private var isProviderLatestIndexLoaded = false
+    private var isProviderLatestIndexDirty = false
     private var saveTask: Task<Void, Never>?
     private static let debounceInterval: TimeInterval = 5.0
 
@@ -38,6 +45,7 @@ final class UsageStore: UsageStoreProtocol {
     // MARK: - UsageStoreProtocol
 
     func record(_ metrics: ExchangeMetrics) async {
+        await ensureProviderLatestIndexLoaded()
         let monthKey = Self.monthFormatter.string(from: metrics.timestamp)
         let dayKey = Self.dayFormatter.string(from: metrics.timestamp)
 
@@ -66,6 +74,8 @@ final class UsageStore: UsageStoreProtocol {
         } else {
             file.days.append(DailyUsageRecord(date: dayKey, entries: [entry]))
         }
+
+        updateProviderLatestDayIndex(provider: metrics.provider, dayKey: dayKey)
 
         cache[monthKey] = file
         dirtyMonths.insert(monthKey)
@@ -102,7 +112,11 @@ final class UsageStore: UsageStoreProtocol {
             return []
         }
         return files
-            .filter { $0.pathExtension == "json" }
+            .filter { url in
+                guard url.pathExtension == "json" else { return false }
+                let name = url.deletingPathExtension().lastPathComponent
+                return name.range(of: #"^\d{4}-\d{2}$"#, options: .regularExpression) != nil
+            }
             .map { $0.deletingPathExtension().lastPathComponent }
             .sorted()
     }
@@ -111,6 +125,14 @@ final class UsageStore: UsageStoreProtocol {
         let monthKey = Self.monthFormatter.string(from: Date())
         let summary = await monthlySummary(for: monthKey)
         return summary.totalCostUSD
+    }
+
+    func latestRecordDay(for provider: String) async -> Date? {
+        await ensureProviderLatestIndexLoaded()
+        let key = Self.normalizedProviderKey(provider)
+        guard !key.isEmpty else { return nil }
+        guard let dayKey = providerLatestDayIndex[key] else { return nil }
+        return Self.dayFormatter.date(from: dayKey)
     }
 
     // MARK: - File I/O
@@ -170,6 +192,7 @@ final class UsageStore: UsageStoreProtocol {
                 }
             }
             dirtyMonths.removeAll()
+            saveProviderLatestIndexIfNeeded()
         }
     }
 
@@ -191,11 +214,83 @@ final class UsageStore: UsageStoreProtocol {
             }
         }
         dirtyMonths.removeAll()
+        saveProviderLatestIndexIfNeeded()
     }
 
     private func usageFileURL(for monthKey: String) -> URL {
         baseURL
             .appendingPathComponent("usage", isDirectory: true)
             .appendingPathComponent("\(monthKey).json")
+    }
+
+    private func providerLatestIndexURL() -> URL {
+        baseURL
+            .appendingPathComponent("usage", isDirectory: true)
+            .appendingPathComponent("provider-latest-index.json")
+    }
+
+    private func updateProviderLatestDayIndex(provider: String, dayKey: String) {
+        let key = Self.normalizedProviderKey(provider)
+        guard !key.isEmpty else { return }
+        if let current = providerLatestDayIndex[key], current >= dayKey {
+            return
+        }
+        providerLatestDayIndex[key] = dayKey
+        isProviderLatestIndexDirty = true
+    }
+
+    private func ensureProviderLatestIndexLoaded() async {
+        guard !isProviderLatestIndexLoaded else { return }
+        isProviderLatestIndexLoaded = true
+
+        let fileURL = providerLatestIndexURL()
+        if let data = try? Data(contentsOf: fileURL),
+           let file = try? JSONDecoder().decode(ProviderLatestIndexFile.self, from: data) {
+            providerLatestDayIndex = file.latestDayByProvider
+            return
+        }
+
+        providerLatestDayIndex = await rebuildProviderLatestDayIndexFromUsageFiles()
+        isProviderLatestIndexDirty = true
+    }
+
+    private func rebuildProviderLatestDayIndexFromUsageFiles() async -> [String: String] {
+        let months = await allMonths()
+        var latest: [String: String] = [:]
+
+        for month in months {
+            let records = await dailyRecords(for: month)
+            for day in records {
+                for entry in day.entries {
+                    let key = Self.normalizedProviderKey(entry.provider)
+                    guard !key.isEmpty else { continue }
+                    if let current = latest[key], current >= day.date {
+                        continue
+                    }
+                    latest[key] = day.date
+                }
+            }
+        }
+
+        return latest
+    }
+
+    private func saveProviderLatestIndexIfNeeded() {
+        guard isProviderLatestIndexDirty else { return }
+        let file = ProviderLatestIndexFile(latestDayByProvider: providerLatestDayIndex)
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(file)
+            try data.write(to: providerLatestIndexURL(), options: .atomic)
+            isProviderLatestIndexDirty = false
+            Log.storage.debug("Usage provider index saved")
+        } catch {
+            Log.storage.error("Failed to save provider latest index: \(error.localizedDescription)")
+        }
+    }
+
+    nonisolated private static func normalizedProviderKey(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }

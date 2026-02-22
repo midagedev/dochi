@@ -180,6 +180,79 @@ final class UsageStoreTests: XCTestCase {
         XCTAssertEqual(records[0].entries.count, 1)
     }
 
+    func testLatestRecordDayPersistsAndReloads() async throws {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let earlier = try XCTUnwrap(formatter.date(from: "2026-02-02"))
+        let later = try XCTUnwrap(formatter.date(from: "2026-02-18"))
+
+        await store.record(ExchangeMetrics(
+            provider: "OpenAI",
+            model: "gpt-4o",
+            inputTokens: 100,
+            outputTokens: 50,
+            totalTokens: 150,
+            firstByteLatency: nil,
+            totalLatency: 1.0,
+            timestamp: earlier,
+            wasFallback: false
+        ))
+        await store.record(ExchangeMetrics(
+            provider: "openai",
+            model: "gpt-4o",
+            inputTokens: 120,
+            outputTokens: 80,
+            totalTokens: 200,
+            firstByteLatency: nil,
+            totalLatency: 1.0,
+            timestamp: later,
+            wasFallback: false
+        ))
+        await store.flushToDisk()
+
+        let latest = await store.latestRecordDay(for: "OPENAI")
+        XCTAssertEqual(latest.map { formatter.string(from: $0) }, "2026-02-18")
+
+        let reloaded = UsageStore(baseURL: tempDir)
+        let latestFromReload = await reloaded.latestRecordDay(for: "openai")
+        XCTAssertEqual(latestFromReload.map { formatter.string(from: $0) }, "2026-02-18")
+        let months = await reloaded.allMonths()
+        XCTAssertEqual(months, ["2026-02"])
+    }
+
+    func testLatestRecordDayRebuildsWhenIndexMissing() async throws {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let sampleDate = try XCTUnwrap(formatter.date(from: "2026-03-11"))
+
+        await store.record(ExchangeMetrics(
+            provider: "anthropic",
+            model: "claude-3-5-sonnet-20241022",
+            inputTokens: 90,
+            outputTokens: 30,
+            totalTokens: 120,
+            firstByteLatency: nil,
+            totalLatency: 1.0,
+            timestamp: sampleDate,
+            wasFallback: false
+        ))
+        await store.flushToDisk()
+
+        let indexURL = tempDir
+            .appendingPathComponent("usage", isDirectory: true)
+            .appendingPathComponent("provider-latest-index.json")
+        try? FileManager.default.removeItem(at: indexURL)
+
+        let rebuilt = UsageStore(baseURL: tempDir)
+        let latest = await rebuilt.latestRecordDay(for: "anthropic")
+        XCTAssertEqual(latest.map { formatter.string(from: $0) }, "2026-03-11")
+
+        await rebuilt.flushToDisk()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: indexURL.path))
+    }
+
     func testEmptyMonthReturnsEmptyRecords() async {
         let records = await store.dailyRecords(for: "2020-01")
         XCTAssertTrue(records.isEmpty)

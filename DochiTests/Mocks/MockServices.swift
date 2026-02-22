@@ -492,13 +492,22 @@ final class MockSupabaseService: SupabaseServiceProtocol {
 final class MockUsageStore: UsageStoreProtocol {
     var recordedMetrics: [ExchangeMetrics] = []
     var stubbedCost: Double = 0.0
+    var latestDayByProvider: [String: Date] = [:]
+    var dailyRecordsCallCount = 0
+    var allMonthsCallCount = 0
+    var latestRecordDayCallCount = 0
 
     func record(_ metrics: ExchangeMetrics) async {
         recordedMetrics.append(metrics)
+        let key = metrics.provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !key.isEmpty {
+            latestDayByProvider[key] = metrics.timestamp
+        }
     }
 
     func dailyRecords(for month: String) async -> [DailyUsageRecord] {
-        []
+        dailyRecordsCallCount += 1
+        return []
     }
 
     func monthlySummary(for month: String) async -> MonthlyUsageSummary {
@@ -513,11 +522,18 @@ final class MockUsageStore: UsageStoreProtocol {
     }
 
     func allMonths() async -> [String] {
-        []
+        allMonthsCallCount += 1
+        return []
     }
 
     func currentMonthCost() async -> Double {
         stubbedCost
+    }
+
+    func latestRecordDay(for provider: String) async -> Date? {
+        latestRecordDayCallCount += 1
+        let key = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return latestDayByProvider[key]
     }
 }
 
