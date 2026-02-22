@@ -179,4 +179,16 @@ enum SessionExplorerViewStateBuilder {
             return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
         })
     }
+
+    static func preferredSession(
+        in repositoryRoot: String?,
+        sessions: [UnifiedCodingSession]
+    ) -> UnifiedCodingSession? {
+        let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
+        let scoped = sessions.filter { session in
+            let normalizedSessionRoot = normalizedRepositoryPath(session.repositoryRoot)
+            return normalizedSessionRoot == normalizedRoot
+        }
+        return sortSessions(scoped, sort: .activity).first
+    }
 }

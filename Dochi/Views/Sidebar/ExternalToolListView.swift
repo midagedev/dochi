@@ -51,6 +51,10 @@ struct ExternalToolListView: View {
     @State private var mappingNotice: String?
     @State private var expandedRepositoryGroups: Set<String> = []
     @State private var didInitializeRepositoryExpansion = false
+    @State private var focusedRepositoryKey: String?
+    @State private var selectedUnifiedSessionKey: String?
+    @State private var hoveredRepositoryKey: String?
+    @State private var hoveredUnifiedSessionKey: String?
     @State private var historyQueryText = ""
     @State private var historyRepositoryFilter: String?
     @State private var historyBranchFilter = ""
@@ -364,43 +368,65 @@ struct ExternalToolListView: View {
                     ForEach(repositorySummaries) { summary in
                         let representative = representativeSession(for: summary.repositoryRoot)
                         let workSummary = representative.flatMap { sessionWorkSummary($0) }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(summary.displayName)
-                                .font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1)
-                            Text("세션 \(summary.sessionCount) · 활성 \(summary.activeSessionCount) · 오류 \(summary.errorSessionCount)")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                            if let workSummary, let representative {
-                                Text("현재 작업: \(workSummary)")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(workSummaryColor(representative))
-                                    .lineLimit(2)
-                            } else {
-                                Text("현재 작업: 정보 없음")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.tertiary)
+                        let isFocused = focusedRepositoryKey == summary.id
+                        let isHovered = hoveredRepositoryKey == summary.id
+                        Button {
+                            handleRepositoryCardTap(summary)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(summary.displayName)
+                                    .font(.system(size: 11, weight: .semibold))
                                     .lineLimit(1)
+                                Text("세션 \(summary.sessionCount) · 활성 \(summary.activeSessionCount) · 오류 \(summary.errorSessionCount)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                if let workSummary, let representative {
+                                    Text("현재 작업: \(workSummary)")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(workSummaryColor(representative))
+                                        .lineLimit(2)
+                                } else {
+                                    Text("현재 작업: 정보 없음")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
+                                if let repositoryRoot = summary.repositoryRoot {
+                                    let branch = managedRepositories.first(where: {
+                                        URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path == repositoryRoot
+                                    })?.defaultBranch ?? "-"
+                                    Text("브랜치 \(branch) · 업데이트 \(relativeTimestamp(representative?.updatedAt ?? summary.lastActivityAt))")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.tertiary)
+                                } else {
+                                    Text("Unassigned · 업데이트 \(relativeTimestamp(representative?.updatedAt ?? summary.lastActivityAt))")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.tertiary)
+                                }
                             }
-                            if let repositoryRoot = summary.repositoryRoot {
-                                let branch = managedRepositories.first(where: {
-                                    URL(fileURLWithPath: $0.rootPath).standardizedFileURL.path == repositoryRoot
-                                })?.defaultBranch ?? "-"
-                                Text("브랜치 \(branch) · 업데이트 \(relativeTimestamp(representative?.updatedAt ?? summary.lastActivityAt))")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.tertiary)
-                            } else {
-                                Text("Unassigned · 업데이트 \(relativeTimestamp(representative?.updatedAt ?? summary.lastActivityAt))")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.tertiary)
+                            .padding(8)
+                            .frame(width: 210, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(nsColor: .controlBackgroundColor))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(
+                                        isFocused ? Color.accentColor : (isHovered ? Color.accentColor.opacity(0.35) : Color.clear),
+                                        lineWidth: isFocused ? 1.5 : 1
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
+                        .onHover { hovering in
+                            if hovering {
+                                hoveredRepositoryKey = summary.id
+                            } else if hoveredRepositoryKey == summary.id {
+                                hoveredRepositoryKey = nil
                             }
                         }
-                        .padding(8)
-                        .frame(width: 210, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(nsColor: .controlBackgroundColor))
-                        )
                     }
                 }
                 .padding(.horizontal, 10)
@@ -770,16 +796,24 @@ struct ExternalToolListView: View {
     @ViewBuilder
     private func repositoryGroupRow(_ group: RepositorySessionGroup) -> some View {
         let isExpanded = expandedRepositoryGroups.contains(group.repositoryRoot)
+        let isFocused = focusedRepositoryKey == group.id
+        let isHovered = hoveredRepositoryKey == group.id
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 8) {
                 Button {
                     toggleRepositoryGroup(group.repositoryRoot)
                 } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    handleRepositoryGroupTap(group)
+                } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 10)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(group.displayName)
                                 .font(.system(size: 11, weight: .semibold))
@@ -842,6 +876,17 @@ struct ExternalToolListView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isFocused ? Color.accentColor.opacity(0.12) : (isHovered ? Color.accentColor.opacity(0.06) : Color.clear))
+            )
+            .onHover { hovering in
+                if hovering {
+                    hoveredRepositoryKey = group.id
+                } else if hoveredRepositoryKey == group.id {
+                    hoveredRepositoryKey = nil
+                }
+            }
 
             if isExpanded {
                 ForEach(
@@ -856,63 +901,82 @@ struct ExternalToolListView: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(nsColor: .controlBackgroundColor))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(
+                    isFocused ? Color.accentColor.opacity(0.8) : Color.clear,
+                    lineWidth: isFocused ? 1.2 : 0
+                )
+        )
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
     }
 
     @ViewBuilder
     private func unifiedSessionRow(_ session: UnifiedCodingSession) -> some View {
+        let sessionKey = ExternalToolSessionManager.sessionStableKey(session)
+        let runtimeUUID = session.runtimeSessionId.flatMap(UUID.init(uuidString:))
+        let isSelected = selectedUnifiedSessionKey == sessionKey || runtimeUUID == selectedSessionId
+        let isHovered = hoveredUnifiedSessionKey == sessionKey
         let sessionTitle = normalizedSessionTitle(session)
         let workSummary = sessionWorkSummary(session)
         HStack(spacing: 8) {
-            Circle()
-                .fill(activityColor(session.activityState))
-                .frame(width: 7, height: 7)
+            Button {
+                handleUnifiedSessionTap(session)
+            } label: {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(activityColor(session.activityState))
+                        .frame(width: 7, height: 7)
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text("[\(session.provider)] \(session.nativeSessionId)")
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
-                    Text(session.controllabilityTier.rawValue)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.secondary.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("[\(session.provider)] \(session.nativeSessionId)")
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                            Text(session.controllabilityTier.rawValue)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
+
+                        if let sessionTitle {
+                            Text(sessionTitle)
+                                .font(.system(size: 10))
+                                .lineLimit(1)
+                        }
+
+                        if let workSummary {
+                            Text("현재 작업: \(workSummary)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(workSummaryColor(session))
+                                .lineLimit(2)
+                        }
+
+                        if let clientDescriptor = sessionClientDescriptor(session) {
+                            Text(clientDescriptor)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Text("state=\(session.activityState.rawValue), score=\(session.activityScore), repo=\(session.repositoryRoot ?? "(unassigned)")")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Text("업데이트 \(relativeTimestamp(session.updatedAt))")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer()
                 }
-
-                if let sessionTitle {
-                    Text(sessionTitle)
-                        .font(.system(size: 10))
-                        .lineLimit(1)
-                }
-
-                if let workSummary {
-                    Text("현재 작업: \(workSummary)")
-                        .font(.system(size: 9))
-                        .foregroundStyle(workSummaryColor(session))
-                        .lineLimit(2)
-                }
-
-                if let clientDescriptor = sessionClientDescriptor(session) {
-                    Text(clientDescriptor)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Text("state=\(session.activityState.rawValue), score=\(session.activityScore), repo=\(session.repositoryRoot ?? "(unassigned)")")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Text("업데이트 \(relativeTimestamp(session.updatedAt))")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
             }
-            Spacer()
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Menu {
                 if let repositoryRoot = session.repositoryRoot {
@@ -944,6 +1008,17 @@ struct ExternalToolListView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? Color.accentColor.opacity(0.14) : (isHovered ? Color.accentColor.opacity(0.07) : Color.clear))
+        )
+        .onHover { hovering in
+            if hovering {
+                hoveredUnifiedSessionKey = sessionKey
+            } else if hoveredUnifiedSessionKey == sessionKey {
+                hoveredUnifiedSessionKey = nil
+            }
+        }
     }
 
     @ViewBuilder
@@ -1401,6 +1476,80 @@ struct ExternalToolListView: View {
         }
     }
 
+    private func handleRepositoryCardTap(_ summary: RepositoryDashboardSummary) {
+        focusedRepositoryKey = summary.id
+        searchText = ""
+        selectedProfileId = nil
+        explorerFilter.activeOnly = false
+
+        if let repositoryRoot = summary.repositoryRoot {
+            let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
+            explorerFilter.repositoryRoot = normalizedRoot
+            explorerFilter.unassignedOnly = false
+            expandedRepositoryGroups.insert(normalizedRoot)
+            orchestrationRepositoryRoot = normalizedRoot
+        } else {
+            explorerFilter.repositoryRoot = nil
+            explorerFilter.unassignedOnly = true
+            orchestrationRepositoryRoot = nil
+        }
+
+        if let preferred = SessionExplorerViewStateBuilder.preferredSession(
+            in: summary.repositoryRoot,
+            sessions: unifiedSessions
+        ) {
+            handleUnifiedSessionTap(preferred)
+        } else {
+            selectedSessionId = nil
+        }
+    }
+
+    private func handleRepositoryGroupTap(_ group: RepositorySessionGroup) {
+        focusedRepositoryKey = group.id
+        searchText = ""
+        selectedProfileId = nil
+        explorerFilter.activeOnly = false
+        explorerFilter.repositoryRoot = group.repositoryRoot
+        explorerFilter.unassignedOnly = false
+        orchestrationRepositoryRoot = group.repositoryRoot
+        expandedRepositoryGroups.insert(group.repositoryRoot)
+
+        if let preferred = group.sessions.first {
+            handleUnifiedSessionTap(preferred)
+        } else {
+            selectedSessionId = nil
+        }
+    }
+
+    private func handleUnifiedSessionTap(_ session: UnifiedCodingSession) {
+        selectedUnifiedSessionKey = ExternalToolSessionManager.sessionStableKey(session)
+        searchText = session.nativeSessionId
+        selectedProfileId = nil
+
+        if let repositoryRoot = session.repositoryRoot {
+            let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
+            focusedRepositoryKey = normalizedRoot
+            explorerFilter.repositoryRoot = normalizedRoot
+            explorerFilter.unassignedOnly = false
+            expandedRepositoryGroups.insert(normalizedRoot)
+            orchestrationRepositoryRoot = normalizedRoot
+        } else {
+            focusedRepositoryKey = "unassigned"
+            explorerFilter.repositoryRoot = nil
+            explorerFilter.unassignedOnly = true
+            orchestrationRepositoryRoot = nil
+        }
+
+        if let runtimeSessionId = session.runtimeSessionId,
+           let runtimeUUID = UUID(uuidString: runtimeSessionId),
+           manager.sessions.contains(where: { $0.id == runtimeUUID }) {
+            selectedSessionId = runtimeUUID
+            mappingNotice = nil
+        } else {
+            selectedSessionId = nil
+        }
+    }
+
     private func normalizedSessionTitle(_ session: UnifiedCodingSession) -> String? {
         guard let raw = session.title else { return nil }
         let normalized = raw
@@ -1446,17 +1595,10 @@ struct ExternalToolListView: View {
     }
 
     private func representativeSession(for repositoryRoot: String?) -> UnifiedCodingSession? {
-        let scoped = unifiedSessions.filter { session in
-            switch (repositoryRoot, session.repositoryRoot) {
-            case (.none, .none):
-                return true
-            case let (.some(left), .some(right)):
-                return normalizedRepositoryPath(left) == normalizedRepositoryPath(right)
-            default:
-                return false
-            }
-        }
-        return scoped.sorted(by: ExternalToolSessionManager.isPreferredUnifiedSessionOrder(_:_:)).first
+        SessionExplorerViewStateBuilder.preferredSession(
+            in: repositoryRoot,
+            sessions: unifiedSessions
+        )
     }
 
     private func workSummaryColor(_ session: UnifiedCodingSession) -> Color {

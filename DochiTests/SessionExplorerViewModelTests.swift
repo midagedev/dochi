@@ -163,6 +163,82 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(groups[0].sessions.map(\.provider), ["anthropic", "zai"])
     }
 
+    func testPreferredSessionChoosesMostActionableForRepository() {
+        let now = Date()
+        let sessions = [
+            makeSession(
+                provider: "codex",
+                nativeId: "stale-old",
+                repo: "/tmp/repo-a",
+                tier: .t1Attach,
+                state: .stale,
+                score: 25,
+                updatedAt: now.addingTimeInterval(-500)
+            ),
+            makeSession(
+                provider: "codex",
+                nativeId: "active-fresh",
+                repo: "/tmp/repo-a/../repo-a",
+                tier: .t0Full,
+                state: .active,
+                score: 91,
+                updatedAt: now.addingTimeInterval(-10)
+            ),
+            makeSession(
+                provider: "claude",
+                nativeId: "idle-other",
+                repo: "/tmp/repo-b",
+                tier: .t2Observe,
+                state: .idle,
+                score: 70,
+                updatedAt: now
+            ),
+        ]
+
+        let preferred = SessionExplorerViewStateBuilder.preferredSession(
+            in: "/tmp/repo-a",
+            sessions: sessions
+        )
+
+        XCTAssertEqual(preferred?.nativeSessionId, "active-fresh")
+    }
+
+    func testPreferredSessionSupportsUnassignedQueue() {
+        let sessions = [
+            makeSession(
+                provider: "codex",
+                nativeId: "assigned",
+                repo: "/tmp/repo-a",
+                tier: .t0Full,
+                state: .active,
+                score: 80
+            ),
+            makeSession(
+                provider: "claude",
+                nativeId: "unassigned-idle",
+                repo: nil,
+                tier: .t2Observe,
+                state: .idle,
+                score: 48
+            ),
+            makeSession(
+                provider: "aider",
+                nativeId: "unassigned-stale",
+                repo: nil,
+                tier: .t2Observe,
+                state: .stale,
+                score: 18
+            ),
+        ]
+
+        let preferred = SessionExplorerViewStateBuilder.preferredSession(
+            in: nil,
+            sessions: sessions
+        )
+
+        XCTAssertEqual(preferred?.nativeSessionId, "unassigned-idle")
+    }
+
     func testFilteredSessionsNormalizesRepositoryRootComparison() {
         let sessions = [
             makeSession(
