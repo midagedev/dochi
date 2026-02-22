@@ -14,7 +14,7 @@ struct SubscriptionEditSheet: View {
     @State private var resetDay: Int = 1
     @State private var monthlyCost: String = ""
 
-    private let providerOptions = ["OpenAI", "Anthropic", "Z.AI", "기타"]
+    private let providerPresets = ["Codex", "Claude", "Gemini", "OpenAI", "Anthropic", "Z.AI"]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,10 +30,26 @@ struct SubscriptionEditSheet: View {
 
             // Form
             Form {
-                // Provider
-                Picker("프로바이더", selection: $providerName) {
-                    ForEach(providerOptions, id: \.self) { provider in
-                        Text(provider).tag(provider)
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("프로바이더 이름", text: $providerName)
+                        .textFieldStyle(.roundedBorder)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(providerPresets, id: \.self) { preset in
+                                Button(preset) {
+                                    providerName = preset
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
+                            }
+                        }
+                    }
+
+                    if usageSource == .externalToolLogs && !isKnownExternalProvider {
+                        Text("알림: 현재 입력한 프로바이더는 외부 로그/API 수집 대상과 매칭되지 않을 수 있습니다.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
                     }
                 }
 
@@ -53,6 +69,24 @@ struct SubscriptionEditSheet: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(sourceGuidanceTitle)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(sourceGuidanceDetail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if usageSource == .externalToolLogs && isGeminiProvider {
+                        Text("Gemini는 oauth-personal 인증에서 모니터링 정확도가 가장 높습니다.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .padding(8)
+                .background(.secondary.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 // Token limit
                 Toggle("무제한", isOn: $isUnlimited)
@@ -118,9 +152,43 @@ struct SubscriptionEditSheet: View {
                 resetDay = sub.resetDayOfMonth
                 monthlyCost = String(format: "%.2f", sub.monthlyCostUSD)
             } else {
-                providerName = providerOptions[0]
+                providerName = providerPresets[0]
                 usageSource = .externalToolLogs
             }
+        }
+    }
+
+    private var normalizedProviderName: String {
+        providerName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var isGeminiProvider: Bool {
+        normalizedProviderName.contains("gemini")
+    }
+
+    private var isKnownExternalProvider: Bool {
+        let normalized = normalizedProviderName
+        if normalized.contains("gemini") { return true }
+        if normalized.contains("claude") || normalized.contains("anthropic") { return true }
+        if normalized.contains("codex") || normalized.contains("chatgpt") || normalized.contains("openai") { return true }
+        return false
+    }
+
+    private var sourceGuidanceTitle: String {
+        switch usageSource {
+        case .externalToolLogs:
+            return "외부 로그/API 수집 안내"
+        case .dochiUsageStore:
+            return "UsageStore 수집 안내"
+        }
+    }
+
+    private var sourceGuidanceDetail: String {
+        switch usageSource {
+        case .externalToolLogs:
+            return "Codex(~/.codex/sessions), Claude(~/.claude/projects), Gemini(~/.gemini) 경로를 자동 탐색해 사용량을 집계합니다."
+        case .dochiUsageStore:
+            return "Dochi 대화 기록의 provider/model 토큰 로그를 기준으로 집계합니다. 외부 CLI 상태와는 분리됩니다."
         }
     }
 

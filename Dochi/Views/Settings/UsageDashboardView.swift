@@ -14,6 +14,7 @@ struct UsageDashboardView: View {
     @State private var allMonthsSummaries: [MonthlyUsageSummary] = []
     @State private var isLoading = true
     @State private var utilizations: [ResourceUtilization] = []
+    @State private var monitoringSnapshots: [UUID: SubscriptionMonitoringSnapshot] = [:]
     @State private var showSubscriptionSheet = false
     @State private var editingSubscription: SubscriptionPlan?
     @State private var showDeleteConfirm = false
@@ -584,8 +585,11 @@ struct UsageDashboardView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
             } else {
-                ForEach(utilizations, id: \.subscription.id) { util in
-                    subscriptionCard(util)
+                ForEach(SubscriptionUsageSource.allCases, id: \.self) { source in
+                    let sourceUtilizations = utilizations.filter { $0.subscription.usageSource == source }
+                    if !sourceUtilizations.isEmpty {
+                        subscriptionSourceSection(source: source, utilizations: sourceUtilizations)
+                    }
                 }
             }
         }
@@ -594,8 +598,29 @@ struct UsageDashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private func subscriptionCard(_ util: ResourceUtilization) -> some View {
+    private func subscriptionSourceSection(
+        source: SubscriptionUsageSource,
+        utilizations: [ResourceUtilization]
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            Text(source.axisSectionTitle)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(utilizations, id: \.subscription.id) { util in
+                subscriptionCard(util)
+            }
+        }
+        .padding(10)
+        .background(.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func subscriptionCard(_ util: ResourceUtilization) -> some View {
+        let snapshot = monitoringSnapshots[util.subscription.id]
+        let status = snapshot?.statusPresentation
+
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(util.subscription.providerName)
                     .font(.system(size: 12, weight: .semibold))
@@ -607,11 +632,67 @@ struct UsageDashboardView: View {
             }
 
             HStack(spacing: 6) {
+                providerBadge(util.subscription.providerName)
                 usageSourceBadge(util.subscription.usageSource)
+                if let status {
+                    monitoringStatusBadge(status)
+                } else {
+                    monitoringStatusBadge(
+                        MonitoringStatusPresentation(
+                            label: "수집 대기",
+                            detail: nil,
+                            tone: .neutral
+                        )
+                    )
+                }
                 Text(util.subscription.usageSource.detailText)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    Text("최근 수집:")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    if let collectedAt = snapshot?.lastCollectedAt {
+                        Text(collectedAt, style: .relative)
+                            .font(.system(size: 10, weight: .medium))
+                    } else {
+                        Text("없음")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("최근 수집")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    if let collectedAt = snapshot?.lastCollectedAt {
+                        Text(collectedAt, style: .relative)
+                            .font(.system(size: 10, weight: .medium))
+                    } else {
+                        Text("없음")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if let status, let detail = status.detail, !detail.isEmpty {
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: monitoringStatusIcon(status.tone))
+                        .font(.system(size: 10))
+                        .foregroundStyle(monitoringStatusColor(status.tone))
+                        .padding(.top, 1)
+                    Text(detail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(monitoringStatusColor(status.tone))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             // Usage gauge
@@ -626,23 +707,27 @@ struct UsageDashboardView: View {
             }
             .frame(height: 8)
 
-            HStack {
-                if let limit = util.subscription.monthlyTokenLimit {
-                    Text("사용: \(formatTokens(util.usedTokens)) / \(formatTokens(limit))")
-                        .font(.system(size: 10, design: .monospaced))
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    usageAmountText(util)
+                    Spacer()
+                    Text("리셋일: 매월 \(util.subscription.resetDayOfMonth)일")
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
-                } else {
-                    Text("사용: \(formatTokens(util.usedTokens)) (무제한)")
-                        .font(.system(size: 10, design: .monospaced))
+                    Text("잔여: \(util.daysRemaining)일")
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
-                Text("리셋일: 매월 \(util.subscription.resetDayOfMonth)일")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                Text("잔여: \(util.daysRemaining)일")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    usageAmountText(util)
+                    Text("리셋일: 매월 \(util.subscription.resetDayOfMonth)일")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text("잔여: \(util.daysRemaining)일")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if util.subscription.monthlyTokenLimit != nil {
@@ -682,6 +767,47 @@ struct UsageDashboardView: View {
         }
     }
 
+    private func providerBadge(_ providerName: String) -> some View {
+        Text(providerBadgeName(providerName))
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(providerBadgeColor(providerName).opacity(0.14))
+            .foregroundStyle(providerBadgeColor(providerName))
+            .clipShape(Capsule())
+    }
+
+    private func providerBadgeName(_ providerName: String) -> String {
+        let normalized = providerName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.contains("claude") || normalized.contains("anthropic") {
+            return "Claude"
+        }
+        if normalized.contains("gemini") {
+            return "Gemini"
+        }
+        if normalized.contains("codex") || normalized.contains("chatgpt") {
+            return "Codex"
+        }
+        if normalized.contains("openai") {
+            return "OpenAI"
+        }
+        return providerName
+    }
+
+    private func providerBadgeColor(_ providerName: String) -> Color {
+        let normalized = providerName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.contains("claude") || normalized.contains("anthropic") {
+            return .orange
+        }
+        if normalized.contains("gemini") {
+            return .green
+        }
+        if normalized.contains("codex") || normalized.contains("chatgpt") || normalized.contains("openai") {
+            return .blue
+        }
+        return .gray
+    }
+
     private func usageSourceBadge(_ source: SubscriptionUsageSource) -> some View {
         Text(source.displayName)
             .font(.system(size: 9, weight: .medium))
@@ -698,6 +824,59 @@ struct UsageDashboardView: View {
             return .indigo
         case .dochiUsageStore:
             return .teal
+        }
+    }
+
+    private func monitoringStatusBadge(_ presentation: MonitoringStatusPresentation) -> some View {
+        Text(presentation.label)
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(monitoringStatusColor(presentation.tone).opacity(0.14))
+            .foregroundStyle(monitoringStatusColor(presentation.tone))
+            .clipShape(Capsule())
+    }
+
+    private func monitoringStatusColor(_ tone: MonitoringStatusTone) -> Color {
+        switch tone {
+        case .success:
+            return .green
+        case .info:
+            return .blue
+        case .warning:
+            return .orange
+        case .error:
+            return .red
+        case .neutral:
+            return .gray
+        }
+    }
+
+    private func monitoringStatusIcon(_ tone: MonitoringStatusTone) -> String {
+        switch tone {
+        case .success:
+            return "checkmark.circle"
+        case .info:
+            return "info.circle"
+        case .warning:
+            return "exclamationmark.triangle"
+        case .error:
+            return "xmark.octagon"
+        case .neutral:
+            return "circle.dashed"
+        }
+    }
+
+    @ViewBuilder
+    private func usageAmountText(_ util: ResourceUtilization) -> some View {
+        if let limit = util.subscription.monthlyTokenLimit {
+            Text("사용: \(formatTokens(util.usedTokens)) / \(formatTokens(limit))")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+        } else {
+            Text("사용: \(formatTokens(util.usedTokens)) (무제한)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -881,7 +1060,9 @@ struct UsageDashboardView: View {
 
     private func loadUtilizations() async {
         guard let optimizer = resourceOptimizer else { return }
-        utilizations = await optimizer.allUtilizations()
+        let loaded = await optimizer.allUtilizations()
+        utilizations = loaded
+        monitoringSnapshots = await optimizer.monitoringSnapshots(for: loaded.map(\.subscription))
     }
 
     private var isGitScanAutoTaskEnabled: Bool {

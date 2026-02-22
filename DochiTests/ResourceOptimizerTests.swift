@@ -701,6 +701,75 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(util.usedTokens, 200)
     }
 
+    func testMonitoringSnapshotUsesDochiUsageStoreLatestCollection() async {
+        let usageDir = tempDir.appendingPathComponent("usage-monitoring-store")
+        try? FileManager.default.createDirectory(at: usageDir, withIntermediateDirectories: true)
+        let store = UsageStore(baseURL: usageDir)
+        let now = Date()
+
+        await store.record(ExchangeMetrics(
+            provider: "openai",
+            model: "gpt-4.1",
+            inputTokens: 60,
+            outputTokens: 40,
+            totalTokens: 100,
+            firstByteLatency: 0.12,
+            totalLatency: 0.4,
+            timestamp: now,
+            wasFallback: false,
+            agentName: "도치"
+        ))
+        await store.flushToDisk()
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-monitoring-store"),
+            usageStore: store,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")]
+        )
+        let plan = SubscriptionPlan(
+            providerName: "openai",
+            planName: "Metered",
+            usageSource: .dochiUsageStore,
+            monthlyTokenLimit: 1_000_000,
+            resetDayOfMonth: 1
+        )
+
+        let snapshot = await sourceService.monitoringSnapshot(for: plan)
+        XCTAssertEqual(snapshot.statusCode, "ok_store")
+        XCTAssertNotNil(snapshot.lastCollectedAt)
+    }
+
+    func testMonitoringSnapshotGeminiUnsupportedAuthType() async throws {
+        let geminiRoot = tempDir.appendingPathComponent("gemini-monitoring-unsupported")
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+        let settings = #"{"security":{"auth":{"selectedType":"api-key"}}}"#
+        try settings.write(
+            to: geminiRoot.appendingPathComponent("settings.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-gemini-monitoring-unsupported"),
+            usageStore: nil,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            geminiConfigRoots: [geminiRoot]
+        )
+        let plan = SubscriptionPlan(
+            providerName: "Gemini CLI",
+            planName: "Pro",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1000,
+            resetDayOfMonth: 1
+        )
+
+        let snapshot = await sourceService.monitoringSnapshot(for: plan)
+        XCTAssertEqual(snapshot.statusCode, "unsupported_auth_type")
+        XCTAssertNotNil(snapshot.statusPresentation.detail)
+    }
+
     func testUtilizationUsesExternalToolLogsWhenSourceIsExternalToolLogs() async throws {
         let claudeRoot = tempDir.appendingPathComponent("claude-projects")
         let codexRoot = tempDir.appendingPathComponent("codex-sessions")
@@ -1289,6 +1358,21 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(WasteRiskLevel.caution.displayName, "주의")
         XCTAssertEqual(WasteRiskLevel.wasteRisk.displayName, "낭비 위험")
         XCTAssertEqual(WasteRiskLevel.normal.displayName, "정상")
+    }
+
+    func testSubscriptionMonitoringSnapshotPresentationNotLoggedIn() {
+        let snapshot = SubscriptionMonitoringSnapshot(
+            subscriptionID: UUID(),
+            source: .externalToolLogs,
+            provider: "Gemini CLI",
+            statusCode: "not_logged_in",
+            statusMessage: nil,
+            lastCollectedAt: nil
+        )
+        let presentation = snapshot.statusPresentation
+        XCTAssertEqual(presentation.label, "로그인 필요")
+        XCTAssertEqual(presentation.tone, .warning)
+        XCTAssertNotNil(presentation.detail)
     }
 
     // MARK: - AutoTaskType
