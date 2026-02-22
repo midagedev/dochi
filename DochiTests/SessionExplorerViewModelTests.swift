@@ -279,6 +279,87 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(groups[1].sessions.first?.nativeSessionId, "running")
     }
 
+    func testOrchestrationFleetSnapshotAggregatesOperationalCounts() {
+        let sessions = [
+            makeSession(
+                provider: "codex",
+                nativeId: "active-a",
+                repo: "/tmp/repo-a",
+                tier: .t0Full,
+                state: .active,
+                score: 92
+            ),
+            makeSession(
+                provider: "claude",
+                nativeId: "blocked-a",
+                repo: "/tmp/repo-b",
+                tier: .t1Attach,
+                state: .dead,
+                score: 8,
+                errorPenalty: 14
+            ),
+            makeSession(
+                provider: "claude",
+                nativeId: "done-a",
+                repo: "/tmp/repo-b",
+                tier: .t1Attach,
+                state: .idle,
+                score: 76
+            ),
+            makeSession(
+                provider: "gemini",
+                nativeId: "queued-a",
+                repo: nil,
+                tier: .t2Observe,
+                state: .idle,
+                score: 50
+            ),
+            makeSession(
+                provider: "codex",
+                nativeId: "review-a",
+                repo: "/tmp/repo-c",
+                tier: .t2Observe,
+                state: .stale,
+                score: 30
+            ),
+        ]
+
+        let snapshot = SessionExplorerViewStateBuilder.orchestrationFleetSnapshot(
+            sessions: sessions
+        )
+
+        XCTAssertEqual(snapshot.totalSessionCount, 5)
+        XCTAssertEqual(snapshot.activeSessionCount, 1)
+        XCTAssertEqual(snapshot.idleSessionCount, 2)
+        XCTAssertEqual(snapshot.blockedSessionCount, 1)
+        XCTAssertEqual(snapshot.queuedSessionCount, 1)
+        XCTAssertEqual(snapshot.unassignedSessionCount, 1)
+        XCTAssertEqual(snapshot.actionableSessionCount, 2)
+        XCTAssertEqual(snapshot.repositoryCount, 3)
+        XCTAssertEqual(snapshot.laneBreakdown.map(\.count), [1, 1, 1, 1, 1])
+    }
+
+    func testOrchestrationFleetSnapshotLimitsAndSortsProviderBreakdown() {
+        let sessions = [
+            makeSession(provider: "zeta", nativeId: "z-1", repo: "/tmp/repo-a", state: .active, score: 90),
+            makeSession(provider: "zeta", nativeId: "z-2", repo: "/tmp/repo-a", state: .idle, score: 72),
+            makeSession(provider: "alpha", nativeId: "a-1", repo: "/tmp/repo-b", state: .active, score: 80),
+            makeSession(provider: "alpha", nativeId: "a-2", repo: "/tmp/repo-b", state: .stale, score: 20),
+            makeSession(provider: "beta", nativeId: "b-1", repo: "/tmp/repo-c", state: .idle, score: 65),
+        ]
+
+        let snapshot = SessionExplorerViewStateBuilder.orchestrationFleetSnapshot(
+            sessions: sessions,
+            providerLimit: 2
+        )
+
+        XCTAssertEqual(snapshot.providerBreakdown.count, 2)
+        XCTAssertEqual(snapshot.providerBreakdown[0].provider, "Alpha")
+        XCTAssertEqual(snapshot.providerBreakdown[0].count, 2)
+        XCTAssertEqual(snapshot.providerBreakdown[1].provider, "Zeta")
+        XCTAssertEqual(snapshot.providerBreakdown[1].count, 2)
+    }
+
     func testPreferredSessionChoosesMostActionableForRepository() {
         let now = Date()
         let sessions = [
@@ -741,6 +822,73 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(lines[1], "def5678 fix: session title fallback · 9m ago")
     }
 
+    func testSessionRepositoryStatusLineIncludesBranchAndWorkingTree() {
+        let session = makeSession(
+            provider: "codex",
+            nativeId: "sess-status",
+            repo: "/tmp/repo-a",
+            tier: .t0Full,
+            state: .active,
+            score: 88
+        )
+        let insight = makeInsight(
+            path: "/tmp/repo-a",
+            changedFileCount: 2,
+            untrackedFileCount: 1,
+            changedPathPreview: ["Sources/App.swift", "README.md"],
+            recentCommitPreviews: nil,
+            lastCommitRelative: "-"
+        )
+
+        let line = SessionExplorerViewStateBuilder.sessionRepositoryStatusLine(
+            session: session,
+            insight: insight
+        )
+
+        XCTAssertTrue(line.contains("브랜치 main"))
+        XCTAssertTrue(line.contains("Sources/App.swift"))
+    }
+
+    func testSessionCommitLineFallsBackToRelativeWhenPreviewMissing() {
+        let insight = makeInsight(
+            path: "/tmp/repo-a",
+            changedFileCount: 0,
+            untrackedFileCount: 0,
+            changedPathPreview: nil,
+            recentCommitPreviews: nil,
+            lastCommitRelative: "4m ago"
+        )
+
+        let line = SessionExplorerViewStateBuilder.sessionCommitLine(for: insight)
+
+        XCTAssertEqual(line, "최근 커밋 4m ago")
+    }
+
+    func testSessionLocationLineUsesRepositoryRelativePath() {
+        let session = UnifiedCodingSession(
+            source: "test",
+            runtimeType: .tmux,
+            controllabilityTier: .t0Full,
+            provider: "codex",
+            nativeSessionId: "sess-location",
+            runtimeSessionId: UUID().uuidString,
+            workingDirectory: "/tmp/repo-a/apps/mobile",
+            repositoryRoot: "/tmp/repo-a",
+            path: "/tmp/sess-location.jsonl",
+            updatedAt: Date(),
+            isActive: true,
+            activityScore: 80,
+            activityState: .active
+        )
+
+        let line = SessionExplorerViewStateBuilder.sessionLocationLine(
+            for: session,
+            homeDirectoryPath: "/Users/tester"
+        )
+
+        XCTAssertEqual(line, "./apps/mobile")
+    }
+
     private func makeSession(
         provider: String,
         nativeId: String,
@@ -780,7 +928,10 @@ final class SessionExplorerViewModelTests: XCTestCase {
         changedFileCount: Int,
         untrackedFileCount: Int,
         changedPathPreview: [String]? = nil,
-        recentCommitPreviews: [GitCommitPreview]? = nil
+        recentCommitPreviews: [GitCommitPreview]? = nil,
+        lastCommitRelative: String = "-",
+        lastCommitShortHash: String? = nil,
+        lastCommitSubject: String? = nil
     ) -> GitRepositoryInsight {
         GitRepositoryInsight(
             workDomain: "personal",
@@ -795,9 +946,9 @@ final class SessionExplorerViewModelTests: XCTestCase {
             remoteRepository: nil,
             lastCommitEpoch: nil,
             lastCommitISO8601: nil,
-            lastCommitRelative: "-",
-            lastCommitShortHash: nil,
-            lastCommitSubject: nil,
+            lastCommitRelative: lastCommitRelative,
+            lastCommitShortHash: lastCommitShortHash,
+            lastCommitSubject: lastCommitSubject,
             upstreamLastCommitEpoch: nil,
             upstreamLastCommitISO8601: nil,
             upstreamLastCommitRelative: "-",

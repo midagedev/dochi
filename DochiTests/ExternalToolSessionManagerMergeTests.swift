@@ -877,12 +877,57 @@ final class ExternalToolSessionManagerMergeTests: XCTestCase {
         XCTAssertEqual(desktop.originator, "Codex Desktop")
         XCTAssertEqual(desktop.sessionSource, "vscode")
         XCTAssertEqual(desktop.clientKind, "desktop")
+        XCTAssertEqual(desktop.title, "hello")
+        XCTAssertEqual(desktop.summary, "hello")
+        XCTAssertEqual(desktop.titleSource, "codex_session_file_head_user_prompt")
+        XCTAssertNotNil(desktop.titleConfidence)
 
         let cli = try XCTUnwrap(discovered.first(where: { $0.sessionId == "codex-cli-1" }))
         XCTAssertEqual(cli.provider, "codex")
         XCTAssertEqual(cli.originator, "Codex CLI")
         XCTAssertEqual(cli.sessionSource, "cli")
         XCTAssertEqual(cli.clientKind, "cli")
+        XCTAssertEqual(cli.title, "hi")
+        XCTAssertEqual(cli.summary, "hi")
+        XCTAssertEqual(cli.titleSource, "codex_session_file_head_user_prompt")
+        XCTAssertNotNil(cli.titleConfidence)
+    }
+
+    func testDiscoverLocalCodingSessionsSkipsCodexBootstrapMessagesForTitle() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-codex-bootstrap-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexRoot = tempRoot.appendingPathComponent("codex", isDirectory: true)
+        let claudeRoot = tempRoot.appendingPathComponent("claude", isDirectory: true)
+        let sessionFile = codexRoot
+            .appendingPathComponent("2026/02/21", isDirectory: true)
+            .appendingPathComponent("rollout-bootstrap.jsonl")
+        try FileManager.default.createDirectory(
+            at: sessionFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let content = """
+        {"timestamp":"2026-02-21T12:00:00Z","type":"session_meta","payload":{"id":"codex-bootstrap-1","cwd":"/Users/hckim/repo/dochi","originator":"Codex Desktop","source":"vscode"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /Users/hckim/repo/dochi"}]}}
+        {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context> <cwd>/Users/hckim/repo/dochi</cwd> </environment_context>"}]}}
+        {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"실제 사용자 요청: 오케스트레이션 대시보드 레이아웃 개선"}]}}
+        """
+        try content.data(using: .utf8)?.write(to: sessionFile, options: .atomic)
+
+        let discovered = ExternalToolSessionManager.discoverLocalCodingSessions(
+            codexSessionsRoot: codexRoot,
+            claudeProjectsRoot: claudeRoot,
+            limit: 20,
+            now: Date(timeIntervalSince1970: 1_771_636_000)
+        )
+
+        let session = try XCTUnwrap(discovered.first(where: { $0.sessionId == "codex-bootstrap-1" }))
+        XCTAssertEqual(session.title, "실제 사용자 요청: 오케스트레이션 대시보드 레이아웃 개선")
+        XCTAssertEqual(session.summary, "실제 사용자 요청: 오케스트레이션 대시보드 레이아웃 개선")
+        XCTAssertEqual(session.titleSource, "codex_session_file_head_user_prompt")
+        XCTAssertNotNil(session.titleConfidence)
     }
 
     func testDiscoverLocalCodingSessionsNormalizesCodexSourceTaxonomy() throws {
@@ -969,6 +1014,39 @@ final class ExternalToolSessionManagerMergeTests: XCTestCase {
         XCTAssertEqual(discovered.first(where: { $0.sessionId == "cli-iterm" })?.clientKind, "cli")
         XCTAssertEqual(discovered.first(where: { $0.sessionId == "cli-originator" })?.clientKind, "cli")
         XCTAssertEqual(discovered.first(where: { $0.sessionId == "unknown-source" })?.clientKind, "unknown")
+    }
+
+    func testDiscoverLocalCodingSessionsParsesClaudeFirstUserPromptFromSessionFile() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-claude-first-prompt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexRoot = tempRoot.appendingPathComponent("codex", isDirectory: true)
+        let claudeRoot = tempRoot.appendingPathComponent("claude", isDirectory: true)
+        let projectDir = claudeRoot.appendingPathComponent("-Users-hckim-repo-dochi", isDirectory: true)
+        let sessionFile = projectDir.appendingPathComponent("claude-file-1.jsonl")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+        let content = """
+        {"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/Users/hckim/repo/dochi","sessionId":"claude-file-1","version":"2.1.50","gitBranch":"main","slug":"sample-session","type":"user","message":{"role":"user","content":"클로드 첫 프롬프트 제목 후보"},"uuid":"u1","timestamp":"2026-02-22T11:15:09.747Z"}
+        {"parentUuid":"u1","isSidechain":false,"userType":"external","cwd":"/Users/hckim/repo/dochi","sessionId":"claude-file-1","version":"2.1.50","gitBranch":"main","slug":"sample-session","type":"assistant","message":{"role":"assistant","content":"분석을 시작합니다"},"uuid":"u2","timestamp":"2026-02-22T11:15:10.100Z"}
+        """
+        try content.data(using: .utf8)?.write(to: sessionFile, options: .atomic)
+
+        let discovered = ExternalToolSessionManager.discoverLocalCodingSessions(
+            codexSessionsRoot: codexRoot,
+            claudeProjectsRoot: claudeRoot,
+            limit: 20,
+            now: Date(timeIntervalSince1970: 1_771_636_000)
+        )
+
+        let claude = try XCTUnwrap(discovered.first(where: {
+            $0.provider == "claude" && $0.sessionId == "claude-file-1"
+        }))
+        XCTAssertEqual(claude.title, "클로드 첫 프롬프트 제목 후보")
+        XCTAssertEqual(claude.summary, "클로드 첫 프롬프트 제목 후보")
+        XCTAssertEqual(claude.titleSource, "claude_session_file_head_user_prompt")
+        XCTAssertNotNil(claude.titleConfidence)
     }
 
     func testEnrichRuntimeSessionMetadataMatchesByWorkingDirectory() {

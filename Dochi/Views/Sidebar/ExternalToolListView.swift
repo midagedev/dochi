@@ -75,6 +75,7 @@ private struct OrchestrationMonitorEvent: Identifiable {
 
 struct ExternalToolListView: View {
     let manager: ExternalToolSessionManagerProtocol
+    var resourceOptimizer: (any ResourceOptimizerProtocol)?
     @Binding var selectedSessionId: UUID?
     @Binding var selectedProfileId: UUID?
     @State private var showProfileEditor = false
@@ -131,6 +132,9 @@ struct ExternalToolListView: View {
     @State private var orchestrationErrorMessage: String?
     @State private var workboardLaneFilter: OrchestrationWorkboardLane?
     @State private var showExtendedInspectorSections = false
+    @State private var subscriptionUtilizations: [ResourceUtilization] = []
+    @State private var subscriptionMonitoringSnapshots: [UUID: SubscriptionMonitoringSnapshot] = [:]
+    @State private var isRefreshingSubscriptionUsage = false
     private let orchestrationSummaryService = OrchestrationSummaryService()
     private static let orchestrationStatusCaptureLines = 120
     private static let orchestrationSummarizeCaptureLines = 160
@@ -270,6 +274,43 @@ struct ExternalToolListView: View {
 
     private var providerFilterOptions: [String] {
         Array(Set(unifiedSessions.map(\.provider))).sorted()
+    }
+
+    private var orchestrationFleetSnapshot: OrchestrationFleetSnapshot {
+        SessionExplorerViewStateBuilder.orchestrationFleetSnapshot(
+            sessions: unifiedSessions,
+            providerLimit: 5
+        )
+    }
+
+    private var overviewActiveSessions: [UnifiedCodingSession] {
+        unifiedSessions
+            .filter { $0.activityState == .active || $0.activityState == .idle }
+            .sorted(by: ExternalToolSessionManager.isPreferredUnifiedSessionOrder(_:_:))
+    }
+
+    private var prioritizedSubscriptionUtilizations: [ResourceUtilization] {
+        subscriptionUtilizations.sorted(by: { lhs, rhs in
+            let lhsRank = riskRank(lhs.riskLevel)
+            let rhsRank = riskRank(rhs.riskLevel)
+            if lhsRank != rhsRank {
+                return lhsRank < rhsRank
+            }
+            if lhs.projectedUsageRatio != rhs.projectedUsageRatio {
+                return lhs.projectedUsageRatio > rhs.projectedUsageRatio
+            }
+            return lhs.subscription.providerName.localizedCaseInsensitiveCompare(rhs.subscription.providerName) == .orderedAscending
+        })
+    }
+
+    private var subscriptionRiskCount: Int {
+        subscriptionUtilizations.filter { $0.riskLevel == .wasteRisk || $0.riskLevel == .caution }.count
+    }
+
+    private var totalSubscriptionUsedTokens: Int {
+        subscriptionUtilizations.reduce(0) { partialResult, util in
+            partialResult + util.usedTokens
+        }
     }
 
     private var orchestrationWorkboardGroups: [OrchestrationWorkboardGroup] {
@@ -470,6 +511,7 @@ struct ExternalToolListView: View {
         )
         .task {
             await refreshUnifiedSessions()
+            await refreshSubscriptionUsage()
             refreshHistoryIndexStatus()
             refreshKPIReport()
         }
@@ -518,7 +560,11 @@ struct ExternalToolListView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 observabilitySectionHeader
+                orchestrationFleetSnapshotSection
+                repoDashboardSection
+                codingPlanUsageSection
                 orchestrationLoopSection
+                orchestrationActiveAgentsSection
                 orchestrationWorkboardSection
                 orchestrationLiveMonitorSection
                 orchestrationActionQueueSection
@@ -526,6 +572,272 @@ struct ExternalToolListView: View {
             }
             .padding(.vertical, 4)
         }
+    }
+
+    @ViewBuilder
+    private var orchestrationFleetSnapshotSection: some View {
+        sectionHeader("Fleet Snapshot")
+
+        let snapshot = orchestrationFleetSnapshot
+        let metricColumns = [
+            GridItem(.flexible(minimum: 80), spacing: 6),
+            GridItem(.flexible(minimum: 80), spacing: 6),
+            GridItem(.flexible(minimum: 80), spacing: 6),
+        ]
+
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 6) {
+                fleetMetricBadge(title: "전체", value: "\(snapshot.totalSessionCount)", color: .secondary)
+                fleetMetricBadge(title: "실행중", value: "\(snapshot.activeSessionCount)", color: .green)
+                fleetMetricBadge(title: "대기", value: "\(snapshot.idleSessionCount)", color: .blue)
+                fleetMetricBadge(title: "Blocked", value: "\(snapshot.blockedSessionCount)", color: .red)
+                fleetMetricBadge(title: "Queue", value: "\(snapshot.queuedSessionCount)", color: .orange)
+                fleetMetricBadge(title: "레포", value: "\(snapshot.repositoryCount)", color: .secondary)
+                fleetMetricBadge(title: "미할당", value: "\(snapshot.unassignedSessionCount)", color: .orange)
+                fleetMetricBadge(title: "개입 가능", value: "\(snapshot.actionableSessionCount)", color: .accentColor)
+            }
+
+            if !snapshot.providerBreakdown.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Provider 분포")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(snapshot.providerBreakdown) { provider in
+                                Text("\(provider.provider) \(provider.count)")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.secondary.opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(snapshot.laneBreakdown) { lane in
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(workboardLaneColor(lane.lane))
+                                .frame(width: 6, height: 6)
+                            Text("\(workboardLaneTitle(lane.lane)) \(lane.count)")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private var codingPlanUsageSection: some View {
+        sectionHeader("Coding Plan Usage")
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("구독 코딩플랜 사용량")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("오케스트레이션 비용/낭비 리스크를 함께 모니터링")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isRefreshingSubscriptionUsage {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                Button("새로고침") {
+                    Task { await refreshSubscriptionUsage() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+
+            if resourceOptimizer == nil {
+                Text("구독 사용량 서비스를 찾을 수 없습니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            } else if subscriptionUtilizations.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("등록된 구독 플랜이 없습니다.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Button("기본 플랜 자동 감지") {
+                        Task {
+                            await bootstrapSubscriptionsIfNeeded()
+                            await refreshSubscriptionUsage()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    fleetMetricBadge(title: "플랜", value: "\(subscriptionUtilizations.count)", color: .secondary)
+                    fleetMetricBadge(title: "리스크", value: "\(subscriptionRiskCount)", color: .red)
+                    fleetMetricBadge(title: "총 사용", value: formatTokenCount(totalSubscriptionUsedTokens), color: .accentColor)
+                }
+
+                ForEach(prioritizedSubscriptionUtilizations.prefix(4), id: \.subscription.id) { util in
+                    subscriptionUsageCard(util)
+                }
+
+                if prioritizedSubscriptionUtilizations.count > 4 {
+                    Text("추가 \(prioritizedSubscriptionUtilizations.count - 4)개 플랜은 사용량 설정 화면에서 확인하세요.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private func subscriptionUsageCard(_ util: ResourceUtilization) -> some View {
+        let snapshot = subscriptionMonitoringSnapshots[util.subscription.id]
+        let status = snapshot?.statusPresentation
+        let usageRatio = util.subscription.monthlyTokenLimit == nil ? 0 : max(0, min(1, util.usageRatio))
+
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Text("\(util.subscription.providerName) · \(util.subscription.planName)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text(util.riskLevel.displayName)
+                    .font(.system(size: 9, weight: .medium))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(riskColor(util.riskLevel).opacity(0.16))
+                    .foregroundStyle(riskColor(util.riskLevel))
+                    .clipShape(Capsule())
+            }
+
+            HStack(spacing: 6) {
+                Text(util.subscription.usageSource.displayName)
+                    .font(.system(size: 9))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(usageSourceColor(util.subscription.usageSource).opacity(0.16))
+                    .foregroundStyle(usageSourceColor(util.subscription.usageSource))
+                    .clipShape(Capsule())
+                if let status {
+                    Text(status.label)
+                        .font(.system(size: 9, weight: .medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(monitoringStatusColor(status.tone).opacity(0.16))
+                        .foregroundStyle(monitoringStatusColor(status.tone))
+                        .clipShape(Capsule())
+                }
+                Spacer()
+                Text("리셋 D-\(util.daysRemaining)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.secondary.opacity(0.15))
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(riskColor(util.riskLevel))
+                        .frame(width: proxy.size.width * usageRatio)
+                }
+            }
+            .frame(height: 7)
+
+            HStack(spacing: 6) {
+                Text(subscriptionUsageAmountText(util))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                Text("예상 \(Int((util.projectedUsageRatio * 100).rounded()))%")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder
+    private var orchestrationActiveAgentsSection: some View {
+        sectionHeader("Active Agents")
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("활성/대기 에이전트 \(overviewActiveSessions.count)개")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("활성만 필터") {
+                    explorerFilter.activeOnly = true
+                    explorerFilter.unassignedOnly = false
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+
+            if overviewActiveSessions.isEmpty {
+                Text("현재 활성 에이전트가 없습니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(
+                    overviewActiveSessions.prefix(6).map {
+                        (key: ExternalToolSessionManager.sessionStableKey($0), value: $0)
+                    },
+                    id: \.key
+                ) { item in
+                    unifiedSessionRow(item.value)
+                }
+                if overviewActiveSessions.count > 6 {
+                    Text("추가 \(overviewActiveSessions.count - 6)개는 Workboard/Explorer에서 확인하세요.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 2)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -726,7 +1038,6 @@ struct ExternalToolListView: View {
         DisclosureGroup(
             isExpanded: $showExtendedInspectorSections,
             content: {
-                repoDashboardSection
                 sessionExplorerSection
                 selectionDetailSection
                 discoveredSessionSection
@@ -778,12 +1089,15 @@ struct ExternalToolListView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if isRefreshingUnified {
+            if isRefreshingUnified || isRefreshingSubscriptionUsage {
                 ProgressView()
                     .controlSize(.small)
             }
             Button("새로고침") {
-                Task { await refreshUnifiedSessions() }
+                Task {
+                    await refreshUnifiedSessions()
+                    await refreshSubscriptionUsage()
+                }
             }
             .buttonStyle(.bordered)
             .controlSize(.mini)
@@ -794,7 +1108,7 @@ struct ExternalToolListView: View {
 
     @ViewBuilder
     private var repoDashboardSection: some View {
-        sectionHeader("Repo Dashboard")
+        sectionHeader("Project Status")
 
         if repositorySummaries.isEmpty {
             Text("표시할 레포 상태가 없습니다.")
@@ -807,6 +1121,9 @@ struct ExternalToolListView: View {
                 HStack(spacing: 8) {
                     ForEach(repositorySummaries) { summary in
                         let representative = representativeSession(for: summary.repositoryRoot)
+                        let representativeTitle = representative.map {
+                            SessionExplorerViewStateBuilder.displaySessionTitle(for: $0)
+                        }
                         let workSummary = representative.flatMap { sessionWorkSummary($0) }
                         let insight = summary.repositoryRoot.flatMap { root in
                             gitInsightByRepositoryPath[normalizedRepositoryPath(root)]
@@ -823,6 +1140,17 @@ struct ExternalToolListView: View {
                                 Text("세션 \(summary.sessionCount) · 활성 \(summary.activeSessionCount) · 오류 \(summary.errorSessionCount)")
                                     .font(.system(size: 10))
                                     .foregroundStyle(.secondary)
+                                if let representativeTitle {
+                                    Text("대표 세션: \(representativeTitle)")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                } else {
+                                    Text("대표 세션: 표시 가능한 제목 없음")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
                                 if let workSummary, let representative {
                                     Text("현재 작업: \(workSummary)")
                                         .font(.system(size: 9))
@@ -1698,12 +2026,17 @@ struct ExternalToolListView: View {
         let isHovered = hoveredUnifiedSessionKey == sessionKey
         let sessionTitle = SessionExplorerViewStateBuilder.displaySessionTitle(for: session)
         let sessionIdentity = SessionExplorerViewStateBuilder.displaySessionIdentity(for: session)
+        let sessionRawTitle = normalizedSessionTitle(session)
+        let sessionDescriptor = sessionClientDescriptor(session)
         let workSummary = sessionWorkSummary(session) ?? SessionExplorerViewStateBuilder.sessionWorkLine(for: session)
         let resultSummary = SessionExplorerViewStateBuilder.sessionResultLine(for: session)
-        let changeSummary = SessionExplorerViewStateBuilder.sessionChangeLine(
+        let insight = repositoryInsight(for: session.repositoryRoot)
+        let repositoryStatusSummary = SessionExplorerViewStateBuilder.sessionRepositoryStatusLine(
             session: session,
-            insight: repositoryInsight(for: session.repositoryRoot)
+            insight: insight
         )
+        let commitSummary = SessionExplorerViewStateBuilder.sessionCommitLine(for: insight)
+        let locationSummary = SessionExplorerViewStateBuilder.sessionLocationLine(for: session)
         HStack(spacing: 8) {
             Button {
                 handleUnifiedSessionTap(session)
@@ -1739,24 +2072,47 @@ struct ExternalToolListView: View {
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
 
+                        if let sessionRawTitle,
+                           !sessionRawTitle.isEmpty,
+                           sessionRawTitle != sessionTitle {
+                            Text("세션 제목: \(sessionRawTitle)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        if let sessionDescriptor,
+                           !sessionDescriptor.isEmpty {
+                            Text("클라이언트: \(sessionDescriptor)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
                         Text("진행: \(workSummary)")
                             .font(.system(size: 9))
                             .foregroundStyle(workSummaryColor(session))
                             .lineLimit(2)
 
-                        Text("결과: \(resultSummary)")
+                        Text("상태: \(resultSummary) · 점수 \(session.activityScore)")
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
 
-                        Text("변경: \(changeSummary)")
+                        Text("레포: \(repositoryStatusSummary)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Text("커밋: \(commitSummary)")
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
 
-                        Text("활동: \(relativeTimestamp(session.updatedAt))")
+                        Text("활동: \(relativeTimestamp(session.updatedAt)) · 위치: \(locationSummary)")
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
+                            .lineLimit(1)
                     }
                     Spacer()
                 }
@@ -1940,10 +2296,35 @@ struct ExternalToolListView: View {
         isRefreshingUnified = true
         async let unified = manager.listUnifiedCodingSessions(limit: 180)
         async let discovered = manager.discoverLocalCodingSessions(limit: 120)
-        async let insights = manager.discoverGitRepositoryInsights(searchPaths: nil, limit: 60)
-        unifiedSessions = await unified
+        async let baselineInsights = manager.discoverGitRepositoryInsights(searchPaths: nil, limit: 60)
+
+        let unifiedResult = await unified
+        unifiedSessions = unifiedResult
         discoveredSessions = await discovered
-        gitInsights = await insights
+
+        let sessionRepositoryRoots = Array(
+            Set(
+                unifiedResult.compactMap(\.repositoryRoot).map { normalizedRepositoryPath($0) }
+            )
+        )
+        .sorted()
+
+        let scopedInsights: [GitRepositoryInsight]
+        if sessionRepositoryRoots.isEmpty {
+            scopedInsights = []
+        } else {
+            let scopedLimit = max(90, min(220, sessionRepositoryRoots.count * 6))
+            scopedInsights = await manager.discoverGitRepositoryInsights(
+                searchPaths: sessionRepositoryRoots,
+                limit: scopedLimit
+            )
+        }
+
+        let mergedInsights = mergeGitInsights(
+            primary: await baselineInsights,
+            scoped: scopedInsights
+        )
+        gitInsights = mergedInsights
         if let repositoryRoot = explorerFilter.repositoryRoot {
             explorerFilter.repositoryRoot = normalizedRepositoryPath(repositoryRoot)
         }
@@ -1953,6 +2334,60 @@ struct ExternalToolListView: View {
         syncExpandedRepositoryGroups()
         refreshKPIReport()
         isRefreshingUnified = false
+    }
+
+    private func mergeGitInsights(
+        primary: [GitRepositoryInsight],
+        scoped: [GitRepositoryInsight]
+    ) -> [GitRepositoryInsight] {
+        var mapped: [String: GitRepositoryInsight] = [:]
+
+        for insight in primary {
+            mapped[normalizedRepositoryPath(insight.path)] = insight
+        }
+
+        // Scoped insights target repos currently visible in this dashboard.
+        // Prefer them when keys collide so branch/commit/status stay aligned to active work.
+        for insight in scoped {
+            mapped[normalizedRepositoryPath(insight.path)] = insight
+        }
+
+        return mapped.values.sorted { lhs, rhs in
+            if lhs.score != rhs.score {
+                return lhs.score > rhs.score
+            }
+            let lhsEpoch = lhs.lastCommitEpoch ?? Int.min
+            let rhsEpoch = rhs.lastCommitEpoch ?? Int.min
+            if lhsEpoch != rhsEpoch {
+                return lhsEpoch > rhsEpoch
+            }
+            return lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+        }
+    }
+
+    @MainActor
+    private func refreshSubscriptionUsage() async {
+        guard !isRefreshingSubscriptionUsage else { return }
+        guard let resourceOptimizer else {
+            subscriptionUtilizations = []
+            subscriptionMonitoringSnapshots = [:]
+            return
+        }
+
+        isRefreshingSubscriptionUsage = true
+        defer { isRefreshingSubscriptionUsage = false }
+
+        let utilizations = await resourceOptimizer.allUtilizations()
+        subscriptionUtilizations = utilizations
+        subscriptionMonitoringSnapshots = await resourceOptimizer.monitoringSnapshots(
+            for: utilizations.map(\.subscription)
+        )
+    }
+
+    @MainActor
+    private func bootstrapSubscriptionsIfNeeded() async {
+        guard let resourceOptimizer else { return }
+        _ = await resourceOptimizer.bootstrapDefaultExternalSubscriptionsIfNeeded()
     }
 
     private func startUnifiedAutoRefreshLoop() {
@@ -2631,6 +3066,94 @@ struct ExternalToolListView: View {
         case .dead:
             return .gray
         }
+    }
+
+    private func riskRank(_ level: WasteRiskLevel) -> Int {
+        switch level {
+        case .wasteRisk:
+            return 0
+        case .caution:
+            return 1
+        case .normal:
+            return 2
+        case .comfortable:
+            return 3
+        }
+    }
+
+    private func riskColor(_ level: WasteRiskLevel) -> Color {
+        switch level {
+        case .comfortable:
+            return .green
+        case .caution:
+            return .orange
+        case .wasteRisk:
+            return .red
+        case .normal:
+            return .blue
+        }
+    }
+
+    private func usageSourceColor(_ source: SubscriptionUsageSource) -> Color {
+        switch source {
+        case .externalToolLogs:
+            return .indigo
+        case .dochiUsageStore:
+            return .teal
+        }
+    }
+
+    private func monitoringStatusColor(_ tone: MonitoringStatusTone) -> Color {
+        switch tone {
+        case .success:
+            return .green
+        case .info:
+            return .blue
+        case .warning:
+            return .orange
+        case .error:
+            return .red
+        case .neutral:
+            return .gray
+        }
+    }
+
+    private func subscriptionUsageAmountText(_ util: ResourceUtilization) -> String {
+        if let limit = util.subscription.monthlyTokenLimit {
+            return "사용 \(formatTokenCount(util.usedTokens))/\(formatTokenCount(limit))"
+        }
+        return "사용 \(formatTokenCount(util.usedTokens)) (무제한)"
+    }
+
+    private func formatTokenCount(_ value: Int) -> String {
+        let absValue = abs(value)
+        if absValue >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        }
+        if absValue >= 1_000 {
+            return String(format: "%.1fK", Double(value) / 1_000)
+        }
+        return "\(value)"
+    }
+
+    @ViewBuilder
+    private func fleetMetricBadge(title: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color.secondary.opacity(0.08))
+        )
     }
 
     @ViewBuilder

@@ -6,6 +6,8 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
     var subscriptions: [SubscriptionPlan] = []
     var autoTaskRecords: [AutoTaskRecord] = []
     var monitoringSnapshotsByID: [UUID: SubscriptionMonitoringSnapshot] = [:]
+    var bootstrapCallCount = 0
+    var bootstrapResult = 0
 
     var addSubscriptionCallCount = 0
     var updateSubscriptionCallCount = 0
@@ -33,6 +35,11 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
     func deleteSubscription(id: UUID) async {
         deleteSubscriptionCallCount += 1
         subscriptions.removeAll { $0.id == id }
+    }
+
+    func bootstrapDefaultExternalSubscriptionsIfNeeded() async -> Int {
+        bootstrapCallCount += 1
+        return bootstrapResult
     }
 
     func utilization(for subscription: SubscriptionPlan) async -> ResourceUtilization {

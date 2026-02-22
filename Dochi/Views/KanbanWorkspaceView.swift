@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct KanbanWorkspaceView: View {
+    var showsBoardListPane: Bool = true
     @State private var boards: [KanbanBoard] = []
     @State private var selectedBoardId: UUID?
     @State private var showCreateBoardSheet = false
@@ -11,6 +12,26 @@ struct KanbanWorkspaceView: View {
     }
 
     var body: some View {
+        Group {
+            if showsBoardListPane {
+                splitLayout
+            } else {
+                singlePaneLayout
+            }
+        }
+        .sheet(isPresented: $showCreateBoardSheet) {
+            CreateBoardSheet { name, columns in
+                _ = KanbanManager.shared.createBoard(name: name, columns: columns)
+                refreshBoards(selectByName: name)
+            }
+        }
+        .onAppear {
+            refreshBoards()
+        }
+    }
+
+    @ViewBuilder
+    private var splitLayout: some View {
         HSplitView {
             VStack(spacing: 0) {
                 HStack {
@@ -45,34 +66,82 @@ struct KanbanWorkspaceView: View {
             }
             .frame(minWidth: 220, idealWidth: 260)
 
-            if let board = selectedBoard {
-                KanbanBoardEditorView(
-                    board: board,
-                    onChanged: { refreshBoards() },
-                    onDeleteBoard: { deleteBoard(board.id) }
-                )
-            } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "rectangle.3.group")
-                        .font(.system(size: 36))
-                        .foregroundStyle(.tertiary)
-                    Text("칸반 보드를 선택하세요")
-                        .font(.system(size: 14, weight: .medium))
-                    Text("왼쪽에서 보드를 선택하거나 새로 생성하세요.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+            boardContent
+        }
+    }
+
+    @ViewBuilder
+    private var singlePaneLayout: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text("칸반 보드")
+                    .font(.headline)
+
+                Menu {
+                    if boards.isEmpty {
+                        Text("생성된 보드가 없습니다.")
+                    } else {
+                        ForEach(boards) { board in
+                            Button {
+                                selectedBoardId = board.id
+                            } label: {
+                                HStack {
+                                    Text(board.name)
+                                    if selectedBoardId == board.id {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(selectedBoard?.name ?? "보드 선택")
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10))
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .fixedSize()
+
+                Spacer()
+
+                Button {
+                    showCreateBoardSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .help("보드 추가")
             }
+            .padding(12)
+
+            Divider()
+
+            boardContent
         }
-        .sheet(isPresented: $showCreateBoardSheet) {
-            CreateBoardSheet { name, columns in
-                _ = KanbanManager.shared.createBoard(name: name, columns: columns)
-                refreshBoards(selectByName: name)
+    }
+
+    @ViewBuilder
+    private var boardContent: some View {
+        if let board = selectedBoard {
+            KanbanBoardEditorView(
+                board: board,
+                onChanged: { refreshBoards() },
+                onDeleteBoard: { deleteBoard(board.id) }
+            )
+        } else {
+            VStack(spacing: 10) {
+                Image(systemName: "rectangle.3.group")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.tertiary)
+                Text("칸반 보드를 선택하세요")
+                    .font(.system(size: 14, weight: .medium))
+                Text("보드를 선택하거나 새로 생성하세요.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             }
-        }
-        .onAppear {
-            refreshBoards()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 

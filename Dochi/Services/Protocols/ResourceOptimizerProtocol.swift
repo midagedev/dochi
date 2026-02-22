@@ -7,6 +7,7 @@ protocol ResourceOptimizerProtocol: Sendable {
     func addSubscription(_ plan: SubscriptionPlan) async
     func updateSubscription(_ plan: SubscriptionPlan) async
     func deleteSubscription(id: UUID) async
+    func bootstrapDefaultExternalSubscriptionsIfNeeded() async -> Int
 
     // MARK: - Utilization
     func utilization(for subscription: SubscriptionPlan) async -> ResourceUtilization
@@ -63,6 +64,8 @@ extension ResourceOptimizerProtocol {
             gitInsights: nil
         )
     }
+
+    func bootstrapDefaultExternalSubscriptionsIfNeeded() async -> Int { 0 }
 
     func monitoringSnapshots(for subscriptions: [SubscriptionPlan]) async -> [UUID: SubscriptionMonitoringSnapshot] {
         var result: [UUID: SubscriptionMonitoringSnapshot] = [:]

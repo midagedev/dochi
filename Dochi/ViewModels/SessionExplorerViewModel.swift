@@ -55,6 +55,37 @@ struct OrchestrationWorkboardGroup: Identifiable, Sendable, Equatable {
     var id: String { lane.rawValue }
 }
 
+struct OrchestrationProviderSummary: Identifiable, Sendable, Equatable {
+    let provider: String
+    let count: Int
+
+    var id: String {
+        provider.lowercased()
+    }
+}
+
+struct OrchestrationLaneSummary: Identifiable, Sendable, Equatable {
+    let lane: OrchestrationWorkboardLane
+    let count: Int
+
+    var id: String {
+        lane.rawValue
+    }
+}
+
+struct OrchestrationFleetSnapshot: Sendable, Equatable {
+    let totalSessionCount: Int
+    let activeSessionCount: Int
+    let idleSessionCount: Int
+    let blockedSessionCount: Int
+    let queuedSessionCount: Int
+    let unassignedSessionCount: Int
+    let actionableSessionCount: Int
+    let repositoryCount: Int
+    let providerBreakdown: [OrchestrationProviderSummary]
+    let laneBreakdown: [OrchestrationLaneSummary]
+}
+
 enum SessionExplorerViewStateBuilder {
     private static func normalizedRepositoryPath(_ path: String?) -> String? {
         guard let path else { return nil }
@@ -234,6 +265,85 @@ enum SessionExplorerViewStateBuilder {
         }
     }
 
+    static func orchestrationFleetSnapshot(
+        sessions: [UnifiedCodingSession],
+        providerLimit: Int = 5
+    ) -> OrchestrationFleetSnapshot {
+        let normalizedProviderLimit = max(1, min(12, providerLimit))
+        var activeSessionCount = 0
+        var idleSessionCount = 0
+        var unassignedSessionCount = 0
+        var actionableSessionCount = 0
+        var repositoryRoots: Set<String> = []
+        var laneCounts: [OrchestrationWorkboardLane: Int] = [:]
+        var providerCounts: [String: (display: String, count: Int)] = [:]
+
+        for session in sessions {
+            switch session.activityState {
+            case .active:
+                activeSessionCount += 1
+            case .idle:
+                idleSessionCount += 1
+            case .stale, .dead:
+                break
+            }
+
+            if session.isUnassigned {
+                unassignedSessionCount += 1
+            } else if let repositoryRoot = normalizedRepositoryPath(session.repositoryRoot) {
+                repositoryRoots.insert(repositoryRoot)
+            }
+
+            if session.activityState != .dead,
+               session.controllabilityTier == .t0Full || session.controllabilityTier == .t1Attach {
+                actionableSessionCount += 1
+            }
+
+            let lane = orchestrationWorkboardLane(for: session)
+            laneCounts[lane, default: 0] += 1
+
+            let providerKey = session.provider
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let providerDisplay = normalizedProviderDisplayName(session.provider)
+            if let existing = providerCounts[providerKey] {
+                providerCounts[providerKey] = (display: existing.display, count: existing.count + 1)
+            } else {
+                providerCounts[providerKey] = (display: providerDisplay, count: 1)
+            }
+        }
+
+        let providerBreakdown = providerCounts
+            .values
+            .map { entry in
+                OrchestrationProviderSummary(provider: entry.display, count: entry.count)
+            }
+            .sorted { lhs, rhs in
+                if lhs.count != rhs.count {
+                    return lhs.count > rhs.count
+                }
+                return lhs.provider.localizedCaseInsensitiveCompare(rhs.provider) == .orderedAscending
+            }
+            .prefix(normalizedProviderLimit)
+
+        let laneBreakdown = OrchestrationWorkboardLane.displayOrder.map { lane in
+            OrchestrationLaneSummary(lane: lane, count: laneCounts[lane, default: 0])
+        }
+
+        return OrchestrationFleetSnapshot(
+            totalSessionCount: sessions.count,
+            activeSessionCount: activeSessionCount,
+            idleSessionCount: idleSessionCount,
+            blockedSessionCount: laneCounts[.blocked, default: 0],
+            queuedSessionCount: laneCounts[.queued, default: 0],
+            unassignedSessionCount: unassignedSessionCount,
+            actionableSessionCount: actionableSessionCount,
+            repositoryCount: repositoryRoots.count,
+            providerBreakdown: Array(providerBreakdown),
+            laneBreakdown: laneBreakdown
+        )
+    }
+
     static func preferredSession(
         in repositoryRoot: String?,
         sessions: [UnifiedCodingSession]
@@ -361,6 +471,36 @@ enum SessionExplorerViewStateBuilder {
         return repositoryWorkingTreeLine(for: insight)
     }
 
+    static func sessionRepositoryStatusLine(session: UnifiedCodingSession, insight: GitRepositoryInsight?) -> String {
+        guard session.repositoryRoot != nil else { return "레포 미할당" }
+        let branch = normalizedCompactText(insight?.branch, maxLength: 42) ?? "-"
+        let workingTree = repositoryWorkingTreeLine(for: insight)
+        return "브랜치 \(branch) · \(workingTree)"
+    }
+
+    static func sessionCommitLine(for insight: GitRepositoryInsight?) -> String {
+        if let preview = repositoryCommitFeedLines(for: insight, limit: 1).first {
+            return preview
+        }
+        guard let insight else { return "최근 커밋 정보 없음" }
+        let relative = insight.lastCommitRelative.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !relative.isEmpty, relative != "-" {
+            return "최근 커밋 \(relative)"
+        }
+        return "최근 커밋 정보 없음"
+    }
+
+    static func sessionLocationLine(
+        for session: UnifiedCodingSession,
+        homeDirectoryPath: String = NSHomeDirectory()
+    ) -> String {
+        compactPathForDisplay(
+            session.workingDirectory ?? session.path,
+            repositoryRoot: session.repositoryRoot,
+            homeDirectoryPath: homeDirectoryPath
+        )
+    }
+
     static func repositoryCommitFeedLines(for insight: GitRepositoryInsight?, limit: Int = 5) -> [String] {
         guard let insight else { return [] }
         let normalizedLimit = max(1, min(8, limit))
@@ -408,6 +548,40 @@ enum SessionExplorerViewStateBuilder {
         return String(normalized.prefix(max(20, maxLength)))
     }
 
+    private static func compactPathForDisplay(
+        _ rawPath: String,
+        repositoryRoot: String?,
+        homeDirectoryPath: String
+    ) -> String {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "-" }
+        if trimmed.contains("://") {
+            return String(trimmed.prefix(120))
+        }
+
+        let normalizedPath = URL(fileURLWithPath: trimmed).standardizedFileURL.path
+        if let normalizedRoot = normalizedRepositoryPath(repositoryRoot) {
+            if normalizedPath == normalizedRoot {
+                return "."
+            }
+            if normalizedPath.hasPrefix(normalizedRoot + "/") {
+                let suffix = String(normalizedPath.dropFirst(normalizedRoot.count + 1))
+                return "./" + String(suffix.prefix(120))
+            }
+        }
+
+        let normalizedHome = URL(fileURLWithPath: homeDirectoryPath).standardizedFileURL.path
+        if normalizedPath == normalizedHome {
+            return "~"
+        }
+        if normalizedPath.hasPrefix(normalizedHome + "/") {
+            let suffix = String(normalizedPath.dropFirst(normalizedHome.count + 1))
+            return "~/" + String(suffix.prefix(120))
+        }
+
+        return String(normalizedPath.prefix(120))
+    }
+
     private static func sessionProviderLabel(provider: String, clientKind: String?) -> String {
         let normalizedProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalizedProvider == "codex" {
@@ -423,6 +597,26 @@ enum SessionExplorerViewStateBuilder {
 
         let compact = provider.trimmingCharacters(in: .whitespacesAndNewlines)
         return compact.isEmpty ? "Session" : compact.capitalized
+    }
+
+    private static func normalizedProviderDisplayName(_ provider: String) -> String {
+        let trimmed = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Unknown" }
+
+        let normalized = trimmed.lowercased()
+        if normalized == "codex" || normalized == "chatgpt" {
+            return "Codex"
+        }
+        if normalized == "claude" || normalized == "anthropic" {
+            return "Claude"
+        }
+        if normalized == "gemini" {
+            return "Gemini"
+        }
+        if normalized == "openai" {
+            return "OpenAI"
+        }
+        return trimmed.capitalized
     }
 
     private static func defaultActivityAction(for state: CodingSessionActivityState) -> String {

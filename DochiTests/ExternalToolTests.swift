@@ -612,6 +612,85 @@ final class ExternalToolAttachCommandTests: XCTestCase {
     }
 }
 
+// MARK: - ExternalTool Insight Discovery Tests
+
+@MainActor
+final class ExternalToolInsightDiscoveryTests: XCTestCase {
+
+    func testDiscoverGitRepositoryInsightsRespectsExplicitScopedPaths() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dochi-insight-scope-\(UUID().uuidString)", isDirectory: true)
+        let appSupport = tempRoot.appendingPathComponent("app-support", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let repoA = try ExternalToolSessionManager.initializeGitRepository(
+            atPath: tempRoot.appendingPathComponent("repo-a", isDirectory: true).path,
+            defaultBranch: "main",
+            createReadme: true,
+            createGitignore: false
+        )
+        let repoB = try ExternalToolSessionManager.initializeGitRepository(
+            atPath: tempRoot.appendingPathComponent("repo-b", isDirectory: true).path,
+            defaultBranch: "main",
+            createReadme: true,
+            createGitignore: false
+        )
+
+        try configureGitIdentity(at: repoA)
+        try configureGitIdentity(at: repoB)
+        try commitAll(at: repoA, message: "feat: repo-a baseline")
+        try commitAll(at: repoB, message: "feat: repo-b baseline")
+
+        let settings = AppSettings()
+        let manager = ExternalToolSessionManager(settings: settings, appSupportDirectory: appSupport)
+        manager.saveProfile(
+            ExternalToolProfile(
+                name: "Profile A",
+                command: "codex",
+                workingDirectory: repoA
+            )
+        )
+
+        let insights = await manager.discoverGitRepositoryInsights(
+            searchPaths: [repoB],
+            limit: 20
+        )
+
+        XCTAssertTrue(insights.contains(where: { $0.path == repoB }))
+        XCTAssertFalse(
+            insights.contains(where: { $0.path == repoA }),
+            "Explicit scoped search should not include unrelated profile roots."
+        )
+    }
+
+    private func configureGitIdentity(at path: String) throws {
+        try runGit(args: ["config", "user.email", "dochi-tests@example.com"], at: path)
+        try runGit(args: ["config", "user.name", "Dochi Tests"], at: path)
+    }
+
+    private func commitAll(at path: String, message: String) throws {
+        try runGit(args: ["add", "."], at: path)
+        try runGit(args: ["commit", "-m", message], at: path)
+    }
+
+    private func runGit(args: [String], at path: String) throws {
+        let process = Process()
+        let outputPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git", "-C", path] + args
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus != 0 {
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            XCTFail("git command failed: git -C \(path) \(args.joined(separator: " "))\n\(output)")
+        }
+    }
+}
+
 // MARK: - ExternalToolSettings Tests
 
 final class ExternalToolSettingsTests: XCTestCase {

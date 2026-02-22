@@ -138,6 +138,64 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         saveToDisk()
     }
 
+    func bootstrapDefaultExternalSubscriptionsIfNeeded() async -> Int {
+        var addedCount = 0
+
+        if shouldAutoRegisterProvider(.codex) {
+            let hint = await bootstrapPlanHint(for: .codex)
+            subscriptions.append(
+                SubscriptionPlan(
+                    providerName: "Codex",
+                    planName: hint.planName,
+                    usageSource: .externalToolLogs,
+                    monthlyTokenLimit: hint.monthlyTokenLimit,
+                    resetDayOfMonth: 1,
+                    monthlyCostUSD: 0
+                )
+            )
+            addedCount += 1
+        }
+
+        if shouldAutoRegisterProvider(.claude) {
+            let hint = await bootstrapPlanHint(for: .claude)
+            subscriptions.append(
+                SubscriptionPlan(
+                    providerName: "Claude",
+                    planName: hint.planName,
+                    usageSource: .externalToolLogs,
+                    monthlyTokenLimit: hint.monthlyTokenLimit,
+                    resetDayOfMonth: 1,
+                    monthlyCostUSD: 0
+                )
+            )
+            addedCount += 1
+        }
+
+        if shouldAutoRegisterProvider(.gemini) {
+            let hint = await bootstrapPlanHint(for: .gemini)
+            subscriptions.append(
+                SubscriptionPlan(
+                    providerName: "Gemini",
+                    planName: hint.planName,
+                    usageSource: .externalToolLogs,
+                    monthlyTokenLimit: hint.monthlyTokenLimit,
+                    resetDayOfMonth: 1,
+                    monthlyCostUSD: 0
+                )
+            )
+            addedCount += 1
+        }
+
+        if addedCount > 0 {
+            usageCache.removeAll()
+            monitoringSnapshotCache.removeAll()
+            saveToDisk()
+            Log.app.info("Bootstrapped \(addedCount) external subscriptions")
+        }
+
+        return addedCount
+    }
+
     // MARK: - Utilization
 
     func utilization(for subscription: SubscriptionPlan) async -> ResourceUtilization {
@@ -854,6 +912,24 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         case unknown
     }
 
+    private struct BootstrapPlanHint {
+        let planName: String
+        let monthlyTokenLimit: Int?
+    }
+
+    private enum GeminiAuthTypeHint {
+        case oauthPersonal
+        case apiKey
+        case vertexAI
+        case unknown
+    }
+
+    private struct GeminiAuthProbeResult {
+        let authType: GeminiAuthTypeHint
+        let hasSettingsFile: Bool
+        let hasOAuthCredentials: Bool
+    }
+
     nonisolated private static func defaultClaudeProjectsRoots() -> [URL] {
         let env = ProcessInfo.processInfo.environment
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -947,5 +1023,335 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         case .unknown:
             return nil
         }
+    }
+
+    private func shouldAutoRegisterProvider(_ kind: ExternalProviderKind) -> Bool {
+        if hasExistingSubscription(for: kind) { return false }
+
+        switch kind {
+        case .codex:
+            return hasAnyFile(in: codexSessionsRoots, withExtensions: ["jsonl"])
+        case .claude:
+            return hasAnyFile(in: claudeProjectsRoots, withExtensions: ["jsonl"])
+        case .gemini:
+            return shouldAutoRegisterGeminiSubscription()
+        case .unknown:
+            return false
+        }
+    }
+
+    private func bootstrapPlanHint(for kind: ExternalProviderKind) async -> BootstrapPlanHint {
+        switch kind {
+        case .codex:
+            let planType = detectCodexPlanType()
+            return BootstrapPlanHint(
+                planName: codexPlanName(from: planType),
+                monthlyTokenLimit: await estimatedMonthlyTokenLimit(for: .codex, codexPlanType: planType)
+            )
+        case .claude:
+            return BootstrapPlanHint(
+                planName: "Auto Detected",
+                monthlyTokenLimit: await estimatedMonthlyTokenLimit(for: .claude, codexPlanType: nil)
+            )
+        case .gemini:
+            let auth = probeGeminiAuth()
+            return BootstrapPlanHint(
+                planName: geminiPlanName(for: auth.authType),
+                monthlyTokenLimit: nil
+            )
+        case .unknown:
+            return BootstrapPlanHint(planName: "Auto Detected", monthlyTokenLimit: nil)
+        }
+    }
+
+    private func estimatedMonthlyTokenLimit(
+        for kind: ExternalProviderKind,
+        codexPlanType: String?
+    ) async -> Int? {
+        if let dynamic = await estimatedMonthlyTokenLimitFromRecentUsage(for: kind) {
+            return dynamic
+        }
+        guard kind == .codex else { return nil }
+        switch codexPlanType {
+        case "free", "free_workspace":
+            return 1_000_000
+        case "plus":
+            return 3_000_000
+        default:
+            return nil
+        }
+    }
+
+    private func estimatedMonthlyTokenLimitFromRecentUsage(for kind: ExternalProviderKind) async -> Int? {
+        guard let provider = Self.externalUsageProvider(from: kind), provider != .gemini else {
+            return nil
+        }
+        let now = Date()
+        let since = Calendar.current.date(byAdding: .day, value: -30, to: now) ?? now
+        let usedTokens = await externalUsageMonitor.tokensUsed(
+            provider: provider,
+            since: since,
+            now: now
+        )
+        guard usedTokens > 0 else { return nil }
+
+        let conservativeEstimate = Int((Double(usedTokens) * 1.8).rounded())
+        let floor = 300_000
+        let cap = 200_000_000
+        let clamped = min(cap, max(floor, conservativeEstimate))
+        return ((clamped + 49_999) / 50_000) * 50_000
+    }
+
+    private func shouldAutoRegisterGeminiSubscription() -> Bool {
+        let auth = probeGeminiAuth()
+        switch auth.authType {
+        case .oauthPersonal:
+            return true
+        case .apiKey, .vertexAI:
+            // API key / Vertex AI는 종량제 축에서 다루고 구독제 자동 등록은 제외.
+            return false
+        case .unknown:
+            return auth.hasSettingsFile || auth.hasOAuthCredentials
+        }
+    }
+
+    private func probeGeminiAuth() -> GeminiAuthProbeResult {
+        let fileManager = FileManager.default
+        var hasSettingsFile = false
+        var hasOAuthCredentials = false
+        var detectedType: GeminiAuthTypeHint = .unknown
+
+        for root in geminiConfigRoots {
+            let settingsURL = root.appendingPathComponent("settings.json")
+            if fileManager.fileExists(atPath: settingsURL.path) {
+                hasSettingsFile = true
+                if detectedType == .unknown,
+                   let parsedType = parseGeminiAuthType(fromSettingsURL: settingsURL) {
+                    detectedType = parsedType
+                }
+            }
+
+            let credentialsURL = root.appendingPathComponent("oauth_creds.json")
+            if fileManager.fileExists(atPath: credentialsURL.path) {
+                hasOAuthCredentials = true
+            }
+        }
+
+        if detectedType == .unknown, hasOAuthCredentials {
+            detectedType = .oauthPersonal
+        }
+
+        return GeminiAuthProbeResult(
+            authType: detectedType,
+            hasSettingsFile: hasSettingsFile,
+            hasOAuthCredentials: hasOAuthCredentials
+        )
+    }
+
+    private func parseGeminiAuthType(fromSettingsURL url: URL) -> GeminiAuthTypeHint? {
+        guard
+            let data = try? Data(contentsOf: url),
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+            return nil
+        }
+
+        let selectedType =
+            (object["selectedAuthType"] as? String)
+            ?? jsonString(in: object, path: ["security", "auth", "selectedType"])
+            ?? jsonString(in: object, path: ["security", "auth", "selectedAuthType"])
+        guard let selectedType else { return nil }
+        return geminiAuthTypeHint(from: selectedType)
+    }
+
+    private func geminiAuthTypeHint(from raw: String) -> GeminiAuthTypeHint {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "oauth-personal":
+            return .oauthPersonal
+        case "api-key":
+            return .apiKey
+        case "vertex-ai":
+            return .vertexAI
+        default:
+            return .unknown
+        }
+    }
+
+    private func geminiPlanName(for authType: GeminiAuthTypeHint) -> String {
+        switch authType {
+        case .oauthPersonal:
+            return "Gemini Personal (Auto)"
+        case .apiKey:
+            return "Gemini API Key (Metered)"
+        case .vertexAI:
+            return "Gemini Vertex AI (Metered)"
+        case .unknown:
+            return "Auto Detected"
+        }
+    }
+
+    private func codexPlanName(from rawPlanType: String?) -> String {
+        guard let rawPlanType, !rawPlanType.isEmpty else { return "Auto Detected" }
+        switch rawPlanType {
+        case "pro":
+            return "ChatGPT Pro (Auto)"
+        case "plus":
+            return "ChatGPT Plus (Auto)"
+        case "free":
+            return "ChatGPT Free (Auto)"
+        case "free_workspace":
+            return "ChatGPT Free Workspace (Auto)"
+        case "team":
+            return "ChatGPT Team (Auto)"
+        case "enterprise":
+            return "ChatGPT Enterprise (Auto)"
+        default:
+            return "ChatGPT \(humanizedPlanFragment(rawPlanType)) (Auto)"
+        }
+    }
+
+    private func detectCodexPlanType() -> String? {
+        for authURL in codexAuthCandidateURLs() {
+            guard
+                let data = try? Data(contentsOf: authURL),
+                let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            else {
+                continue
+            }
+
+            if let direct = extractCodexPlanType(from: object) {
+                return direct
+            }
+
+            guard let tokens = object["tokens"] as? [String: Any] else { continue }
+            for key in ["id_token", "access_token"] {
+                guard let token = tokens[key] as? String,
+                      let claims = decodeJWTClaims(token),
+                      let planType = extractCodexPlanType(from: claims) else {
+                    continue
+                }
+                return planType
+            }
+        }
+        return nil
+    }
+
+    private func codexAuthCandidateURLs() -> [URL] {
+        let env = ProcessInfo.processInfo.environment
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        var candidates: [URL] = []
+
+        if let codexHome = env["CODEX_HOME"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !codexHome.isEmpty {
+            let expanded = NSString(string: codexHome).expandingTildeInPath
+            candidates.append(URL(fileURLWithPath: expanded).appendingPathComponent("auth.json"))
+        }
+
+        for root in codexSessionsRoots {
+            let normalized = root.standardizedFileURL
+            candidates.append(normalized.appendingPathComponent("auth.json"))
+            if normalized.lastPathComponent == "sessions" {
+                candidates.append(normalized.deletingLastPathComponent().appendingPathComponent("auth.json"))
+            } else {
+                candidates.append(normalized.deletingLastPathComponent().appendingPathComponent("auth.json"))
+            }
+        }
+
+        candidates.append(home.appendingPathComponent(".codex/auth.json"))
+        return Self.uniqueStandardizedPaths(candidates)
+    }
+
+    private func extractCodexPlanType(from object: [String: Any]) -> String? {
+        if let direct = normalizedPlanTypeString(object["chatgpt_plan_type"]) {
+            return direct
+        }
+        if let direct = normalizedPlanTypeString(object["plan_type"]) {
+            return direct
+        }
+        if let auth = object["https://api.openai.com/auth"] as? [String: Any],
+           let nested = normalizedPlanTypeString(auth["chatgpt_plan_type"]) {
+            return nested
+        }
+        return nil
+    }
+
+    private func normalizedPlanTypeString(_ value: Any?) -> String? {
+        guard let raw = value as? String else { return nil }
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private func decodeJWTClaims(_ token: String) -> [String: Any]? {
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard segments.count >= 2 else { return nil }
+
+        var payload = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = payload.count % 4
+        if remainder != 0 {
+            payload += String(repeating: "=", count: 4 - remainder)
+        }
+        guard
+            let data = Data(base64Encoded: payload),
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+            return nil
+        }
+        return object
+    }
+
+    private func humanizedPlanFragment(_ raw: String) -> String {
+        raw
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map { token in token.capitalized }
+            .joined(separator: " ")
+    }
+
+    private func jsonString(in object: [String: Any], path: [String]) -> String? {
+        var current: Any = object
+        for key in path {
+            guard let dictionary = current as? [String: Any],
+                  let next = dictionary[key] else {
+                return nil
+            }
+            current = next
+        }
+        return current as? String
+    }
+
+    private func hasExistingSubscription(for kind: ExternalProviderKind) -> Bool {
+        subscriptions.contains { subscription in
+            subscription.usageSource == .externalToolLogs
+                && Self.externalProviderKind(from: subscription.providerName) == kind
+        }
+    }
+
+    private func hasAnyFile(in roots: [URL], withExtensions extensions: Set<String>) -> Bool {
+        let fileManager = FileManager.default
+        for root in roots {
+            guard fileManager.fileExists(atPath: root.path) else { continue }
+            if let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) {
+                for case let fileURL as URL in enumerator {
+                    let ext = fileURL.pathExtension.lowercased()
+                    if extensions.contains(ext) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func hasGeminiConfigArtifacts() -> Bool {
+        let auth = probeGeminiAuth()
+        return auth.hasSettingsFile || auth.hasOAuthCredentials
     }
 }

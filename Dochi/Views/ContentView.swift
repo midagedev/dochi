@@ -4,8 +4,46 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     enum MainSection: String, CaseIterable {
         case chat = "대화"
-        case kanban = "칸반"
         case tools = "도구"
+    }
+
+    enum ToolSection: String, CaseIterable, Identifiable {
+        case orchestration = "에이전트 오케스트레이션"
+        case kanban = "칸반"
+        case reminders = "미리알림"
+
+        var id: Self { self }
+
+        var icon: String {
+            switch self {
+            case .orchestration:
+                return "arrow.triangle.branch"
+            case .kanban:
+                return "rectangle.3.group"
+            case .reminders:
+                return "checklist"
+            }
+        }
+
+        var groupTitle: String {
+            switch self {
+            case .orchestration:
+                return "개발 오케스트레이션"
+            case .kanban, .reminders:
+                return "개인 생산성"
+            }
+        }
+
+        var shortDescription: String {
+            switch self {
+            case .orchestration:
+                return "세션 선택, 상태, 실행, 요약"
+            case .kanban:
+                return "보드/카드 운영"
+            case .reminders:
+                return "Apple 미리알림 관리"
+            }
+        }
     }
 
     @Bindable var viewModel: DochiViewModel
@@ -15,6 +53,7 @@ struct ContentView: View {
     @State private var showCapabilityCatalog = false
     @State private var showSystemStatusSheet = false
     @State private var selectedSection: MainSection = .chat
+    @State private var selectedToolSection: ToolSection = .orchestration
 
     // UX-3: 키보드 단축키 체계
     @State private var showCommandPalette = false
@@ -78,11 +117,13 @@ struct ContentView: View {
                 guard let section = newValue else { return }
                 switch section {
                 case "kanban":
-                    selectedSection = .kanban
+                    selectedSection = .tools
+                    selectedToolSection = .kanban
                 case "chat":
                     selectedSection = .chat
                 case "tools":
                     selectedSection = .tools
+                    selectedToolSection = .orchestration
                 default:
                     break
                 }
@@ -304,7 +345,7 @@ struct ContentView: View {
             }
             return .ignored
         }
-        // ⌘K: Command palette, ⌘⇧K: Toggle kanban/chat, ⌘1~9: conversation switch
+        // ⌘K: Command palette, ⌘⇧K: Toggle chat/tools, ⌘1~9: conversation switch
         .onKeyPress(phases: .down) { press in
             handleKeyPress(press)
         }
@@ -317,6 +358,7 @@ struct ContentView: View {
                 viewModel: viewModel,
                 supabaseService: supabaseService,
                 selectedSection: $selectedSection,
+                selectedToolSection: $selectedToolSection,
                 selectedToolSessionId: $selectedToolSessionId,
                 selectedToolProfileId: $selectedToolProfileId
             )
@@ -389,8 +431,6 @@ struct ContentView: View {
             switch selectedSection {
             case .chat:
                 chatDetailView
-            case .kanban:
-                KanbanWorkspaceView()
             case .tools:
                 toolsDetailView
             }
@@ -633,6 +673,18 @@ struct ContentView: View {
 
     @ViewBuilder
     private var toolsDetailView: some View {
+        switch selectedToolSection {
+        case .orchestration:
+            orchestrationDetailView
+        case .kanban:
+            KanbanWorkspaceView(showsBoardListPane: false)
+        case .reminders:
+            RemindersWorkspaceView()
+        }
+    }
+
+    @ViewBuilder
+    private var orchestrationDetailView: some View {
         VStack(spacing: 0) {
             if let error = viewModel.errorMessage {
                 ErrorBannerView(message: error) {
@@ -652,18 +704,18 @@ struct ContentView: View {
                             selectedToolProfileId = nil
                         }
                     )
-                } else if let profileId = selectedToolProfileId {
+                } else if let profileId = selectedToolProfileId,
+                          let profile = manager.profiles.first(where: { $0.id == profileId }) {
                     // Profile selected but no session — show start prompt
                     VStack(spacing: 16) {
                         Spacer()
-                        let profile = manager.profiles.first(where: { $0.id == profileId })
-                        Image(systemName: profile?.icon ?? "terminal.fill")
+                        Image(systemName: profile.icon)
                             .font(.system(size: 32))
                             .foregroundStyle(.tertiary)
-                        Text(profile?.name ?? "")
+                        Text(profile.name)
                             .font(.title3)
                             .foregroundStyle(.secondary)
-                        Text("작업 위치: \(profile?.workingDirectory ?? "~")")
+                        Text("작업 위치: \(profile.workingDirectory)")
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.tertiary)
                         if isStartingToolSession {
@@ -695,7 +747,12 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ExternalToolEmptyDashboardView()
+                    ExternalToolListView(
+                        manager: manager,
+                        resourceOptimizer: viewModel.resourceOptimizer,
+                        selectedSessionId: $selectedToolSessionId,
+                        selectedProfileId: $selectedToolProfileId
+                    )
                 }
             } else {
                 ExternalToolEmptyDashboardView()
@@ -779,9 +836,12 @@ struct ContentView: View {
             return .handled
         }
 
-        // ⌘⇧K: Toggle kanban/chat (check before ⌘K)
+        // ⌘⇧K: Toggle chat/tools (check before ⌘K)
         if hasCommand && hasShift && chars == "k" {
-            selectedSection = selectedSection == .chat ? .kanban : .chat
+            selectedSection = selectedSection == .chat ? .tools : .chat
+            if selectedSection == .tools {
+                selectedToolSection = .orchestration
+            }
             return .handled
         }
 
@@ -878,7 +938,8 @@ struct ContentView: View {
                 showExportOptions = true
             }
         case .toggleKanban:
-            selectedSection = selectedSection == .chat ? .kanban : .chat
+            selectedSection = .tools
+            selectedToolSection = .kanban
         case .openTagManagement:
             showTagManagementFromPalette = true
         case .toggleMultiSelect:
@@ -947,6 +1008,7 @@ struct ContentView: View {
             viewModel.showSuggestionHistory = true
         case .openExternalToolDashboard:
             selectedSection = .tools
+            selectedToolSection = .orchestration
         case .externalToolHealthcheck:
             if let manager = viewModel.externalToolManager {
                 Task { await manager.checkAllHealth() }
@@ -1039,6 +1101,7 @@ struct SidebarView: View {
     @Bindable var viewModel: DochiViewModel
     var supabaseService: SupabaseServiceProtocol?
     @Binding var selectedSection: ContentView.MainSection
+    @Binding var selectedToolSection: ContentView.ToolSection
     @Binding var selectedToolSessionId: UUID?
     @Binding var selectedToolProfileId: UUID?
     @State private var searchText: String = ""
@@ -1158,34 +1221,12 @@ struct SidebarView: View {
                         syncState: viewModel.syncEngine?.syncState
                     )
                 }
-            } else if selectedSection == .kanban {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("칸반 보드", systemImage: "rectangle.3.group")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("오른쪽 패널에서 보드/카드를 직접 관리할 수 있습니다.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(12)
-                Spacer()
             } else if selectedSection == .tools {
-                if let manager = viewModel.externalToolManager {
-                    ExternalToolListView(
-                        manager: manager,
-                        selectedSessionId: $selectedToolSessionId,
-                        selectedProfileId: $selectedToolProfileId
-                    )
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("외부 도구", systemImage: "hammer")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("외부 AI 도구 관리가 초기화되지 않았습니다.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(12)
-                    Spacer()
-                }
+                ToolsMenuSidebarView(
+                    selectedToolSection: $selectedToolSection,
+                    selectedToolSessionId: $selectedToolSessionId,
+                    selectedToolProfileId: $selectedToolProfileId
+                )
             }
         }
         .toolbar {

@@ -575,6 +575,14 @@ struct UsageDashboardView: View {
                     Text("구독을 등록하면 사용량을 추적하고 낭비를 방지합니다.")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
+                    Button("자동 감지로 시작") {
+                        Task {
+                            await bootstrapSubscriptionsIfNeeded()
+                            await loadUtilizations()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                     Button("구독 추가") {
                         editingSubscription = nil
                         showSubscriptionSheet = true
@@ -1060,9 +1068,16 @@ struct UsageDashboardView: View {
 
     private func loadUtilizations() async {
         guard let optimizer = resourceOptimizer else { return }
+        await bootstrapSubscriptionsIfNeeded()
         let loaded = await optimizer.allUtilizations()
         utilizations = loaded
         monitoringSnapshots = await optimizer.monitoringSnapshots(for: loaded.map(\.subscription))
+    }
+
+    private func bootstrapSubscriptionsIfNeeded() async {
+        guard let optimizer = resourceOptimizer else { return }
+        guard optimizer.subscriptions.isEmpty else { return }
+        _ = await optimizer.bootstrapDefaultExternalSubscriptionsIfNeeded()
     }
 
     private var isGitScanAutoTaskEnabled: Bool {

@@ -82,6 +82,139 @@ final class ResourceOptimizerTests: XCTestCase {
         XCTAssertEqual(service.autoTaskRecords.count, 0)
     }
 
+    func testBootstrapDefaultExternalSubscriptionsAddsDetectedProviders() async throws {
+        let codexRoot = tempDir.appendingPathComponent("bootstrap-codex")
+        let claudeRoot = tempDir.appendingPathComponent("bootstrap-claude")
+        let claudeProject = claudeRoot.appendingPathComponent("project-a")
+        let geminiRoot = tempDir.appendingPathComponent("bootstrap-gemini")
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: claudeProject, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+
+        try "{\"type\":\"session_meta\"}\n".write(
+            to: codexRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "{\"type\":\"assistant\"}\n".write(
+            to: claudeProject.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#.write(
+            to: geminiRoot.appendingPathComponent("settings.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-bootstrap-detect"),
+            usageStore: nil,
+            claudeProjectsRoots: [claudeRoot],
+            codexSessionsRoots: [codexRoot],
+            geminiConfigRoots: [geminiRoot]
+        )
+
+        let added = await sourceService.bootstrapDefaultExternalSubscriptionsIfNeeded()
+        XCTAssertEqual(added, 3)
+
+        let providerNames = Set(sourceService.subscriptions.map(\.providerName))
+        XCTAssertTrue(providerNames.contains("Codex"))
+        XCTAssertTrue(providerNames.contains("Claude"))
+        XCTAssertTrue(providerNames.contains("Gemini"))
+    }
+
+    func testBootstrapDefaultExternalSubscriptionsSkipsDuplicates() async throws {
+        let codexRoot = tempDir.appendingPathComponent("bootstrap-codex-repeat")
+        let geminiRoot = tempDir.appendingPathComponent("bootstrap-gemini-empty")
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+        try "{\"type\":\"session_meta\"}\n".write(
+            to: codexRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-bootstrap-repeat"),
+            usageStore: nil,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [codexRoot],
+            geminiConfigRoots: [geminiRoot]
+        )
+
+        let first = await sourceService.bootstrapDefaultExternalSubscriptionsIfNeeded()
+        let second = await sourceService.bootstrapDefaultExternalSubscriptionsIfNeeded()
+
+        XCTAssertEqual(first, 1)
+        XCTAssertEqual(second, 0)
+        XCTAssertEqual(
+            sourceService.subscriptions.filter { $0.providerName == "Codex" }.count,
+            1
+        )
+    }
+
+    func testBootstrapDefaultExternalSubscriptionsUsesCodexAuthPlanHint() async throws {
+        let codexRoot = tempDir.appendingPathComponent("bootstrap-codex-plan")
+        let geminiRoot = tempDir.appendingPathComponent("bootstrap-gemini-empty-plan")
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+
+        try "{\"type\":\"session_meta\"}\n".write(
+            to: codexRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let idToken = try makeUnsignedJWT(payload: [
+            "https://api.openai.com/auth": [
+                "chatgpt_plan_type": "pro",
+            ],
+        ])
+        let authPayload: [String: Any] = [
+            "tokens": [
+                "id_token": idToken,
+            ],
+        ]
+        let authData = try JSONSerialization.data(withJSONObject: authPayload, options: [.sortedKeys])
+        try authData.write(to: codexRoot.appendingPathComponent("auth.json"))
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-bootstrap-codex-plan"),
+            usageStore: nil,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [codexRoot],
+            geminiConfigRoots: [geminiRoot]
+        )
+
+        let added = await sourceService.bootstrapDefaultExternalSubscriptionsIfNeeded()
+        XCTAssertEqual(added, 1)
+        let codex = try XCTUnwrap(sourceService.subscriptions.first(where: { $0.providerName == "Codex" }))
+        XCTAssertEqual(codex.planName, "ChatGPT Pro (Auto)")
+    }
+
+    func testBootstrapDefaultExternalSubscriptionsSkipsGeminiMeteredAuthType() async throws {
+        let geminiRoot = tempDir.appendingPathComponent("bootstrap-gemini-metered")
+        try FileManager.default.createDirectory(at: geminiRoot, withIntermediateDirectories: true)
+        try #"{"security":{"auth":{"selectedType":"api-key"}}}"#.write(
+            to: geminiRoot.appendingPathComponent("settings.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let sourceService = ResourceOptimizerService(
+            baseURL: tempDir.appendingPathComponent("resource-bootstrap-gemini-metered"),
+            usageStore: nil,
+            claudeProjectsRoots: [tempDir.appendingPathComponent("empty-claude")],
+            codexSessionsRoots: [tempDir.appendingPathComponent("empty-codex")],
+            geminiConfigRoots: [geminiRoot]
+        )
+
+        let added = await sourceService.bootstrapDefaultExternalSubscriptionsIfNeeded()
+        XCTAssertEqual(added, 0)
+        XCTAssertFalse(sourceService.subscriptions.contains(where: { $0.providerName == "Gemini" }))
+    }
+
     // MARK: - Persistence
 
     func testPersistenceRoundtrip() async {
@@ -1368,6 +1501,11 @@ final class ResourceOptimizerTests: XCTestCase {
         viewModel.configureResourceOptimizer(mock)
 
         XCTAssertNotNil(viewModel.resourceOptimizer)
+        let deadline = Date().addingTimeInterval(1)
+        while mock.bootstrapCallCount == 0, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(mock.bootstrapCallCount, 1)
 
         // Verify the mock works through the protocol interface
         let plan = SubscriptionPlan(providerName: "TestProvider", planName: "Pro")
@@ -1477,5 +1615,21 @@ final class ResourceOptimizerTests: XCTestCase {
             behindCount: 0,
             score: 1
         )
+    }
+
+    private func makeUnsignedJWT(payload: [String: Any]) throws -> String {
+        let headerData = try JSONSerialization.data(withJSONObject: [
+            "alg": "none",
+            "typ": "JWT",
+        ], options: [.sortedKeys])
+        let payloadData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        return "\(base64URL(headerData)).\(base64URL(payloadData))."
+    }
+
+    private func base64URL(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }

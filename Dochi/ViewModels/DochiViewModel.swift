@@ -493,6 +493,12 @@ final class DochiViewModel {
     func configureResourceOptimizer(_ optimizer: any ResourceOptimizerProtocol) {
         self.resourceOptimizer = optimizer
         Log.app.info("ResourceOptimizerService configured")
+        Task {
+            let added = await optimizer.bootstrapDefaultExternalSubscriptionsIfNeeded()
+            if added > 0 {
+                Log.app.info("ResourceOptimizer auto-bootstrapped \(added) external subscriptions")
+            }
+        }
     }
 
     // MARK: - Terminal (K-1)

@@ -913,8 +913,27 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     }
 
     func discoverGitRepositoryInsights(searchPaths: [String]?, limit: Int) async -> [GitRepositoryInsight] {
-        let profilePaths = profiles.map(\.workingDirectory)
-        let mergedPaths = (searchPaths ?? []) + profilePaths
+        let explicitPaths = (searchPaths ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let candidatePaths: [String]
+        if explicitPaths.isEmpty {
+            candidatePaths = profiles.map(\.workingDirectory)
+        } else {
+            // Explicit scoped paths should remain focused; avoid diluting with every profile root.
+            candidatePaths = explicitPaths
+        }
+
+        var seen: Set<String> = []
+        let mergedPaths = candidatePaths.filter { path in
+            let normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { return false }
+            if seen.contains(normalized) {
+                return false
+            }
+            seen.insert(normalized)
+            return true
+        }
         let effectiveLimit = max(1, min(200, limit))
         return await Task.detached(priority: .utility) {
             GitRepositoryInsightScanner.discover(
@@ -3659,7 +3678,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             .prefix(sampleLimit)
 
         return sampled.map { candidate in
-            let meta = parseCodexSessionMeta(fromFirstLine: readFirstLine(of: candidate.url))
+            let headLines = readSessionHeadLines(of: candidate.url, maxLines: 80)
+            let meta = parseCodexSessionMeta(fromHeadLines: headLines)
             let sessionId = meta?.id ?? candidate.url.deletingPathExtension().lastPathComponent
             let isActive = now.timeIntervalSince(candidate.modifiedAt) <= 60 * 45
             return DiscoveredCodingSession(
@@ -3772,7 +3792,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             .prefix(sampleLimit)
 
         for candidate in sampled {
-            let meta = parseClaudeSessionMeta(fromFirstLine: readFirstLine(of: candidate.url))
+            let headLines = readSessionHeadLines(of: candidate.url, maxLines: 80)
+            let meta = parseClaudeSessionMeta(fromHeadLines: headLines)
             let sessionId = meta?.id ?? candidate.url.deletingPathExtension().lastPathComponent
             let inferredProjectPath = decodeClaudeProjectFolder(candidate.url.deletingLastPathComponent().lastPathComponent)
             let workingDirectory = meta?.cwd ?? inferredProjectPath
@@ -3831,6 +3852,35 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
 
         guard !data.isEmpty else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    nonisolated private static func readSessionHeadLines(
+        of fileURL: URL,
+        maxLines: Int,
+        maxBytes: Int = 512 * 1024
+    ) -> [String] {
+        let effectiveMaxLines = max(1, min(240, maxLines))
+        guard let data = try? Data(contentsOf: fileURL, options: [.mappedIfSafe]),
+              !data.isEmpty else {
+            return []
+        }
+
+        let capped = data.count > maxBytes ? data.prefix(maxBytes) : data[...]
+        guard let text = String(data: Data(capped), encoding: .utf8), !text.isEmpty else {
+            return []
+        }
+
+        var lines: [String] = []
+        lines.reserveCapacity(min(effectiveMaxLines, 40))
+        for rawLine in text.split(omittingEmptySubsequences: true, whereSeparator: \.isNewline) {
+            let normalized = String(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { continue }
+            lines.append(normalized)
+            if lines.count >= effectiveMaxLines {
+                break
+            }
+        }
+        return lines
     }
 
     private struct SessionClientTaxonomy {
@@ -3896,7 +3946,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     ]
 
     nonisolated private static func parseCodexSessionMeta(
-        fromFirstLine line: String?
+        fromHeadLines lines: [String]
     ) -> (
         id: String,
         cwd: String?,
@@ -3910,8 +3960,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         sessionSource: String?,
         clientKind: String?
     )? {
-        guard let line,
-              let data = line.data(using: .utf8),
+        guard let line = lines.first else { return nil }
+        guard let data = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String,
               type == "session_meta",
@@ -3933,15 +3983,37 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             originator: originator,
             sessionSource: sessionSource
         )
+        let explicitTitle = normalizedSessionText(payload["title"], maxLength: 140)
+        let explicitSummary = normalizedSessionText(payload["summary"], maxLength: 320)
+        let firstUserPrompt = firstSessionUserPrompt(
+            fromHeadLines: Array(lines.dropFirst()),
+            provider: "codex"
+        )
+
+        let title = explicitTitle ?? explicitSummary ?? firstUserPrompt
+        let summary = explicitSummary ?? firstUserPrompt
+        let titleSource: String?
+        let titleConfidence: Double?
+        if explicitTitle != nil || explicitSummary != nil {
+            titleSource = "codex_session_file_header"
+            titleConfidence = explicitTitle != nil ? 0.9 : 0.82
+        } else if firstUserPrompt != nil {
+            titleSource = "codex_session_file_head_user_prompt"
+            titleConfidence = 0.72
+        } else {
+            titleSource = nil
+            titleConfidence = nil
+        }
+
         return (
             id: id,
             cwd: cwd,
             gitBranch: gitBranch,
             sessionHintKeys: sessionHintKeys,
-            title: nil,
-            summary: nil,
-            titleSource: nil,
-            titleConfidence: nil,
+            title: title,
+            summary: summary,
+            titleSource: titleSource,
+            titleConfidence: titleConfidence,
             originator: originator,
             sessionSource: sessionSource,
             clientKind: clientKind
@@ -4011,7 +4083,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
     }
 
     nonisolated private static func parseClaudeSessionMeta(
-        fromFirstLine line: String?
+        fromHeadLines lines: [String]
     ) -> (
         id: String,
         cwd: String?,
@@ -4022,7 +4094,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         titleSource: String?,
         titleConfidence: Double?
     )? {
-        guard let line,
+        guard let line = lines.first,
               let data = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -4034,16 +4106,86 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         let gitBranch = normalizedSessionText(json["gitBranch"] ?? json["branch"], maxLength: 120)
         let sessionHintKeys = normalizedUniqueSessionHintKeys([sessionId])
         let metadata = claudeSessionMetadataFromSessionJSON(json)
+        let firstUserPrompt = firstSessionUserPrompt(fromHeadLines: lines, provider: "claude")
+        let title = metadata.title ?? firstUserPrompt
+        let summary = metadata.summary ?? firstUserPrompt
+        let titleSource = metadata.titleSource ?? (firstUserPrompt == nil ? nil : "claude_session_file_head_user_prompt")
+        let titleConfidence = metadata.titleConfidence ?? (firstUserPrompt == nil ? nil : 0.6)
         return (
             id: sessionId,
             cwd: cwd,
             gitBranch: gitBranch,
             sessionHintKeys: sessionHintKeys,
-            title: metadata.title,
-            summary: metadata.summary,
-            titleSource: metadata.titleSource,
-            titleConfidence: metadata.titleConfidence
+            title: title,
+            summary: summary,
+            titleSource: titleSource,
+            titleConfidence: titleConfidence
         )
+    }
+
+    nonisolated private static func firstSessionUserPrompt(
+        fromHeadLines lines: [String],
+        provider: String
+    ) -> String? {
+        for line in lines {
+            guard let object = parseJSONLine(line),
+                  let rawPrompt = extractSessionUserPromptText(from: object),
+                  let normalized = normalizedSessionText(rawPrompt, maxLength: 220) else {
+                continue
+            }
+            if isBoilerplateSessionPrompt(normalized, provider: provider) {
+                continue
+            }
+            return normalized
+        }
+        return nil
+    }
+
+    nonisolated private static func extractSessionUserPromptText(from object: [String: Any]) -> String? {
+        let type = (object["type"] as? String)?.lowercased()
+        if type == "response_item",
+           let payload = object["payload"] as? [String: Any] {
+            let payloadType = (payload["type"] as? String)?.lowercased()
+            let payloadRole = (payload["role"] as? String)?.lowercased()
+            if payloadType == "message", payloadRole == "user" {
+                return flattenText(payload["content"] ?? payload["message"] ?? payload)
+            }
+        }
+
+        if let message = object["message"] as? [String: Any],
+           (message["role"] as? String)?.lowercased() == "user" {
+            if let content = flattenText(message["content"] ?? message["text"] ?? message) {
+                return content
+            }
+        }
+
+        if (object["role"] as? String)?.lowercased() == "user" {
+            if let content = flattenText(object["content"] ?? object["text"] ?? object["input"]) {
+                return content
+            }
+        }
+
+        return nil
+    }
+
+    nonisolated private static func isBoilerplateSessionPrompt(_ text: String, provider: String) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return true }
+
+        if provider == "codex" {
+            if normalized.hasPrefix("# agents.md instructions for ") {
+                return true
+            }
+            if normalized.hasPrefix("<environment_context>") ||
+                normalized.hasPrefix("<app-context>") ||
+                normalized.hasPrefix("<permissions instructions>") ||
+                normalized.hasPrefix("<collaboration_mode>") ||
+                normalized.hasPrefix("<turn_aborted>") {
+                return true
+            }
+        }
+
+        return false
     }
 
     nonisolated private static func claudeSessionMetadataFromIndexEntry(
