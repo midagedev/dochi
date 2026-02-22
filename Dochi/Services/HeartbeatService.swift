@@ -56,6 +56,7 @@ final class HeartbeatService: Observable {
     private var resourceOptimizer: ResourceOptimizerProtocol?
     private var telegramRelay: TelegramProactiveRelayProtocol?
     private var changeJournalService: HeartbeatChangeJournalProtocol?
+    private var workQueueService: WorkQueueServiceProtocol?
 
     // Observable state
     private(set) var lastTickDate: Date?
@@ -110,6 +111,11 @@ final class HeartbeatService: Observable {
     /// Inject change journal persistence service for heartbeat change events.
     func setChangeJournalService(_ service: HeartbeatChangeJournalProtocol) {
         self.changeJournalService = service
+    }
+
+    /// Inject WorkQueue service for change-to-work-item bridge.
+    func setWorkQueueService(_ service: WorkQueueServiceProtocol) {
+        self.workQueueService = service
     }
 
     /// Set a callback for when the heartbeat decides to proactively message the user.
@@ -279,6 +285,7 @@ final class HeartbeatService: Observable {
             if !detectedChanges.isEmpty {
                 changeJournalService?.append(events: detectedChanges)
                 Log.app.info("HeartbeatService detected \(detectedChanges.count) change event(s)")
+                enqueueDetectedChangesToWorkQueue(detectedChanges)
 
                 let channel = NotificationChannel(rawValue: settings.heartbeatNotificationChannel) ?? .appOnly
                 if channel != .off {
@@ -765,6 +772,80 @@ final class HeartbeatService: Observable {
             }
         }
         Log.app.info("HeartbeatService sent \(events.count) change alert(s)")
+    }
+
+    private func enqueueDetectedChangesToWorkQueue(_ events: [HeartbeatChangeEvent]) {
+        guard let workQueueService else { return }
+
+        var queuedCount = 0
+        for event in events {
+            let draft = WorkItemDraft(
+                source: .heartbeat,
+                title: event.title,
+                detail: event.detail,
+                repositoryRoot: workItemRepositoryRoot(for: event),
+                severity: workItemSeverity(for: event.severity),
+                suggestedAction: workItemSuggestedAction(for: event),
+                dedupeKey: "heartbeat_change|\(event.dedupeKey)",
+                dueAt: nil,
+                ttl: workItemTTL(for: event.severity)
+            )
+            if workQueueService.enqueue(draft, now: event.timestamp) != nil {
+                queuedCount += 1
+            }
+        }
+
+        if queuedCount > 0 {
+            Log.app.info("HeartbeatService queued \(queuedCount) work item(s)")
+        }
+    }
+
+    private func workItemRepositoryRoot(for event: HeartbeatChangeEvent) -> String? {
+        let candidates = [
+            event.metadata["repositoryRoot"],
+            event.metadata["newRepositoryRoot"],
+            event.metadata["oldRepositoryRoot"],
+            event.metadata["path"],
+        ]
+        for candidate in candidates {
+            guard let candidate else { continue }
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
+    private func workItemSeverity(for severity: HeartbeatChangeSeverity) -> WorkItemSeverity {
+        switch severity {
+        case .info:
+            return .info
+        case .warning:
+            return .warning
+        case .critical:
+            return .critical
+        }
+    }
+
+    private func workItemSuggestedAction(for event: HeartbeatChangeEvent) -> String {
+        switch event.eventType {
+        case .codingSessionStarted:
+            return "bridge.orchestrator.select_session"
+        default:
+            return "bridge.orchestrator.status"
+        }
+    }
+
+    private func workItemTTL(for severity: HeartbeatChangeSeverity) -> TimeInterval {
+        switch severity {
+        case .critical:
+            return 48 * 60 * 60
+        case .warning:
+            return 24 * 60 * 60
+        case .info:
+            return 12 * 60 * 60
+        }
     }
 
     private func trimChangeAlertDedupeState() {
