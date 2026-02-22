@@ -239,6 +239,26 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(preferred?.nativeSessionId, "unassigned-idle")
     }
 
+    func testSelectionFilterForRepositoryNormalizesRootAndClearsScopedFilters() {
+        let filter = SessionExplorerViewStateBuilder.selectionFilter(for: "/tmp/repo-a/../repo-a")
+
+        XCTAssertEqual(filter.repositoryRoot, "/tmp/repo-a")
+        XCTAssertNil(filter.provider)
+        XCTAssertNil(filter.tier)
+        XCTAssertFalse(filter.activeOnly)
+        XCTAssertFalse(filter.unassignedOnly)
+    }
+
+    func testSelectionFilterForUnassignedEnablesUnassignedOnly() {
+        let filter = SessionExplorerViewStateBuilder.selectionFilter(for: nil)
+
+        XCTAssertNil(filter.repositoryRoot)
+        XCTAssertNil(filter.provider)
+        XCTAssertNil(filter.tier)
+        XCTAssertFalse(filter.activeOnly)
+        XCTAssertTrue(filter.unassignedOnly)
+    }
+
     func testFilteredSessionsNormalizesRepositoryRootComparison() {
         let sessions = [
             makeSession(

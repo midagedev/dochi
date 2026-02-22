@@ -191,4 +191,15 @@ enum SessionExplorerViewStateBuilder {
         }
         return sortSessions(scoped, sort: .activity).first
     }
+
+    static func selectionFilter(for repositoryRoot: String?) -> SessionExplorerFilter {
+        let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
+        return SessionExplorerFilter(
+            repositoryRoot: normalizedRoot,
+            provider: nil,
+            tier: nil,
+            activeOnly: false,
+            unassignedOnly: normalizedRoot == nil
+        )
+    }
 }

@@ -1480,17 +1480,12 @@ struct ExternalToolListView: View {
         focusedRepositoryKey = summary.id
         searchText = ""
         selectedProfileId = nil
-        explorerFilter.activeOnly = false
+        explorerFilter = SessionExplorerViewStateBuilder.selectionFilter(for: summary.repositoryRoot)
 
-        if let repositoryRoot = summary.repositoryRoot {
-            let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
-            explorerFilter.repositoryRoot = normalizedRoot
-            explorerFilter.unassignedOnly = false
+        if let normalizedRoot = explorerFilter.repositoryRoot {
             expandedRepositoryGroups.insert(normalizedRoot)
             orchestrationRepositoryRoot = normalizedRoot
         } else {
-            explorerFilter.repositoryRoot = nil
-            explorerFilter.unassignedOnly = true
             orchestrationRepositoryRoot = nil
         }
 
@@ -1508,9 +1503,7 @@ struct ExternalToolListView: View {
         focusedRepositoryKey = group.id
         searchText = ""
         selectedProfileId = nil
-        explorerFilter.activeOnly = false
-        explorerFilter.repositoryRoot = group.repositoryRoot
-        explorerFilter.unassignedOnly = false
+        explorerFilter = SessionExplorerViewStateBuilder.selectionFilter(for: group.repositoryRoot)
         orchestrationRepositoryRoot = group.repositoryRoot
         expandedRepositoryGroups.insert(group.repositoryRoot)
 
