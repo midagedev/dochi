@@ -72,6 +72,36 @@ final class WorkQueueServiceTests: XCTestCase {
         XCTAssertEqual(service.items.first?.status, .accepted)
     }
 
+    func testTransitionAllowsQueuedDeferredDismissedPath() throws {
+        let baseURL = try makeTempDirectory(prefix: "dochi-workqueue-deferred")
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+        let service = WorkQueueService(baseURL: baseURL, dedupeCooldown: 60)
+
+        let queued = try XCTUnwrap(service.enqueue(makeDraft(dedupeKey: "defer-key"), now: Date(timeIntervalSince1970: 1_700_000_000)))
+
+        let deferred = service.transitionItem(
+            id: queued.id,
+            to: .deferred,
+            now: Date(timeIntervalSince1970: 1_700_000_010)
+        )
+        XCTAssertEqual(deferred?.status, .deferred)
+
+        let dismissed = service.transitionItem(
+            id: queued.id,
+            to: .dismissed,
+            now: Date(timeIntervalSince1970: 1_700_000_020)
+        )
+        XCTAssertEqual(dismissed?.status, .dismissed)
+
+        let invalid = service.transitionItem(
+            id: queued.id,
+            to: .queued,
+            now: Date(timeIntervalSince1970: 1_700_000_030)
+        )
+        XCTAssertNil(invalid)
+        XCTAssertEqual(service.items.first?.status, .dismissed)
+    }
+
     func testPruneExpiredMarksItemsExpiredAndRecentSortingPrioritizesSeverity() throws {
         let baseURL = try makeTempDirectory(prefix: "dochi-workqueue-expire")
         defer { try? FileManager.default.removeItem(at: baseURL) }
