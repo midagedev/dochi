@@ -935,6 +935,27 @@ final class GitRepositoryInsightScorerTests: XCTestCase {
         XCTAssertEqual(summary, "Proceed with force push? [Y/n]")
     }
 
+    func testRuntimeSessionSummaryIgnoresOldWaitingPromptOutsideRecentWindow() {
+        let summary = ExternalToolSessionManager.runtimeSessionSummary(
+            status: .busy,
+            lastOutput: [
+                "Apply migration? [Y/n]",
+                "line-1",
+                "line-2",
+                "line-3",
+                "line-4",
+                "line-5",
+                "line-6",
+                "line-7",
+                "line-8",
+                "Running lint checks",
+            ],
+            lastActivityText: "swift test"
+        )
+
+        XCTAssertEqual(summary, "Running lint checks")
+    }
+
     func testRuntimeSessionSummaryUsesRecentMeaningfulOutput() {
         let esc = "\u{001B}"
         let summary = ExternalToolSessionManager.runtimeSessionSummary(

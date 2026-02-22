@@ -3847,7 +3847,8 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
         lastOutput: [String],
         lastActivityText: String?
     ) -> String? {
-        if let waitingLine = lastOutput.reversed().first(where: { containsWaitingPrompt($0) }),
+        let waitingWindow = Array(lastOutput.suffix(8))
+        if let waitingLine = waitingWindow.reversed().first(where: { containsWaitingPrompt($0) }),
            let normalizedWaiting = normalizedRuntimeOutputLine(waitingLine, maxLength: 220) {
             return normalizedWaiting
         }
@@ -3907,7 +3908,7 @@ final class ExternalToolSessionManager: ExternalToolSessionManagerProtocol {
             return true
         }
         let lowercased = trimmed.lowercased()
-        if lowercased == "ready" || lowercased == "done" {
+        if lowercased == "ready" {
             return true
         }
         return false
