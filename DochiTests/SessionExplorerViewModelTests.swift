@@ -163,6 +163,122 @@ final class SessionExplorerViewModelTests: XCTestCase {
         XCTAssertEqual(groups[0].sessions.map(\.provider), ["anthropic", "zai"])
     }
 
+    func testOrchestrationWorkboardLaneClassifiesSessionStates() {
+        let blocked = makeSession(
+            provider: "codex",
+            nativeId: "blocked",
+            repo: "/tmp/repo-a",
+            tier: .t1Attach,
+            state: .idle,
+            score: 82,
+            errorPenalty: 12
+        )
+        let running = makeSession(
+            provider: "codex",
+            nativeId: "running",
+            repo: "/tmp/repo-a",
+            tier: .t0Full,
+            state: .active,
+            score: 85
+        )
+        let done = makeSession(
+            provider: "claude",
+            nativeId: "done",
+            repo: "/tmp/repo-b",
+            tier: .t2Observe,
+            state: .idle,
+            score: 72
+        )
+        let review = makeSession(
+            provider: "claude",
+            nativeId: "review",
+            repo: "/tmp/repo-c",
+            tier: .t2Observe,
+            state: .stale,
+            score: 35
+        )
+        let queued = makeSession(
+            provider: "aider",
+            nativeId: "queued",
+            repo: nil,
+            tier: .t3Unknown,
+            state: .idle,
+            score: 51
+        )
+
+        XCTAssertEqual(
+            SessionExplorerViewStateBuilder.orchestrationWorkboardLane(for: blocked),
+            .blocked
+        )
+        XCTAssertEqual(
+            SessionExplorerViewStateBuilder.orchestrationWorkboardLane(for: running),
+            .running
+        )
+        XCTAssertEqual(
+            SessionExplorerViewStateBuilder.orchestrationWorkboardLane(for: done),
+            .done
+        )
+        XCTAssertEqual(
+            SessionExplorerViewStateBuilder.orchestrationWorkboardLane(for: review),
+            .review
+        )
+        XCTAssertEqual(
+            SessionExplorerViewStateBuilder.orchestrationWorkboardLane(for: queued),
+            .queued
+        )
+    }
+
+    func testOrchestrationWorkboardGroupsPrioritizeBlockedThenRunning() {
+        let now = Date()
+        let sessions = [
+            makeSession(
+                provider: "codex",
+                nativeId: "review",
+                repo: "/tmp/repo-r",
+                tier: .t2Observe,
+                state: .stale,
+                score: 33,
+                updatedAt: now.addingTimeInterval(-90)
+            ),
+            makeSession(
+                provider: "codex",
+                nativeId: "done",
+                repo: "/tmp/repo-d",
+                tier: .t0Full,
+                state: .idle,
+                score: 75,
+                updatedAt: now.addingTimeInterval(-40)
+            ),
+            makeSession(
+                provider: "codex",
+                nativeId: "running",
+                repo: "/tmp/repo-a",
+                tier: .t0Full,
+                state: .active,
+                score: 90,
+                updatedAt: now
+            ),
+            makeSession(
+                provider: "codex",
+                nativeId: "blocked",
+                repo: "/tmp/repo-b",
+                tier: .t1Attach,
+                state: .idle,
+                score: 60,
+                updatedAt: now.addingTimeInterval(-20),
+                errorPenalty: 8
+            ),
+        ]
+
+        let groups = SessionExplorerViewStateBuilder.orchestrationWorkboardGroups(
+            sessions: sessions
+        )
+
+        XCTAssertEqual(groups.map(\.lane), [.blocked, .running, .review, .done])
+        XCTAssertEqual(groups.first?.sessions.first?.nativeSessionId, "blocked")
+        XCTAssertEqual(groups[1].sessions.first?.nativeSessionId, "running")
+    }
+
     func testPreferredSessionChoosesMostActionableForRepository() {
         let now = Date()
         let sessions = [
