@@ -179,4 +179,27 @@ enum SessionExplorerViewStateBuilder {
             return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
         })
     }
+
+    static func preferredSession(
+        in repositoryRoot: String?,
+        sessions: [UnifiedCodingSession]
+    ) -> UnifiedCodingSession? {
+        let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
+        let scoped = sessions.filter { session in
+            let normalizedSessionRoot = normalizedRepositoryPath(session.repositoryRoot)
+            return normalizedSessionRoot == normalizedRoot
+        }
+        return sortSessions(scoped, sort: .activity).first
+    }
+
+    static func selectionFilter(for repositoryRoot: String?) -> SessionExplorerFilter {
+        let normalizedRoot = normalizedRepositoryPath(repositoryRoot)
+        return SessionExplorerFilter(
+            repositoryRoot: normalizedRoot,
+            provider: nil,
+            tier: nil,
+            activeOnly: false,
+            unassignedOnly: normalizedRoot == nil
+        )
+    }
 }
