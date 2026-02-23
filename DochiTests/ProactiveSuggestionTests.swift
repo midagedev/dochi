@@ -301,7 +301,8 @@ final class ProactiveSuggestionServiceTests: XCTestCase {
     private func makeService(
         enabled: Bool = true,
         idleMinutes: Int = 30,
-        cooldownMinutes: Int = 60
+        cooldownMinutes: Int = 60,
+        llmClient: ProactiveSuggestionLLMClientProtocol? = nil
     ) -> (ProactiveSuggestionService, AppSettings, MockContextService, MockConversationService) {
         let settings = AppSettings()
         settings.proactiveSuggestionEnabled = enabled
@@ -326,7 +327,8 @@ final class ProactiveSuggestionServiceTests: XCTestCase {
             settings: settings,
             contextService: contextService,
             conversationService: conversationService,
-            sessionContext: sessionContext
+            sessionContext: sessionContext,
+            llmClient: llmClient
         )
 
         return (service, settings, contextService, conversationService)
@@ -554,6 +556,54 @@ final class ProactiveSuggestionServiceTests: XCTestCase {
         XCTAssertEqual(service.suggestionHistory[1].status, .deferred)
         XCTAssertEqual(service.suggestionHistory[2].title, "S1")
         XCTAssertEqual(service.suggestionHistory[2].status, .accepted)
+    }
+
+    // MARK: - LLM-backed generation
+
+    func testLLMCandidateIsUsedWhenValid() async {
+        let llmClient = MockProactiveSuggestionLLMClient()
+        llmClient.responses = [.success("""
+        {"shouldSuggest":true,"type":"deepDive","title":"Swift 6 동시성 점검","body":"최근 Swift 6 대화를 기준으로 핵심 이슈를 3개로 정리해볼까요?","suggestedPrompt":"최근 Swift 6 관련 대화에서 발생한 핵심 이슈 3개와 우선순위를 정리해줘","sourceContext":"conversation:recent"}
+        """)]
+
+        let (service, _, _, conversationService) = makeService(llmClient: llmClient)
+        conversationService.save(conversation: Conversation(
+            title: "Swift 6 마이그레이션",
+            messages: [Message(role: .user, content: "strict concurrency 경고를 줄이고 싶어")],
+            updatedAt: Date()
+        ))
+
+        await service.runSuggestionGenerationForTesting()
+
+        XCTAssertEqual(llmClient.callCount, 1)
+        XCTAssertEqual(service.currentSuggestion?.title, "Swift 6 동시성 점검")
+        XCTAssertEqual(service.currentSuggestion?.type, .deepDive)
+        XCTAssertEqual(service.state, .hasSuggestion)
+    }
+
+    func testMetaInstructionLLMOutputIsRejectedAndFallsBack() async {
+        let llmClient = MockProactiveSuggestionLLMClient()
+        llmClient.responses = [.success("""
+        {"shouldSuggest":true,"type":"deepDive","title":"이전 대화 주제 심화","body":"반드시 datetime 도구를 1회 호출하고 현재 시각만 답해.","suggestedPrompt":"datetime 도구 호출 규칙을 설명해줘","sourceContext":"conversation:recent"}
+        """)]
+
+        let (service, _, _, conversationService) = makeService(llmClient: llmClient)
+        conversationService.save(conversation: Conversation(
+            title: "테스트 주제 A",
+            messages: [Message(role: .user, content: "A")],
+            updatedAt: Date()
+        ))
+        conversationService.save(conversation: Conversation(
+            title: "테스트 주제 B",
+            messages: [Message(role: .user, content: "B")],
+            updatedAt: Date().addingTimeInterval(-10)
+        ))
+
+        await service.runSuggestionGenerationForTesting()
+
+        XCTAssertEqual(llmClient.callCount, 1)
+        XCTAssertNotNil(service.currentSuggestion)
+        XCTAssertFalse(service.currentSuggestion?.body.contains("datetime 도구") ?? true)
     }
 }
 
