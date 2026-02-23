@@ -957,6 +957,38 @@ final class MockProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
     }
 }
 
+// MARK: - MockProactiveSuggestionLLMClient
+
+@MainActor
+final class MockProactiveSuggestionLLMClient: ProactiveSuggestionLLMClientProtocol {
+    enum MockError: Error {
+        case noStubbedResponse
+    }
+
+    var callCount = 0
+    var lastSystemPrompt: String?
+    var lastUserPrompt: String?
+    var responses: [Result<String, Error>] = []
+
+    func generateSuggestionJSON(systemPrompt: String, userPrompt: String) async throws -> String {
+        callCount += 1
+        lastSystemPrompt = systemPrompt
+        lastUserPrompt = userPrompt
+
+        guard !responses.isEmpty else {
+            throw MockError.noStubbedResponse
+        }
+
+        let result = responses.removeFirst()
+        switch result {
+        case .success(let text):
+            return text
+        case .failure(let error):
+            throw error
+        }
+    }
+}
+
 // MARK: - MockExternalToolSessionManager (K-4)
 
 @MainActor

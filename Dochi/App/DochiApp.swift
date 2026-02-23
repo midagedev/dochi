@@ -198,6 +198,17 @@ struct DochiApp: App {
         )
         self.toolService = toolService
 
+        let nativeAgentLoopService = NativeAgentLoopService(
+            adapters: [
+                AnthropicNativeLLMProviderAdapter(),
+                OpenAINativeLLMProviderAdapter(),
+                ZAINativeLLMProviderAdapter(),
+                OllamaNativeLLMProviderAdapter(),
+                LMStudioNativeLLMProviderAdapter()
+            ],
+            toolService: toolService
+        )
+
         let metricsCollector = MetricsCollector()
         metricsCollector.usageStore = usageStore
         metricsCollector.settings = settings
@@ -224,11 +235,17 @@ struct DochiApp: App {
         self.externalToolManager = externalToolManager
 
         // Proactive Suggestion Service (K-2)
+        let proactiveSuggestionLLMClient = NativeProactiveSuggestionLLMClient(
+            settings: settings,
+            keychainService: keychainService,
+            nativeAgentLoopService: nativeAgentLoopService
+        )
         let proactiveSuggestionService = ProactiveSuggestionService(
             settings: settings,
             contextService: contextService,
             conversationService: conversationService,
-            sessionContext: sessionContext
+            sessionContext: sessionContext,
+            llmClient: proactiveSuggestionLLMClient
         )
         self.proactiveSuggestionService = proactiveSuggestionService
 
@@ -270,7 +287,8 @@ struct DochiApp: App {
             soundService: soundService,
             settings: settings,
             sessionContext: sessionContext,
-            metricsCollector: metricsCollector
+            metricsCollector: metricsCollector,
+            nativeAgentLoopService: nativeAgentLoopService
         )
         _viewModel = State(initialValue: viewModel)
 
