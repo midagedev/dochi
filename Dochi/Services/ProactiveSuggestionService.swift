@@ -614,7 +614,7 @@ final class ProactiveSuggestionService: ProactiveSuggestionServiceProtocol {
             return nil
         }
 
-        if payload.shouldSuggest == false {
+        guard payload.shouldSuggest == true else {
             return nil
         }
 

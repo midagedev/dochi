@@ -605,6 +605,31 @@ final class ProactiveSuggestionServiceTests: XCTestCase {
         XCTAssertNotNil(service.currentSuggestion)
         XCTAssertFalse(service.currentSuggestion?.body.contains("datetime 도구") ?? true)
     }
+
+    func testMissingShouldSuggestIsRejectedAndFallsBack() async {
+        let llmClient = MockProactiveSuggestionLLMClient()
+        llmClient.responses = [.success("""
+        {"type":"deepDive","title":"누락 테스트","body":"이 값은 shouldSuggest 없이 오면 무시되어야 합니다.","suggestedPrompt":"무시 테스트","sourceContext":"conversation:recent"}
+        """)]
+
+        let (service, _, _, conversationService) = makeService(llmClient: llmClient)
+        conversationService.save(conversation: Conversation(
+            title: "테스트 주제 A",
+            messages: [Message(role: .user, content: "A")],
+            updatedAt: Date()
+        ))
+        conversationService.save(conversation: Conversation(
+            title: "테스트 주제 B",
+            messages: [Message(role: .user, content: "B")],
+            updatedAt: Date().addingTimeInterval(-10)
+        ))
+
+        await service.runSuggestionGenerationForTesting()
+
+        XCTAssertEqual(llmClient.callCount, 1)
+        XCTAssertNotNil(service.currentSuggestion)
+        XCTAssertNotEqual(service.currentSuggestion?.title, "누락 테스트")
+    }
 }
 
 // MARK: - Activity Signal Expansion (B2)
