@@ -473,6 +473,7 @@ struct ContentView: View {
                 devicePolicyService: viewModel.devicePolicyService,
                 isOfflineFallbackActive: viewModel.isOfflineFallbackActive,
                 localServerStatus: viewModel.localServerStatus,
+                subscriptionUsage: viewModel.menuBarSubscriptionUsage,
                 onModelTap: { showQuickModelPopover = true },
                 onSyncTap: { showSystemStatusSheet = true },
                 onHeartbeatTap: { showSystemStatusSheet = true },
@@ -668,6 +669,15 @@ struct ContentView: View {
                 TelegramReadOnlyBarView()
             } else {
                 InputBarView(viewModel: viewModel)
+            }
+        }
+        .task {
+            await viewModel.refreshMenuBarSubscriptionUsage()
+        }
+        .onChange(of: viewModel.interactionState) { _, newValue in
+            guard newValue == .idle else { return }
+            Task {
+                await viewModel.refreshMenuBarSubscriptionUsage()
             }
         }
     }

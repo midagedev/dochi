@@ -62,42 +62,179 @@ struct MenuBarPopoverView: View {
         .frame(width: 380, height: 480)
         .onAppear {
             isInputFocused = true
+            Task {
+                await viewModel.refreshMenuBarSubscriptionUsage()
+            }
+        }
+        .onChange(of: viewModel.interactionState) { _, newValue in
+            guard newValue == .idle else { return }
+            Task {
+                await viewModel.refreshMenuBarSubscriptionUsage()
+            }
         }
     }
 
-    // MARK: - Header (36pt)
+    // MARK: - Header
 
     private var headerView: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(currentAgentName)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-
-                Text(currentWorkspaceName)
-                    .font(.system(size: 10))
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 16))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(currentAgentName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+
+                    Text(currentWorkspaceName)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if viewModel.isMenuBarSubscriptionUsageRefreshing {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("닫기 (Esc)")
             }
 
-            Spacer()
-
-            Button {
-                onClose()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("닫기 (Esc)")
+            subscriptionUsageStrip
         }
         .padding(.horizontal, 12)
-        .frame(height: 36)
+        .padding(.vertical, 8)
+    }
+
+    private var subscriptionUsageStrip: some View {
+        HStack(spacing: 6) {
+            ForEach(viewModel.menuBarSubscriptionUsage) { usage in
+                subscriptionUsageCard(usage)
+            }
+        }
+    }
+
+    private func subscriptionUsageCard(
+        _ usage: DochiViewModel.MenuBarSubscriptionUsageSummary
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(usage.provider.displayName)
+                .font(.system(size: 8, weight: .semibold))
+                .lineLimit(1)
+
+            Text(usage.remainingText)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .lineLimit(1)
+
+            Text(usage.detailText)
+                .font(.system(size: 8, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            ForEach(usage.windows.prefix(2)) { window in
+                usageMeter(
+                    label: shortWindowLabel(window.label),
+                    usedPercent: window.usedPercent,
+                    detail: window.detail
+                )
+            }
+
+            if usage.availability == .active && usage.windows.isEmpty {
+                Text("주간/세션 데이터 대기")
+                    .font(.system(size: 7))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(subscriptionUsageColor(usage.availability).opacity(0.12))
+        )
+    }
+
+    private func usageMeter(
+        label: String,
+        usedPercent: Double,
+        detail: String?
+    ) -> some View {
+        let clamped = max(0, min(100, usedPercent))
+        return VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(Int(usedPercent.rounded()))%")
+                    .lineLimit(1)
+            }
+            .font(.system(size: 7, weight: .medium, design: .monospaced))
+            .foregroundStyle(.secondary)
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.2))
+                    Capsule()
+                        .fill(usageMeterColor(usedPercent))
+                        .frame(width: proxy.size.width * (clamped / 100))
+                }
+            }
+            .frame(height: 3)
+
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 7))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private func shortWindowLabel(_ label: String) -> String {
+        let normalized = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.contains("session") || normalized.contains("세션") {
+            return "세션"
+        }
+        if normalized.contains("week") || normalized.contains("주") {
+            return "주간"
+        }
+        if normalized.contains("day") || normalized.contains("일") {
+            return "일간"
+        }
+        return label
+    }
+
+    private func usageMeterColor(_ usedPercent: Double) -> Color {
+        if usedPercent >= 100 { return .red }
+        if usedPercent >= 80 { return .orange }
+        return .blue
+    }
+
+    private func subscriptionUsageColor(
+        _ availability: DochiViewModel.MenuBarSubscriptionUsageSummary.Availability
+    ) -> Color {
+        switch availability {
+        case .active:
+            return .blue
+        case .notConfigured:
+            return .orange
+        case .serviceUnavailable:
+            return .secondary
+        }
     }
 
     // MARK: - Conversation Area

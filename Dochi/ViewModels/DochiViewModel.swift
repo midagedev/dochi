@@ -105,6 +105,66 @@ final class DochiViewModel {
         }
     }
 
+    struct MenuBarSubscriptionUsageSummary: Identifiable, Equatable, Sendable {
+        enum Provider: String, CaseIterable, Sendable {
+            case codex
+            case claude
+            case gemini
+
+            var displayName: String {
+                switch self {
+                case .codex:
+                    return "Codex"
+                case .claude:
+                    return "Claude"
+                case .gemini:
+                    return "Gemini"
+                }
+            }
+        }
+
+        enum Availability: Sendable, Equatable {
+            case active
+            case notConfigured
+            case serviceUnavailable
+        }
+
+        struct UsageWindow: Equatable, Sendable, Identifiable {
+            let label: String
+            let usedPercent: Double
+            let detail: String?
+
+            var id: String {
+                "\(label)-\(Int(usedPercent.rounded()))-\(detail ?? "")"
+            }
+        }
+
+        let provider: Provider
+        let remainingText: String
+        let detailText: String
+        let availability: Availability
+        let windows: [UsageWindow]
+        let statusText: String?
+
+        var id: Provider { provider }
+
+        init(
+            provider: Provider,
+            remainingText: String,
+            detailText: String,
+            availability: Availability,
+            windows: [UsageWindow] = [],
+            statusText: String? = nil
+        ) {
+            self.provider = provider
+            self.remainingText = remainingText
+            self.detailText = detailText
+            self.availability = availability
+            self.windows = windows
+            self.statusText = statusText
+        }
+    }
+
     enum ControlPlaneExecutionMode: Sendable {
         case standard
         case secret(ControlPlaneSecretOptions)
@@ -173,6 +233,16 @@ final class DochiViewModel {
 
     // MARK: - Resource Optimizer (J-5)
     private(set) var resourceOptimizer: (any ResourceOptimizerProtocol)?
+    private(set) var menuBarSubscriptionUsage: [MenuBarSubscriptionUsageSummary] =
+        MenuBarSubscriptionUsageSummary.Provider.allCases.map { provider in
+            MenuBarSubscriptionUsageSummary(
+                provider: provider,
+                remainingText: "미등록",
+                detailText: "플랜 연결 필요",
+                availability: .notConfigured
+            )
+        }
+    private(set) var isMenuBarSubscriptionUsageRefreshing: Bool = false
 
     // MARK: - Terminal (K-1)
     private(set) var terminalService: TerminalServiceProtocol?
@@ -498,6 +568,7 @@ final class DochiViewModel {
             if added > 0 {
                 Log.app.info("ResourceOptimizer auto-bootstrapped \(added) external subscriptions")
             }
+            await self.refreshMenuBarSubscriptionUsage()
         }
     }
 
@@ -582,6 +653,232 @@ final class DochiViewModel {
     var menuBarSuggestion: ProactiveSuggestion? {
         guard settings.proactiveSuggestionMenuBarEnabled else { return nil }
         return currentSuggestion
+    }
+
+    func refreshMenuBarSubscriptionUsage() async {
+        guard !isMenuBarSubscriptionUsageRefreshing else { return }
+        isMenuBarSubscriptionUsageRefreshing = true
+        defer { isMenuBarSubscriptionUsageRefreshing = false }
+
+        guard let optimizer = resourceOptimizer else {
+            menuBarSubscriptionUsage = Self.menuBarUnavailablePlaceholders()
+            return
+        }
+
+        let utilizations = await optimizer.allUtilizations()
+        let snapshots = await optimizer.monitoringSnapshots(
+            for: utilizations.map(\.subscription)
+        )
+
+        var grouped: [MenuBarSubscriptionUsageSummary.Provider: (ResourceUtilization, SubscriptionMonitoringSnapshot?)] = [:]
+        for util in utilizations {
+            guard let provider = Self.menuBarProvider(from: util.subscription.providerName) else {
+                continue
+            }
+            let snapshot = snapshots[util.subscription.id]
+            if let existing = grouped[provider] {
+                if Self.shouldPreferMenuBarUsageCandidate(
+                    candidate: (util, snapshot),
+                    over: existing
+                ) {
+                    grouped[provider] = (util, snapshot)
+                }
+            } else {
+                grouped[provider] = (util, snapshot)
+            }
+        }
+
+        menuBarSubscriptionUsage = MenuBarSubscriptionUsageSummary.Provider.allCases.map { provider in
+            guard let entry = grouped[provider] else {
+                return MenuBarSubscriptionUsageSummary(
+                    provider: provider,
+                    remainingText: "미등록",
+                    detailText: "플랜 연결 필요",
+                    availability: .notConfigured
+                )
+            }
+            return Self.makeMenuBarUsageSummary(
+                provider: provider,
+                utilization: entry.0,
+                snapshot: entry.1
+            )
+        }
+    }
+
+    private static func menuBarUnavailablePlaceholders() -> [MenuBarSubscriptionUsageSummary] {
+        MenuBarSubscriptionUsageSummary.Provider.allCases.map { provider in
+            MenuBarSubscriptionUsageSummary(
+                provider: provider,
+                remainingText: "연결 없음",
+                detailText: "사용량 서비스 비활성",
+                availability: .serviceUnavailable
+            )
+        }
+    }
+
+    private static func menuBarProvider(
+        from providerName: String
+    ) -> MenuBarSubscriptionUsageSummary.Provider? {
+        let normalized = providerName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if normalized.contains("claude") || normalized.contains("anthropic") {
+            return .claude
+        }
+        if normalized.contains("gemini") {
+            return .gemini
+        }
+        if normalized.contains("codex")
+            || normalized.contains("chatgpt")
+            || normalized.contains("openai") {
+            return .codex
+        }
+        return nil
+    }
+
+    private static func shouldPreferMenuBarUsageCandidate(
+        candidate: (ResourceUtilization, SubscriptionMonitoringSnapshot?),
+        over current: (ResourceUtilization, SubscriptionMonitoringSnapshot?)
+    ) -> Bool {
+        let candidateWindowCount = menuBarWindowCount(candidate.1)
+        let currentWindowCount = menuBarWindowCount(current.1)
+        if candidateWindowCount != currentWindowCount {
+            return candidateWindowCount > currentWindowCount
+        }
+
+        let candidateHasPrimaryWindow = candidate.1?.primaryWindow != nil
+        let currentHasPrimaryWindow = current.1?.primaryWindow != nil
+        if candidateHasPrimaryWindow != currentHasPrimaryWindow {
+            return candidateHasPrimaryWindow
+        }
+
+        return candidate.0.usedTokens > current.0.usedTokens
+    }
+
+    private static func menuBarWindowCount(_ snapshot: SubscriptionMonitoringSnapshot?) -> Int {
+        guard let snapshot else { return 0 }
+        var count = 0
+        if snapshot.primaryWindow != nil { count += 1 }
+        if snapshot.secondaryWindow != nil { count += 1 }
+        return count
+    }
+
+    private static func makeMenuBarUsageSummary(
+        provider: MenuBarSubscriptionUsageSummary.Provider,
+        utilization _: ResourceUtilization,
+        snapshot: SubscriptionMonitoringSnapshot?
+    ) -> MenuBarSubscriptionUsageSummary {
+        let windows = menuBarUsageWindows(snapshot)
+        let statusText = snapshot?.statusPresentation.label
+
+        if let leadingWindow = windows.first {
+            let remainingPercent = max(0, min(100, 100 - leadingWindow.usedPercent))
+            let label = menuBarWindowLabel(leadingWindow.label)
+            return MenuBarSubscriptionUsageSummary(
+                provider: provider,
+                remainingText: "\(Int(remainingPercent.rounded()))% 남음",
+                detailText: "\(label) 사용 \(Int(leadingWindow.usedPercent.rounded()))%",
+                availability: .active,
+                windows: windows,
+                statusText: statusText
+            )
+        }
+
+        return MenuBarSubscriptionUsageSummary(
+            provider: provider,
+            remainingText: "잔여 미확인",
+            detailText: statusText ?? "주간/세션 데이터 대기",
+            availability: .active,
+            windows: windows,
+            statusText: statusText
+        )
+    }
+
+    private static func menuBarUsageWindows(
+        _ snapshot: SubscriptionMonitoringSnapshot?
+    ) -> [MenuBarSubscriptionUsageSummary.UsageWindow] {
+        guard let snapshot else { return [] }
+        var windows: [MenuBarSubscriptionUsageSummary.UsageWindow] = []
+
+        if let primary = snapshot.primaryWindow {
+            windows.append(
+                MenuBarSubscriptionUsageSummary.UsageWindow(
+                    label: menuBarWindowTitle(primary, fallback: "세션"),
+                    usedPercent: primary.usedPercent,
+                    detail: menuBarWindowResetDetail(primary)
+                )
+            )
+        }
+        if let secondary = snapshot.secondaryWindow {
+            let fallback = secondary.windowMinutes == 10_080 ? "주간" : "보조"
+            windows.append(
+                MenuBarSubscriptionUsageSummary.UsageWindow(
+                    label: menuBarWindowTitle(secondary, fallback: fallback),
+                    usedPercent: secondary.usedPercent,
+                    detail: menuBarWindowResetDetail(secondary)
+                )
+            )
+        }
+        return windows
+    }
+
+    private static func menuBarWindowTitle(
+        _ window: MonitoringUsageWindowSnapshot,
+        fallback: String
+    ) -> String {
+        if let minutes = window.windowMinutes, minutes > 0 {
+            if minutes == 300 { return "세션" }
+            if minutes == 10_080 { return "주간" }
+            if minutes == 1_440 { return "일간" }
+            if minutes % 1_440 == 0 { return "\(minutes / 1_440)일" }
+            if minutes % 60 == 0 { return "\(minutes / 60)시간" }
+            return "\(minutes)분"
+        }
+        let trimmed = window.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private static func menuBarWindowLabel(_ rawLabel: String) -> String {
+        let trimmed = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "윈도우" }
+        return trimmed
+    }
+
+    private static func menuBarWindowResetDetail(_ window: MonitoringUsageWindowSnapshot) -> String? {
+        if let resetsAt = window.resetsAt {
+            let remaining = resetsAt.timeIntervalSince(Date())
+            if remaining <= 0 { return "갱신 반영 대기" }
+            if remaining < 60 { return "1분 미만 남음" }
+            if remaining < 3_600 {
+                return "\(Int(ceil(remaining / 60)))분 남음"
+            }
+            if remaining < 86_400 {
+                return "\(Int(ceil(remaining / 3_600)))시간 남음"
+            }
+            return "\(Int(ceil(remaining / 86_400)))일 남음"
+        }
+
+        guard let reset = window.resetDescription?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !reset.isEmpty else {
+            return nil
+        }
+        let compact = reset.replacingOccurrences(
+            of: #"\s+"#,
+            with: " ",
+            options: .regularExpression
+        )
+        let lower = compact.lowercased()
+        if lower.hasPrefix("resets ") {
+            return "갱신 \(compact.dropFirst(7))"
+        }
+        if lower.hasPrefix("reset ") {
+            return "갱신 \(compact.dropFirst(6))"
+        }
+        if compact.hasPrefix("리셋") || compact.hasPrefix("갱신") {
+            return compact
+        }
+        return "갱신 \(compact)"
     }
 
     var suggestionHistory: [ProactiveSuggestion] {

@@ -11,6 +11,7 @@ struct SystemHealthBarView: View {
     var devicePolicyService: DevicePolicyServiceProtocol?
     var isOfflineFallbackActive: Bool = false
     var localServerStatus: LocalServerStatus = .unknown
+    var subscriptionUsage: [DochiViewModel.MenuBarSubscriptionUsageSummary] = []
 
     // UX-10: Individual indicator callbacks
     let onModelTap: () -> Void
@@ -22,6 +23,21 @@ struct SystemHealthBarView: View {
 
     private var sessionSummary: SessionMetricsSummary {
         metricsCollector.sessionSummary
+    }
+
+    private var normalizedSubscriptionUsage: [DochiViewModel.MenuBarSubscriptionUsageSummary] {
+        let lookup = Dictionary(uniqueKeysWithValues: subscriptionUsage.map { ($0.provider, $0) })
+        return DochiViewModel.MenuBarSubscriptionUsageSummary.Provider.allCases.map { provider in
+            if let existing = lookup[provider] {
+                return existing
+            }
+            return DochiViewModel.MenuBarSubscriptionUsageSummary(
+                provider: provider,
+                remainingText: "미등록",
+                detailText: "플랜 연결 필요",
+                availability: .notConfigured
+            )
+        }
     }
 
     /// Icon for the model indicator depending on provider type and status.
@@ -186,6 +202,33 @@ struct SystemHealthBarView: View {
             }
             .buttonStyle(IndicatorButtonStyle())
             .help("시스템 상태 (\u{2318}\u{21E7}S)")
+
+            divider
+
+            // 5. Subscription usage summary (Codex/Claude/Gemini)
+            Button {
+                onTokenTap()
+            } label: {
+                indicator {
+                    HStack(spacing: 4) {
+                        Image(systemName: "gauge")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                        ForEach(normalizedSubscriptionUsage) { usage in
+                            Text("\(usage.provider.displayName) \(compactRemainingText(usage))")
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(subscriptionUsageTone(usage.availability).opacity(0.14))
+                                .foregroundStyle(subscriptionUsageTone(usage.availability))
+                                .clipShape(Capsule())
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+            .buttonStyle(IndicatorButtonStyle())
+            .help("구독 플랜 사용량")
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)
@@ -212,6 +255,35 @@ struct SystemHealthBarView: View {
             return String(format: "%.1fK", Double(count) / 1000.0)
         }
         return "\(count)"
+    }
+
+    private func compactRemainingText(
+        _ usage: DochiViewModel.MenuBarSubscriptionUsageSummary
+    ) -> String {
+        switch usage.availability {
+        case .active:
+            if let prefix = usage.remainingText.split(separator: " ").first {
+                return String(prefix)
+            }
+            return usage.remainingText
+        case .notConfigured:
+            return "-"
+        case .serviceUnavailable:
+            return "연결없음"
+        }
+    }
+
+    private func subscriptionUsageTone(
+        _ availability: DochiViewModel.MenuBarSubscriptionUsageSummary.Availability
+    ) -> Color {
+        switch availability {
+        case .active:
+            return .blue
+        case .notConfigured:
+            return .orange
+        case .serviceUnavailable:
+            return .secondary
+        }
     }
 
     @ViewBuilder

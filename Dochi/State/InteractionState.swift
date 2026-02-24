@@ -1,6 +1,6 @@
 import Foundation
 
-enum InteractionState: Sendable {
+enum InteractionState: Sendable, Equatable {
     case idle
     case listening
     case processing

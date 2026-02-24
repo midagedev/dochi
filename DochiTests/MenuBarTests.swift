@@ -203,13 +203,12 @@ final class CommandPaletteMenuBarTests: XCTestCase {
 final class MenuBarPopoverDataTests: XCTestCase {
 
     @MainActor
-    func testEmptyConversationShowsEmptyState() {
-        let settings = AppSettings()
+    private func makeViewModel(settings: AppSettings = AppSettings()) -> DochiViewModel {
         let sessionContext = SessionContext(
             workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
             currentUserId: nil
         )
-        let viewModel = DochiViewModel(
+        return DochiViewModel(
             toolService: MockBuiltInToolService(),
             contextService: MockContextService(),
             conversationService: MockConversationService(),
@@ -220,6 +219,12 @@ final class MenuBarPopoverDataTests: XCTestCase {
             settings: settings,
             sessionContext: sessionContext
         )
+    }
+
+    @MainActor
+    func testEmptyConversationShowsEmptyState() {
+        let settings = AppSettings()
+        let viewModel = makeViewModel(settings: settings)
 
         // No current conversation means empty state
         XCTAssertNil(viewModel.currentConversation, "Should have no conversation initially")
@@ -230,21 +235,7 @@ final class MenuBarPopoverDataTests: XCTestCase {
     func testMenuBarSharesViewModelState() {
         let settings = AppSettings()
         settings.activeAgentName = "테스트 에이전트"
-        let sessionContext = SessionContext(
-            workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
-            currentUserId: nil
-        )
-        let viewModel = DochiViewModel(
-            toolService: MockBuiltInToolService(),
-            contextService: MockContextService(),
-            conversationService: MockConversationService(),
-            keychainService: MockKeychainService(),
-            speechService: MockSpeechService(),
-            ttsService: MockTTSService(),
-            soundService: MockSoundService(),
-            settings: settings,
-            sessionContext: sessionContext
-        )
+        let viewModel = makeViewModel(settings: settings)
 
         // Setting inputText on viewModel should be visible
         viewModel.inputText = "테스트 입력"
@@ -253,24 +244,140 @@ final class MenuBarPopoverDataTests: XCTestCase {
     }
 
     @MainActor
+    func testMenuBarSubscriptionUsageShowsThreeSlotsWithoutOptimizer() async {
+        let viewModel = makeViewModel()
+
+        await viewModel.refreshMenuBarSubscriptionUsage()
+
+        XCTAssertEqual(
+            viewModel.menuBarSubscriptionUsage.map(\.provider),
+            [.codex, .claude, .gemini]
+        )
+        XCTAssertTrue(
+            viewModel.menuBarSubscriptionUsage.allSatisfy { $0.availability == .serviceUnavailable }
+        )
+    }
+
+    @MainActor
+    func testMenuBarSubscriptionUsageMapsConfiguredProvidersAndKeepsMissingSlot() async throws {
+        let viewModel = makeViewModel()
+        let mockOptimizer = MockResourceOptimizer()
+
+        let codexPlan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "ChatGPT Plus",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 1_000_000
+        )
+        let claudePlan = SubscriptionPlan(
+            providerName: "Anthropic",
+            planName: "Claude Max",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: nil
+        )
+
+        mockOptimizer.subscriptions = [codexPlan, claudePlan]
+        mockOptimizer.monitoringSnapshotsByID[codexPlan.id] = SubscriptionMonitoringSnapshot(
+            subscriptionID: codexPlan.id,
+            source: codexPlan.usageSource,
+            provider: codexPlan.providerName,
+            statusCode: "ok_log_scan",
+            statusMessage: nil,
+            lastCollectedAt: Date(),
+            primaryWindow: MonitoringUsageWindowSnapshot(
+                label: "session",
+                usedPercent: 40,
+                windowMinutes: 300
+            ),
+            secondaryWindow: MonitoringUsageWindowSnapshot(
+                label: "weekly",
+                usedPercent: 65,
+                windowMinutes: 10_080
+            )
+        )
+        mockOptimizer.monitoringSnapshotsByID[claudePlan.id] = SubscriptionMonitoringSnapshot(
+            subscriptionID: claudePlan.id,
+            source: claudePlan.usageSource,
+            provider: claudePlan.providerName,
+            statusCode: "ok_log_scan",
+            statusMessage: nil,
+            lastCollectedAt: Date(),
+            primaryWindow: MonitoringUsageWindowSnapshot(
+                label: "주간",
+                usedPercent: 70
+            )
+        )
+
+        viewModel.configureResourceOptimizer(mockOptimizer)
+        await viewModel.refreshMenuBarSubscriptionUsage()
+
+        let codex = try XCTUnwrap(
+            viewModel.menuBarSubscriptionUsage.first(where: { $0.provider == .codex })
+        )
+        XCTAssertEqual(codex.remainingText, "60% 남음")
+        XCTAssertEqual(codex.detailText, "세션 사용 40%")
+        XCTAssertEqual(codex.windows.count, 2)
+        XCTAssertEqual(codex.windows.map(\.label), ["세션", "주간"])
+        XCTAssertEqual(codex.availability, .active)
+
+        let claude = try XCTUnwrap(
+            viewModel.menuBarSubscriptionUsage.first(where: { $0.provider == .claude })
+        )
+        XCTAssertEqual(claude.remainingText, "30% 남음")
+        XCTAssertEqual(claude.detailText, "주간 사용 70%")
+        XCTAssertEqual(claude.windows.count, 1)
+        XCTAssertEqual(claude.availability, .active)
+
+        let gemini = try XCTUnwrap(
+            viewModel.menuBarSubscriptionUsage.first(where: { $0.provider == .gemini })
+        )
+        XCTAssertEqual(gemini.remainingText, "미등록")
+        XCTAssertEqual(gemini.availability, .notConfigured)
+    }
+
+    @MainActor
+    func testMenuBarSubscriptionUsageShowsResetCountdownWhenResetsAtProvided() async throws {
+        let viewModel = makeViewModel()
+        let mockOptimizer = MockResourceOptimizer()
+
+        let codexPlan = SubscriptionPlan(
+            providerName: "OpenAI",
+            planName: "ChatGPT Plus",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: nil
+        )
+
+        mockOptimizer.subscriptions = [codexPlan]
+        mockOptimizer.monitoringSnapshotsByID[codexPlan.id] = SubscriptionMonitoringSnapshot(
+            subscriptionID: codexPlan.id,
+            source: codexPlan.usageSource,
+            provider: codexPlan.providerName,
+            statusCode: "ok_log_scan",
+            statusMessage: nil,
+            lastCollectedAt: Date(),
+            primaryWindow: MonitoringUsageWindowSnapshot(
+                label: "session",
+                usedPercent: 25,
+                windowMinutes: 300,
+                resetsAt: Date().addingTimeInterval(2 * 60 * 60)
+            )
+        )
+
+        viewModel.configureResourceOptimizer(mockOptimizer)
+        await viewModel.refreshMenuBarSubscriptionUsage()
+
+        let codex = try XCTUnwrap(
+            viewModel.menuBarSubscriptionUsage.first(where: { $0.provider == .codex })
+        )
+        let detail = try XCTUnwrap(codex.windows.first?.detail)
+        XCTAssertTrue(detail.contains("남음"))
+    }
+
+    @MainActor
     func testMenuBarSuggestionExposedWhenToggleEnabled() {
         let settings = AppSettings()
         settings.proactiveSuggestionMenuBarEnabled = true
-        let sessionContext = SessionContext(
-            workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
-            currentUserId: nil
-        )
-        let viewModel = DochiViewModel(
-            toolService: MockBuiltInToolService(),
-            contextService: MockContextService(),
-            conversationService: MockConversationService(),
-            keychainService: MockKeychainService(),
-            speechService: MockSpeechService(),
-            ttsService: MockTTSService(),
-            soundService: MockSoundService(),
-            settings: settings,
-            sessionContext: sessionContext
-        )
+        let viewModel = makeViewModel(settings: settings)
 
         let mockSuggestionService = MockProactiveSuggestionService()
         let suggestion = ProactiveSuggestion(
@@ -289,21 +396,7 @@ final class MenuBarPopoverDataTests: XCTestCase {
     func testMenuBarSuggestionHiddenWhenToggleDisabled() {
         let settings = AppSettings()
         settings.proactiveSuggestionMenuBarEnabled = false
-        let sessionContext = SessionContext(
-            workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
-            currentUserId: nil
-        )
-        let viewModel = DochiViewModel(
-            toolService: MockBuiltInToolService(),
-            contextService: MockContextService(),
-            conversationService: MockConversationService(),
-            keychainService: MockKeychainService(),
-            speechService: MockSpeechService(),
-            ttsService: MockTTSService(),
-            soundService: MockSoundService(),
-            settings: settings,
-            sessionContext: sessionContext
-        )
+        let viewModel = makeViewModel(settings: settings)
 
         let mockSuggestionService = MockProactiveSuggestionService()
         mockSuggestionService.currentSuggestion = ProactiveSuggestion(
