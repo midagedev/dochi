@@ -10,6 +10,7 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
 
     private(set) var subscriptions: [SubscriptionPlan] = []
     private(set) var autoTaskRecords: [AutoTaskRecord] = []
+    private(set) var latestSubscriptionUsageSnapshot: SubscriptionUsageSnapshot?
 
     private struct UsageCacheKey: Hashable {
         let subscriptionID: UUID
@@ -69,12 +70,17 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
             cacheURL: appSupport.appendingPathComponent("external-usage-cache-v1.json")
         )
         loadFromDisk()
+        loadSubscriptionUsageSnapshotFromDisk()
     }
 
     // MARK: - File Path
 
     private var filePath: URL {
         baseURL.appendingPathComponent("subscriptions.json")
+    }
+
+    private var subscriptionUsageSnapshotPath: URL {
+        baseURL.appendingPathComponent("subscription-usage-snapshot.json")
     }
 
     // MARK: - Persistence
@@ -113,11 +119,63 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         }
     }
 
+    private func loadSubscriptionUsageSnapshotFromDisk() {
+        do {
+            let data = try Data(contentsOf: subscriptionUsageSnapshotPath)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let snapshot = try decoder.decode(SubscriptionUsageSnapshot.self, from: data)
+            let liveIDs = Set(subscriptions.map(\.id))
+            let snapshotIDs = Set(snapshot.utilizations.map { $0.subscription.id })
+            guard liveIDs == snapshotIDs else {
+                latestSubscriptionUsageSnapshot = nil
+                return
+            }
+            latestSubscriptionUsageSnapshot = snapshot
+        } catch {
+            if (error as NSError).domain != NSCocoaErrorDomain
+                || (error as NSError).code != NSFileReadNoSuchFileError {
+                Log.storage.warning(
+                    "Failed to load subscription usage snapshot: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private func saveSubscriptionUsageSnapshotToDisk(_ snapshot: SubscriptionUsageSnapshot) {
+        do {
+            try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(snapshot)
+            try data.write(to: subscriptionUsageSnapshotPath, options: .atomic)
+        } catch {
+            Log.storage.warning(
+                "Failed to save subscription usage snapshot: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func invalidateSubscriptionUsageSnapshot() {
+        latestSubscriptionUsageSnapshot = nil
+        do {
+            if FileManager.default.fileExists(atPath: subscriptionUsageSnapshotPath.path) {
+                try FileManager.default.removeItem(at: subscriptionUsageSnapshotPath)
+            }
+        } catch {
+            Log.storage.warning(
+                "Failed to remove stale subscription usage snapshot: \(error.localizedDescription)"
+            )
+        }
+    }
+
     // MARK: - Subscription CRUD
 
     func addSubscription(_ plan: SubscriptionPlan) async {
         subscriptions.append(plan)
         monitoringSnapshotCache.removeValue(forKey: plan.id)
+        invalidateSubscriptionUsageSnapshot()
         saveToDisk()
     }
 
@@ -126,6 +184,7 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
             subscriptions[index] = plan
             usageCache = usageCache.filter { $0.key.subscriptionID != plan.id }
             monitoringSnapshotCache.removeValue(forKey: plan.id)
+            invalidateSubscriptionUsageSnapshot()
             saveToDisk()
         }
     }
@@ -135,6 +194,7 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         autoTaskRecords.removeAll { $0.subscriptionId == id }
         usageCache = usageCache.filter { $0.key.subscriptionID != id }
         monitoringSnapshotCache.removeValue(forKey: id)
+        invalidateSubscriptionUsageSnapshot()
         saveToDisk()
     }
 
@@ -189,11 +249,33 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
         if addedCount > 0 {
             usageCache.removeAll()
             monitoringSnapshotCache.removeAll()
+            invalidateSubscriptionUsageSnapshot()
             saveToDisk()
             Log.app.info("Bootstrapped \(addedCount) external subscriptions")
         }
 
         return addedCount
+    }
+
+    func refreshSubscriptionUsageSnapshot(force: Bool) async -> SubscriptionUsageSnapshot {
+        let liveIDs = Set(subscriptions.map(\.id))
+        if !force, let cached = latestSubscriptionUsageSnapshot {
+            let snapshotIDs = Set(cached.utilizations.map { $0.subscription.id })
+            if liveIDs == snapshotIDs {
+                return cached
+            }
+        }
+
+        let utilizations = await allUtilizations()
+        let monitoring = await monitoringSnapshots(for: utilizations.map(\.subscription))
+        let snapshot = SubscriptionUsageSnapshot(
+            capturedAt: Date(),
+            utilizations: utilizations,
+            monitoringSnapshots: monitoring
+        )
+        latestSubscriptionUsageSnapshot = snapshot
+        saveSubscriptionUsageSnapshotToDisk(snapshot)
+        return snapshot
     }
 
     // MARK: - Utilization
@@ -402,7 +484,8 @@ final class ResourceOptimizerService: ResourceOptimizerProtocol {
             gitCandidates = []
         }
 
-        let utilizations = (await allUtilizations()).filter {
+        let utilizationSnapshot = await refreshSubscriptionUsageSnapshot(force: false)
+        let utilizations = utilizationSnapshot.utilizations.filter {
             $0.subscription.usageSource == .externalToolLogs
         }
         let now = Date()

@@ -32,6 +32,10 @@ struct UsageDashboardView: View {
     @State private var deletingSubscriptionId: UUID?
     @State private var subscriptionAutoRefreshTask: Task<Void, Never>?
 
+    private var resourceOptimizerAvailable: Bool {
+        resourceOptimizer != nil
+    }
+
     enum Period: String, CaseIterable {
         case today = "오늘"
         case thisWeek = "이번 주"
@@ -146,6 +150,13 @@ struct UsageDashboardView: View {
             subscriptionAutoRefreshTask?.cancel()
             subscriptionAutoRefreshTask = nil
             persistSessionCache()
+        }
+        .onChange(of: resourceOptimizerAvailable) { _, available in
+            guard available else { return }
+            startSubscriptionAutoRefreshIfNeeded()
+            Task {
+                await loadUtilizations()
+            }
         }
         .onChange(of: selectedPeriod) { _, _ in
             Task { await loadData() }
@@ -1191,12 +1202,12 @@ struct UsageDashboardView: View {
 
     // MARK: - Utilization Loading
 
-    private func loadUtilizations() async {
+    private func loadUtilizations(forceRefresh: Bool = false) async {
         guard let optimizer = resourceOptimizer else { return }
         await bootstrapSubscriptionsIfNeeded()
-        let loaded = await optimizer.allUtilizations()
-        utilizations = loaded
-        monitoringSnapshots = await optimizer.monitoringSnapshots(for: loaded.map(\.subscription))
+        let snapshot = await optimizer.refreshSubscriptionUsageSnapshot(force: forceRefresh)
+        utilizations = snapshot.utilizations
+        monitoringSnapshots = snapshot.monitoringSnapshots
         persistSessionCache()
     }
 

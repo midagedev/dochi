@@ -5,9 +5,13 @@ import Foundation
 final class MockResourceOptimizer: ResourceOptimizerProtocol {
     var subscriptions: [SubscriptionPlan] = []
     var autoTaskRecords: [AutoTaskRecord] = []
+    var latestSubscriptionUsageSnapshot: SubscriptionUsageSnapshot?
     var monitoringSnapshotsByID: [UUID: SubscriptionMonitoringSnapshot] = [:]
     var bootstrapCallCount = 0
     var bootstrapResult = 0
+    var bootstrapPlansToInject: [SubscriptionPlan] = []
+    var refreshSubscriptionUsageSnapshotCallCount = 0
+    var lastRefreshSubscriptionUsageForce: Bool?
 
     var addSubscriptionCallCount = 0
     var updateSubscriptionCallCount = 0
@@ -23,6 +27,7 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
     func addSubscription(_ plan: SubscriptionPlan) async {
         addSubscriptionCallCount += 1
         subscriptions.append(plan)
+        latestSubscriptionUsageSnapshot = nil
     }
 
     func updateSubscription(_ plan: SubscriptionPlan) async {
@@ -30,16 +35,49 @@ final class MockResourceOptimizer: ResourceOptimizerProtocol {
         if let index = subscriptions.firstIndex(where: { $0.id == plan.id }) {
             subscriptions[index] = plan
         }
+        latestSubscriptionUsageSnapshot = nil
     }
 
     func deleteSubscription(id: UUID) async {
         deleteSubscriptionCallCount += 1
         subscriptions.removeAll { $0.id == id }
+        latestSubscriptionUsageSnapshot = nil
     }
 
     func bootstrapDefaultExternalSubscriptionsIfNeeded() async -> Int {
         bootstrapCallCount += 1
-        return bootstrapResult
+        var added = 0
+        for plan in bootstrapPlansToInject {
+            if subscriptions.contains(where: { $0.id == plan.id }) { continue }
+            subscriptions.append(plan)
+            added += 1
+        }
+        if added > 0 {
+            latestSubscriptionUsageSnapshot = nil
+        }
+        if bootstrapResult > 0 {
+            return bootstrapResult
+        }
+        return added
+    }
+
+    func refreshSubscriptionUsageSnapshot(force: Bool) async -> SubscriptionUsageSnapshot {
+        refreshSubscriptionUsageSnapshotCallCount += 1
+        lastRefreshSubscriptionUsageForce = force
+
+        if !force, let cached = latestSubscriptionUsageSnapshot {
+            return cached
+        }
+
+        let utilizations = await allUtilizations()
+        let snapshots = await monitoringSnapshots(for: utilizations.map(\.subscription))
+        let snapshot = SubscriptionUsageSnapshot(
+            capturedAt: Date(),
+            utilizations: utilizations,
+            monitoringSnapshots: snapshots
+        )
+        latestSubscriptionUsageSnapshot = snapshot
+        return snapshot
     }
 
     func utilization(for subscription: SubscriptionPlan) async -> ResourceUtilization {

@@ -547,7 +547,7 @@ struct ExternalToolListView: View {
             restoreCachedStateIfNeeded()
             if shouldRunInitialRefresh() {
                 async let unified: Void = refreshUnifiedSessions()
-                async let subscription: Void = refreshSubscriptionUsage()
+                async let subscription: Void = refreshSubscriptionUsageWithBootstrap()
                 _ = await (unified, subscription)
                 refreshHistoryIndexStatus()
                 refreshKPIReport()
@@ -565,6 +565,12 @@ struct ExternalToolListView: View {
             unifiedAutoRefreshTask?.cancel()
             unifiedAutoRefreshTask = nil
             persistSessionCache()
+        }
+        .onChange(of: resourceOptimizer != nil) { _, available in
+            guard available else { return }
+            Task {
+                await refreshSubscriptionUsageWithBootstrap()
+            }
         }
         .onChange(of: explorerFilter.activeOnly) { _, _ in
             Task { await refreshUnifiedSessions() }
@@ -709,7 +715,7 @@ struct ExternalToolListView: View {
                         .controlSize(.mini)
                 }
                 Button("새로고침") {
-                    Task { await refreshSubscriptionUsage() }
+                    Task { await refreshSubscriptionUsage(forceRefresh: true) }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
@@ -727,7 +733,7 @@ struct ExternalToolListView: View {
                     Button("기본 플랜 자동 감지") {
                         Task {
                             await bootstrapSubscriptionsIfNeeded()
-                            await refreshSubscriptionUsage()
+                            await refreshSubscriptionUsage(forceRefresh: true)
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -2450,24 +2456,25 @@ struct ExternalToolListView: View {
     }
 
     @MainActor
-    private func refreshSubscriptionUsage() async {
+    private func refreshSubscriptionUsage(forceRefresh: Bool = false) async {
         guard !isRefreshingSubscriptionUsage else { return }
         guard let resourceOptimizer else {
-            subscriptionUtilizations = []
-            subscriptionMonitoringSnapshots = [:]
-            persistSessionCache()
             return
         }
 
         isRefreshingSubscriptionUsage = true
         defer { isRefreshingSubscriptionUsage = false }
 
-        let utilizations = await resourceOptimizer.allUtilizations()
-        subscriptionUtilizations = utilizations
-        subscriptionMonitoringSnapshots = await resourceOptimizer.monitoringSnapshots(
-            for: utilizations.map(\.subscription)
-        )
+        let snapshot = await resourceOptimizer.refreshSubscriptionUsageSnapshot(force: forceRefresh)
+        subscriptionUtilizations = snapshot.utilizations
+        subscriptionMonitoringSnapshots = snapshot.monitoringSnapshots
         persistSessionCache()
+    }
+
+    @MainActor
+    private func refreshSubscriptionUsageWithBootstrap(forceRefresh: Bool = false) async {
+        await bootstrapSubscriptionsIfNeeded()
+        await refreshSubscriptionUsage(forceRefresh: forceRefresh)
     }
 
     @MainActor

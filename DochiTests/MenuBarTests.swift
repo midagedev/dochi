@@ -336,6 +336,31 @@ final class MenuBarPopoverDataTests: XCTestCase {
     }
 
     @MainActor
+    func testMenuBarSubscriptionUsageShowsConfiguredProviderWithoutSnapshotAsActive() async throws {
+        let viewModel = makeViewModel()
+        let mockOptimizer = MockResourceOptimizer()
+
+        let codexPlan = SubscriptionPlan(
+            providerName: "Codex",
+            planName: "ChatGPT Pro",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: 200_000_000
+        )
+
+        mockOptimizer.subscriptions = [codexPlan]
+
+        viewModel.configureResourceOptimizer(mockOptimizer)
+        await viewModel.refreshMenuBarSubscriptionUsage()
+
+        let codex = try XCTUnwrap(
+            viewModel.menuBarSubscriptionUsage.first(where: { $0.provider == .codex })
+        )
+        XCTAssertEqual(codex.availability, .active)
+        XCTAssertEqual(codex.remainingText, "잔여 미확인")
+        XCTAssertFalse(codex.detailText.isEmpty)
+    }
+
+    @MainActor
     func testMenuBarSubscriptionUsageShowsResetCountdownWhenResetsAtProvided() async throws {
         let viewModel = makeViewModel()
         let mockOptimizer = MockResourceOptimizer()
@@ -371,6 +396,82 @@ final class MenuBarPopoverDataTests: XCTestCase {
         )
         let detail = try XCTUnwrap(codex.windows.first?.detail)
         XCTAssertTrue(detail.contains("남음"))
+    }
+
+    @MainActor
+    func testMenuBarSubscriptionUsageParsesRelativeResetDescriptionAsRemainingTime() async throws {
+        let viewModel = makeViewModel()
+        let mockOptimizer = MockResourceOptimizer()
+
+        let claudePlan = SubscriptionPlan(
+            providerName: "Anthropic",
+            planName: "Claude Max",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: nil
+        )
+
+        mockOptimizer.subscriptions = [claudePlan]
+        mockOptimizer.monitoringSnapshotsByID[claudePlan.id] = SubscriptionMonitoringSnapshot(
+            subscriptionID: claudePlan.id,
+            source: claudePlan.usageSource,
+            provider: claudePlan.providerName,
+            statusCode: "ok_log_scan",
+            statusMessage: nil,
+            lastCollectedAt: Date(),
+            primaryWindow: MonitoringUsageWindowSnapshot(
+                label: "session",
+                usedPercent: 40,
+                windowMinutes: 300,
+                resetDescription: "Resets in 2h"
+            )
+        )
+
+        viewModel.configureResourceOptimizer(mockOptimizer)
+        await viewModel.refreshMenuBarSubscriptionUsage()
+
+        let claude = try XCTUnwrap(
+            viewModel.menuBarSubscriptionUsage.first(where: { $0.provider == .claude })
+        )
+        let detail = try XCTUnwrap(claude.windows.first?.detail)
+        XCTAssertTrue(detail.contains("남음"))
+    }
+
+    @MainActor
+    func testMenuBarSubscriptionUsageHidesAbsoluteResetTextWhenRemainingUnknown() async throws {
+        let viewModel = makeViewModel()
+        let mockOptimizer = MockResourceOptimizer()
+
+        let geminiPlan = SubscriptionPlan(
+            providerName: "Gemini",
+            planName: "Gemini Personal",
+            usageSource: .externalToolLogs,
+            monthlyTokenLimit: nil
+        )
+
+        mockOptimizer.subscriptions = [geminiPlan]
+        mockOptimizer.monitoringSnapshotsByID[geminiPlan.id] = SubscriptionMonitoringSnapshot(
+            subscriptionID: geminiPlan.id,
+            source: geminiPlan.usageSource,
+            provider: geminiPlan.providerName,
+            statusCode: "ok_log_scan",
+            statusMessage: nil,
+            lastCollectedAt: Date(),
+            primaryWindow: MonitoringUsageWindowSnapshot(
+                label: "weekly",
+                usedPercent: 50,
+                windowMinutes: 10_080,
+                resetDescription: "Resets Feb25at2pm (Asia/Seoul)"
+            )
+        )
+
+        viewModel.configureResourceOptimizer(mockOptimizer)
+        await viewModel.refreshMenuBarSubscriptionUsage()
+
+        let gemini = try XCTUnwrap(
+            viewModel.menuBarSubscriptionUsage.first(where: { $0.provider == .gemini })
+        )
+        let detail = try XCTUnwrap(gemini.windows.first?.detail)
+        XCTAssertEqual(detail, "남은시간 확인중")
     }
 
     @MainActor

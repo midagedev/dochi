@@ -261,6 +261,12 @@ final class HeartbeatService: Observable {
             // 6. Interest expiration check (K-3)
             interestDiscoveryService?.checkExpirations()
 
+            // 6.5 Subscription usage snapshot refresh (single refresh path)
+            if let resourceOptimizer {
+                checksPerformed.append("subscriptionUsageSnapshot")
+                _ = await resourceOptimizer.refreshSubscriptionUsageSnapshot(force: true)
+            }
+
             // 7. Resource auto-task pipeline (J-5)
             if settings.resourceAutoTaskEnabled, let resourceOptimizer {
                 let enabledTypes = Array(Set(settings.resourceAutoTaskTypes.compactMap(AutoTaskType.init(rawValue:))))

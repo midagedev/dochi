@@ -119,7 +119,7 @@ struct MenuBarPopoverView: View {
     }
 
     private var subscriptionUsageStrip: some View {
-        HStack(spacing: 6) {
+        VStack(spacing: 6) {
             ForEach(viewModel.menuBarSubscriptionUsage) { usage in
                 subscriptionUsageCard(usage)
             }
@@ -129,19 +129,24 @@ struct MenuBarPopoverView: View {
     private func subscriptionUsageCard(
         _ usage: DochiViewModel.MenuBarSubscriptionUsageSummary
     ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(usage.provider.displayName)
-                .font(.system(size: 8, weight: .semibold))
-                .lineLimit(1)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(usage.provider.displayName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+                    .frame(width: 48, alignment: .leading)
 
-            Text(usage.remainingText)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .lineLimit(1)
+                Text(usage.remainingText)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .lineLimit(1)
 
-            Text(usage.detailText)
-                .font(.system(size: 8, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                Spacer(minLength: 8)
+
+                Text(usage.detailText)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             ForEach(usage.windows.prefix(2)) { window in
                 usageMeter(
@@ -153,16 +158,16 @@ struct MenuBarPopoverView: View {
 
             if usage.availability == .active && usage.windows.isEmpty {
                 Text("주간/세션 데이터 대기")
-                    .font(.system(size: 7))
+                    .font(.system(size: 8))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: 7)
                 .fill(subscriptionUsageColor(usage.availability).opacity(0.12))
         )
     }
@@ -173,15 +178,15 @@ struct MenuBarPopoverView: View {
         detail: String?
     ) -> some View {
         let clamped = max(0, min(100, usedPercent))
-        return VStack(alignment: .leading, spacing: 1) {
+        return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
-                Text(label)
+                Text("\(label) 사용")
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text("\(Int(usedPercent.rounded()))%")
+                Text("\(Int(clamped.rounded()))%")
                     .lineLimit(1)
             }
-            .font(.system(size: 7, weight: .medium, design: .monospaced))
+            .font(.system(size: 8, weight: .medium, design: .monospaced))
             .foregroundStyle(.secondary)
 
             GeometryReader { proxy in
@@ -193,11 +198,11 @@ struct MenuBarPopoverView: View {
                         .frame(width: proxy.size.width * (clamped / 100))
                 }
             }
-            .frame(height: 3)
+            .frame(height: 5)
 
             if let detail, !detail.isEmpty {
                 Text(detail)
-                    .font(.system(size: 7))
+                    .font(.system(size: 8))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }

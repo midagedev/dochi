@@ -4,10 +4,12 @@ import Foundation
 protocol ResourceOptimizerProtocol: Sendable {
     // MARK: - Subscription CRUD
     var subscriptions: [SubscriptionPlan] { get }
+    var latestSubscriptionUsageSnapshot: SubscriptionUsageSnapshot? { get }
     func addSubscription(_ plan: SubscriptionPlan) async
     func updateSubscription(_ plan: SubscriptionPlan) async
     func deleteSubscription(id: UUID) async
     func bootstrapDefaultExternalSubscriptionsIfNeeded() async -> Int
+    func refreshSubscriptionUsageSnapshot(force: Bool) async -> SubscriptionUsageSnapshot
 
     // MARK: - Utilization
     func utilization(for subscription: SubscriptionPlan) async -> ResourceUtilization
@@ -66,6 +68,18 @@ extension ResourceOptimizerProtocol {
     }
 
     func bootstrapDefaultExternalSubscriptionsIfNeeded() async -> Int { 0 }
+
+    var latestSubscriptionUsageSnapshot: SubscriptionUsageSnapshot? { nil }
+
+    func refreshSubscriptionUsageSnapshot(force _: Bool) async -> SubscriptionUsageSnapshot {
+        let utilizations = await allUtilizations()
+        let snapshots = await monitoringSnapshots(for: utilizations.map(\.subscription))
+        return SubscriptionUsageSnapshot(
+            capturedAt: Date(),
+            utilizations: utilizations,
+            monitoringSnapshots: snapshots
+        )
+    }
 
     func monitoringSnapshots(for subscriptions: [SubscriptionPlan]) async -> [UUID: SubscriptionMonitoringSnapshot] {
         var result: [UUID: SubscriptionMonitoringSnapshot] = [:]

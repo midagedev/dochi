@@ -665,44 +665,41 @@ final class DochiViewModel {
             return
         }
 
-        let utilizations = await optimizer.allUtilizations()
-        let snapshots = await optimizer.monitoringSnapshots(
-            for: utilizations.map(\.subscription)
+        if optimizer.subscriptions.isEmpty {
+            _ = await optimizer.bootstrapDefaultExternalSubscriptionsIfNeeded()
+        }
+
+        let subscriptions = optimizer.subscriptions
+        guard !subscriptions.isEmpty else {
+            menuBarSubscriptionUsage = Self.menuBarNotConfiguredPlaceholders()
+            return
+        }
+
+        let groupedWithoutSnapshots = Self.menuBarUsageGroups(
+            from: subscriptions,
+            snapshots: [:]
         )
+        menuBarSubscriptionUsage = Self.menuBarSummaries(from: groupedWithoutSnapshots)
 
-        var grouped: [MenuBarSubscriptionUsageSummary.Provider: (ResourceUtilization, SubscriptionMonitoringSnapshot?)] = [:]
-        for util in utilizations {
-            guard let provider = Self.menuBarProvider(from: util.subscription.providerName) else {
-                continue
-            }
-            let snapshot = snapshots[util.subscription.id]
-            if let existing = grouped[provider] {
-                if Self.shouldPreferMenuBarUsageCandidate(
-                    candidate: (util, snapshot),
-                    over: existing
-                ) {
-                    grouped[provider] = (util, snapshot)
-                }
-            } else {
-                grouped[provider] = (util, snapshot)
-            }
-        }
-
-        menuBarSubscriptionUsage = MenuBarSubscriptionUsageSummary.Provider.allCases.map { provider in
-            guard let entry = grouped[provider] else {
-                return MenuBarSubscriptionUsageSummary(
-                    provider: provider,
-                    remainingText: "미등록",
-                    detailText: "플랜 연결 필요",
-                    availability: .notConfigured
-                )
-            }
-            return Self.makeMenuBarUsageSummary(
-                provider: provider,
-                utilization: entry.0,
-                snapshot: entry.1
+        if let cached = optimizer.latestSubscriptionUsageSnapshot,
+           !cached.utilizations.isEmpty {
+            let cachedGrouped = Self.menuBarUsageGroups(
+                from: cached.utilizations.map(\.subscription),
+                snapshots: cached.monitoringSnapshots
             )
+            if !cachedGrouped.isEmpty {
+                menuBarSubscriptionUsage = Self.menuBarSummaries(from: cachedGrouped)
+            }
         }
+
+        let refreshed = await optimizer.refreshSubscriptionUsageSnapshot(force: false)
+        let refreshedGrouped = Self.menuBarUsageGroups(
+            from: refreshed.utilizations.map(\.subscription),
+            snapshots: refreshed.monitoringSnapshots
+        )
+        menuBarSubscriptionUsage = refreshedGrouped.isEmpty
+            ? Self.menuBarSummaries(from: groupedWithoutSnapshots)
+            : Self.menuBarSummaries(from: refreshedGrouped)
     }
 
     private static func menuBarUnavailablePlaceholders() -> [MenuBarSubscriptionUsageSummary] {
@@ -712,6 +709,58 @@ final class DochiViewModel {
                 remainingText: "연결 없음",
                 detailText: "사용량 서비스 비활성",
                 availability: .serviceUnavailable
+            )
+        }
+    }
+
+    private static func menuBarNotConfiguredPlaceholders() -> [MenuBarSubscriptionUsageSummary] {
+        MenuBarSubscriptionUsageSummary.Provider.allCases.map { provider in
+            MenuBarSubscriptionUsageSummary(
+                provider: provider,
+                remainingText: "미등록",
+                detailText: "플랜 연결 필요",
+                availability: .notConfigured
+            )
+        }
+    }
+
+    private static func menuBarUsageGroups(
+        from subscriptions: [SubscriptionPlan],
+        snapshots: [UUID: SubscriptionMonitoringSnapshot]
+    ) -> [MenuBarSubscriptionUsageSummary.Provider: (SubscriptionPlan, SubscriptionMonitoringSnapshot?)] {
+        var grouped: [MenuBarSubscriptionUsageSummary.Provider: (SubscriptionPlan, SubscriptionMonitoringSnapshot?)] = [:]
+        for subscription in subscriptions {
+            guard let provider = menuBarProvider(from: subscription.providerName) else {
+                continue
+            }
+            let snapshot = snapshots[subscription.id]
+            let candidate = (subscription, snapshot)
+            if let existing = grouped[provider] {
+                if shouldPreferMenuBarUsageCandidate(candidate: candidate, over: existing) {
+                    grouped[provider] = candidate
+                }
+            } else {
+                grouped[provider] = candidate
+            }
+        }
+        return grouped
+    }
+
+    private static func menuBarSummaries(
+        from grouped: [MenuBarSubscriptionUsageSummary.Provider: (SubscriptionPlan, SubscriptionMonitoringSnapshot?)]
+    ) -> [MenuBarSubscriptionUsageSummary] {
+        MenuBarSubscriptionUsageSummary.Provider.allCases.map { provider in
+            guard let entry = grouped[provider] else {
+                return MenuBarSubscriptionUsageSummary(
+                    provider: provider,
+                    remainingText: "미등록",
+                    detailText: "플랜 연결 필요",
+                    availability: .notConfigured
+                )
+            }
+            return makeMenuBarUsageSummary(
+                provider: provider,
+                snapshot: entry.1
             )
         }
     }
@@ -737,8 +786,8 @@ final class DochiViewModel {
     }
 
     private static func shouldPreferMenuBarUsageCandidate(
-        candidate: (ResourceUtilization, SubscriptionMonitoringSnapshot?),
-        over current: (ResourceUtilization, SubscriptionMonitoringSnapshot?)
+        candidate: (SubscriptionPlan, SubscriptionMonitoringSnapshot?),
+        over current: (SubscriptionPlan, SubscriptionMonitoringSnapshot?)
     ) -> Bool {
         let candidateWindowCount = menuBarWindowCount(candidate.1)
         let currentWindowCount = menuBarWindowCount(current.1)
@@ -752,7 +801,19 @@ final class DochiViewModel {
             return candidateHasPrimaryWindow
         }
 
-        return candidate.0.usedTokens > current.0.usedTokens
+        let candidateUpdatedAt = candidate.1?.lastCollectedAt ?? candidate.0.createdAt
+        let currentUpdatedAt = current.1?.lastCollectedAt ?? current.0.createdAt
+        if candidateUpdatedAt != currentUpdatedAt {
+            return candidateUpdatedAt > currentUpdatedAt
+        }
+
+        let candidateHasLimit = candidate.0.monthlyTokenLimit != nil
+        let currentHasLimit = current.0.monthlyTokenLimit != nil
+        if candidateHasLimit != currentHasLimit {
+            return candidateHasLimit
+        }
+
+        return candidate.0.id.uuidString < current.0.id.uuidString
     }
 
     private static func menuBarWindowCount(_ snapshot: SubscriptionMonitoringSnapshot?) -> Int {
@@ -765,7 +826,6 @@ final class DochiViewModel {
 
     private static func makeMenuBarUsageSummary(
         provider: MenuBarSubscriptionUsageSummary.Provider,
-        utilization _: ResourceUtilization,
         snapshot: SubscriptionMonitoringSnapshot?
     ) -> MenuBarSubscriptionUsageSummary {
         let windows = menuBarUsageWindows(snapshot)
@@ -846,16 +906,7 @@ final class DochiViewModel {
 
     private static func menuBarWindowResetDetail(_ window: MonitoringUsageWindowSnapshot) -> String? {
         if let resetsAt = window.resetsAt {
-            let remaining = resetsAt.timeIntervalSince(Date())
-            if remaining <= 0 { return "갱신 반영 대기" }
-            if remaining < 60 { return "1분 미만 남음" }
-            if remaining < 3_600 {
-                return "\(Int(ceil(remaining / 60)))분 남음"
-            }
-            if remaining < 86_400 {
-                return "\(Int(ceil(remaining / 3_600)))시간 남음"
-            }
-            return "\(Int(ceil(remaining / 86_400)))일 남음"
+            return menuBarRemainingDurationText(resetsAt.timeIntervalSince(Date()))
         }
 
         guard let reset = window.resetDescription?
@@ -868,17 +919,71 @@ final class DochiViewModel {
             with: " ",
             options: .regularExpression
         )
-        let lower = compact.lowercased()
-        if lower.hasPrefix("resets ") {
-            return "갱신 \(compact.dropFirst(7))"
+
+        if let parsedSeconds = menuBarParseResetSeconds(from: compact) {
+            return menuBarRemainingDurationText(parsedSeconds)
         }
-        if lower.hasPrefix("reset ") {
-            return "갱신 \(compact.dropFirst(6))"
+
+        // 표기를 남은시간 기준으로 통일하기 위해 절대 시각 문자열은 노출하지 않는다.
+        return "남은시간 확인중"
+    }
+
+    private static func menuBarRemainingDurationText(_ seconds: TimeInterval) -> String {
+        if seconds <= 0 { return "갱신 반영 대기" }
+        if seconds < 60 { return "1분 미만 남음" }
+        if seconds < 3_600 {
+            return "\(Int(ceil(seconds / 60)))분 남음"
         }
-        if compact.hasPrefix("리셋") || compact.hasPrefix("갱신") {
-            return compact
+        if seconds < 86_400 {
+            return "\(Int(ceil(seconds / 3_600)))시간 남음"
         }
-        return "갱신 \(compact)"
+        return "\(Int(ceil(seconds / 86_400)))일 남음"
+    }
+
+    private static func menuBarParseResetSeconds(from text: String) -> TimeInterval? {
+        let lowered = text.lowercased()
+
+        if let days = menuBarExtractNumber(
+            from: lowered,
+            patterns: [#"(\d+)\s*(day|days|d)\b"#, #"(\d+)\s*일"#]
+        ) {
+            return TimeInterval(days * 86_400)
+        }
+        if let hours = menuBarExtractNumber(
+            from: lowered,
+            patterns: [#"(\d+)\s*(hour|hours|hr|hrs|h)\b"#, #"(\d+)\s*시간"#]
+        ) {
+            return TimeInterval(hours * 3_600)
+        }
+        if let minutes = menuBarExtractNumber(
+            from: lowered,
+            patterns: [#"(\d+)\s*(minute|minutes|min|mins|m)\b"#, #"(\d+)\s*분"#]
+        ) {
+            return TimeInterval(minutes * 60)
+        }
+        return nil
+    }
+
+    private static func menuBarExtractNumber(
+        from text: String,
+        patterns: [String]
+    ) -> Int? {
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            guard let match = regex.firstMatch(in: text, options: [], range: fullRange) else {
+                continue
+            }
+            guard match.numberOfRanges > 1 else { continue }
+            let numberRange = match.range(at: 1)
+            guard numberRange.location != NSNotFound else { continue }
+            let raw = nsText.substring(with: numberRange)
+            if let value = Int(raw), value >= 0 {
+                return value
+            }
+        }
+        return nil
     }
 
     var suggestionHistory: [ProactiveSuggestion] {

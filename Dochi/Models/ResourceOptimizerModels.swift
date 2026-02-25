@@ -81,7 +81,7 @@ struct SubscriptionPlan: Codable, Sendable, Identifiable {
 
 // MARK: - ResourceUtilization
 
-struct ResourceUtilization: Sendable {
+struct ResourceUtilization: Codable, Sendable {
     let subscription: SubscriptionPlan
     let usedTokens: Int
     let daysInPeriod: Int
@@ -146,7 +146,7 @@ struct ResourceUtilization: Sendable {
 
 // MARK: - Monitoring Snapshot
 
-struct MonitoringUsageWindowSnapshot: Sendable, Equatable {
+struct MonitoringUsageWindowSnapshot: Codable, Sendable, Equatable {
     let label: String
     let usedPercent: Double
     let windowMinutes: Int?
@@ -172,7 +172,7 @@ struct MonitoringUsageWindowSnapshot: Sendable, Equatable {
     }
 }
 
-struct SubscriptionMonitoringSnapshot: Sendable, Equatable {
+struct SubscriptionMonitoringSnapshot: Codable, Sendable, Equatable {
     let subscriptionID: UUID
     let source: SubscriptionUsageSource
     let provider: String
@@ -301,6 +301,22 @@ struct SubscriptionMonitoringSnapshot: Sendable, Equatable {
                 tone: .neutral
             )
         }
+    }
+}
+
+struct SubscriptionUsageSnapshot: Codable, Sendable {
+    let capturedAt: Date
+    let utilizations: [ResourceUtilization]
+    let monitoringSnapshots: [UUID: SubscriptionMonitoringSnapshot]
+
+    init(
+        capturedAt: Date = Date(),
+        utilizations: [ResourceUtilization],
+        monitoringSnapshots: [UUID: SubscriptionMonitoringSnapshot]
+    ) {
+        self.capturedAt = capturedAt
+        self.utilizations = utilizations
+        self.monitoringSnapshots = monitoringSnapshots
     }
 }
 
