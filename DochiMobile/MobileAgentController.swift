@@ -41,7 +41,7 @@ final class MobileAgentController {
     private let memoryRepository: MobileOwnedMemoryRepository?
     private let memoryTools: MemoryToolBundle?
     private let memoryContext: MemoryContextProvider?
-    private let conversationStore: MobileConversationStore?
+    private let conversationStore: (any MobileConversationStoring)?
     private var agentHistory: [AgentMessage] = []
     private var runTask: Task<Void, Never>?
     private var approvalTask: Task<Void, Never>?
@@ -271,7 +271,6 @@ final class MobileAgentController {
         runTask = Task { [weak self] in
             guard let self else { return }
             var completedCheckpointIDs: Set<UUID> = []
-            var didComplete = false
             defer {
                 self.runTask = nil
                 if self.activeRunID == request.id { self.activeRunID = nil }
@@ -297,7 +296,6 @@ final class MobileAgentController {
                     case .usage(let latest):
                         self.usage = latest
                     case .completed(let result):
-                        didComplete = true
                         if let checkpoint = result.lastCheckpoint {
                             completedCheckpointIDs.insert(checkpoint.id)
                         }
@@ -306,13 +304,21 @@ final class MobileAgentController {
                         self.replaceHistory(with: result.messages)
                         let finalText = result.finalMessage.text
                             .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !finalText.isEmpty { self.onAssistantReply?(finalText) }
                         self.streamingText = ""
                         self.activeToolName = nil
                         self.pendingToolApproval = nil
+                        do {
+                            try await self.persistCompletedConversation(
+                                checkpointIDs: completedCheckpointIDs
+                            )
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            throw MobileAgentError.completedConversationPersistenceFailed
+                        }
                         self.phase = .ready
                         self.completionFeedbackCounter += 1
-                        self.persistConversation()
+                        if !finalText.isEmpty { self.onAssistantReply?(finalText) }
                     case .checkpointSaved(let checkpoint):
                         completedCheckpointIDs.insert(checkpoint.id)
                     case .runStarted, .contextPrepared, .contextProviderFailed,
@@ -320,16 +326,6 @@ final class MobileAgentController {
                          .toolRequested:
                         break
                     }
-                }
-                // Only checkpoints observed in this successfully completed run
-                // are removed. Checkpoints left by interrupted runs remain
-                // available for reconciliation, especially for non-idempotent
-                // tool executions whose outcome may be indeterminate.
-                if didComplete, !completedCheckpointIDs.isEmpty, let checkpointStore {
-                    try? await MobileCheckpointCleanup.deleteCompletedRun(
-                        checkpointIDs: completedCheckpointIDs,
-                        from: checkpointStore
-                    )
                 }
             } catch is CancellationError {
                 guard self.activeRunID == request.id else { return }
@@ -543,13 +539,7 @@ final class MobileAgentController {
     }
 
     private func persistConversation() {
-        let snapshot = MobileConversationSnapshot(
-            userID: preferences.userID,
-            sessionID: preferences.sessionID,
-            providerID: historyProviderID,
-            modelID: historyModelID,
-            messages: agentHistory
-        )
+        let snapshot = conversationSnapshot()
         persistenceTask?.cancel()
         persistenceTask = Task { [conversationStore] in
             guard let conversationStore else { return }
@@ -562,6 +552,33 @@ final class MobileAgentController {
                 // Conversation persistence must not interrupt an otherwise valid reply.
             }
         }
+    }
+
+    /// A completed runtime turn is committed in durability order: first the
+    /// full provider-aware conversation snapshot, then the exact checkpoints
+    /// observed during that run. If snapshot persistence fails, cleanup is
+    /// never entered and the checkpoint remains available for recovery.
+    private func persistCompletedConversation(checkpointIDs: Set<UUID>) async throws {
+        persistenceTask?.cancel()
+        await persistenceTask?.value
+        persistenceTask = nil
+        guard let conversationStore else { throw MobileAgentError.notInitialized }
+        try await MobileCompletedRunCommitter.commit(
+            snapshot: conversationSnapshot(),
+            conversationStore: conversationStore,
+            checkpointIDs: checkpointIDs,
+            checkpointStore: checkpointStore
+        )
+    }
+
+    private func conversationSnapshot() -> MobileConversationSnapshot {
+        MobileConversationSnapshot(
+            userID: preferences.userID,
+            sessionID: preferences.sessionID,
+            providerID: historyProviderID,
+            modelID: historyModelID,
+            messages: agentHistory
+        )
     }
 
     private func beginMemoryManagementOperation() -> MobileOwnedMemoryRepository? {
@@ -701,6 +718,27 @@ enum MobileCheckpointCleanup {
             try await store.delete(id: latest.id)
         }
         return true
+    }
+}
+
+enum MobileCompletedRunCommitter {
+    static func commit(
+        snapshot: MobileConversationSnapshot,
+        conversationStore: any MobileConversationStoring,
+        checkpointIDs: Set<UUID>,
+        checkpointStore: (any AgentCheckpointStore)?
+    ) async throws {
+        try Task.checkCancellation()
+        try await conversationStore.save(snapshot)
+        try Task.checkCancellation()
+        guard !checkpointIDs.isEmpty, let checkpointStore else { return }
+        // Cleanup failure is recoverable because the durable snapshot already
+        // exists. Keep the checkpoint rather than turning a valid answer into
+        // an apparent send failure; a later cleanup can safely retry exact IDs.
+        try? await MobileCheckpointCleanup.deleteCompletedRun(
+            checkpointIDs: checkpointIDs,
+            from: checkpointStore
+        )
     }
 }
 

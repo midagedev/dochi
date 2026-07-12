@@ -1,7 +1,7 @@
 # Dochi (도치)
 
 **Dochi는 macOS와 iPhone에서 동작하는 음성·아바타 AI 동반자입니다.** 기본 경로는
-[AgentRuntimeKit](../AgentRuntimeKit/README.md)을 앱 프로세스 안에서 실행하는 순수 Swift 에이전트이며,
+[AgentRuntimeKit](https://github.com/midagedev/AgentRuntimeKit)을 앱 프로세스 안에서 실행하는 순수 Swift 에이전트이며,
 macOS에서는 기존 Hermes WebSocket 브리지를 선택 백엔드로 계속 사용할 수 있습니다.
 
 ```text
@@ -42,7 +42,7 @@ repo/
 └── dochi/
 ```
 
-`project.yml`은 `../AgentRuntimeKit`을 로컬 Swift package로 참조합니다.
+`project.yml`은 공개 Swift package `AgentRuntimeKit`의 `0.1.x` 릴리스를 참조합니다.
 
 ### 프로젝트 생성과 macOS 실행
 
@@ -148,9 +148,10 @@ python -m dochi_hermes_bridge --echo
 ```
 
 실제 Hermes 설치와 프로토콜 테스트는 [`HermesBridge/README.md`](./HermesBridge/README.md)를
-따릅니다. 현재 클라이언트 전송은 `ws://`이고 브리지 기본 bind는 `127.0.0.1`이므로 인터넷에 직접
-노출하는 경로로 사용하면 안 됩니다. 공유 토큰은 `~/.hermes/dochi_bridge_token` 또는
-`DOCHI_BRIDGE_TOKEN`에서 읽습니다.
+따릅니다. 클라이언트는 `ws://`를 localhost/127.0.0.0/8/::1에만 허용합니다. LAN이나 인터넷의
+브리지는 loopback에 그대로 두고 TLS reverse proxy를 앞에 배치한 뒤 설정에 `wss://` 주소를
+입력해야 합니다. 외부 호스트를 scheme 없이 입력해도 안전한 기본값인 `wss://`로 해석합니다.
+공유 토큰은 `~/.hermes/dochi_bridge_token` 또는 `DOCHI_BRIDGE_TOKEN`에서 읽습니다.
 
 ## 저장소 구조
 

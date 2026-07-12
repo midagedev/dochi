@@ -11,7 +11,8 @@ enum DochiNativeAgentAssembly {
 
     static func make(
         settings: AppSettings,
-        approvalBroker: AgentToolApprovalBroker
+        approvalBroker: AgentToolApprovalBroker,
+        secretStore: any AgentSecretStore = KeychainAgentSecretStore()
     ) throws -> NativeAgentBackend {
         let supportDirectory = try applicationSupportDirectory()
         let memoryStore = try ProtectedSQLiteMemoryStore(configuration: .init(
@@ -41,7 +42,6 @@ enum DochiNativeAgentAssembly {
             auditSink: auditSink
         )
 
-        let secretStore = KeychainAgentSecretStore()
         let credentialResolver = ProviderCredentialResolver(
             secretStore: secretStore,
             namespace: providerSecretNamespace,
@@ -90,7 +90,7 @@ enum DochiNativeAgentAssembly {
     private static func registerProviders(
         settings: AppSettings,
         registry: ModelProviderRegistry,
-        secretStore: KeychainAgentSecretStore,
+        secretStore: any AgentSecretStore,
         credentialResolver: ProviderCredentialResolver
     ) async throws {
         guard !settings.nativeModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

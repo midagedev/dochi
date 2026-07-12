@@ -462,6 +462,170 @@ final class MobileCheckpointCleanupTests: XCTestCase {
     }
 }
 
+final class MobileCompletedRunCommitterTests: XCTestCase {
+    func testCompletedRunSavesSnapshotBeforeDeletingCheckpoint() async throws {
+        let recorder = MobileCommitRecorder()
+        let conversationStore = RecordingConversationStore(recorder: recorder)
+        let checkpointStore = RecordingCheckpointStore(recorder: recorder)
+        let checkpoint = makeCheckpoint()
+        await checkpointStore.save(checkpoint)
+
+        try await MobileCompletedRunCommitter.commit(
+            snapshot: makeSnapshot(),
+            conversationStore: conversationStore,
+            checkpointIDs: [checkpoint.id],
+            checkpointStore: checkpointStore
+        )
+
+        let events = await recorder.events
+        XCTAssertEqual(events, ["save-snapshot", "delete-checkpoint"])
+        let deleted = await checkpointStore.load(id: checkpoint.id)
+        XCTAssertNil(deleted)
+    }
+
+    func testSnapshotFailurePreservesCheckpointForRecovery() async throws {
+        let recorder = MobileCommitRecorder()
+        let conversationStore = RecordingConversationStore(
+            recorder: recorder,
+            shouldFail: true
+        )
+        let checkpointStore = RecordingCheckpointStore(recorder: recorder)
+        let checkpoint = makeCheckpoint()
+        await checkpointStore.save(checkpoint)
+
+        do {
+            try await MobileCompletedRunCommitter.commit(
+                snapshot: makeSnapshot(),
+                conversationStore: conversationStore,
+                checkpointIDs: [checkpoint.id],
+                checkpointStore: checkpointStore
+            )
+            XCTFail("Expected snapshot persistence to fail")
+        } catch is RecordingConversationStore.Failure {
+            // Expected.
+        }
+
+        let events = await recorder.events
+        XCTAssertEqual(events, ["save-snapshot"])
+        let retained = await checkpointStore.load(id: checkpoint.id)
+        XCTAssertEqual(retained, checkpoint)
+        XCTAssertTrue(
+            MobileAgentError.completedConversationPersistenceFailed.localizedDescription
+                .contains("복구 체크포인트는 보존")
+        )
+    }
+
+    private func makeSnapshot() -> MobileConversationSnapshot {
+        MobileConversationSnapshot(
+            userID: "user-1",
+            sessionID: "session-1",
+            providerID: "anthropic",
+            modelID: "claude-sonnet-5",
+            messages: [AgentMessage(role: .assistant, text: "완료")]
+        )
+    }
+
+    private func makeCheckpoint() -> AgentRunCheckpoint {
+        AgentRunCheckpoint(
+            runID: UUID(),
+            sessionID: "session-1",
+            appID: "com.hckim.dochi.mobile",
+            userID: "user-1",
+            agentID: "도치",
+            providerID: "anthropic",
+            model: "claude-sonnet-5",
+            messages: [AgentMessage(role: .assistant, text: "완료")],
+            stepCount: 1,
+            toolCallCount: 0,
+            usage: AgentTokenUsage()
+        )
+    }
+}
+
+private actor MobileCommitRecorder {
+    private(set) var events: [String] = []
+
+    func append(_ event: String) {
+        events.append(event)
+    }
+}
+
+private actor RecordingConversationStore: MobileConversationStoring {
+    struct Failure: Error {}
+
+    let recorder: MobileCommitRecorder
+    let shouldFail: Bool
+
+    init(recorder: MobileCommitRecorder, shouldFail: Bool = false) {
+        self.recorder = recorder
+        self.shouldFail = shouldFail
+    }
+
+    func load(
+        fallbackUserID: String,
+        fallbackSessionID: String
+    ) async throws -> MobileConversationSnapshot? {
+        nil
+    }
+
+    func save(_ snapshot: MobileConversationSnapshot) async throws {
+        await recorder.append("save-snapshot")
+        if shouldFail { throw Failure() }
+    }
+}
+
+private actor RecordingCheckpointStore: AgentCheckpointStore {
+    let recorder: MobileCommitRecorder
+    private var checkpoints: [UUID: AgentRunCheckpoint] = [:]
+
+    init(recorder: MobileCommitRecorder) {
+        self.recorder = recorder
+    }
+
+    func save(_ checkpoint: AgentRunCheckpoint) {
+        checkpoints[checkpoint.id] = checkpoint
+    }
+
+    func load(id: UUID) -> AgentRunCheckpoint? {
+        checkpoints[id]
+    }
+
+    func latest(
+        appID: String,
+        userID: String?,
+        sessionID: String,
+        agentID: String
+    ) -> AgentRunCheckpoint? {
+        checkpoints.values
+            .filter {
+                $0.appID == appID
+                    && $0.userID == userID
+                    && $0.sessionID == sessionID
+                    && $0.agentID == agentID
+            }
+            .max { $0.createdAt < $1.createdAt }
+    }
+
+    func delete(id: UUID) async {
+        await recorder.append("delete-checkpoint")
+        checkpoints[id] = nil
+    }
+
+    func deleteAll(
+        appID: String,
+        userID: String?,
+        sessionID: String,
+        agentID: String
+    ) {
+        checkpoints = checkpoints.filter { _, checkpoint in
+            checkpoint.appID != appID
+                || checkpoint.userID != userID
+                || checkpoint.sessionID != sessionID
+                || checkpoint.agentID != agentID
+        }
+    }
+}
+
 final class MobileSpeechCallbackGateTests: XCTestCase {
     func testStaleCallbackCannotFinishOrReplaceCurrentGeneration() {
         var gate = MobileSpeechCallbackGate()

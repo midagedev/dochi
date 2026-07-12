@@ -657,12 +657,12 @@ struct SettingsView: View {
                 }
             } else {
                 Section("Hermes 브리지 연결") {
-                    TextField("호스트", text: $settings.hermesBridgeHost)
+                    TextField("호스트 또는 wss:// 주소", text: $settings.hermesBridgeHost)
                     TextField("포트", value: $settings.hermesBridgePort, format: .number.grouping(.never))
                     Button("재연결") { viewModel.reconnectBackend() }
                 }
                 Section {
-                    Text("Hermes를 다른 장치에서 실행할 때 사용합니다. 터미널에서 `python -m dochi_hermes_bridge`를 실행하고 호스트와 포트를 입력하세요.")
+                    Text("같은 Mac은 localhost/127.0.0.1의 ws:// 연결을 사용합니다. 다른 장치나 인터넷의 브리지는 TLS reverse proxy 뒤에 두고 wss:// 주소를 입력해야 합니다. 외부 호스트를 주소만 입력하면 wss://가 자동 적용됩니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

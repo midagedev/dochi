@@ -14,7 +14,8 @@ packages:
     url: https://github.com/tattn/VRMKit.git
     from: "0.5.0"
   AgentRuntimeKit:
-    path: ../AgentRuntimeKit
+    url: https://github.com/midagedev/AgentRuntimeKit.git
+    from: "0.1.0"
 
 targets:
   Dochi:

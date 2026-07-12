@@ -510,7 +510,15 @@ enum MobileCompatibleEndpoint {
     }
 }
 
-actor MobileConversationStore {
+protocol MobileConversationStoring: Sendable {
+    func load(
+        fallbackUserID: String,
+        fallbackSessionID: String
+    ) async throws -> MobileConversationSnapshot?
+    func save(_ snapshot: MobileConversationSnapshot) async throws
+}
+
+actor MobileConversationStore: MobileConversationStoring {
     private let fileURL: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -522,7 +530,10 @@ actor MobileConversationStore {
         decoder = JSONDecoder()
     }
 
-    func load(fallbackUserID: String, fallbackSessionID: String) throws -> MobileConversationSnapshot? {
+    func load(
+        fallbackUserID: String,
+        fallbackSessionID: String
+    ) async throws -> MobileConversationSnapshot? {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
         try ensureRegularDestination(fileURL)
         let data = try Data(contentsOf: fileURL)
@@ -543,7 +554,7 @@ actor MobileConversationStore {
         )
     }
 
-    func save(_ snapshot: MobileConversationSnapshot) throws {
+    func save(_ snapshot: MobileConversationSnapshot) async throws {
         try Task.checkCancellation()
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(
@@ -588,6 +599,7 @@ enum MobileAgentError: LocalizedError, Equatable {
     case emptyModel
     case unsupportedConversationSnapshot
     case unsafeConversationLocation
+    case completedConversationPersistenceFailed
 
     var errorDescription: String? {
         switch self {
@@ -597,6 +609,8 @@ enum MobileAgentError: LocalizedError, Equatable {
         case .emptyModel: "사용할 모델 이름을 입력해 주세요."
         case .unsupportedConversationSnapshot: "저장된 대화 형식이 이 앱보다 새 버전입니다."
         case .unsafeConversationLocation: "보호된 대화 저장 위치가 안전하지 않아 사용을 중단했습니다."
+        case .completedConversationPersistenceFailed:
+            "답변은 받았지만 기기에 안전하게 저장하지 못했습니다. 복구 체크포인트는 보존했으니 저장 공간을 확인한 뒤 다시 시도해 주세요."
         }
     }
 }

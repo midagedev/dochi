@@ -1,0 +1,77 @@
+name: Agent Runtime Host Contract
+
+on:
+  pull_request:
+    paths:
+      - "Dochi/Services/Agent/**"
+      - "Dochi/Services/Hermes/**"
+      - "DochiMobile/**"
+      - "DochiTests/**"
+      - "DochiMobileTests/**"
+      - "HermesBridge/**"
+      - "project.yml"
+      - ".github/workflows/agent-runtime-contract.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Dochi/Services/Agent/**"
+      - "Dochi/Services/Hermes/**"
+      - "DochiMobile/**"
+      - "DochiTests/**"
+      - "DochiMobileTests/**"
+      - "HermesBridge/**"
+      - "project.yml"
+      - ".github/workflows/agent-runtime-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  host-contract:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Test macOS runtime host contract
+        run: |
+          xcodebuild test \
+            -project Dochi.xcodeproj \
+            -scheme Dochi \
+            -destination 'platform=macOS' \
+            -only-testing:DochiTests/DochiNativeAgentAssemblyTests \
+            -only-testing:DochiTests/NativeAgentBackendTests \
+            -only-testing:DochiTests/AgentBackendRouterTests \
+            -only-testing:DochiTests/HermesAgentBridgeTests \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM=
+
+      - name: Select iOS Simulator
+        run: |
+          SIMULATOR_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for values in data["devices"].values() for d in values if "iPhone" in d["name"]))')"
+          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+
+      - name: Test iOS runtime host contract
+        run: |
+          xcodebuild test \
+            -project Dochi.xcodeproj \
+            -scheme DochiMobile \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -only-testing:DochiMobileTests \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Test Hermes bridge protocol and cancellation
+        working-directory: HermesBridge
+        run: |
+          python3 -m venv .ci-venv
+          .ci-venv/bin/pip install -e .
+          .ci-venv/bin/pip install pytest
+          PYTHONPATH=. .ci-venv/bin/python -m pytest tests/test_echo_roundtrip.py

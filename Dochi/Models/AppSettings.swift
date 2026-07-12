@@ -223,7 +223,7 @@ final class AppSettings {
         "nativeModel.\(provider.rawValue)"
     }
 
-    /// Host of the local dochi-hermes-bridge WebSocket server.
+    /// Host or explicit wss:// endpoint of the dochi-hermes-bridge server.
     var hermesBridgeHost: String = UserDefaults.standard.string(forKey: "hermesBridgeHost") ?? "127.0.0.1" {
         didSet { UserDefaults.standard.set(hermesBridgeHost, forKey: "hermesBridgeHost") }
     }

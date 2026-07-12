@@ -1,7 +1,7 @@
 # Native Agent Runtime Architecture
 
 > 상태: **현행 정본**<br>
-> 적용 대상: `Dochi` macOS 14+, `DochiMobile` iOS 17+, 로컬 package `../AgentRuntimeKit`<br>
+> 적용 대상: `Dochi` macOS 14+, `DochiMobile` iOS 17+, `AgentRuntimeKit` 0.1.x<br>
 > 마지막 코드 대조: 2026-07-12
 
 이 문서는 Dochi의 인프로세스 Swift 에이전트 경계와 현재 보안 동작을 정의한다. macOS의 선택형
@@ -18,7 +18,7 @@ Hermes 경로는 [`../HermesBridge/README.md`](../HermesBridge/README.md)가 정
 macOS
 Speech/TTS/VRM/UI ─ DochiViewModel ─ AgentBackendProtocol ─ AgentBackendRouter
                                                              ├─ NativeAgentBackend ─ AgentRuntimeKit
-                                                             └─ HermesAgentBridge ─ ws:// bridge
+                                                             └─ HermesAgentBridge ─ ws:// loopback 또는 wss:// remote
 
 iOS
 SwiftUI/Apple Speech/AVSpeechSynthesizer ─ MobileAgentController ─ AgentRuntimeKit

@@ -44,6 +44,12 @@ On first run the bridge writes a shared token to `~/.hermes/dochi_bridge_token`
 (mode `0600`). Dochi reads the same file, so no copy/paste is required. Override
 with `DOCHI_BRIDGE_TOKEN` if you prefer.
 
+The Python process intentionally binds to loopback only. To reach it from
+another device, keep the bridge on `127.0.0.1` and expose it through a TLS
+reverse proxy (Caddy, nginx, or an equivalent authenticated tunnel). Enter the
+public `wss://` host and proxy port in Dochi. The app rejects remote `ws://`
+endpoints; the shared token is authentication, not transport encryption.
+
 ## Giving Hermes a model
 
 Hermes is the brain, but it still needs an LLM provider. Configure one **once**
@@ -102,6 +108,9 @@ stable schema. Summary:
 PYTHONPATH=. python tests/test_echo_roundtrip.py      # protocol round-trip (no Hermes)
 PYTHONPATH=. python tests/test_hermes_roundtrip.py    # full stack: bridge → real Hermes → model
 ```
+
+The echo suite also verifies that disconnecting a WebSocket cancels every
+in-flight runtime task owned by that client.
 
 `test_hermes_roundtrip` stands up a tiny OpenAI-compatible mock model so it runs
 the **real** Hermes conversation loop locally with no API key. It skips
