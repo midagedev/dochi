@@ -43,6 +43,7 @@ struct SentenceChunker {
         for (index, char) in buffer.enumerated() {
             let stringIndex = buffer.index(buffer.startIndex, offsetBy: index)
             if Self.boundaries.contains(char) {
+                if isInsideURL(at: stringIndex) { continue }
                 // Don't split on decimal points (e.g., "3.14")
                 if char == "." && index > 0 {
                     let prevIndex = buffer.index(before: stringIndex)
@@ -52,5 +53,17 @@ struct SentenceChunker {
             }
         }
         return nil
+    }
+
+    private func isInsideURL(at index: String.Index) -> Bool {
+        let prefix = buffer[..<index]
+        guard let tokenStart = prefix.lastIndex(where: { $0.isWhitespace || $0 == "(" || $0 == "[" || $0 == "\"" || $0 == "'" }) else {
+            let token = buffer[buffer.startIndex...index]
+            return token.hasPrefix("http://") || token.hasPrefix("https://") || token.hasPrefix("file://")
+        }
+
+        let start = buffer.index(after: tokenStart)
+        let token = buffer[start...index]
+        return token.hasPrefix("http://") || token.hasPrefix("https://") || token.hasPrefix("file://")
     }
 }

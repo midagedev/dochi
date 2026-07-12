@@ -1,197 +1,134 @@
 # CLAUDE.md
 
-## 스펙 문서 (정본)
+## 제품 정의
 
-- 전체 스펙: [spec/README.md](./spec/README.md)
-- 상태 머신: [spec/states.md](./spec/states.md)
-- 플로우: [spec/flows.md](./spec/flows.md)
-- 데이터 모델: [spec/models.md](./spec/models.md)
-- 서비스 인터페이스: [spec/interfaces.md](./spec/interfaces.md)
-- 도구 스키마: [spec/tools.md](./spec/tools.md)
-- LLM 규칙: [spec/llm-requirements.md](./spec/llm-requirements.md)
-- 보안/권한: [spec/security.md](./spec/security.md)
-- 실행 컨텍스트: [spec/execution-context.md](./spec/execution-context.md)
+**Dochi는 [Hermes Agent](https://github.com/NousResearch/hermes-agent)의 음성·캐릭터 프론트엔드입니다.**
+
+- Dochi가 담당: 한국어 STT(웨이크워드 포함), TTS(시스템/Google Cloud/Typecast/로컬 ONNX), VRM 3D 아바타와 립싱크, macOS 네이티브 UI.
+- Hermes가 담당: 추론(LLM 루프), 영속 메모리, 스킬, 도구 실행, MCP.
+- 둘을 잇는 것: 로컬 WebSocket 브리지 (`HermesBridge/` — Python). Dochi는 음성을 텍스트로 바꿔 보내고, 스트리밍 응답(델타/도구 이벤트)을 받아 말하고 표정짓습니다.
+
+> 과거 Dochi는 자체 LLM 루프·도구(35+)·칸반·텔레그램·클라우드 동기화까지 떠안아 ~102K줄로 비대해졌습니다. 그 "두뇌" 영역을 Hermes에 위임하고 음성/캐릭터 인터페이스에 집중하도록 ~8K줄로 전면 재작성했습니다.
 
 ## Build Commands
 
 ```bash
-# Generate Xcode project from project.yml (required after changing project.yml)
+# project.yml 변경 후 Xcode 프로젝트 재생성
 xcodegen generate
 
-# Build
+# 빌드 / 테스트 / 실행
 xcodebuild -project Dochi.xcodeproj -scheme Dochi -configuration Debug build
-
-# Run tests
 xcodebuild -project Dochi.xcodeproj -scheme Dochi -configuration Debug -destination 'platform=macOS' test
-
-# Run the built app
 open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.app
 ```
+
+### Hermes 브리지 (백엔드)
+
+```bash
+cd HermesBridge
+python -m venv .venv && source .venv/bin/activate
+pip install -e .                      # 브리지만 (echo 모드 가능)
+pip install hermes-agent              # 실제 Hermes (Nous Research, 검증: 0.15.2)
+python -m dochi_hermes_bridge --echo  # Hermes 없이 음성 파이프라인 검증
+hermes setup                          # Hermes에 LLM 프로바이더 1회 설정 (또는 hermes model)
+python -m dochi_hermes_bridge         # 설치/설정된 Hermes Agent 구동
+# 프로바이더를 직접 지정 (config 없이):
+#   python -m dochi_hermes_bridge --base-url http://127.0.0.1:11434/v1 --provider openai --model qwen2.5 --api-key x
+PYTHONPATH=. python tests/test_echo_roundtrip.py     # 프로토콜 라운드트립
+PYTHONPATH=. python tests/test_hermes_roundtrip.py   # 풀스택: 브리지→실제 Hermes→(목)모델
+```
+
+실제 연동은 `run_agent.AIAgent(...).run_conversation(...)`를 사용하며 Hermes의
+`stream_delta_callback`/`tool_start_callback`/`tool_complete_callback`을 브리지 이벤트로 매핑(`runtime.py`).
+LLM 프로바이더 미설정 시 `No LLM provider configured. Run \`hermes model\`…` 에러로 안내됩니다.
 
 ## Code Structure
 
 ```
-Dochi/
-├── App/                          # DochiApp.swift (entry point + AppDelegate)
-├── Models/                       # Data models (LLMProvider, Message, Conversation, TTSProvider, KanbanBoard, etc.)
-├── State/                        # State machine enums (InteractionState, SessionState, ProcessingSubState)
-├── ViewModels/                   # DochiViewModel (orchestrator)
-├── Views/                        # SwiftUI views (ContentView, ConversationView, SettingsView, AvatarView, KanbanWorkspaceView)
-│   ├── Settings/                 # 설정 탭 뷰 (VoiceSettingsView, ToolsSettingsView, etc.)
-│   └── Sidebar/                  # 사이드바 관련 뷰 (AgentCreationView, WorkspaceManagementView, etc.)
+Dochi/                               # ~9K줄, 56 Swift 파일
+├── App/DochiApp.swift               # 진입점 + AppDelegate (최소 wiring)
+├── Models/                          # 값 타입: Message, Conversation, AppSettings,
+│                                    #   TTSProvider, SupertonicVoice, AvatarModelCatalog,
+│                                    #   ToolExecution/ToolResult/ToolCategory, FeedbackModels 등
+├── State/                           # InteractionState / SessionState / ProcessingSubState
+├── ViewModels/DochiViewModel.swift  # 음성 오케스트레이터 (STT→Hermes→TTS→아바타)
+├── Views/                           # ContentView, ConversationView, MessageBubbleView,
+│                                    #   AvatarView, SettingsView + 메시지 배지/카드 뷰
 ├── Services/
-│   ├── Protocols/                # Service protocols (10개: Context, Conversation, Keychain, LLM, Speech, TTS, BuiltInTool, MCP, Supabase, Telegram)
-│   ├── LLM/                      # LLMService + provider adapters (OpenAI, Anthropic, Z.AI) + ModelRouter
-│   ├── Context/                  # ContextService — file-based context
-│   ├── Conversation/             # ConversationService — conversation CRUD
-│   ├── Keychain/                 # KeychainService — API key management
-│   ├── Tools/                    # BuiltInToolService + 35개 도구 + ToolRegistry
-│   ├── Speech/                   # SpeechService — Apple STT + wake word
-│   ├── TTS/                      # TTSRouter + SystemTTS + GoogleCloudTTS + SupertonicService (ONNX)
-│   ├── Sound/                    # SoundService — UI 효과음
-│   ├── Avatar/                   # AvatarManager + FaceTrackingService — VRM 3D 아바타
-│   ├── MCP/                      # MCPService — MCP server proxy
-│   ├── Telegram/                 # TelegramService — DM + streaming
-│   ├── Cloud/                    # SupabaseService — auth + sync
-│   ├── HeartbeatService.swift    # 프로액티브 에이전트 (캘린더/칸반/미리알림 주기 점검)
-│   └── MetricsCollector.swift    # LLM 교환 메트릭 수집
-├── Resources/
-│   ├── Assets.xcassets/          # 앱 아이콘
-│   └── Models/                   # VRM 아바타 모델 (gitignored)
-└── Utilities/                    # Log enum, SentenceChunker, JamoMatcher
+│   ├── Protocols/                   # Speech/TTS/Conversation/Keychain/FeedbackStore 프로토콜
+│   ├── Hermes/HermesAgentBridge.swift   # Hermes 브리지 WebSocket 클라이언트 (핵심 seam)
+│   ├── Speech/                      # SpeechService — Apple STT + 웨이크워드
+│   ├── TTS/                         # TTSRouter + System/GoogleCloud/Typecast/Supertonic(ONNX)
+│   ├── Avatar/                      # AvatarManager + FaceTrackingService — VRM 3D 아바타
+│   ├── Conversation/                # ConversationService — 대화 CRUD (파일 기반)
+│   ├── Sound/ Keychain/             # 효과음, API 키 보관
+│   └── FeedbackStore.swift          # 메시지 피드백 저장(선택)
+├── Resources/ (Assets, Models[VRM, gitignored])
+└── Utilities/                       # Log, SentenceChunker, JamoMatcher
 
-DochiTests/
-├── Mocks/                        # Mock service implementations
-└── DochiTests.swift
+HermesBridge/                        # Python: Dochi↔Hermes 게이트웨이 어댑터
+└── dochi_hermes_bridge/             # protocol / runtime / server / token + tests
 
-DochiUITests/
-└── DochiUITests.swift
+DochiTests/                          # XCTest + Mocks (음성 루프, 브리지, 청커, 대화 CRUD)
 ```
 
-## Testing
+## Architecture
 
-### 단위 테스트
-
-```bash
-# 전체 테스트 실행
-xcodebuild -project Dochi.xcodeproj -scheme Dochi -configuration Debug -destination 'platform=macOS' test
-
-# 특정 테스트 클래스만 실행
-xcodebuild test -project Dochi.xcodeproj -scheme Dochi -destination 'platform=macOS' \
-  -only-testing:DochiTests/ProfilePersistenceTests
+```
+사용자 ──말──▶ SpeechService(STT) ──텍스트──▶ DochiViewModel ──▶ HermesAgentBridge ──ws──▶ dochi-hermes-bridge ──▶ Hermes Agent
+사용자 ◀─말/표정─ AvatarView + TTSRouter ◀─문장(SentenceChunker)─ DochiViewModel ◀─델타/도구 이벤트◀──────────────────────┘
 ```
 
-테스트 구조:
-- `DochiTests/Mocks/MockServices.swift` — 모든 서비스 프로토콜의 Mock 구현
-- `DochiTests/ContextServiceTests.swift` — ContextService 파일 I/O (임시 디렉토리 사용)
-- `DochiTests/FamilyFeatureTests.swift` — 프로필 CRUD, ViewModel 사용자 전환, 시스템 프롬프트
-- `DochiTests/ConversationServiceTests.swift` — 대화 저장/로드/삭제
-- `DochiTests/ModelTests.swift`, `ToolRegistryTests.swift`, `LLMAdapterTests.swift` 등
-
-테스트 작성 규칙:
-- **기능 구현 시 반드시 단위 테스트를 쌍으로 작성할 것.** 테스트 없는 기능 구현은 완료로 간주하지 않음
-- **ContextService 테스트**: `ContextService(baseURL: tempDir)` 사용 — 실제 앱 데이터 건드리지 않음
-- **ViewModel 테스트**: `MockContextService` + `MockKeychainService` 등 Mock 주입
-- **JSON 파일 포맷**: 날짜는 ISO 8601 (`encoder.dateEncodingStrategy = .iso8601`). 기존 데이터와 호환성 테스트 반드시 포함
-- 핵심 데이터 경로(저장→로드 roundtrip, 상태 전환, 에러 케이스) 커버
-- 구현 완료 후 `xcodebuild test` 통과 확인 필수
-
-### 스모크 테스트
-
-```bash
-# 빌드 → 앱 실행 → 상태 검증 (자동)
-./scripts/smoke_test.sh
-```
-
-동작 방식:
-1. `SmokeTestReporter` (DEBUG 빌드 전용)가 앱 시작 시 `/tmp/dochi_smoke.log`에 주요 상태 기록
-2. `scripts/smoke_test.sh`가 로그 파일을 파싱하여 기대값 검증
-3. 검증 항목: 프로필 수, 현재 사용자 ID/이름, 대화 수, 워크스페이스, 에이전트
-
-기능 구현 후 UI 동작까지 확인할 때 사용. 단위 테스트로 못 잡는 **앱 초기화 흐름** 검증에 유용.
+핵심 설계:
+- **명시적 상태 머신**: `InteractionState`(idle/listening/processing/speaking) + `SessionState` + `ProcessingSubState`. 전환 검증은 `DochiViewModel.validateTransition`.
+- **음성 루프 seam**: `DochiViewModel.processHermesPath` 가 텍스트를 Hermes로 보내고 `HermesEvent` 스트림(delta/toolStarted/toolFinished/done)을 소비. 음성 모드에서는 델타를 `SentenceChunker`로 문장 단위로 끊어 `TTSRouter.enqueueSentence`에 흘리고, TTS `onComplete`가 다시 청취로 전환.
+- **연결 진실 원천**: `HermesAgentBridge.connectionState` (UI 미러는 `DochiViewModel.hermesConnection`).
+- **프로액티브**: Hermes가 보낸 `proactive` 프레임 → `injectProactiveMessage`.
+- **와이어 프로토콜**: `HermesBridge/dochi_hermes_bridge/protocol.py` 가 정본.
 
 ## Conventions
 
-- `@MainActor` on all ViewModels and Services
-- Swift 6.0 with `SWIFT_STRICT_CONCURRENCY: targeted`
-- `async/await` + `Task` for concurrency; `Task.detached` for CPU-heavy ONNX
-- Logging via `Log.*` (os.Logger) — never use `print()`
-- UI language: Korean
-- XcodeGen (`project.yml`) generates `.xcodeproj` — edit `project.yml`, not Xcode project
-- Protocol-based DI for all services — mock injection for tests
-- macOS 14+ deployment target
-- `project.yml` auto-includes all files under `Dochi/` path — no need to add new files manually
-- **기능 구현 = 코드 + 테스트**: 모든 기능은 단위 테스트와 쌍으로 작성. 빌드 후 `xcodebuild test` 통과 필수
-- **설계 원칙**: 레거시 보존보다 merge 이후 구조 개선을 우선. 임시 호환 레이어 누적을 피하고, 새 구조를 기본 경로로 정착시킬 것
+- `@MainActor` on ViewModels/Services; Swift 6.0 `SWIFT_STRICT_CONCURRENCY: targeted`
+- `async/await` + 구조적 동시성; `Task.detached`는 CPU-heavy(ONNX)에만
+- 로깅은 `Log.*` (os.Logger) — `print()` 금지
+- UI 언어: 한국어
+- XcodeGen(`project.yml`)이 `.xcodeproj` 생성 — `project.yml`을 편집. `Dochi/` 하위 파일은 자동 포함
+- Protocol 기반 DI — 테스트는 Mock 주입
+- macOS 14+ (아바타 렌더링 경로는 macOS 15+ `@available` 게이트)
+- **기능 구현 = 코드 + 테스트**: 빌드 후 `xcodebuild test` 통과 필수
+- **설계 원칙**: 레거시 보존보다 구조 개선 우선. 두뇌(추론/도구/메모리)는 Dochi에 다시 들이지 말고 Hermes에 둘 것
 
-## Swift Code Quality Rules
+## Testing
 
-### Concurrency (Swift 6.0, strict targeted)
-- `@MainActor`는 진짜 UI 관련 코드에만 사용. "일단 붙이기" 금지 — 왜 main-actor isolation이 맞는지 근거 필요
-- 구조적 동시성 우선: `TaskGroup`/child task > 비구조적 `Task {}`. `Task.detached`는 CPU-heavy 작업(ONNX 등)에만 명확한 이유와 함께 사용
-- `@preconcurrency`, `@unchecked Sendable`, `nonisolated(unsafe)` 사용 시: 안전 불변조건(safety invariant) 주석 필수 + 제거 계획 TODO 추가
-- isolation 경계를 넘기 전에 먼저 식별: `@MainActor`, custom actor, `nonisolated` 중 어디에 속하는지 확인
-- suspension point 최소화 — actor-isolated 구간을 짧게 유지하여 context switch 줄이기
-- `async` 컨텍스트에서 semaphore/lock으로 블로킹 금지 — deadlock 위험
-- `Task.isCancelled` 검사: 장시간 실행 작업에서 반드시 cancellation 처리
+```bash
+xcodebuild -project Dochi.xcodeproj -scheme Dochi -destination 'platform=macOS' test \
+  -only-testing:DochiTests/DochiViewModelTests
+```
 
-### API Design (Apple Swift API Design Guidelines)
-- **사용 시점의 명확성**(clarity at point of use) 최우선. 간결성보다 명확성
-- 역할로 이름 짓기, 타입 반복 금지: `var greeting: String` (O) / `var greetingString` (X)
-- 부작용 기준 네이밍: 부작용 없으면 명사구(`x.distance(to:)`), 부작용 있으면 명령형 동사(`x.sort()`)
-- mutating/nonmutating 쌍: 동사 → `sort()` / `sorted()`, 명사 → `union()` / `formUnion()`
-- Bool 프로퍼티/메서드는 단언문으로 읽히게: `isEmpty`, `intersects(line2)`
-- Factory 메서드는 `make` 접두사: `makeIterator()`
-- 약어 금지, 기술 용어는 정확히 사용
-
-### Code Style
-- 타입/프로토콜: `UpperCamelCase`, 그 외: `lowerCamelCase`
-- 약어 대소문자 통일: `utf8Bytes`, `ASCII` (혼합 금지)
-- 기본값 있는 파라미터는 파라미터 목록 뒤쪽에 배치
-- O(1)이 아닌 computed property는 복잡도 문서화
-- free function은 `self`가 없거나 제약 없는 제네릭일 때만
+- `DochiTests/Mocks/MockServices.swift` — 보존 프로토콜 + `MockHermesBridge`
+- `DochiViewModelTests` — 텍스트/음성 전송, 연결 끊김 에러, 도구 이벤트, 프로액티브
+- `ConversationServiceTests` — 저장/로드/삭제 (`ConversationService(baseURL:)` 임시 디렉토리)
+- `SentenceChunkerTests` — 문장 경계/소수점/flush
+- 날짜는 ISO 8601, 저장→로드 roundtrip 커버
 
 ## External Dependencies
 
-- `microsoft/onnxruntime-swift-package-manager` v1.20.0 (TTS ONNX)
-- `modelcontextprotocol/swift-sdk` v0.10.2 (MCP)
-- `supabase/supabase-swift` v2.0.0+ (Cloud sync)
-- `tattn/VRMKit` v0.5.0 (3D 아바타 — VRMKit + VRMRealityKit)
+- `microsoft/onnxruntime-swift-package-manager` v1.20.0 (로컬 TTS ONNX)
+- `tattn/VRMKit` v0.5.0 (VRM 3D 아바타 — VRMKit + VRMRealityKit)
+- (Python) `websockets` — 브리지 서버
 
 ## Logging
 
-Subsystem: `com.dochi.app`. Categories: App, LLM, STT, TTS, MCP, Tool, Storage, Cloud, Telegram, Avatar.
+Subsystem: `com.dochi.app`. Categories: App, STT, TTS, Avatar, Storage.
 
 ```bash
 log show --predicate 'subsystem == "com.dochi.app"' --last 5m --style compact
-log show --predicate 'subsystem == "com.dochi.app" AND category == "Tool"' --last 5m
 ```
 
 ## Context Structure
 
 ```
 ~/Library/Application Support/Dochi/
-├── system_prompt.md
-├── profiles.json
-├── conversations/{id}.json
-├── memory/{userId}.md
-├── kanban/                       # 칸반 보드 데이터
-│   └── {boardId}.json
-└── workspaces/{wsId}/
-    ├── config.json
-    ├── memory.md
-    └── agents/{name}/
-        ├── persona.md
-        ├── memory.md
-        └── config.json
+└── conversations/{id}.json          # 로컬 대화 기록 (기억/프로필은 Hermes가 보관)
+~/.hermes/dochi_bridge_token         # 브리지 공유 토큰 (0600)
 ```
-
-## Architecture
-
-상세: [spec/tech-spec.md](./spec/tech-spec.md)
-
-핵심 설계:
-- **명시적 상태 머신**: [spec/states.md](./spec/states.md) — InteractionState / SessionState / ProcessingSubState
-- **프로바이더 어댑터**: [spec/llm-requirements.md](./spec/llm-requirements.md#provider-adapter) — OpenAI/Anthropic/Z.AI 차이 흡수
-- **세션 기반 도구 레지스트리**: baseline만 노출, LLM이 `tools.enable`으로 추가 활성화
-- **권한 시스템**: [spec/security.md](./spec/security.md) — safe/sensitive/restricted, 에이전트별 선언

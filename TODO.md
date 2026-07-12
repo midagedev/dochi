@@ -1,5 +1,7 @@
 # Dochi TODO (Operational)
 
+> **역사적 문서:** 아래 목록은 자체 에이전트 시절의 운영 백로그입니다. 현재 Hermes 기반 앱의 구조와 검증 방법은 [`README.md`](./README.md)와 [`CLAUDE.md`](./CLAUDE.md)를 따릅니다.
+
 갱신: 2026-02-18
 
 이 문서는 대시보드용 요약이다.  
@@ -38,4 +40,3 @@
 1. GitHub 이슈 생성: `spec/execution-context.md` 템플릿 사용
 2. 이슈 단위 구현/테스트/문서 갱신
 3. 머지 후 `spec/execution-context.md` 상태 업데이트
-

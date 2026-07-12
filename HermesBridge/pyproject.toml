@@ -1,0 +1,25 @@
+[project]
+name = "dochi-hermes-bridge"
+version = "0.1.0"
+description = "Local WebSocket bridge so the Dochi macOS app can be the voice + 3D-character front-end for a Hermes Agent backend."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+# Pull in Hermes itself for production use. Echo mode needs none of this.
+hermes = [
+    "hermes-agent",
+]
+
+[project.scripts]
+dochi-hermes-bridge = "dochi_hermes_bridge.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["dochi_hermes_bridge*"]

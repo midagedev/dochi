@@ -1,6 +1,12 @@
 # SpecKit — Dochi Specs
 
-이 `spec/` 폴더는 Dochi 재작성의 설계 문서.
+> ⚠️ **재초점 안내 (2026-05):** Dochi는 자체 두뇌(LLM 루프·도구·칸반·텔레그램·클라우드 동기화)를 들어내고
+> **[Hermes Agent](https://github.com/NousResearch/hermes-agent)의 음성·캐릭터 프론트엔드**로 전면 재작성되었습니다.
+> 현행 아키텍처/구조는 [`../CLAUDE.md`](../CLAUDE.md)와 [`../HermesBridge/README.md`](../HermesBridge/README.md)가 정본입니다.
+> 이 `spec/` 폴더의 `tools.md`, `llm-requirements.md`, `security.md`, `interfaces.md` 등은 구(舊) 자체-에이전트 설계를
+> 기술하므로 **역사적 참고용**입니다. 음성/상태 머신 관련 문서(`states.md`)만 부분적으로 유효합니다.
+
+이 `spec/` 폴더는 (구) Dochi 자체-에이전트 재작성의 설계 문서.
 
 ---
 
@@ -17,7 +23,7 @@
 | 문서 | 역할 |
 |------|------|
 | [execution-context.md](./execution-context.md) | 이슈 드리븐 실행 정본. 구현 완료 축약 + 구현 예정 상세 + UX 일관성 계약 + 이슈 템플릿/백로그 |
-| [claude-agent-sdk-rewrite/README.md](./claude-agent-sdk-rewrite/README.md) | Native + MCP 리라이트 프로그램 이슈 맵/진행 컨텍스트 (현재 트랙) |
+| [claude-agent-sdk-rewrite/README.md](./claude-agent-sdk-rewrite/README.md) | 구 Native + MCP 리라이트 프로그램의 역사적 기록 |
 | [product-spec.md](./product-spec.md) | 제품 배경, 목표, 요구사항, 성공 지표 |
 | [tech-spec.md](./tech-spec.md) | 아키텍처, 컴포넌트, 의존성, 규칙 |
 | [states.md](./states.md) | 앱 상태 머신, 전이 규칙, 금지 조합 |

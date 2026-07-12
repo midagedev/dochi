@@ -1,5 +1,7 @@
 # Dochi - 로드맵
 
+> **역사적 문서:** 아래 단계는 자체 에이전트 시절의 장기 계획입니다. Hermes 전환 이후의 현행 구조와 실행 방법은 [`README.md`](./README.md)와 [`CLAUDE.md`](./CLAUDE.md)를 참고하세요.
+
 단기 실행 계획/우선순위는 [spec/execution-context.md](./spec/execution-context.md) 참조.
 아래는 그 이후 장기 비전.
 

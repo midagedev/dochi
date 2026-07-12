@@ -1,1705 +1,912 @@
 import SwiftUI
-import UserNotifications
 
-// MARK: - SettingsView (NavigationSplitView)
-
+/// Settings for the voice + character front-end: how Dochi listens, how it
+/// speaks, how the avatar looks, and where the Hermes backend lives.
 struct SettingsView: View {
-    var settings: AppSettings
-    var keychainService: KeychainServiceProtocol
-    var contextService: ContextServiceProtocol?
-    var sessionContext: SessionContext?
-    var ttsService: TTSServiceProtocol?
-    var downloadManager: ModelDownloadManager?
-    var telegramService: TelegramServiceProtocol?
-    var mcpService: MCPServiceProtocol?
-    var supabaseService: SupabaseServiceProtocol?
-    var toolService: BuiltInToolService?
-    var devicePolicyService: DevicePolicyServiceProtocol?
-    var schedulerService: SchedulerServiceProtocol?
-    var heartbeatService: HeartbeatService?
-    var notificationManager: NotificationManager?
-    var metricsCollector: MetricsCollector?
-    var viewModel: DochiViewModel?
-    var pluginManager: PluginManagerProtocol?
-    var documentIndexer: DocumentIndexer?
-    var feedbackStore: FeedbackStoreProtocol?
-    var resourceOptimizer: (any ResourceOptimizerProtocol)?
+    @Bindable var settings: AppSettings
+    let keychainService: KeychainServiceProtocol
+    let ttsService: TTSRouter
+    let downloadManager: ModelDownloadManager
+    @Bindable var viewModel: DochiViewModel
 
-    @State var selectedSection: SettingsSection = .aiModel
-    @State private var searchText: String = ""
-    @State private var usageDashboardSessionCache = UsageDashboardSessionCache()
+    @State private var testPlaying = false
+    @State private var googleCloudAPIKey = ""
+    @State private var typecastAPIKey = ""
+    @State private var googleCloudSaveStatus: String?
+    @State private var googleCloudValidationStatus: String?
+    @State private var googleCloudValidationFailed = false
+    @State private var isCheckingGoogleCloudKey = false
+    @State private var typecastSaveStatus: String?
+    @State private var typecastVoices: [TypecastVoiceOption] = []
+    @State private var isLoadingTypecastVoices = false
+    @State private var typecastVoiceLoadError: String?
+
+    private static let typecastDefaultEmotions = [
+        "normal", "happy", "sad", "angry", "whisper", "toneup", "tonedown",
+    ]
 
     var body: some View {
-        NavigationSplitView {
-            SettingsSidebarView(
-                selectedSection: $selectedSection,
-                searchText: $searchText
-            )
-        } detail: {
-            settingsContent(for: selectedSection)
+        TabView {
+            voiceTab.tabItem { Label("음성", systemImage: "mic") }
+            speechTab.tabItem { Label("말하기", systemImage: "speaker.wave.2") }
+            avatarTab.tabItem { Label("아바타", systemImage: "person.crop.circle") }
+            backendTab.tabItem { Label("Hermes", systemImage: "brain") }
         }
-        .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 180)
-        .frame(minWidth: 680, minHeight: 440)
-        .frame(idealWidth: 780, idealHeight: 540)
-        .onAppear {
-            applyPendingDeepLinkIfNeeded()
-        }
-        .onChange(of: settings.pendingSettingsDeepLinkSection) { _, _ in
-            applyPendingDeepLinkIfNeeded()
-        }
+        .frame(width: 560, height: 680)
     }
 
-    // MARK: - Content Router
+    // MARK: 음성 (STT + wake word)
 
-    @ViewBuilder
-    private func settingsContent(for section: SettingsSection) -> some View {
-        switch section {
-        case .aiModel:
-            ModelSettingsView(settings: settings)
-
-        case .apiKey:
-            APIKeySettingsView(keychainService: keychainService)
-
-        case .usage:
-            if let metricsCollector {
-                UsageDashboardView(
-                    metricsCollector: metricsCollector,
-                    settings: settings,
-                    resourceOptimizer: resourceOptimizer,
-                    sessionCache: usageDashboardSessionCache
-                )
-            } else {
-                unavailableView(title: "사용량", message: "메트릭 수집기가 초기화되지 않았습니다.")
-            }
-
-        case .rag:
-            RAGSettingsView(settings: settings, documentIndexer: documentIndexer)
-
-        case .memory:
-            MemorySettingsView(settings: settings, memoryConsolidator: viewModel?.memoryConsolidator)
-
-        case .feedback:
-            if let feedbackStore {
-                FeedbackStatsView(
-                    feedbackStore: feedbackStore,
-                    settings: settings,
-                    viewModel: viewModel
-                )
-            } else {
-                unavailableView(title: "피드백 통계", message: "피드백 저장소가 초기화되지 않았습니다.")
-            }
-
-        case .voice:
-            VoiceSettingsView(settings: settings, keychainService: keychainService, ttsService: ttsService, downloadManager: downloadManager)
-
-        case .interface:
-            Form {
-                InterfaceSettingsContent(settings: settings, viewModel: viewModel, spotlightIndexer: viewModel?.concreteSpotlightIndexer)
-            }
-            .formStyle(.grouped)
-            .padding()
-
-        case .wakeWord:
-            Form {
-                WakeWordSettingsContent(settings: settings)
-            }
-            .formStyle(.grouped)
-            .padding()
-
-        case .heartbeat:
-            Form {
-                HeartbeatSettingsContent(
-                    settings: settings,
-                    heartbeatService: heartbeatService,
-                    notificationManager: notificationManager,
-                    keychainService: keychainService,
-                    onOpenProactiveSettings: { selectedSection = .proactiveSuggestion }
-                )
-            }
-            .formStyle(.grouped)
-            .padding()
-
-        case .proactiveSuggestion:
-            ProactiveSuggestionSettingsView(
-                settings: settings,
-                proactiveSuggestionService: viewModel?.proactiveSuggestionService
-            )
-
-        case .automation:
-            AutomationSettingsView(
-                settings: settings,
-                schedulerService: schedulerService,
-                contextService: contextService,
-                workspaceId: sessionContext?.workspaceId
-            )
-
-        case .family:
-            if let contextService, let sessionContext {
-                FamilySettingsView(
-                    contextService: contextService,
-                    settings: settings,
-                    sessionContext: sessionContext
-                )
-            } else {
-                unavailableView(title: "가족 구성원", message: "컨텍스트 서비스가 초기화되지 않았습니다.")
-            }
-
-        case .interest:
-            InterestSettingsView(
-                settings: settings,
-                interestService: viewModel?.interestDiscoveryService,
-                contextService: contextService,
-                userId: sessionContext?.currentUserId
-            )
-
-        case .agent:
-            if let contextService, let sessionContext {
-                AgentSettingsView(
-                    contextService: contextService,
-                    settings: settings,
-                    sessionContext: sessionContext,
-                    viewModel: viewModel
-                )
-            } else {
-                unavailableView(title: "에이전트", message: "컨텍스트 서비스가 초기화되지 않았습니다.")
-            }
-
-        case .tools:
-            if let toolService {
-                ToolsSettingsView(toolService: toolService)
-            } else {
-                unavailableView(title: "도구", message: "도구 서비스가 초기화되지 않았습니다.")
-            }
-
-        case .integrations:
-            IntegrationsSettingsView(
-                keychainService: keychainService,
-                telegramService: telegramService,
-                mcpService: mcpService,
-                settings: settings,
-                sessionContext: sessionContext
-            )
-
-        case .shortcuts:
-            ShortcutsSettingsView()
-
-        case .plugins:
-            PluginSettingsView(pluginManager: pluginManager)
-
-        case .terminal:
-            TerminalSettingsView(settings: settings)
-
-        case .externalTool:
-            ExternalToolSettingsView(
-                settings: settings,
-                externalToolManager: viewModel?.externalToolManager
-            )
-
-        case .devices:
-            if let devicePolicyService {
-                DeviceSettingsView(
-                    devicePolicyService: devicePolicyService,
-                    settings: settings,
-                    supabaseService: supabaseService
-                )
-            } else {
-                unavailableView(title: "디바이스", message: "디바이스 정책 서비스가 초기화되지 않았습니다.")
-            }
-
-        case .account:
-            AccountSettingsView(
-                supabaseService: supabaseService,
-                settings: settings,
-                syncEngine: viewModel?.syncEngine
-            )
-
-        case .guide:
-            Form {
-                GuideSettingsContent(settings: settings)
-            }
-            .formStyle(.grouped)
-            .padding()
-        }
-    }
-
-    @ViewBuilder
-    private func unavailableView(title: String, message: String) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.headline)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func applyPendingDeepLinkIfNeeded() {
-        guard let raw = settings.pendingSettingsDeepLinkSection else { return }
-        defer { settings.pendingSettingsDeepLinkSection = nil }
-        guard let section = SettingsSection(rawValue: raw) else { return }
-        selectedSection = section
-    }
-}
-
-// MARK: - Interface Settings Content (split from GeneralSettingsView)
-
-struct InterfaceSettingsContent: View {
-    var settings: AppSettings
-    var viewModel: DochiViewModel?
-    var spotlightIndexer: SpotlightIndexer?
-
-    private var selectedAvatarModel: AvatarModelOption {
-        AvatarModelCatalog.model(for: settings.avatarModelName)
-            ?? AvatarModelCatalog.model(for: AvatarModelCatalog.defaultModelID)
-            ?? AvatarModelCatalog.models[0]
-    }
-
-    var body: some View {
-        Section {
-            HStack {
-                Text("채팅 글꼴 크기: \(Int(settings.chatFontSize))pt")
-                Slider(value: Binding(
-                    get: { settings.chatFontSize },
-                    set: { settings.chatFontSize = $0 }
-                ), in: 10...24, step: 1)
-            }
-
-            Text("미리보기 텍스트")
-                .font(.system(size: settings.chatFontSize))
-                .foregroundStyle(.secondary)
-        } header: {
-            SettingsSectionHeader(
-                title: "글꼴",
-                helpContent: "대화 영역의 글꼴 크기를 조절합니다. 시스템 설정의 접근성 글꼴과 독립적입니다."
-            )
-        }
-
-        Section {
-            Picker("모드", selection: Binding(
-                get: { settings.interactionMode },
-                set: { settings.interactionMode = $0 }
-            )) {
+    private var voiceTab: some View {
+        Form {
+            Picker("상호작용 모드", selection: $settings.interactionMode) {
                 Text("음성 + 텍스트").tag(InteractionMode.voiceAndText.rawValue)
                 Text("텍스트 전용").tag(InteractionMode.textOnly.rawValue)
             }
-            .pickerStyle(.radioGroup)
-        } header: {
-            SettingsSectionHeader(
-                title: "상호작용 모드",
-                helpContent: "\"음성 + 텍스트\"는 마이크 버튼과 웨이크워드를 활성화합니다. \"텍스트 전용\"은 음성 기능을 비활성화합니다."
-            )
-        }
 
-        Section {
-            Picker("기본 운영 프로필", selection: Binding(
-                get: { settings.operatingProfile },
-                set: { settings.operatingProfile = $0 }
-            )) {
-                ForEach(OperatingProfile.allCases, id: \.self) { profile in
-                    Text(profile.displayName).tag(profile.rawValue)
-                }
+            Section("웨이크워드") {
+                Toggle("웨이크워드 사용", isOn: $settings.wakeWordEnabled)
+                Toggle("항상 듣기 (백그라운드)", isOn: $settings.wakeWordAlwaysOn)
+                    .disabled(!settings.wakeWordEnabled)
+                TextField("웨이크워드", text: $settings.wakeWord)
+                    .disabled(!settings.wakeWordEnabled)
             }
 
-            Text("현재 프로필: \(OperatingProfile(rawValue: settings.operatingProfile)?.summary ?? OperatingProfile.familyHomeAssistant.summary)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } header: {
-            SettingsSectionHeader(
-                title: "운영 프로필",
-                helpContent: "앱의 기본 운영 성향을 지정합니다. 가족 중심 운영형 또는 개인 생산성 중심형 중 선택할 수 있으며, 언제든 변경 가능합니다."
-            )
-        }
-
-        Section {
-            Toggle("3D 아바타 표시", isOn: Binding(
-                get: { settings.avatarEnabled },
-                set: { settings.avatarEnabled = $0 }
-            ))
-
-            Text("VRM 3D 아바타를 대화 영역 위에 표시합니다 (macOS 15+)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if settings.avatarEnabled {
-                Picker("아바타 모델", selection: Binding(
-                    get: { settings.avatarModelName },
-                    set: { settings.avatarModelName = AvatarModelCatalog.normalizedModelID($0) }
-                )) {
-                    ForEach(AvatarModelCatalog.models) { option in
-                        Text(option.displayName).tag(option.id)
-                    }
-                }
-
+            Section("음성 인식") {
                 HStack {
-                    Text("프레이밍 줌: \(Int((settings.avatarCameraZoom * 100).rounded()))%")
-                    Slider(value: Binding(
-                        get: { settings.avatarCameraZoom },
-                        set: { settings.avatarCameraZoom = $0 }
-                    ), in: AppSettings.avatarCameraZoomRange, step: 0.01)
-                }
-
-                Text("값이 작을수록 줌아웃, 클수록 줌인됩니다.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("메인 화면 아바타에 마우스를 올리고 휠 또는 트랙패드 핀치로도 실시간 조절할 수 있습니다.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Button("기본 줌으로 복원") {
-                    settings.avatarCameraZoom = AppSettings.avatarCameraZoomDefault
-                }
-                .buttonStyle(.borderless)
-
-                Text("선택됨: \(selectedAvatarModel.id).vrm · 라이선스 \(selectedAvatarModel.license)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("모델 경로: Dochi/Resources/Models/")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            SettingsSectionHeader(
-                title: "아바타",
-                helpContent: "VRM 형식의 3D 아바타를 대화 영역 위에 표시합니다. macOS 15 이상에서 사용 가능합니다. 내장 모델 중 하나를 선택해 사용할 수 있습니다."
-            )
-        }
-
-        Section {
-            Toggle("메뉴바 아이콘 표시", isOn: Binding(
-                get: { settings.menuBarEnabled },
-                set: { settings.menuBarEnabled = $0 }
-            ))
-
-            Text("메뉴바에서 바로 도치와 대화할 수 있습니다")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if settings.menuBarEnabled {
-                Toggle("글로벌 단축키 (Cmd+Shift+D)", isOn: Binding(
-                    get: { settings.menuBarGlobalShortcutEnabled },
-                    set: { settings.menuBarGlobalShortcutEnabled = $0 }
-                ))
-
-                Text("다른 앱 사용 중에도 단축키로 퀵 액세스 팝업을 열 수 있습니다")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            SettingsSectionHeader(
-                title: "메뉴바 퀵 액세스",
-                helpContent: "메뉴바 아이콘을 통해 메인 앱을 열지 않고도 빠르게 도치와 대화할 수 있습니다. Cmd+Shift+D로 어디서든 팝업을 토글할 수 있습니다."
-            )
-        }
-
-        // MARK: - Spotlight 검색 (H-4)
-
-        Section {
-            Toggle("Spotlight 인덱싱 활성화", isOn: Binding(
-                get: { settings.spotlightIndexingEnabled },
-                set: { settings.spotlightIndexingEnabled = $0 }
-            ))
-
-            if settings.spotlightIndexingEnabled {
-                // 인덱싱 상태 — spotlightIndexer는 @Observable 구체 타입으로 직접 받아 관찰 추적 가능
-                if let indexer = spotlightIndexer {
-                    HStack {
-                        Text("인덱싱된 항목")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(indexer.indexedItemCount)건")
-                            .font(.system(.body, design: .monospaced))
-                    }
-
-                    if let lastDate = indexer.lastIndexedAt {
-                        HStack {
-                            Text("마지막 인덱싱")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(lastDate, style: .relative)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    // 재구축/초기화 버튼
-                    if indexer.isRebuilding {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ProgressView(value: indexer.rebuildProgress)
-                            Text("재구축 중... \(Int(indexer.rebuildProgress * 100))%")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        HStack(spacing: 12) {
-                            Button("인덱스 재구축") {
-                                guard let vm = viewModel else { return }
-                                Task {
-                                    await indexer.rebuildAllIndices(
-                                        conversations: vm.conversations,
-                                        contextService: vm.contextService,
-                                        sessionContext: vm.sessionContext
-                                    )
-                                }
-                            }
-                            .buttonStyle(.bordered)
-
-                            Button("인덱스 초기화") {
-                                Task {
-                                    await indexer.clearAllIndices()
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .foregroundStyle(.red)
-                        }
-                    }
-                }
-
-                Divider()
-
-                // 인덱싱 범위 체크박스
-                Text("인덱싱 범위")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle("대화", isOn: Binding(
-                    get: { settings.spotlightIndexConversations },
-                    set: { settings.spotlightIndexConversations = $0 }
-                ))
-
-                Toggle("개인 메모리", isOn: Binding(
-                    get: { settings.spotlightIndexPersonalMemory },
-                    set: { settings.spotlightIndexPersonalMemory = $0 }
-                ))
-
-                Toggle("에이전트 메모리", isOn: Binding(
-                    get: { settings.spotlightIndexAgentMemory },
-                    set: { settings.spotlightIndexAgentMemory = $0 }
-                ))
-
-                Toggle("워크스페이스 메모리", isOn: Binding(
-                    get: { settings.spotlightIndexWorkspaceMemory },
-                    set: { settings.spotlightIndexWorkspaceMemory = $0 }
-                ))
-            }
-        } header: {
-            SettingsSectionHeader(
-                title: "Spotlight 검색",
-                helpContent: "대화와 메모리를 macOS Spotlight에 인덱싱하여 앱 밖에서도 검색할 수 있습니다. Spotlight에서 결과를 클릭하면 해당 대화나 메모리로 바로 이동합니다."
-            )
-        }
-    }
-}
-
-// MARK: - WakeWord Settings Content (split from GeneralSettingsView)
-
-struct WakeWordSettingsContent: View {
-    var settings: AppSettings
-
-    var body: some View {
-        Section {
-            Toggle("웨이크워드 감지", isOn: Binding(
-                get: { settings.wakeWordEnabled },
-                set: { settings.wakeWordEnabled = $0 }
-            ))
-
-            TextField("웨이크워드", text: Binding(
-                get: { settings.wakeWord },
-                set: { settings.wakeWord = $0 }
-            ))
-            .textFieldStyle(.roundedBorder)
-
-            HStack {
-                Text("침묵 타임아웃: \(String(format: "%.1f", settings.sttSilenceTimeout))초")
-                Slider(value: Binding(
-                    get: { settings.sttSilenceTimeout },
-                    set: { settings.sttSilenceTimeout = $0 }
-                ), in: 1...5, step: 0.5)
-            }
-
-            Toggle("항상 대기 모드", isOn: Binding(
-                get: { settings.wakeWordAlwaysOn },
-                set: { settings.wakeWordAlwaysOn = $0 }
-            ))
-
-            Text("앱이 활성화되어 있는 동안 항상 웨이크워드를 감지합니다")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } header: {
-            SettingsSectionHeader(
-                title: "웨이크워드",
-                helpContent: "지정한 단어를 말하면 자동으로 음성 입력이 시작됩니다. \"항상 대기 모드\"를 켜면 앱이 활성화된 동안 계속 감지합니다."
-            )
-        }
-    }
-}
-
-// MARK: - Heartbeat Settings Content (split from GeneralSettingsView)
-
-struct HeartbeatSettingsContent: View {
-    var settings: AppSettings
-    var heartbeatService: HeartbeatService?
-    var notificationManager: NotificationManager?
-    var keychainService: KeychainServiceProtocol?
-    var onOpenProactiveSettings: (() -> Void)? = nil
-
-    var body: some View {
-        Section {
-            Toggle("하트비트 활성화", isOn: Binding(
-                get: { settings.heartbeatEnabled },
-                set: { settings.heartbeatEnabled = $0 }
-            ))
-
-            Text("주기적으로 일정과 할 일을 점검하여 자동 알림")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack {
-                Text("점검 주기: \(settings.heartbeatIntervalMinutes)분")
-                Slider(
-                    value: Binding(
-                        get: { Double(settings.heartbeatIntervalMinutes) },
-                        set: { settings.heartbeatIntervalMinutes = Int($0.rounded()) }
-                    ),
-                    in: 5...120,
-                    step: 5
-                )
-            }
-
-            Toggle("캘린더 점검", isOn: Binding(
-                get: { settings.heartbeatCheckCalendar },
-                set: { settings.heartbeatCheckCalendar = $0 }
-            ))
-            Toggle("칸반 점검", isOn: Binding(
-                get: { settings.heartbeatCheckKanban },
-                set: { settings.heartbeatCheckKanban = $0 }
-            ))
-            Toggle("미리알림 점검", isOn: Binding(
-                get: { settings.heartbeatCheckReminders },
-                set: { settings.heartbeatCheckReminders = $0 }
-            ))
-        } header: {
-            SettingsSectionHeader(
-                title: "하트비트",
-                helpContent: "주기적으로 캘린더, 칸반, 미리알림을 점검하여 알려줄 내용이 있으면 자동으로 메시지를 보냅니다. 조용한 시간 동안에는 알림을 보내지 않습니다."
-            )
-        }
-
-        Section {
-            Toggle("Git 변화 추적", isOn: Binding(
-                get: { settings.heartbeatTrackGitChanges },
-                set: { settings.heartbeatTrackGitChanges = $0 }
-            ))
-            Text("저장소 추가/제거, 브랜치, 변경량, 원격 동기화 변화를 감지합니다")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Toggle("코딩세션 변화 추적", isOn: Binding(
-                get: { settings.heartbeatTrackCodingSessionChanges },
-                set: { settings.heartbeatTrackCodingSessionChanges = $0 }
-            ))
-            Text("세션 시작/종료, 활동 상태 전이, 저장소 바인딩 변화를 감지합니다")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Toggle("변화 알림", isOn: Binding(
-                get: { settings.heartbeatChangeAlertEnabled },
-                set: { settings.heartbeatChangeAlertEnabled = $0 }
-            ))
-
-            if settings.heartbeatChangeAlertEnabled {
-                Stepper(
-                    "중복 억제 쿨다운: \(settings.heartbeatChangeAlertCooldownMinutes)분",
-                    value: Binding(
-                        get: { settings.heartbeatChangeAlertCooldownMinutes },
-                        set: { settings.heartbeatChangeAlertCooldownMinutes = min(max($0, 1), 240) }
-                    ),
-                    in: 1...240
-                )
-            }
-
-            if !settings.heartbeatTrackGitChanges && !settings.heartbeatTrackCodingSessionChanges {
-                Text("감지 토글이 모두 꺼져 있으면 변화 알림이 발생하지 않습니다.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            SettingsSectionHeader(
-                title: "변화 추적",
-                helpContent: "하트비트가 감지할 변화 소스(Git/코딩세션)와 변화 알림 중복 억제 쿨다운을 제어합니다."
-            )
-        }
-        .disabled(!settings.heartbeatEnabled)
-
-        // MARK: - Notification Center (H-3)
-        Section {
-            // Authorization status row
-            if let notificationManager {
-                HStack {
-                    Text("알림 권한")
-                    Spacer()
-                    NotificationAuthorizationStatusView(status: notificationManager.authorizationStatus)
+                    Text("침묵 후 종료")
+                    Slider(value: $settings.sttSilenceTimeout, in: 0.5...5.0, step: 0.5)
+                    Text(String(format: "%.1fs", settings.sttSilenceTimeout)).monospacedDigit()
                 }
             }
-
-            Toggle("알림 소리", isOn: Binding(
-                get: { settings.notificationSoundEnabled },
-                set: { settings.notificationSoundEnabled = $0 }
-            ))
-
-            Toggle("알림에서 답장", isOn: Binding(
-                get: { settings.notificationReplyEnabled },
-                set: { settings.notificationReplyEnabled = $0 }
-            ))
-
-            // Category toggles
-            HStack {
-                Image(systemName: "calendar")
-                    .foregroundStyle(.blue)
-                    .frame(width: 20)
-                VStack(alignment: .leading) {
-                    Toggle("캘린더 알림", isOn: Binding(
-                        get: { settings.notificationCalendarEnabled },
-                        set: { settings.notificationCalendarEnabled = $0 }
-                    ))
-                    Text("다가오는 일정을 알림 센터에 표시")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack {
-                Image(systemName: "list.bullet.rectangle")
-                    .foregroundStyle(.orange)
-                    .frame(width: 20)
-                VStack(alignment: .leading) {
-                    Toggle("칸반 알림", isOn: Binding(
-                        get: { settings.notificationKanbanEnabled },
-                        set: { settings.notificationKanbanEnabled = $0 }
-                    ))
-                    Text("진행 중인 칸반 작업을 알림 센터에 표시")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack {
-                Image(systemName: "bell")
-                    .foregroundStyle(.green)
-                    .frame(width: 20)
-                VStack(alignment: .leading) {
-                    Toggle("미리알림 알림", isOn: Binding(
-                        get: { settings.notificationReminderEnabled },
-                        set: { settings.notificationReminderEnabled = $0 }
-                    ))
-                    Text("마감 임박한 미리알림을 알림 센터에 표시")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack {
-                Image(systemName: "externaldrive")
-                    .foregroundStyle(.purple)
-                    .frame(width: 20)
-                VStack(alignment: .leading) {
-                    Toggle("메모리 알림", isOn: Binding(
-                        get: { settings.notificationMemoryEnabled },
-                        set: { settings.notificationMemoryEnabled = $0 }
-                    ))
-                    Text("메모리 크기 경고를 알림 센터에 표시")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        } header: {
-            SettingsSectionHeader(
-                title: "알림 센터",
-                helpContent: "하트비트 알림을 macOS 알림 센터로 전달합니다. 카테고리별로 알림을 켜거나 끌 수 있으며, 알림에서 바로 답장할 수 있습니다."
-            )
-        }
-        .disabled(!settings.heartbeatEnabled)
-
-        // MARK: - Telegram Proactive Notifications (K-6)
-        Section {
-            if let keychainService,
-               let token = keychainService.load(account: "telegram_bot_token"), !token.isEmpty {
-
-                Picker("하트비트 알림 채널", selection: Binding(
-                    get: { NotificationChannel(rawValue: settings.heartbeatNotificationChannel) ?? .appOnly },
-                    set: { settings.heartbeatNotificationChannel = $0.rawValue }
-                )) {
-                    ForEach(NotificationChannel.allCases, id: \.self) { channel in
-                        Text(channel.displayName).tag(channel)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text("캘린더/칸반/미리알림/메모리 알림의 전달 채널")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle("앱 활성 시 텔레그램 전송 생략", isOn: Binding(
-                    get: { settings.telegramSkipWhenAppActive },
-                    set: { settings.telegramSkipWhenAppActive = $0 }
-                ))
-
-                Text("앱이 포그라운드에 있으면 텔레그램으로 보내지 않습니다")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text("텔레그램 봇이 설정되지 않았습니다")
-                        .font(.caption)
-                }
-            }
-        } header: {
-            SettingsSectionHeader(
-                title: "텔레그램 알림",
-                helpContent: "하트비트 알림과 프로액티브 제안을 텔레그램 DM으로도 전달할 수 있습니다. 텔레그램 봇 설정이 필요합니다."
-            )
-        }
-        .disabled(!settings.heartbeatEnabled)
-
-        Section("하트비트 조용한 시간") {
-            Stepper(
-                "시작: \(settings.heartbeatQuietHoursStart):00",
-                value: Binding(
-                    get: { settings.heartbeatQuietHoursStart },
-                    set: { settings.heartbeatQuietHoursStart = min(max($0, 0), 23) }
-                ),
-                in: 0...23
-            )
-
-            Stepper(
-                "종료: \(settings.heartbeatQuietHoursEnd):00",
-                value: Binding(
-                    get: { settings.heartbeatQuietHoursEnd },
-                    set: { settings.heartbeatQuietHoursEnd = min(max($0, 0), 23) }
-                ),
-                in: 0...23
-            )
-        }
-
-        if let heartbeatService {
-            Section("하트비트 상태") {
-                if let lastTick = heartbeatService.lastTickDate {
-                    HStack {
-                        Text("마지막 실행")
-                        Spacer()
-                        Text(lastTick, style: .relative)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("아직 실행되지 않음")
-                        .foregroundStyle(.secondary)
-                }
-
-                if let result = heartbeatService.lastTickResult {
-                    HStack {
-                        Text("점검 항목")
-                        Spacer()
-                        Text(result.checksPerformed.joined(separator: ", "))
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
-                    }
-                    HStack {
-                        Text("발견 항목")
-                        Spacer()
-                        Text("\(result.itemsFound)건")
-                            .foregroundStyle(result.itemsFound > 0 ? .primary : .secondary)
-                    }
-                    HStack {
-                        Text("감지된 변화")
-                        Spacer()
-                        Text("\(result.detectedChanges.count)건")
-                            .foregroundStyle(result.detectedChanges.isEmpty ? .secondary : .primary)
-                    }
-                    if result.notificationSent {
-                        Text("알림 전송됨")
-                            .foregroundStyle(.green)
-                            .font(.caption)
-                    }
-                    if let error = result.error {
-                        Text("오류: \(error)")
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                    }
-                }
-
-                HStack {
-                    Text("실행 이력")
-                    Spacer()
-                    Text("\(heartbeatService.tickHistory.count)건")
-                        .foregroundStyle(.secondary)
-                }
-
-                if heartbeatService.consecutiveErrors > 0 {
-                    HStack {
-                        Text("연속 오류")
-                        Spacer()
-                        Text("\(heartbeatService.consecutiveErrors)회")
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                let recentChanges = recentChangeEvents(from: heartbeatService, limit: 5)
-                if recentChanges.isEmpty {
-                    Text("아직 감지된 변화가 없습니다")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                } else {
-                    ForEach(recentChanges) { event in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(changeSeverityLabel(event.severity))
-                                    .font(.caption2)
-                                    .fontWeight(.semibold)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(changeSeverityColor(event.severity).opacity(0.2))
-                                    .clipShape(Capsule())
-
-                                Text(changeSourceLabel(event.source))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-
-                                Spacer()
-
-                                Text(event.timestamp, style: .relative)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Text(event.title)
-                                .font(.subheadline)
-                                .lineLimit(1)
-                            Text(changeTargetText(event))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-            }
-        }
-
-        // MARK: - Proactive Summary (C2)
-
-        Section {
-            let proactiveChannel = NotificationChannel(rawValue: settings.suggestionNotificationChannel) ?? .off
-
-            HStack {
-                Text("활성 상태")
-                Spacer()
-                Text(settings.proactiveSuggestionEnabled ? "활성" : "비활성")
-                    .foregroundStyle(settings.proactiveSuggestionEnabled ? .primary : .secondary)
-            }
-
-            HStack {
-                Text("유휴 감지")
-                Spacer()
-                Text("\(settings.proactiveSuggestionIdleMinutes)분")
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Text("쿨다운")
-                Spacer()
-                Text("\(settings.proactiveSuggestionCooldownMinutes)분")
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Text("일일 제안 한도")
-                Spacer()
-                Text("\(settings.proactiveDailyCap)개")
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Text("전달 채널")
-                Spacer()
-                Text(proactiveChannel.displayName)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let onOpenProactiveSettings {
-                Button {
-                    onOpenProactiveSettings()
-                } label: {
-                    Label("프로액티브 상세 설정 열기", systemImage: "arrow.right.circle")
-                }
-                .buttonStyle(.plain)
-            }
-        } header: {
-            SettingsSectionHeader(
-                title: "프로액티브 제안",
-                helpContent: "프로액티브 세부 설정은 전용 화면(Settings > 프로액티브 제안)에서만 변경됩니다. 이 영역은 현재 상태 요약과 이동 링크만 제공합니다."
-            )
-        }
-    }
-
-    private func recentChangeEvents(
-        from heartbeatService: HeartbeatService,
-        limit: Int
-    ) -> [HeartbeatChangeEvent] {
-        let events = heartbeatService.tickHistory.flatMap(\.detectedChanges)
-        return Array(events.sorted { $0.timestamp > $1.timestamp }.prefix(limit))
-    }
-
-    private func changeSeverityLabel(_ severity: HeartbeatChangeSeverity) -> String {
-        switch severity {
-        case .info:
-            return "정보"
-        case .warning:
-            return "주의"
-        case .critical:
-            return "중요"
-        }
-    }
-
-    private func changeSeverityColor(_ severity: HeartbeatChangeSeverity) -> Color {
-        switch severity {
-        case .info:
-            return .blue
-        case .warning:
-            return .orange
-        case .critical:
-            return .red
-        }
-    }
-
-    private func changeSourceLabel(_ source: HeartbeatChangeSource) -> String {
-        switch source {
-        case .git:
-            return "Git"
-        case .codingSession:
-            return "Coding Session"
-        }
-    }
-
-    private func changeTargetText(_ event: HeartbeatChangeEvent) -> String {
-        switch event.source {
-        case .git:
-            if let repository = event.metadata["repository"], !repository.isEmpty {
-                return repository
-            }
-            return URL(fileURLWithPath: event.targetId).lastPathComponent
-        case .codingSession:
-            let provider = event.metadata["provider"] ?? ""
-            let sessionId = event.metadata["sessionId"] ?? ""
-            let raw = "\(provider) \(sessionId)".trimmingCharacters(in: .whitespacesAndNewlines)
-            return raw.isEmpty ? event.targetId : raw
-        }
-    }
-}
-
-/// Displays notification authorization status with colored indicator.
-struct NotificationAuthorizationStatusView: View {
-    let status: UNAuthorizationStatus
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
-            Text(statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var statusColor: Color {
-        switch status {
-        case .authorized, .provisional:
-            return .green
-        case .denied:
-            return .red
-        case .notDetermined:
-            return .yellow
-        @unknown default:
-            return .gray
-        }
-    }
-
-    private var statusText: String {
-        switch status {
-        case .authorized:
-            return "허용됨"
-        case .denied:
-            return "거부됨"
-        case .notDetermined:
-            return "미결정"
-        case .provisional:
-            return "임시 허용"
-        @unknown default:
-            return "알 수 없음"
-        }
-    }
-}
-
-// MARK: - Guide Settings Content (split from GeneralSettingsView)
-
-struct GuideSettingsContent: View {
-    var settings: AppSettings
-
-    @State private var showFeatureTourSheet = false
-
-    var body: some View {
-        Section("가이드") {
-            Button {
-                settings.resetFeatureTour()
-                showFeatureTourSheet = true
-            } label: {
-                HStack {
-                    Image(systemName: "play.rectangle")
-                        .foregroundStyle(.secondary)
-                    Text("기능 투어 다시 보기")
-                }
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                settings.resetAllHints()
-                HintManager.shared.resetAllHints()
-            } label: {
-                HStack {
-                    Image(systemName: "arrow.counterclockwise")
-                        .foregroundStyle(.secondary)
-                    Text("인앱 힌트 초기화")
-                }
-            }
-            .buttonStyle(.plain)
-
-            Toggle("인앱 힌트 표시", isOn: Binding(
-                get: { settings.hintsEnabled },
-                set: { newValue in
-                    settings.hintsEnabled = newValue
-                    if !newValue {
-                        HintManager.shared.disableAllHints()
-                    }
-                }
-            ))
-        }
-        .sheet(isPresented: $showFeatureTourSheet) {
-            FeatureTourView(
-                onComplete: { showFeatureTourSheet = false },
-                onSkip: { showFeatureTourSheet = false }
-            )
-        }
-    }
-}
-
-// MARK: - GeneralSettingsView (backward compatibility wrapper)
-
-struct GeneralSettingsView: View {
-    var settings: AppSettings
-    var heartbeatService: HeartbeatService?
-    var notificationManager: NotificationManager?
-    var keychainService: KeychainServiceProtocol?
-
-    var body: some View {
-        Form {
-            InterfaceSettingsContent(settings: settings)
-            WakeWordSettingsContent(settings: settings)
-            HeartbeatSettingsContent(settings: settings, heartbeatService: heartbeatService, notificationManager: notificationManager, keychainService: keychainService)
-            GuideSettingsContent(settings: settings)
         }
         .formStyle(.grouped)
         .padding()
     }
-}
 
-// MARK: - Model Settings
+    // MARK: 말하기 (TTS)
 
-struct ModelSettingsView: View {
-    var settings: AppSettings
-
-    @State private var selectedProviderRaw: String = ""
-    @State private var selectedModel: String = ""
-    @State private var ollamaModels: [LocalModelInfo] = []
-    @State private var ollamaAvailable: Bool? = nil
-    @State private var ollamaURL: String = ""
-    @State private var lmStudioModels: [LocalModelInfo] = []
-    @State private var lmStudioAvailable: Bool? = nil
-    @State private var lmStudioURL: String = ""
-
-    // Offline fallback
-    @State private var offlineFallbackModels: [String] = []
-
-    private var selectedProvider: LLMProvider {
-        LLMProvider(rawValue: selectedProviderRaw) ?? .openai
-    }
-
-    /// Combined model list: static for most providers, dynamic for local providers.
-    private var availableModels: [String] {
-        switch selectedProvider {
-        case .ollama:
-            return ollamaModels.map(\.name)
-        case .lmStudio:
-            return lmStudioModels.map(\.name)
-        default:
-            return selectedProvider.models
-        }
-    }
-
-    /// Get LocalModelInfo for current local provider, if applicable.
-    private var currentLocalModels: [LocalModelInfo] {
-        switch selectedProvider {
-        case .ollama: return ollamaModels
-        case .lmStudio: return lmStudioModels
-        default: return []
-        }
-    }
-
-    var body: some View {
+    private var speechTab: some View {
         Form {
-            // Provider picker with cloud/local grouping
-            Section {
-                Picker("프로바이더", selection: $selectedProviderRaw) {
-                    // Cloud providers
-                    Section("클라우드") {
-                        ForEach(LLMProvider.cloudProviders, id: \.self) { provider in
-                            Text(provider.displayName).tag(provider.rawValue)
-                        }
-                    }
-                    // Local providers
-                    Section("로컬") {
-                        ForEach(LLMProvider.localProviders, id: \.self) { provider in
-                            Text(provider.displayName).tag(provider.rawValue)
-                        }
-                    }
-                }
-                .onChange(of: selectedProviderRaw) { _, newValue in
-                    settings.llmProvider = newValue
-                    let provider = LLMProvider(rawValue: newValue) ?? .openai
-                    switch provider {
-                    case .ollama:
-                        fetchOllamaModels()
-                    case .lmStudio:
-                        fetchLMStudioModels()
-                    default:
-                        if !provider.models.contains(selectedModel) {
-                            selectedModel = provider.models.first ?? ""
-                            settings.llmModel = selectedModel
-                        }
-                    }
-                }
+            Section("TTS 제공자") {
+                ForEach(TTSProvider.allCases, id: \.rawValue) { provider in
+                    HStack {
+                        Image(systemName: settings.currentTTSProvider == provider ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(settings.currentTTSProvider == provider ? .blue : .secondary)
 
-                if selectedProvider.isLocal {
-                    // Local model picker with metadata
-                    Picker("모델", selection: $selectedModel) {
-                        if availableModels.isEmpty {
-                            Text("모델 없음").tag("")
-                        }
-                        ForEach(currentLocalModels) { model in
-                            HStack {
-                                Text(model.name)
-                                if !model.compactDescription.isEmpty {
-                                    Text(model.compactDescription)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if model.supportsTools {
-                                    Image(systemName: "wrench.and.screwdriver")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .tag(model.name)
-                        }
-                    }
-                    .onChange(of: selectedModel) { _, newValue in
-                        settings.llmModel = newValue
-                    }
-
-                    // Tool support warning for selected model
-                    if let selectedInfo = currentLocalModels.first(where: { $0.name == selectedModel }),
-                       !selectedInfo.supportsTools {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                            Text("이 모델은 도구 호출(function calling)을 지원하지 않을 수 있습니다")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(provider.displayName)
+                            Text(provider.shortDescription)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                    }
-                } else {
-                    Picker("모델", selection: $selectedModel) {
-                        ForEach(selectedProvider.models, id: \.self) { model in
-                            Text(model).tag(model)
-                        }
-                    }
-                    .onChange(of: selectedModel) { _, newValue in
-                        settings.llmModel = newValue
-                    }
-                }
-            } header: {
-                SettingsSectionHeader(
-                    title: "LLM 프로바이더",
-                    helpContent: "AI 응답을 생성하는 서비스를 선택합니다. 클라우드 프로바이더는 API 키가 필요하며, 로컬 프로바이더(Ollama, LM Studio)는 별도 설치 후 사용합니다."
-                )
-            }
 
-            // Ollama settings
-            if selectedProvider == .ollama {
-                Section("Ollama 설정") {
-                    HStack {
-                        Text("Base URL")
-                        TextField("http://localhost:11434", text: $ollamaURL)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                            .onSubmit {
-                                settings.ollamaBaseURL = ollamaURL
-                                fetchOllamaModels()
-                            }
+                        Spacer()
                     }
-
-                    localServerStatusRow(available: ollamaAvailable)
-
-                    Button("모델 새로고침") {
-                        fetchOllamaModels()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        settings.ttsProvider = provider.rawValue
                     }
                 }
             }
 
-            // LM Studio settings
-            if selectedProvider == .lmStudio {
-                Section("LM Studio 설정") {
-                    HStack {
-                        Text("Base URL")
-                        TextField("http://localhost:1234", text: $lmStudioURL)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                            .onSubmit {
-                                settings.lmStudioBaseURL = lmStudioURL
-                                fetchLMStudioModels()
-                            }
-                    }
-
-                    localServerStatusRow(available: lmStudioAvailable)
-
-                    Button("모델 새로고침") {
-                        fetchLMStudioModels()
-                    }
-                }
+            if settings.currentTTSProvider == .googleCloud {
+                googleCloudSection
             }
 
-            Section {
+            if settings.currentTTSProvider == .typecast {
+                typecastSection
+            }
+
+            if settings.currentTTSProvider == .onnxLocal {
+                onnxSection
+            }
+
+            Section("속도 / 피치") {
                 HStack {
-                    Text("컨텍스트 윈도우")
-                    Spacer()
-                    let tokens = selectedProvider.contextWindowTokens(for: selectedModel)
-                    Text("\(tokens / 1000)K tokens")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+                    Text("속도")
+                    Slider(value: $settings.ttsSpeed, in: 0.5...2.0, step: 0.1)
+                    Text(String(format: "%.1f×", settings.ttsSpeed)).monospacedDigit()
                 }
-            } header: {
-                SettingsSectionHeader(
-                    title: "컨텍스트",
-                    helpContent: "모델이 한 번에 처리할 수 있는 텍스트 양(토큰)입니다. 대화가 길어지면 오래된 메시지는 자동으로 압축됩니다."
-                )
-            }
 
-            // Offline fallback
-            Section {
-                Toggle("오프라인 자동 전환", isOn: Binding(
-                    get: { settings.offlineFallbackEnabled },
-                    set: { settings.offlineFallbackEnabled = $0 }
-                ))
+                HStack {
+                    Text("피치")
+                    Slider(value: $settings.ttsPitch, in: -10.0...10.0, step: 0.5)
+                    Text(String(format: "%+.1f", settings.ttsPitch)).monospacedDigit()
+                }
 
-                Text("네트워크 연결이 끊어지면 자동으로 로컬 모델로 전환합니다")
+                Text("Typecast에서는 속도가 audio_tempo로 전달됩니다. 피치는 Google Cloud TTS에서만 사용됩니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                if settings.offlineFallbackEnabled {
-                    Picker("폴백 프로바이더", selection: Binding(
-                        get: { settings.offlineFallbackProvider },
-                        set: { newValue in
-                            settings.offlineFallbackProvider = newValue
-                            settings.offlineFallbackModel = ""
-                            fetchOfflineFallbackModels()
-                        }
-                    )) {
-                        ForEach(LLMProvider.localProviders, id: \.self) { p in
-                            Text(p.displayName).tag(p.rawValue)
-                        }
-                    }
-
-                    Picker("폴백 모델", selection: Binding(
-                        get: { settings.offlineFallbackModel },
-                        set: { settings.offlineFallbackModel = $0 }
-                    )) {
-                        if offlineFallbackModels.isEmpty {
-                            Text("서버 연결 필요").tag("")
-                        }
-                        ForEach(offlineFallbackModels, id: \.self) { model in
-                            Text(model).tag(model)
-                        }
-                    }
-
-                    if !settings.offlineFallbackModel.isEmpty {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                            Text("오프라인 폴백 설정 완료: \(settings.offlineFallbackModel)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            } header: {
-                SettingsSectionHeader(
-                    title: "오프라인 폴백",
-                    helpContent: "클라우드 LLM 서비스에 접속할 수 없을 때 로컬에서 실행 중인 Ollama 또는 LM Studio 모델로 자동 전환합니다."
-                )
             }
 
-            Section {
-                Toggle("자동 모델 선택", isOn: Binding(
-                    get: { settings.taskRoutingEnabled },
-                    set: { settings.taskRoutingEnabled = $0 }
-                ))
-
-                Text("메시지 복잡도에 따라 경량/고급 모델을 자동 선택합니다")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if settings.taskRoutingEnabled {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("경량 모델 (일상 대화)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 8) {
-                            Picker("프로바이더", selection: Binding(
-                                get: { settings.lightModelProvider },
-                                set: { settings.lightModelProvider = $0 }
-                            )) {
-                                Text("기본 모델 사용").tag("")
-                                ForEach(LLMProvider.allCases, id: \.self) { p in
-                                    Text(p.displayName).tag(p.rawValue)
-                                }
-                            }
-                            .frame(width: 140)
-
-                            TextField("모델명", text: Binding(
-                                get: { settings.lightModelName },
-                                set: { settings.lightModelName = $0 }
-                            ))
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("고급 모델 (코딩, 분석)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 8) {
-                            Picker("프로바이더", selection: Binding(
-                                get: { settings.heavyModelProvider },
-                                set: { settings.heavyModelProvider = $0 }
-                            )) {
-                                Text("기본 모델 사용").tag("")
-                                ForEach(LLMProvider.allCases, id: \.self) { p in
-                                    Text(p.displayName).tag(p.rawValue)
-                                }
-                            }
-                            .frame(width: 140)
-
-                            TextField("모델명", text: Binding(
-                                get: { settings.heavyModelName },
-                                set: { settings.heavyModelName = $0 }
-                            ))
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                        }
-                    }
-
-                    Text("표준 복잡도 메시지는 위에서 선택한 기본 모델을 사용합니다")
+            if !settings.currentTTSProvider.isLocal {
+                Section("오프라인 폴백") {
+                    Toggle("클라우드 TTS 실패 시 로컬/시스템 TTS 사용", isOn: $settings.ttsOfflineFallbackEnabled)
+                    Text("ONNX 모델 ID가 설정되어 있으면 로컬 TTS를 먼저 시도하고, 실패하면 시스템 TTS로 전환합니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            } header: {
-                SettingsSectionHeader(
-                    title: "용도별 모델 라우팅",
-                    helpContent: "메시지 복잡도를 자동으로 판단하여 간단한 질문은 빠른 모델에, 복잡한 작업은 고급 모델에 보냅니다. 비용 절약과 속도 개선에 유용합니다."
-                )
+            }
+
+            Section("상태") {
+                LabeledContent("엔진") { engineStateLabel }
+                Button {
+                    testTTS()
+                } label: {
+                    Label(testPlaying ? "재생 중..." : "테스트 재생", systemImage: testPlaying ? "speaker.wave.3.fill" : "play.circle")
+                }
+                .disabled(testPlaying)
             }
         }
         .formStyle(.grouped)
         .padding()
         .onAppear {
-            selectedProviderRaw = settings.llmProvider
-            selectedModel = settings.llmModel
-            ollamaURL = settings.ollamaBaseURL
-            lmStudioURL = settings.lmStudioBaseURL
-            if selectedProvider == .ollama {
-                fetchOllamaModels()
-            } else if selectedProvider == .lmStudio {
-                fetchLMStudioModels()
+            googleCloudAPIKey = keychainService.load(account: TTSProvider.googleCloud.keychainAccount) ?? ""
+            typecastAPIKey = keychainService.load(account: TTSProvider.typecast.keychainAccount) ?? ""
+            normalizeTypecastSettings()
+            if settings.currentTTSProvider == .onnxLocal {
+                Task { await loadONNXCatalogIfNeeded() }
             }
-            if settings.offlineFallbackEnabled {
-                fetchOfflineFallbackModels()
+            if settings.currentTTSProvider == .typecast, !typecastAPIKey.isEmpty {
+                Task { await loadTypecastVoices() }
             }
+        }
+        .onChange(of: settings.ttsProvider) { _, _ in
+            if settings.currentTTSProvider == .onnxLocal {
+                Task { await loadONNXCatalogIfNeeded() }
+            }
+            if settings.currentTTSProvider == .typecast, !typecastAPIKey.isEmpty, typecastVoices.isEmpty {
+                Task { await loadTypecastVoices() }
+            }
+        }
+        .onChange(of: settings.typecastModel) { _, _ in
+            syncSelectedTypecastVoiceForCurrentModel()
+            normalizeTypecastEmotionPreset()
+        }
+        .onChange(of: settings.typecastVoiceId) { _, _ in
+            normalizeTypecastEmotionPreset()
         }
     }
 
-    // MARK: - Local Server Status Row
-
-    @ViewBuilder
-    private func localServerStatusRow(available: Bool?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("상태")
-                Spacer()
-                if let available {
-                    if available {
-                        Label("연결됨", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        Label("연결 불가", systemImage: "xmark.circle.fill")
-                            .foregroundStyle(.red)
+    private var googleCloudSection: some View {
+        Section("Google Cloud TTS") {
+            Picker("음성", selection: $settings.googleCloudVoiceName) {
+                ForEach(GoogleCloudVoice.voicesByTier, id: \.tier.rawValue) { group in
+                    Section(group.tier.displayName) {
+                        ForEach(group.voices) { voice in
+                            Text(voice.displayName).tag(voice.name)
+                        }
                     }
-                } else {
+                }
+            }
+
+            if let selectedGoogleCloudVoice {
+                LabeledContent("선택 음성") {
+                    Text("\(selectedGoogleCloudVoice.displayName) · \(selectedGoogleCloudVoice.tier.displayName)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                SecureField("Google Cloud API 키", text: $googleCloudAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+
+                Button("저장") { saveGoogleCloudKey() }
+
+                Button {
+                    Task { await validateGoogleCloudKey() }
+                } label: {
+                    Label("키 확인", systemImage: "checkmark.shield")
+                }
+                .disabled(isCheckingGoogleCloudKey || googleCloudAPIKey.isEmpty)
+
+                if !googleCloudAPIKey.isEmpty {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .help("입력됨")
+                }
+            }
+
+            if let status = googleCloudSaveStatus {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if isCheckingGoogleCloudKey {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Google Cloud 키 확인 중...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let status = googleCloudValidationStatus {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(googleCloudValidationFailed ? .red : .green)
+            }
+
+            Text("Chirp3-HD 음성은 Google 정책상 속도/피치 조절을 받지 않을 수 있습니다. WaveNet/Neural2/Standard는 아래 속도와 피치를 사용합니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var typecastSection: some View {
+        Section("Typecast TTS") {
+            HStack(spacing: 8) {
+                Button {
+                    Task { await loadTypecastVoices() }
+                } label: {
+                    Label("음성 목록 새로고침", systemImage: "arrow.clockwise")
+                }
+                .disabled(isLoadingTypecastVoices)
+
+                if isLoadingTypecastVoices {
                     ProgressView()
                         .controlSize(.small)
                 }
             }
 
-            if available == false {
-                Text("로컬 서버를 실행한 뒤 Base URL을 확인하고 '모델 새로고침'을 눌러주세요.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    // MARK: - Data Fetching
-
-    private func fetchOllamaModels() {
-        ollamaAvailable = nil
-        Task {
-            let baseURL = URL(string: settings.ollamaBaseURL) ?? URL(string: "http://localhost:11434")!
-            let infos = await OllamaModelFetcher.fetchModelInfos(baseURL: baseURL)
-            let available = await OllamaModelFetcher.isAvailable(baseURL: baseURL)
-            ollamaModels = infos
-            ollamaAvailable = available
-            if !infos.map(\.name).contains(selectedModel) {
-                selectedModel = infos.first?.name ?? ""
-                settings.llmModel = selectedModel
-            }
-        }
-    }
-
-    private func fetchLMStudioModels() {
-        lmStudioAvailable = nil
-        Task {
-            let baseURL = URL(string: settings.lmStudioBaseURL) ?? URL(string: "http://localhost:1234")!
-            let infos = await LMStudioModelFetcher.fetchModelInfos(baseURL: baseURL)
-            let available = await LMStudioModelFetcher.isAvailable(baseURL: baseURL)
-            lmStudioModels = infos
-            lmStudioAvailable = available
-            if !infos.map(\.name).contains(selectedModel) {
-                selectedModel = infos.first?.name ?? ""
-                settings.llmModel = selectedModel
-            }
-        }
-    }
-
-    private func fetchOfflineFallbackModels() {
-        Task {
-            guard let provider = LLMProvider(rawValue: settings.offlineFallbackProvider) else { return }
-            switch provider {
-            case .ollama:
-                let baseURL = URL(string: settings.ollamaBaseURL) ?? URL(string: "http://localhost:11434")!
-                offlineFallbackModels = await OllamaModelFetcher.fetchModels(baseURL: baseURL)
-            case .lmStudio:
-                let baseURL = URL(string: settings.lmStudioBaseURL) ?? URL(string: "http://localhost:1234")!
-                offlineFallbackModels = await LMStudioModelFetcher.fetchModels(baseURL: baseURL)
-            default:
-                offlineFallbackModels = []
-            }
-        }
-    }
-}
-
-// MARK: - API Key Settings
-
-struct APIKeySettingsView: View {
-    var keychainService: KeychainServiceProtocol
-
-    @State private var openaiKey: String = ""
-    @State private var anthropicKey: String = ""
-    @State private var zaiKey: String = ""
-    @State private var tavilyKey: String = ""
-    @State private var falKey: String = ""
-    @State private var saveStatus: String?
-    @State private var showKeys: Bool = false
-    @State private var showTierKeys: Bool = false
-
-    // Tier-specific keys
-    @State private var openaiPremiumKey: String = ""
-    @State private var openaiEconomyKey: String = ""
-    @State private var anthropicPremiumKey: String = ""
-    @State private var anthropicEconomyKey: String = ""
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("키 표시", isOn: $showKeys)
-
-                apiKeyRow(label: "OpenAI", key: $openaiKey, account: LLMProvider.openai.keychainAccount)
-                apiKeyRow(label: "Anthropic", key: $anthropicKey, account: LLMProvider.anthropic.keychainAccount)
-                apiKeyRow(label: "Z.AI", key: $zaiKey, account: LLMProvider.zai.keychainAccount)
-            } header: {
-                SettingsSectionHeader(
-                    title: "LLM API 키",
-                    helpContent: "API 키는 macOS 키체인에 암호화되어 저장됩니다. 각 프로바이더 웹사이트에서 키를 발급받을 수 있습니다. 키를 입력하지 않은 프로바이더의 모델은 사용할 수 없습니다."
-                )
+            if let error = typecastVoiceLoadError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
 
-            Section("티어별 API 키") {
-                Toggle("티어별 키 관리", isOn: $showTierKeys)
-                Text("용도별 모델 라우팅 시 프리미엄/경제 티어 전용 키를 사용합니다")
+            if !typecastVoicesForSelectedModel.isEmpty {
+                Picker("음성", selection: $settings.typecastVoiceId) {
+                    ForEach(typecastVoicesForSelectedModel) { voice in
+                        Text(typecastVoiceDisplayName(voice)).tag(voice.voiceId)
+                    }
+                }
+            } else {
+                Text("음성 목록을 불러오지 못했거나 선택한 모델(\(settings.typecastModel))과 맞는 음성이 없습니다. Voice ID를 직접 입력할 수 있습니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
 
-                if showTierKeys {
-                    Group {
-                        Text("OpenAI")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        apiKeyRow(label: "  프리미엄", key: $openaiPremiumKey, account: LLMProvider.openai.keychainAccount + APIKeyTier.premium.keychainSuffix)
-                        apiKeyRow(label: "  경제", key: $openaiEconomyKey, account: LLMProvider.openai.keychainAccount + APIKeyTier.economy.keychainSuffix)
+            TextField("Voice ID", text: $settings.typecastVoiceId)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+
+            Picker("모델", selection: $settings.typecastModel) {
+                Text("ssfm-v30").tag("ssfm-v30")
+                Text("ssfm-v21").tag("ssfm-v21")
+            }
+
+            Picker("언어", selection: $settings.typecastLanguage) {
+                Text("한국어 (kor)").tag("kor")
+                Text("영어 (eng)").tag("eng")
+                Text("일본어 (jpn)").tag("jpn")
+            }
+
+            Picker("감정 모드", selection: $settings.typecastEmotionType) {
+                Text("Preset").tag("preset")
+                Text("Smart").tag("smart")
+            }
+
+            if settings.typecastEmotionType == "preset" {
+                Picker("감정 프리셋", selection: $settings.typecastEmotionPreset) {
+                    ForEach(typecastEmotionPresetsForCurrentSelection, id: \.self) { emotion in
+                        Text(emotion).tag(emotion)
                     }
+                }
 
-                    Group {
-                        Text("Anthropic")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        apiKeyRow(label: "  프리미엄", key: $anthropicPremiumKey, account: LLMProvider.anthropic.keychainAccount + APIKeyTier.premium.keychainSuffix)
-                        apiKeyRow(label: "  경제", key: $anthropicEconomyKey, account: LLMProvider.anthropic.keychainAccount + APIKeyTier.economy.keychainSuffix)
-                    }
+                HStack {
+                    Text("감정 강도")
+                    Slider(value: $settings.typecastEmotionIntensity, in: 0.0...2.0, step: 0.1)
+                    Text(String(format: "%.1f", settings.typecastEmotionIntensity)).monospacedDigit()
+                }
+            } else {
+                Text("Smart 모드는 Typecast가 문맥 기반으로 감정을 추론합니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
-                    Text("티어별 키가 없으면 기본 키를 사용합니다")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            HStack {
+                Text("볼륨")
+                Slider(
+                    value: Binding(
+                        get: { Double(settings.typecastVolume) },
+                        set: { settings.typecastVolume = Int($0.rounded()) }
+                    ),
+                    in: 0...200,
+                    step: 1
+                )
+                Text("\(settings.typecastVolume)").monospacedDigit()
+            }
+
+            HStack {
+                Text("오디오 피치")
+                Slider(
+                    value: Binding(
+                        get: { Double(settings.typecastAudioPitch) },
+                        set: { settings.typecastAudioPitch = Int($0.rounded()) }
+                    ),
+                    in: -12...12,
+                    step: 1
+                )
+                Text("\(settings.typecastAudioPitch)").monospacedDigit()
+            }
+
+            Picker("출력 포맷", selection: $settings.typecastAudioFormat) {
+                Text("WAV").tag("wav")
+                Text("MP3").tag("mp3")
+            }
+
+            HStack {
+                SecureField("Typecast API 키", text: $typecastAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+
+                Button("저장") { saveTypecastKey() }
+
+                if !typecastAPIKey.isEmpty {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .help("입력됨")
                 }
             }
 
-            Section("도구 API 키") {
-                apiKeyRow(label: "Tavily (웹 검색)", key: $tavilyKey, account: "tavily_api_key")
-                apiKeyRow(label: "Fal.ai (이미지)", key: $falKey, account: "fal_api_key")
+            if let status = typecastSaveStatus {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var onnxSection: some View {
+        Section("로컬 TTS (ONNX)") {
+            VStack(alignment: .leading, spacing: 10) {
+                onnxCatalogView
             }
 
-            Section {
-                HStack {
-                    Button("저장") {
-                        saveAllKeys()
-                    }
-                    .keyboardShortcut(.defaultAction)
+            Picker("로컬 음색", selection: $settings.supertonicVoice) {
+                ForEach(SupertonicVoice.allCases, id: \.rawValue) { voice in
+                    Text(voice.rawValue).tag(voice.rawValue)
+                }
+            }
 
-                    if let status = saveStatus {
-                        Text(status)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            HStack {
+                Text("디퓨전 스텝")
+                Slider(
+                    value: Binding(
+                        get: { Double(settings.ttsDiffusionSteps) },
+                        set: { settings.ttsDiffusionSteps = Int($0.rounded()) }
+                    ),
+                    in: 1...10,
+                    step: 1
+                )
+                Text("\(settings.ttsDiffusionSteps)").monospacedDigit()
+            }
+
+            Text("모델 파일은 ~/Library/Application Support/Dochi/models 아래의 모델 ID 폴더에서 찾습니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var onnxCatalogView: some View {
+        switch downloadManager.catalogState {
+        case .idle:
+            Button {
+                Task { await downloadManager.loadCatalog() }
+            } label: {
+                Label("한국어 ONNX 모델 탐색", systemImage: "arrow.down.circle")
+            }
+            .buttonStyle(.bordered)
+
+            if !settings.onnxModelId.isEmpty {
+                TextField("ONNX 모델 ID", text: $settings.onnxModelId)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+            }
+
+        case .loading:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("모델 카탈로그 로딩 중...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .error(let message):
+            VStack(alignment: .leading, spacing: 8) {
+                Label("카탈로그 로드 실패", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("다시 시도") {
+                    Task { await downloadManager.loadCatalog() }
+                }
+            }
+
+        case .loaded:
+            if !downloadManager.installedModelIds.isEmpty {
+                Picker("사용할 모델", selection: $settings.onnxModelId) {
+                    Text("선택 안 함").tag("")
+                    ForEach(downloadManager.availableModels.filter { downloadManager.installedModelIds.contains($0.id) }) { model in
+                        Text(model.name).tag(model.id)
+                    }
+                }
+            } else {
+                TextField("ONNX 모델 ID", text: $settings.onnxModelId)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+            }
+
+            ForEach(downloadManager.availableModels) { model in
+                onnxModelRow(model)
+            }
+
+            if !downloadManager.installedModelIds.isEmpty {
+                Text("설치된 모델 용량: \(downloadManager.formattedTotalSize)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func onnxModelRow(_ model: PiperModelInfo) -> some View {
+        let state = downloadManager.installState(for: model.id)
+
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(model.name)
+                        .font(.system(size: 12, weight: .medium))
+                    if case .installed = state {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.green)
+                    }
+                }
+                HStack(spacing: 6) {
+                    Label(model.language, systemImage: "globe")
+                    Label(model.gender, systemImage: "person")
+                    Label(model.quality.displayName, systemImage: model.quality.icon)
+                    Text(model.formattedSize)
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            switch state {
+            case .notInstalled:
+                Button {
+                    Task { await downloadManager.downloadModel(model.id) }
+                } label: {
+                    Label("다운로드", systemImage: "arrow.down.circle")
+                }
+                .controlSize(.small)
+
+            case .downloading(let progress):
+                HStack(spacing: 6) {
+                    ProgressView(value: progress)
+                        .frame(width: 60)
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Button {
+                        downloadManager.cancelDownload(model.id)
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+            case .installed:
+                Button(role: .destructive) {
+                    downloadManager.deleteModel(model.id)
+                    if settings.onnxModelId == model.id {
+                        settings.onnxModelId = ""
+                    }
+                } label: {
+                    Label("삭제", systemImage: "trash")
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    // MARK: 아바타
+
+    private var avatarTab: some View {
+        Form {
+            Section {
+                Toggle("3D 아바타 표시", isOn: $settings.avatarEnabled)
+            }
+
+            if settings.avatarEnabled {
+                Section("캐릭터 선택") {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 132, maximum: 160), spacing: 12)],
+                        spacing: 12
+                    ) {
+                        ForEach(AvatarModelCatalog.models) { model in
+                            AvatarModelSelectionCard(
+                                model: model,
+                                isSelected: settings.avatarModelName == model.id
+                            ) {
+                                settings.avatarModelName = model.id
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("화면 맞춤") {
+                    HStack {
+                        Text("카메라 줌")
+                        Slider(value: $settings.avatarCameraZoom, in: AppSettings.avatarCameraZoomRange, step: 0.05)
+                        Text(String(format: "%.1f", settings.avatarCameraZoom)).monospacedDigit()
+                    }
+                }
+
+                if let selectedModel = AvatarModelCatalog.model(for: settings.avatarModelName) {
+                    Section("선택한 캐릭터") {
+                        LabeledContent("모델") {
+                            Text("\(selectedModel.displayName) · \(selectedModel.originalName)")
+                                .foregroundStyle(.secondary)
+                        }
+                        LabeledContent("제작자") {
+                            Text(selectedModel.creator)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Label("\(selectedModel.license) · 앱 번들 사용 가능", systemImage: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                            Spacer()
+                            if let sourceURL = URL(string: selectedModel.sourceURL) {
+                                Link("원본 VRM", destination: sourceURL)
+                            }
+                        }
+                        .font(.caption)
                     }
                 }
             }
         }
         .formStyle(.grouped)
         .padding()
-        .onAppear {
-            loadKeys()
+    }
+
+    // MARK: Hermes 백엔드
+
+    private var backendTab: some View {
+        Form {
+            Section("Hermes 브리지 연결") {
+                TextField("호스트", text: $settings.hermesBridgeHost)
+                TextField("포트", value: $settings.hermesBridgePort, format: .number.grouping(.never))
+                LabeledContent("상태") { connectionStatusText }
+                Button("재연결") { viewModel.reconnectBackend() }
+            }
+            Section {
+                Text("""
+                Dochi는 음성·캐릭터 인터페이스입니다. 추론·기억·도구는 Hermes Agent가 담당합니다. \
+                터미널에서 `python -m dochi_hermes_bridge` 를 실행해 브리지를 켜세요. \
+                (Hermes 미설치 시 `--echo` 로 음성 파이프라인을 테스트할 수 있습니다.)
+                """)
+                .font(.caption).foregroundStyle(.secondary)
+            }
         }
+        .formStyle(.grouped)
+        .padding()
     }
 
     @ViewBuilder
-    private func apiKeyRow(label: String, key: Binding<String>, account: String) -> some View {
-        HStack {
-            Text(label)
-                .frame(width: 120, alignment: .leading)
-            if showKeys {
-                TextField("sk-...", text: key)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12, design: .monospaced))
-            } else {
-                SecureField("sk-...", text: key)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12, design: .monospaced))
-            }
-
-            if let stored = keychainService.load(account: account), !stored.isEmpty {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.caption)
-                    .help("저장됨")
-            }
+    private var engineStateLabel: some View {
+        switch ttsService.engineState {
+        case .unloaded:
+            Label("미로드", systemImage: "circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .loading:
+            Label("로딩 중", systemImage: "arrow.clockwise")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        case .ready:
+            Label("준비됨", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        case .error(let message):
+            Label("오류: \(message)", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
         }
     }
 
-    private func loadKeys() {
-        openaiKey = keychainService.load(account: LLMProvider.openai.keychainAccount) ?? ""
-        anthropicKey = keychainService.load(account: LLMProvider.anthropic.keychainAccount) ?? ""
-        zaiKey = keychainService.load(account: LLMProvider.zai.keychainAccount) ?? ""
-        tavilyKey = keychainService.load(account: "tavily_api_key") ?? ""
-        falKey = keychainService.load(account: "fal_api_key") ?? ""
-
-        // Tier keys
-        openaiPremiumKey = keychainService.load(account: LLMProvider.openai.keychainAccount + APIKeyTier.premium.keychainSuffix) ?? ""
-        openaiEconomyKey = keychainService.load(account: LLMProvider.openai.keychainAccount + APIKeyTier.economy.keychainSuffix) ?? ""
-        anthropicPremiumKey = keychainService.load(account: LLMProvider.anthropic.keychainAccount + APIKeyTier.premium.keychainSuffix) ?? ""
-        anthropicEconomyKey = keychainService.load(account: LLMProvider.anthropic.keychainAccount + APIKeyTier.economy.keychainSuffix) ?? ""
+    private var selectedGoogleCloudVoice: GoogleCloudVoice? {
+        GoogleCloudVoice.koreanVoices.first { $0.name == settings.googleCloudVoiceName }
     }
 
-    private func saveAllKeys() {
+    private func loadONNXCatalogIfNeeded() async {
+        if case .idle = downloadManager.catalogState {
+            await downloadManager.loadCatalog()
+        }
+    }
+
+    private func validateGoogleCloudKey() async {
+        let apiKey = googleCloudAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !apiKey.isEmpty else {
+            googleCloudValidationStatus = "Google Cloud API 키를 먼저 입력하세요."
+            googleCloudValidationFailed = true
+            return
+        }
+
+        isCheckingGoogleCloudKey = true
+        googleCloudValidationStatus = nil
+        googleCloudValidationFailed = false
+        defer { isCheckingGoogleCloudKey = false }
+
         do {
-            var keys: [(String, String)] = [
-                (LLMProvider.openai.keychainAccount, openaiKey),
-                (LLMProvider.anthropic.keychainAccount, anthropicKey),
-                (LLMProvider.zai.keychainAccount, zaiKey),
-                ("tavily_api_key", tavilyKey),
-                ("fal_api_key", falKey),
+            var components = URLComponents(string: "https://texttospeech.googleapis.com/v1/voices")!
+            components.queryItems = [
+                URLQueryItem(name: "languageCode", value: "ko-KR"),
+                URLQueryItem(name: "key", value: apiKey),
             ]
-
-            // Tier keys
-            let tierKeys: [(String, String)] = [
-                (LLMProvider.openai.keychainAccount + APIKeyTier.premium.keychainSuffix, openaiPremiumKey),
-                (LLMProvider.openai.keychainAccount + APIKeyTier.economy.keychainSuffix, openaiEconomyKey),
-                (LLMProvider.anthropic.keychainAccount + APIKeyTier.premium.keychainSuffix, anthropicPremiumKey),
-                (LLMProvider.anthropic.keychainAccount + APIKeyTier.economy.keychainSuffix, anthropicEconomyKey),
-            ]
-            keys.append(contentsOf: tierKeys)
-
-            for (account, value) in keys {
-                if !value.isEmpty {
-                    try keychainService.save(account: account, value: value)
-                }
+            guard let url = components.url else {
+                throw GoogleCloudKeyValidationError.invalidURL
             }
-            saveStatus = "저장 완료"
-            Log.app.info("API keys saved")
+
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse else {
+                throw GoogleCloudKeyValidationError.invalidResponse
+            }
+            guard (200...299).contains(http.statusCode) else {
+                let message = String(data: data, encoding: .utf8) ?? "unknown"
+                throw GoogleCloudKeyValidationError.httpError(statusCode: http.statusCode, message: message)
+            }
+
+            let decoded = try JSONDecoder().decode(GoogleCloudVoicesResponse.self, from: data)
+            googleCloudValidationStatus = "키 확인 완료 · ko-KR 음성 \(decoded.voices.count)개 접근 가능"
+            googleCloudValidationFailed = false
         } catch {
-            saveStatus = "저장 실패: \(error.localizedDescription)"
-            Log.app.error("API key save failed: \(error.localizedDescription)")
+            googleCloudValidationStatus = "키 확인 실패: \(error.localizedDescription)"
+            googleCloudValidationFailed = true
+        }
+    }
+
+    private var typecastVoicesForSelectedModel: [TypecastVoiceOption] {
+        typecastVoices.filter { voice in
+            voice.models.contains { $0.version == settings.typecastModel }
+        }
+    }
+
+    private var selectedTypecastVoice: TypecastVoiceOption? {
+        typecastVoices.first { $0.voiceId == settings.typecastVoiceId }
+    }
+
+    private var typecastEmotionPresetsForCurrentSelection: [String] {
+        guard let selectedTypecastVoice else { return Self.typecastDefaultEmotions }
+        let emotions = selectedTypecastVoice.models
+            .first { $0.version == settings.typecastModel }?
+            .emotions
+            .filter { !$0.isEmpty } ?? []
+        return emotions.isEmpty ? Self.typecastDefaultEmotions : emotions
+    }
+
+    private func typecastVoiceDisplayName(_ voice: TypecastVoiceOption) -> String {
+        let gender = voice.gender?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let age = voice.age?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let genderText = gender?.isEmpty == false ? gender! : "unknown"
+        let ageText = age?.isEmpty == false ? age! : "unknown"
+        return "\(voice.voiceName) (\(genderText), \(ageText))"
+    }
+
+    private func normalizeTypecastSettings() {
+        if !["preset", "smart"].contains(settings.typecastEmotionType) {
+            settings.typecastEmotionType = "preset"
+        }
+        if !["wav", "mp3"].contains(settings.typecastAudioFormat) {
+            settings.typecastAudioFormat = "wav"
+        }
+        if settings.typecastLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            settings.typecastLanguage = "kor"
+        }
+        settings.typecastEmotionIntensity = min(max(settings.typecastEmotionIntensity, 0.0), 2.0)
+        settings.typecastVolume = min(max(settings.typecastVolume, 0), 200)
+        settings.typecastAudioPitch = min(max(settings.typecastAudioPitch, -12), 12)
+        normalizeTypecastEmotionPreset()
+    }
+
+    private func normalizeTypecastEmotionPreset() {
+        let allowed = typecastEmotionPresetsForCurrentSelection
+        if !allowed.contains(settings.typecastEmotionPreset) {
+            settings.typecastEmotionPreset = allowed.first ?? "normal"
+        }
+    }
+
+    private func syncSelectedTypecastVoiceForCurrentModel() {
+        guard !typecastVoicesForSelectedModel.isEmpty else { return }
+        let current = settings.typecastVoiceId
+        let supported = typecastVoicesForSelectedModel.contains { $0.voiceId == current }
+        if !supported {
+            settings.typecastVoiceId = typecastVoicesForSelectedModel[0].voiceId
+        }
+    }
+
+    private func loadTypecastVoices() async {
+        let apiKey = keychainService.load(account: TTSProvider.typecast.keychainAccount) ?? ""
+        guard !apiKey.isEmpty else {
+            typecastVoiceLoadError = "Typecast API 키를 먼저 저장하세요."
+            return
+        }
+
+        isLoadingTypecastVoices = true
+        typecastVoiceLoadError = nil
+        defer { isLoadingTypecastVoices = false }
+
+        do {
+            var request = URLRequest(url: URL(string: "https://api.typecast.ai/v2/voices")!)
+            request.httpMethod = "GET"
+            request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw TypecastVoiceLoadError.invalidResponse
+            }
+            guard (200...299).contains(http.statusCode) else {
+                let message = String(data: data, encoding: .utf8) ?? "unknown"
+                throw TypecastVoiceLoadError.httpError(statusCode: http.statusCode, message: message)
+            }
+
+            let decoded = try JSONDecoder().decode([TypecastVoiceOption].self, from: data)
+            typecastVoices = decoded.sorted { lhs, rhs in
+                lhs.voiceName.localizedCaseInsensitiveCompare(rhs.voiceName) == .orderedAscending
+            }
+            syncSelectedTypecastVoiceForCurrentModel()
+            normalizeTypecastEmotionPreset()
+
+            if typecastVoicesForSelectedModel.isEmpty {
+                typecastVoiceLoadError = "선택한 모델(\(settings.typecastModel))을 지원하는 음성이 없습니다."
+            }
+        } catch {
+            typecastVoiceLoadError = "음성 목록 로드 실패: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveGoogleCloudKey() {
+        do {
+            if googleCloudAPIKey.isEmpty {
+                try keychainService.delete(account: TTSProvider.googleCloud.keychainAccount)
+            } else {
+                try keychainService.save(account: TTSProvider.googleCloud.keychainAccount, value: googleCloudAPIKey)
+            }
+            googleCloudSaveStatus = "저장 완료"
+            Log.app.info("Google Cloud TTS API key saved")
+        } catch {
+            googleCloudSaveStatus = "저장 실패: \(error.localizedDescription)"
+            Log.app.error("Google Cloud TTS API key save failed: \(error.localizedDescription)")
         }
 
         Task {
             try? await Task.sleep(for: .seconds(3))
-            saveStatus = nil
+            googleCloudSaveStatus = nil
+        }
+    }
+
+    private func saveTypecastKey() {
+        do {
+            if typecastAPIKey.isEmpty {
+                try keychainService.delete(account: TTSProvider.typecast.keychainAccount)
+            } else {
+                try keychainService.save(account: TTSProvider.typecast.keychainAccount, value: typecastAPIKey)
+            }
+            typecastSaveStatus = "저장 완료"
+            Log.app.info("Typecast TTS API key saved")
+            Task { await loadTypecastVoices() }
+        } catch {
+            typecastSaveStatus = "저장 실패: \(error.localizedDescription)"
+            Log.app.error("Typecast TTS API key save failed: \(error.localizedDescription)")
+        }
+
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            typecastSaveStatus = nil
+        }
+    }
+
+    private func testTTS() {
+        testPlaying = true
+
+        Task {
+            if case .unloaded = ttsService.engineState {
+                try? await ttsService.loadEngine()
+            }
+            ttsService.enqueueSentence("안녕하세요, 저는 도치입니다.")
+
+            while ttsService.isSpeaking {
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            testPlaying = false
+        }
+    }
+
+    private struct TypecastVoiceOption: Identifiable, Decodable {
+        let voiceId: String
+        let voiceName: String
+        let models: [TypecastVoiceModel]
+        let gender: String?
+        let age: String?
+        let useCases: [String]
+
+        var id: String { voiceId }
+
+        enum CodingKeys: String, CodingKey {
+            case voiceId = "voice_id"
+            case voiceName = "voice_name"
+            case models
+            case gender
+            case age
+            case useCases = "use_cases"
+        }
+    }
+
+    private struct TypecastVoiceModel: Decodable {
+        let version: String
+        let emotions: [String]
+    }
+
+    private enum TypecastVoiceLoadError: LocalizedError {
+        case invalidResponse
+        case httpError(statusCode: Int, message: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidResponse:
+                return "Typecast 음성 목록 응답이 올바르지 않습니다."
+            case let .httpError(statusCode, message):
+                return "Typecast API 오류 (\(statusCode)): \(message)"
+            }
+        }
+    }
+
+    private struct GoogleCloudVoicesResponse: Decodable {
+        let voices: [GoogleCloudVoiceInfo]
+    }
+
+    private struct GoogleCloudVoiceInfo: Decodable {
+        let name: String
+    }
+
+    private enum GoogleCloudKeyValidationError: LocalizedError {
+        case invalidURL
+        case invalidResponse
+        case httpError(statusCode: Int, message: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidURL:
+                return "Google Cloud 음성 목록 URL을 만들 수 없습니다."
+            case .invalidResponse:
+                return "Google Cloud 응답이 올바르지 않습니다."
+            case let .httpError(statusCode, message):
+                return "Google Cloud API 오류 (\(statusCode)): \(message)"
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var connectionStatusText: some View {
+        switch viewModel.hermesConnection {
+        case .connected(let persona): Text(persona.map { "연결됨 · \($0)" } ?? "연결됨").foregroundStyle(.green)
+        case .connecting: Text("연결 중…").foregroundStyle(.orange)
+        case .disconnected: Text("연결 끊김").foregroundStyle(.secondary)
+        case .failed(let message): Text("실패: \(message)").foregroundStyle(.red)
         }
     }
 }

@@ -19,9 +19,11 @@ _backup/
 # Large binary assets
 *.vrm
 !Dochi/Resources/Models/chubby_tubby_cat.vrm
-!Dochi/Resources/Models/paws_chestnut.vrm
-!Dochi/Resources/Models/merry_yulelog.vrm
-!Dochi/Resources/Models/thumper_cranberry.vrm
+!Dochi/Resources/Models/dino_kid.vrm
+!Dochi/Resources/Models/weird_cat.vrm
+!Dochi/Resources/Models/dogo_burger.vrm
+!Dochi/Resources/Models/cute_saurus.vrm
+!Dochi/Resources/Models/cute_moth.vrm
 !Dochi/Resources/Models/megan_the_fox.vrm
 
 # Coverage artifacts

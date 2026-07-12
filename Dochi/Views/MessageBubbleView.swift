@@ -45,22 +45,23 @@ struct MessageBubbleView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // Content
-                contentView
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(backgroundColor)
-                    .cornerRadius(12)
-                    .foregroundStyle(foregroundColor)
-                    .overlay(alignment: .topTrailing) {
-                        HStack(spacing: 2) {
-                            feedbackButtons
-                            copyButton
+                if shouldRenderContentBubble {
+                    contentView
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(backgroundColor)
+                        .cornerRadius(12)
+                        .foregroundStyle(foregroundColor)
+                        .overlay(alignment: .topTrailing) {
+                            HStack(spacing: 2) {
+                                feedbackButtons
+                                copyButton
+                            }
                         }
-                    }
-                    .onHover { hovering in
-                        isHovering = hovering
-                    }
+                        .onHover { hovering in
+                            isHovering = hovering
+                        }
+                }
 
                 // Completed turn: keep only compact tool summary in chat.
                 if let records = message.toolExecutionRecords, !records.isEmpty {
@@ -165,7 +166,7 @@ struct MessageBubbleView: View {
                     if feedbackRating == .negative {
                         onRemoveFeedback?(message.id)
                     } else {
-                        showFeedbackSheet = true
+                        onFeedback?(message.id, .negative, nil, nil)
                     }
                 } label: {
                     Image(systemName: feedbackRating == .negative ? "hand.thumbsdown.fill" : "hand.thumbsdown")
@@ -177,18 +178,6 @@ struct MessageBubbleView: View {
                 }
                 .buttonStyle(.plain)
                 .help("싫어요")
-                .popover(isPresented: $showFeedbackSheet, arrowEdge: .bottom) {
-                    FeedbackCommentSheet(
-                        messageId: message.id,
-                        onSubmit: { category, comment in
-                            showFeedbackSheet = false
-                            onFeedback?(message.id, .negative, category, comment)
-                        },
-                        onCancel: {
-                            showFeedbackSheet = false
-                        }
-                    )
-                }
             }
             .opacity(showButtons ? 1 : 0)
             .animation(.easeInOut(duration: 0.15), value: isHovering)
@@ -255,6 +244,17 @@ struct MessageBubbleView: View {
             return attributed
         }
         return AttributedString(message.content)
+    }
+
+    private var shouldRenderContentBubble: Bool {
+        if shouldSuppressToolTextForVisualOutput { return false }
+        if message.content.isEmpty && message.toolCalls != nil { return false }
+        if message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let imageURLs = message.imageURLs,
+           !imageURLs.isEmpty {
+            return false
+        }
+        return true
     }
 
     private var shouldSuppressToolTextForVisualOutput: Bool {
