@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings for the voice + character front-end: how Dochi listens, how it
-/// speaks, how the avatar looks, and where the Hermes backend lives.
+/// speaks, how the avatar looks, and how the local or remote agent runs.
 struct SettingsView: View {
     @Bindable var settings: AppSettings
     let keychainService: KeychainServiceProtocol
@@ -20,6 +20,8 @@ struct SettingsView: View {
     @State private var typecastVoices: [TypecastVoiceOption] = []
     @State private var isLoadingTypecastVoices = false
     @State private var typecastVoiceLoadError: String?
+    @State private var agentProviderAPIKey = ""
+    @State private var agentProviderKeyStatus: String?
 
     private static let typecastDefaultEmotions = [
         "normal", "happy", "sad", "angry", "whisper", "toneup", "tonedown",
@@ -30,7 +32,7 @@ struct SettingsView: View {
             voiceTab.tabItem { Label("음성", systemImage: "mic") }
             speechTab.tabItem { Label("말하기", systemImage: "speaker.wave.2") }
             avatarTab.tabItem { Label("아바타", systemImage: "person.crop.circle") }
-            backendTab.tabItem { Label("Hermes", systemImage: "brain") }
+            backendTab.tabItem { Label("에이전트", systemImage: "brain") }
         }
         .frame(width: 560, height: 680)
     }
@@ -584,27 +586,91 @@ struct SettingsView: View {
         .padding()
     }
 
-    // MARK: Hermes 백엔드
+    // MARK: Agent backend
 
     private var backendTab: some View {
         Form {
-            Section("Hermes 브리지 연결") {
-                TextField("호스트", text: $settings.hermesBridgeHost)
-                TextField("포트", value: $settings.hermesBridgePort, format: .number.grouping(.never))
+            Section("실행 방식") {
+                Picker("백엔드", selection: $settings.agentBackendKind) {
+                    ForEach(AgentBackendKind.allCases) { kind in
+                        Text(kind.displayName).tag(kind.rawValue)
+                    }
+                }
+                .disabled(isAgentBusy)
+                .onChange(of: settings.agentBackendKind) { _, value in
+                    viewModel.selectBackend(AgentBackendKind(rawValue: value) ?? .native)
+                }
                 LabeledContent("상태") { connectionStatusText }
-                Button("재연결") { viewModel.reconnectBackend() }
             }
-            Section {
-                Text("""
-                Dochi는 음성·캐릭터 인터페이스입니다. 추론·기억·도구는 Hermes Agent가 담당합니다. \
-                터미널에서 `python -m dochi_hermes_bridge` 를 실행해 브리지를 켜세요. \
-                (Hermes 미설치 시 `--echo` 로 음성 파이프라인을 테스트할 수 있습니다.)
-                """)
-                .font(.caption).foregroundStyle(.secondary)
+
+            if settings.currentAgentBackendKind == .native {
+                Section("모델 제공자") {
+                    Picker("제공자", selection: $settings.nativeProviderKind) {
+                        ForEach(NativeModelProviderKind.allCases) { provider in
+                            Text(provider.displayName).tag(provider.rawValue)
+                        }
+                    }
+                    .disabled(isAgentBusy)
+                    .onChange(of: settings.nativeProviderKind) { _, _ in
+                        loadAgentProviderKey()
+                        viewModel.reconnectBackend()
+                    }
+                    TextField("모델", text: $settings.nativeModel)
+                    if settings.currentNativeProviderKind == .openAICompatible {
+                        TextField("Base URL 또는 chat/completions 주소", text: $settings.nativeCompatibleBaseURL)
+                        Text("원격 서버는 대화와 기억을 보호하기 위해 HTTPS가 필요합니다. HTTP는 이 기기의 localhost에서만 허용됩니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    SecureField(
+                        settings.currentNativeProviderKind == .openAICompatible
+                            ? "API 키 (인증 없는 로컬 서버는 선택 사항)"
+                            : "API 키",
+                        text: $agentProviderAPIKey
+                    )
+                    HStack {
+                        Button("키 저장") { saveAgentProviderKey() }
+                            .disabled(isAgentBusy)
+                        Button("설정 적용") { viewModel.reconnectBackend() }
+                            .disabled(isAgentBusy)
+                        if let agentProviderKeyStatus {
+                            Text(agentProviderKeyStatus).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("개인 BYOK 키만 기기 Keychain에 저장하세요. 서비스 공용 키는 앱에 넣지 말고 인증된 서버 프록시를 사용해야 합니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("기억과 지침") {
+                    Toggle("로컬 장기 기억", isOn: $settings.nativeMemoryEnabled)
+                        .disabled(isAgentBusy)
+                        .onChange(of: settings.nativeMemoryEnabled) { _, _ in
+                            viewModel.reconnectBackend()
+                        }
+                    TextEditor(text: $settings.nativeAgentInstructions)
+                        .font(.body.monospaced())
+                        .frame(minHeight: 140)
+                    Text("건강·금융 정보는 명시적인 승인 없이는 장기 기억으로 저장되지 않고, 비밀값은 항상 거부됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Section("Hermes 브리지 연결") {
+                    TextField("호스트", text: $settings.hermesBridgeHost)
+                    TextField("포트", value: $settings.hermesBridgePort, format: .number.grouping(.never))
+                    Button("재연결") { viewModel.reconnectBackend() }
+                }
+                Section {
+                    Text("Hermes를 다른 장치에서 실행할 때 사용합니다. 터미널에서 `python -m dochi_hermes_bridge`를 실행하고 호스트와 포트를 입력하세요.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
         .padding()
+        .onAppear { loadAgentProviderKey() }
     }
 
     @ViewBuilder
@@ -902,11 +968,46 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var connectionStatusText: some View {
-        switch viewModel.hermesConnection {
-        case .connected(let persona): Text(persona.map { "연결됨 · \($0)" } ?? "연결됨").foregroundStyle(.green)
+        switch viewModel.agentConnection {
+        case .connected(let name): Text(name.map { "연결됨 · \($0)" } ?? "연결됨").foregroundStyle(.green)
         case .connecting: Text("연결 중…").foregroundStyle(.orange)
         case .disconnected: Text("연결 끊김").foregroundStyle(.secondary)
         case .failed(let message): Text("실패: \(message)").foregroundStyle(.red)
         }
+    }
+
+    private func loadAgentProviderKey() {
+        agentProviderAPIKey = keychainService.load(
+            account: settings.currentNativeProviderKind.keychainAccount
+        ) ?? ""
+        if agentProviderAPIKey.isEmpty,
+           settings.currentNativeProviderKind == .openAICompatible {
+            agentProviderKeyStatus = "키 없음 · 인증 없는 로컬 서버 사용 가능"
+        } else {
+            agentProviderKeyStatus = agentProviderAPIKey.isEmpty
+                ? "저장된 키 없음"
+                : "Keychain에 저장됨"
+        }
+    }
+
+    private func saveAgentProviderKey() {
+        let account = settings.currentNativeProviderKind.keychainAccount
+        let value = agentProviderAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if value.isEmpty {
+                try keychainService.delete(account: account)
+                agentProviderKeyStatus = "삭제됨"
+            } else {
+                try keychainService.save(account: account, value: value)
+                agentProviderKeyStatus = "저장됨"
+            }
+            viewModel.reconnectBackend()
+        } catch {
+            agentProviderKeyStatus = "저장 실패: \(error.localizedDescription)"
+        }
+    }
+
+    private var isAgentBusy: Bool {
+        viewModel.interactionState == .processing || viewModel.pendingToolApproval != nil
     }
 }

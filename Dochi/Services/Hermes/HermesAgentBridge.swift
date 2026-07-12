@@ -1,47 +1,9 @@
 import Foundation
 
-// MARK: - Public surface
-
-/// One streamed step of a Hermes reply, surfaced to the orchestrator.
-enum HermesEvent: Sendable {
-    /// A chunk of assistant text. Feed into the sentence chunker → TTS.
-    case delta(String)
-    /// Hermes began running a tool. Drives the avatar's "thinking" state.
-    case toolStarted(name: String, summary: String?)
-    /// Hermes finished a tool.
-    case toolFinished(name: String, isError: Bool, summary: String?)
-    /// The reply is complete; `text` is the full assistant message.
-    case done(text: String, messageId: String?)
-}
-
-enum HermesConnectionState: Sendable, Equatable {
-    case disconnected
-    case connecting
-    case connected(persona: String?)
-    case failed(String)
-}
-
 /// Connection to the local `dochi-hermes-bridge` (see `HermesBridge/`).
 ///
 /// Dochi owns voice + avatar; Hermes owns reasoning + memory + tools. This is
 /// the seam that replaced the in-app LLM loop: transcribed text goes out, a
-/// stream of `HermesEvent`s comes back.
-@MainActor
-protocol HermesBridgeProtocol: AnyObject {
-    var connectionState: HermesConnectionState { get }
-    /// Invoked for server-initiated messages (Hermes proactive nudges).
-    var onProactiveMessage: (@MainActor (String) -> Void)? { get set }
-    var onConnectionStateChanged: (@MainActor (HermesConnectionState) -> Void)? { get set }
-
-    func connect()
-    func disconnect()
-    /// Point at a new host/port (e.g. after a settings change) and reconnect.
-    func reconfigure(host: String, port: Int)
-    /// Send a user utterance and stream the reply. Cancelling the consuming
-    /// task (or breaking the `for await`) sends a `cancel` to the backend.
-    func send(text: String, conversationId: String, user: String?) -> AsyncThrowingStream<HermesEvent, Error>
-}
-
 enum HermesBridgeError: LocalizedError {
     case notConnected
     case backend(String)
@@ -60,8 +22,8 @@ enum HermesBridgeError: LocalizedError {
 
 @MainActor
 @Observable
-final class HermesAgentBridge: HermesBridgeProtocol {
-    private(set) var connectionState: HermesConnectionState = .disconnected {
+final class HermesAgentBridge: AgentBackendProtocol {
+    private(set) var connectionState: AgentBackendConnectionState = .disconnected {
         didSet {
             if oldValue != connectionState {
                 onConnectionStateChanged?(connectionState)
@@ -70,7 +32,7 @@ final class HermesAgentBridge: HermesBridgeProtocol {
     }
 
     @ObservationIgnored var onProactiveMessage: (@MainActor (String) -> Void)?
-    @ObservationIgnored var onConnectionStateChanged: (@MainActor (HermesConnectionState) -> Void)?
+    @ObservationIgnored var onConnectionStateChanged: (@MainActor (AgentBackendConnectionState) -> Void)?
 
     private var endpoint: URL
     private let tokenProvider: () -> String?
@@ -82,7 +44,7 @@ final class HermesAgentBridge: HermesBridgeProtocol {
     private var reconnectAttempts = 0
 
     /// correlation_id → stream continuation for the in-flight request.
-    private var continuations: [String: AsyncThrowingStream<HermesEvent, Error>.Continuation] = [:]
+    private var continuations: [String: AsyncThrowingStream<DochiAgentEvent, Error>.Continuation] = [:]
     /// Accumulated text per request, so `done` can carry the full message even
     /// if the backend omits it.
     private var accumulated: [String: String] = [:]
@@ -193,7 +155,7 @@ final class HermesAgentBridge: HermesBridgeProtocol {
 
     // MARK: Sending
 
-    func send(text: String, conversationId: String, user: String?) -> AsyncThrowingStream<HermesEvent, Error> {
+    func send(text: String, conversationId: String, user: String?) -> AsyncThrowingStream<DochiAgentEvent, Error> {
         AsyncThrowingStream { continuation in
             guard case .connected = connectionState else {
                 continuation.finish(throwing: HermesBridgeError.notConnected)
@@ -265,7 +227,7 @@ final class HermesAgentBridge: HermesBridgeProtocol {
         switch type {
         case "ready":
             reconnectAttempts = 0
-            connectionState = .connected(persona: frame["persona"] as? String)
+            connectionState = .connected(name: frame["persona"] as? String)
             Log.app.info("Hermes bridge connected (persona=\(frame["persona"] as? String ?? "nil"))")
 
         case "delta":

@@ -1,10 +1,12 @@
+import AgentRuntimeCore
 import XCTest
 @testable import Dochi
 
 @MainActor
 final class DochiViewModelTests: XCTestCase {
     private func makeViewModel(
-        mode: InteractionMode = .textOnly
+        mode: InteractionMode = .textOnly,
+        approvalBroker: AgentToolApprovalBroker? = nil
     ) -> (DochiViewModel, MockHermesBridge, MockTTSService, MockSpeechService) {
         let settings = AppSettings()
         settings.interactionMode = mode.rawValue
@@ -21,7 +23,8 @@ final class DochiViewModelTests: XCTestCase {
             ttsService: tts,
             soundService: MockSoundService(),
             conversationService: conversations,
-            hermesBridge: bridge
+            agentBackend: bridge,
+            approvalBroker: approvalBroker
         )
         return (vm, bridge, tts, speech)
     }
@@ -50,6 +53,23 @@ final class DochiViewModelTests: XCTestCase {
         XCTAssertEqual(vm.interactionState, .idle)
         XCTAssertEqual(bridge.sentMessages, ["테스트"])
         XCTAssertTrue(vm.streamingText.isEmpty)
+    }
+
+    func testConversationKeepsItsOriginalMemoryIdentity() async {
+        let (vm, bridge, _, _) = makeViewModel(mode: .textOnly)
+        let previousDefaultUserID = vm.settings.defaultUserId
+        defer { vm.settings.defaultUserId = previousDefaultUserID }
+        vm.settings.defaultUserId = "original-user"
+        vm.newConversation()
+        vm.settings.defaultUserId = "different-user"
+        bridge.scriptedEvents = [.done(text: "응답", messageId: nil)]
+
+        vm.inputText = "질문"
+        vm.sendMessage()
+        await waitUntil { vm.interactionState == .idle && vm.messages.count >= 2 }
+
+        XCTAssertEqual(bridge.sentUsers.count, 1)
+        XCTAssertEqual(bridge.sentUsers[0], "original-user")
     }
 
     func testAssistantMarkdownImageIsStoredAsImageURL() async {
@@ -127,6 +147,42 @@ final class DochiViewModelTests: XCTestCase {
         bridge.emitProactive("회의가 10분 뒤에 시작돼요.")
         await waitUntil { vm.messages.contains { $0.role == .assistant } }
         XCTAssertEqual(vm.messages.last?.content, "회의가 10분 뒤에 시작돼요.")
+    }
+
+    func testCancellingRequestDeniesPendingToolApproval() async {
+        let broker = AgentToolApprovalBroker()
+        let (vm, _, _, _) = makeViewModel(approvalBroker: broker)
+        let request = AgentToolApprovalRequest(
+            call: AgentToolCall(
+                id: "approval",
+                name: "sensitive_tool",
+                arguments: .object([:])
+            ),
+            descriptor: AgentToolDescriptor(
+                name: "sensitive_tool",
+                description: "민감한 테스트 도구",
+                inputSchema: .object(["type": .string("object")]),
+                risk: .sensitive
+            ),
+            reason: "승인이 필요합니다.",
+            context: AgentToolExecutionContext(
+                runID: UUID(),
+                sessionID: "session",
+                appID: "com.hckim.dochi",
+                userID: nil,
+                agentID: "dochi-native"
+            )
+        )
+        let decisionTask = Task { await broker.requestApproval(request) }
+        await waitUntil { vm.pendingToolApproval?.id == request.id }
+
+        vm.cancelRequest()
+        let decision = await decisionTask.value
+
+        XCTAssertNil(vm.pendingToolApproval)
+        guard case .deny = decision else {
+            return XCTFail("Cancelling a request must deny its pending approval")
+        }
     }
 
     func testToolEventsSurfaceAsToolExecutions() async {

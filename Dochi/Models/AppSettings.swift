@@ -2,10 +2,9 @@ import Foundation
 
 /// User-facing settings for the voice + character front-end.
 ///
-/// Anything about *thinking* (model choice, memory, tools) now lives in the
-/// Hermes backend, so this holds only what Dochi itself owns: how it listens
-/// (STT, wake word), how it speaks (TTS), how the avatar looks, and where the
-/// Hermes bridge is.
+/// This includes Dochi-owned presentation/voice preferences plus selection and
+/// configuration of either the in-process Swift agent or the remote Hermes
+/// bridge. Provider secrets themselves remain in Keychain, never UserDefaults.
 @MainActor
 @Observable
 final class AppSettings {
@@ -18,10 +17,19 @@ final class AppSettings {
     }
 
     init() {
-        // Normalize the persisted avatar model id once at launch.
         let defaults = UserDefaults.standard
+
+        // Normalize the persisted avatar model id once at launch.
         let normalizedModel = AvatarModelCatalog.normalizedModelID(defaults.string(forKey: "avatarModelName"))
         defaults.set(normalizedModel, forKey: "avatarModelName")
+
+        // Preserve the first native-agent build's single model preference as
+        // the selected provider's initial per-provider value before a provider
+        // switch overwrites the legacy key.
+        let modelKey = Self.nativeModelKey(for: currentNativeProviderKind)
+        if defaults.string(forKey: modelKey) == nil {
+            defaults.set(nativeModel, forKey: modelKey)
+        }
     }
 
     // MARK: - Interaction Mode
@@ -37,7 +45,8 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(chatFontSize, forKey: "chatFontSize") }
     }
 
-    /// Optional user identity passed to Hermes (for its per-user memory).
+    /// Optional identity captured when a new conversation is created and used
+    /// to isolate per-user memory in either backend.
     var defaultUserId: String = UserDefaults.standard.string(forKey: "defaultUserId") ?? "" {
         didSet { UserDefaults.standard.set(defaultUserId, forKey: "defaultUserId") }
     }
@@ -152,7 +161,67 @@ final class AppSettings {
         }
     }
 
-    // MARK: - Hermes Agent Backend
+    // MARK: - Agent Backend
+
+    var agentBackendKind: String = UserDefaults.standard.string(forKey: "agentBackendKind") ?? AgentBackendKind.native.rawValue {
+        didSet { UserDefaults.standard.set(agentBackendKind, forKey: "agentBackendKind") }
+    }
+    var currentAgentBackendKind: AgentBackendKind {
+        AgentBackendKind(rawValue: agentBackendKind) ?? .native
+    }
+
+    var nativeProviderKind: String = UserDefaults.standard.string(forKey: "nativeProviderKind") ?? NativeModelProviderKind.anthropic.rawValue {
+        didSet {
+            UserDefaults.standard.set(nativeProviderKind, forKey: "nativeProviderKind")
+            guard nativeProviderKind != oldValue else { return }
+            let provider = currentNativeProviderKind
+            nativeModel = UserDefaults.standard.string(
+                forKey: Self.nativeModelKey(for: provider)
+            ) ?? provider.defaultModel
+        }
+    }
+    var currentNativeProviderKind: NativeModelProviderKind {
+        NativeModelProviderKind(rawValue: nativeProviderKind) ?? .anthropic
+    }
+
+    var nativeModel: String = {
+        let defaults = UserDefaults.standard
+        let provider = NativeModelProviderKind(
+            rawValue: defaults.string(forKey: "nativeProviderKind") ?? ""
+        ) ?? .anthropic
+        // `nativeModel` is retained as a one-time migration source from the
+        // first native-agent build. New values are stored per provider so
+        // switching from Claude to OpenAI cannot silently keep a Claude model.
+        return defaults.string(forKey: AppSettings.nativeModelKey(for: provider))
+            ?? defaults.string(forKey: "nativeModel")
+            ?? provider.defaultModel
+    }() {
+        didSet {
+            UserDefaults.standard.set(nativeModel, forKey: "nativeModel")
+            UserDefaults.standard.set(
+                nativeModel,
+                forKey: Self.nativeModelKey(for: currentNativeProviderKind)
+            )
+        }
+    }
+
+    var nativeCompatibleBaseURL: String = UserDefaults.standard.string(forKey: "nativeCompatibleBaseURL") ?? "http://127.0.0.1:11434/v1" {
+        didSet { UserDefaults.standard.set(nativeCompatibleBaseURL, forKey: "nativeCompatibleBaseURL") }
+    }
+
+    var nativeMemoryEnabled: Bool = UserDefaults.standard.object(forKey: "nativeMemoryEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(nativeMemoryEnabled, forKey: "nativeMemoryEnabled") }
+    }
+
+    var nativeAgentInstructions: String = UserDefaults.standard.string(forKey: "nativeAgentInstructions") ?? """
+    당신은 도치입니다. 사용자의 말을 정확히 이해하고, 필요한 경우 허용된 도구와 기억을 사용하세요. 답변은 기본적으로 자연스러운 한국어로 간결하게 말하세요. 민감하거나 되돌리기 어려운 행동은 실행 전에 승인을 요청하세요.
+    """ {
+        didSet { UserDefaults.standard.set(nativeAgentInstructions, forKey: "nativeAgentInstructions") }
+    }
+
+    private static func nativeModelKey(for provider: NativeModelProviderKind) -> String {
+        "nativeModel.\(provider.rawValue)"
+    }
 
     /// Host of the local dochi-hermes-bridge WebSocket server.
     var hermesBridgeHost: String = UserDefaults.standard.string(forKey: "hermesBridgeHost") ?? "127.0.0.1" {

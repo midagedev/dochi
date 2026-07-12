@@ -1,13 +1,14 @@
+import AgentRuntimeCore
 import Foundation
 import SwiftUI
 
 /// Orchestrates the Dochi voice + 3D-character front-end.
 ///
 /// Dochi owns what the user *sees and hears* — Korean STT, TTS, and the VRM
-/// avatar's state. All reasoning, memory, and tools live in the Hermes Agent
-/// backend, reached through ``HermesAgentBridge``. The voice loop is:
+/// avatar's state. Reasoning, memory, and tools come from the selected native
+/// or remote agent backend. The voice loop is:
 ///
-///   STT (final transcript) ─▶ Hermes ─▶ streamed deltas ─▶ sentence chunker
+///   STT (final transcript) ─▶ Agent ─▶ streamed deltas ─▶ sentence chunker
 ///   ─▶ TTS (sentence-by-sentence) ─▶ avatar lip-sync ─▶ back to listening.
 @MainActor
 @Observable
@@ -27,13 +28,14 @@ final class DochiViewModel {
     var errorMessage: String?
     var currentToolName: String?
     var partialTranscript: String = ""
+    private(set) var pendingToolApproval: AgentToolApprovalRequest?
 
-    /// Tool runs surfaced by Hermes, shown inline in the transcript (UX-7).
+    /// Tool runs surfaced by the active agent, shown inline in the transcript.
     var toolExecutions: [ToolExecution] = []
 
     // MARK: - Backend Connection (mirrored for UI)
 
-    private(set) var hermesConnection: HermesConnectionState = .disconnected
+    private(set) var agentConnection: AgentBackendConnectionState = .disconnected
 
     // MARK: - TTS Fallback State (driven by TTSRouter)
 
@@ -47,7 +49,7 @@ final class DochiViewModel {
     private var ttsService: TTSServiceProtocol
     private let soundService: SoundServiceProtocol
     private let conversationService: ConversationServiceProtocol
-    let hermesBridge: HermesBridgeProtocol
+    let agentBackend: AgentBackendProtocol
 
     // MARK: - Internal
 
@@ -59,6 +61,8 @@ final class DochiViewModel {
     private var expectingMoreSpeech = false
     private var isBackgroundListening = false
     private var toolExecutionsByName: [String: ToolExecution] = [:]
+    private let approvalBroker: AgentToolApprovalBroker?
+    private var approvalRequestTask: Task<Void, Never>?
     private static let sessionEndingTimeout: TimeInterval = 10
 
     // MARK: - Computed
@@ -76,14 +80,16 @@ final class DochiViewModel {
         ttsService: TTSServiceProtocol,
         soundService: SoundServiceProtocol,
         conversationService: ConversationServiceProtocol,
-        hermesBridge: HermesBridgeProtocol
+        agentBackend: AgentBackendProtocol,
+        approvalBroker: AgentToolApprovalBroker? = nil
     ) {
         self.settings = settings
         self.speechService = speechService
         self.ttsService = ttsService
         self.soundService = soundService
         self.conversationService = conversationService
-        self.hermesBridge = hermesBridge
+        self.agentBackend = agentBackend
+        self.approvalBroker = approvalBroker
 
         self.ttsService.onComplete = { [weak self] in
             self?.handleTTSComplete()
@@ -95,22 +101,65 @@ final class DochiViewModel {
             }
         }
 
-        self.hermesConnection = hermesBridge.connectionState
-        self.hermesBridge.onConnectionStateChanged = { [weak self] state in
-            self?.hermesConnection = state
+        self.agentConnection = agentBackend.connectionState
+        self.agentBackend.onConnectionStateChanged = { [weak self] state in
+            self?.agentConnection = state
         }
-        self.hermesBridge.onProactiveMessage = { [weak self] message in
+        self.agentBackend.onProactiveMessage = { [weak self] message in
             self?.injectProactiveMessage(message)
+        }
+        if let approvalBroker {
+            let approvalRequests = approvalBroker.requests
+            approvalRequestTask = Task { [weak self] in
+                for await request in approvalRequests {
+                    guard !Task.isCancelled else { return }
+                    self?.pendingToolApproval = request
+                }
+            }
         }
     }
 
     func connectBackend() {
-        hermesBridge.connect()
+        agentBackend.connect()
     }
 
-    /// Re-point the bridge at the host/port currently in settings and reconnect.
+    /// Apply settings to the selected backend and reconnect. Native reloads its
+    /// provider and memory registration; Hermes applies the current endpoint.
     func reconnectBackend() {
-        hermesBridge.reconfigure(host: settings.hermesBridgeHost, port: settings.hermesBridgePort)
+        if interactionState == .processing {
+            cancelRequest()
+        } else {
+            denyPendingToolApproval(reason: "백엔드 설정이 변경되었습니다.")
+        }
+        agentBackend.reconfigure(host: settings.hermesBridgeHost, port: settings.hermesBridgePort)
+    }
+
+    func selectBackend(_ kind: AgentBackendKind) {
+        if interactionState == .processing {
+            cancelRequest()
+        } else {
+            denyPendingToolApproval(reason: "에이전트 백엔드가 변경되었습니다.")
+        }
+        settings.agentBackendKind = kind.rawValue
+        (agentBackend as? AgentBackendRouter)?.select(kind)
+        prepareCurrentConversationHistory()
+    }
+
+    func resolvePendingToolApproval(_ decision: AgentToolApprovalDecision) {
+        guard let request = pendingToolApproval, let approvalBroker else { return }
+        pendingToolApproval = nil
+        Task { await approvalBroker.resolve(requestID: request.id, decision: decision) }
+    }
+
+    private func denyPendingToolApproval(reason: String) {
+        guard let request = pendingToolApproval, let approvalBroker else { return }
+        pendingToolApproval = nil
+        Task {
+            await approvalBroker.resolve(
+                requestID: request.id,
+                decision: .deny(reason: reason)
+            )
+        }
     }
 
     // MARK: - State Machine
@@ -171,11 +220,12 @@ final class DochiViewModel {
         transition(to: .processing)
         processingSubState = .streaming
         processingTask = Task { [weak self] in
-            await self?.processHermesPath(input: text)
+            await self?.processAgentPath(input: text)
         }
     }
 
     func cancelRequest() {
+        denyPendingToolApproval(reason: "요청이 취소되었습니다.")
         processingTask?.cancel()
         processingTask = nil
         ttsService.stopAndClear()
@@ -185,6 +235,7 @@ final class DochiViewModel {
             appendAssistantMessage(streamingText)
             streamingText = ""
             saveConversation()
+            prepareCurrentConversationHistory()
         }
         processingSubState = nil
         currentToolName = nil
@@ -192,18 +243,21 @@ final class DochiViewModel {
         Log.app.info("Request cancelled by user")
     }
 
-    // MARK: - Hermes Streaming Path
+    // MARK: - Agent Streaming Path
 
-    private func processHermesPath(input: String) async {
+    private func processAgentPath(input: String) async {
         guard !Task.isCancelled else { return }
-        guard case .connected = hermesBridge.connectionState else {
-            errorMessage = "Hermes 에이전트에 연결되어 있지 않습니다. 브리지(dochi-hermes-bridge)가 실행 중인지 확인해주세요."
+        guard case .connected = agentBackend.connectionState else {
+            errorMessage = "에이전트에 연결되어 있지 않습니다. 설정에서 백엔드와 자격 증명을 확인해주세요."
             failTurn()
             return
         }
 
         let conversationId = currentConversation?.id.uuidString ?? UUID().uuidString
-        let user = settings.defaultUserId.isEmpty ? nil : settings.defaultUserId
+        // A conversation keeps the identity it was created with. Re-reading a
+        // mutable global default here could expose one user's history or
+        // memory scope after the preference changes.
+        let user = Self.normalizedUserID(currentConversation?.userId)
 
         streamingText = ""
         sentenceChunker = SentenceChunker()
@@ -213,7 +267,7 @@ final class DochiViewModel {
         var startedSpeaking = false
 
         do {
-            for try await event in hermesBridge.send(text: input, conversationId: conversationId, user: user) {
+            for try await event in agentBackend.send(text: input, conversationId: conversationId, user: user) {
                 guard !Task.isCancelled else { break }
                 switch event {
                 case .delta(let chunk):
@@ -238,12 +292,13 @@ final class DochiViewModel {
                     if !text.isEmpty { fullText = text }
                 }
             }
+            try Task.checkCancellation()
         } catch is CancellationError {
             // handled by cancelRequest()
             return
         } catch {
             errorMessage = error.localizedDescription
-            Log.app.error("Hermes path error: \(error.localizedDescription)")
+            Log.app.error("Agent path error: \(error.localizedDescription)")
         }
 
         expectingMoreSpeech = false
@@ -257,6 +312,9 @@ final class DochiViewModel {
         appendAssistantMessage(fullText)
         streamingText = ""
         saveConversation()
+        // The visible transcript is the durable source of truth. Opaque
+        // provider state is reattached only from a verified checkpoint.
+        prepareCurrentConversationHistory()
 
         if startedSpeaking {
             // Speech queued. If audio is still playing, handleTTSComplete()
@@ -423,7 +481,7 @@ final class DochiViewModel {
         transition(to: .processing)
         processingSubState = .streaming
         processingTask = Task { [weak self] in
-            await self?.processHermesPath(input: cleanedText)
+            await self?.processAgentPath(input: cleanedText)
         }
     }
 
@@ -574,9 +632,13 @@ final class DochiViewModel {
     // MARK: - Conversation CRUD
 
     func newConversation() {
+        if interactionState == .processing || interactionState == .speaking {
+            cancelRequest()
+        }
         currentConversation = Conversation(userId: settings.defaultUserId.isEmpty ? nil : settings.defaultUserId)
         streamingText = ""
         toolExecutions = []
+        prepareCurrentConversationHistory()
     }
 
     func loadConversations() {
@@ -584,13 +646,30 @@ final class DochiViewModel {
     }
 
     func selectConversation(id: UUID) {
+        if interactionState == .processing || interactionState == .speaking {
+            cancelRequest()
+        }
         guard let conversation = conversationService.load(id: id) else { return }
         currentConversation = conversation
         toolExecutions = []
+        prepareCurrentConversationHistory()
     }
 
     func deleteConversation(id: UUID) {
+        let deletedUser = Self.normalizedUserID(
+            currentConversation?.id == id
+                ? currentConversation?.userId
+                : conversationService.load(id: id)?.userId
+        )
+        if currentConversation?.id == id,
+           (interactionState == .processing || interactionState == .speaking) {
+            cancelRequest()
+        }
         conversationService.delete(id: id)
+        agentBackend.removeConversationHistory(
+            conversationId: id.uuidString,
+            user: deletedUser
+        )
         if currentConversation?.id == id { newConversation() }
         loadConversations()
     }
@@ -598,7 +677,32 @@ final class DochiViewModel {
     private func ensureConversation() {
         if currentConversation == nil {
             currentConversation = Conversation(userId: settings.defaultUserId.isEmpty ? nil : settings.defaultUserId)
+            prepareCurrentConversationHistory()
         }
+    }
+
+    private func prepareCurrentConversationHistory() {
+        guard let conversation = currentConversation else { return }
+        let history = conversation.messages.compactMap { message -> DochiAgentHistoryMessage? in
+            switch message.role {
+            case .user:
+                return DochiAgentHistoryMessage(role: .user, text: message.content)
+            case .assistant:
+                return DochiAgentHistoryMessage(role: .assistant, text: message.content)
+            case .system, .tool:
+                return nil
+            }
+        }
+        agentBackend.replaceConversationHistory(
+            history,
+            conversationId: conversation.id.uuidString,
+            user: Self.normalizedUserID(conversation.userId)
+        )
+    }
+
+    private static func normalizedUserID(_ value: String?) -> String? {
+        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized?.isEmpty == false ? normalized : nil
     }
 
     private func appendUserMessage(_ text: String, imageData: [ImageContent]? = nil) {

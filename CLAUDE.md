@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+> **현행 아키텍처 정본:** [`spec/native-agent-runtime.md`](./spec/native-agent-runtime.md). Dochi의 기본
+> 백엔드는 이제 인프로세스 Swift `AgentRuntimeKit`이며, macOS의 Hermes bridge는 선택 경로다.
+> 아래의 Hermes-only 제품 정의·구조 설명은 이전 재초점의 역사적 기록이므로 현행 동작 판단에
+> 사용하지 않는다. 빌드 명령과 Swift/XcodeGen 개발 규칙은 계속 유효하다.
+
 ## 제품 정의
 
 **Dochi는 [Hermes Agent](https://github.com/NousResearch/hermes-agent)의 음성·캐릭터 프론트엔드입니다.**

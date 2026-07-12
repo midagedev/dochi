@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.hckim
   deploymentTarget:
     macOS: "14.0"
+    iOS: "17.0"
   createIntermediateGroups: true
 
 packages:
@@ -12,6 +13,8 @@ packages:
   VRMKit:
     url: https://github.com/tattn/VRMKit.git
     from: "0.5.0"
+  AgentRuntimeKit:
+    path: ../AgentRuntimeKit
 
 targets:
   Dochi:
@@ -46,6 +49,14 @@ targets:
         product: VRMKit
       - package: VRMKit
         product: VRMRealityKit
+      - package: AgentRuntimeKit
+        product: AgentRuntimeCore
+      - package: AgentRuntimeKit
+        product: AgentRuntimeProviders
+      - package: AgentRuntimeKit
+        product: AgentRuntimeMemory
+      - package: AgentRuntimeKit
+        product: AgentRuntimeApple
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi
@@ -67,9 +78,97 @@ targets:
       - path: DochiTests
     dependencies:
       - target: Dochi
+      - package: AgentRuntimeKit
+        product: AgentRuntimeTestKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi.tests
         SWIFT_VERSION: "6.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
+
+  DochiMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: DochiMobile
+        excludes:
+          - Info.plist
+          - PrivacyInfo.xcprivacy
+          - Resources
+      - path: DochiMobile/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: DochiMobile/Resources/Assets.xcassets
+        buildPhase: resources
+    info:
+      path: DochiMobile/Info.plist
+      properties:
+        CFBundleDisplayName: 도치
+        NSMicrophoneUsageDescription: "도치에게 말로 메시지를 입력할 때 마이크를 사용합니다."
+        NSSpeechRecognitionUsageDescription: "도치에게 말한 내용을 메시지 텍스트로 바꾸기 위해 음성 인식을 사용합니다."
+        NSLocalNetworkUsageDescription: "사용자가 직접 설정한 이 기기의 OpenAI 호환 모델 서버에 연결할 때 사용합니다."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        "UISupportedInterfaceOrientations~ipad":
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    dependencies:
+      - package: AgentRuntimeKit
+        product: AgentRuntimeCore
+      - package: AgentRuntimeKit
+        product: AgentRuntimeProviders
+      - package: AgentRuntimeKit
+        product: AgentRuntimeMemory
+      - package: AgentRuntimeKit
+        product: AgentRuntimeApple
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi.mobile
+        PRODUCT_NAME: DochiMobile
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: XEF9KH7N43
+        SWIFT_STRICT_CONCURRENCY: targeted
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  DochiMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: DochiMobileTests
+    dependencies:
+      - target: DochiMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi.mobile.tests
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        GENERATE_INFOPLIST_FILE: YES
+
+  DochiMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: DochiMobileUITests
+    dependencies:
+      - target: DochiMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hckim.dochi.mobile.uitests
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: DochiMobile
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: XEF9KH7N43
+        SWIFT_STRICT_CONCURRENCY: targeted

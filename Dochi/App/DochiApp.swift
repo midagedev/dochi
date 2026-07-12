@@ -1,3 +1,4 @@
+import AgentRuntimeCore
 import SwiftUI
 import AppKit
 
@@ -37,11 +38,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Dochi — a voice + 3D-character front-end for a Hermes Agent backend.
+/// Dochi — a voice + character front-end with a native Swift agent runtime and
+/// an optional remote Hermes backend.
 ///
 /// The app keeps only what it does best: Korean speech recognition, local/cloud
-/// TTS, and a VRM avatar. Reasoning, memory, and tools come from Hermes through
-/// ``HermesAgentBridge`` (see `HermesBridge/` for the Python side).
+/// TTS, and a VRM avatar. Reasoning, governed memory, and tools run in-process by
+/// default through AgentRuntimeKit.
 @main
 struct DochiApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -59,9 +61,25 @@ struct DochiApp: App {
         let ttsModelDownloadManager = ModelDownloadManager()
         let soundService = SoundService()
         let conversationService = ConversationService()
+        let approvalBroker = AgentToolApprovalBroker()
+        let nativeBackend: AgentBackendProtocol
+        do {
+            nativeBackend = try DochiNativeAgentAssembly.make(
+                settings: settings,
+                approvalBroker: approvalBroker
+            )
+        } catch {
+            Log.app.error("Native agent assembly failed: \(error.localizedDescription)")
+            nativeBackend = UnavailableAgentBackend(error: error)
+        }
         let hermesBridge = HermesAgentBridge(
             host: settings.hermesBridgeHost,
             port: settings.hermesBridgePort
+        )
+        let agentBackend = AgentBackendRouter(
+            selectedKind: settings.currentAgentBackendKind,
+            native: nativeBackend,
+            hermes: hermesBridge
         )
 
         self.settings = settings
@@ -75,7 +93,8 @@ struct DochiApp: App {
             ttsService: ttsService,
             soundService: soundService,
             conversationService: conversationService,
-            hermesBridge: hermesBridge
+            agentBackend: agentBackend,
+            approvalBroker: approvalBroker
         )
         _viewModel = State(initialValue: viewModel)
     }
