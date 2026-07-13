@@ -8,7 +8,19 @@ final class KeychainService: KeychainServiceProtocol {
 
     func save(account: String, value: String) throws {
         guard let data = value.data(using: .utf8) else { return }
-        let status = saveToKeychain(account: account, data: data)
+        let itemQuery = query(account: account)
+        let updateStatus = SecItemUpdate(
+            itemQuery as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        let status: OSStatus
+        if updateStatus == errSecItemNotFound {
+            var newItem = itemQuery
+            newItem[kSecValueData as String] = data
+            status = SecItemAdd(newItem as CFDictionary, nil)
+        } else {
+            status = updateStatus
+        }
 
         guard status == errSecSuccess else {
             Log.storage.error("Keychain save failed for \(account): \(status)")
@@ -17,50 +29,30 @@ final class KeychainService: KeychainServiceProtocol {
     }
 
     func load(account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+        var lookup = query(account: account)
+        lookup[kSecReturnData as String] = true
+        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecSuccess, let data = result as? Data {
-            return String(data: data, encoding: .utf8)
-        }
-        return nil
+        let status = SecItemCopyMatching(lookup as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     func delete(account: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-
+        let status = SecItemDelete(query(account: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             Log.storage.error("Keychain delete failed for \(account): \(status)")
             throw KeychainError.deleteFailed(status)
         }
     }
 
-    private func saveToKeychain(account: String, data: Data) -> OSStatus {
-        let deleteQuery: [String: Any] = [
+    private func query(account: String) -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(deleteQuery as CFDictionary)
-
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: data,
-        ]
-        return SecItemAdd(addQuery as CFDictionary, nil)
     }
 }
 

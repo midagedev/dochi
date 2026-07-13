@@ -1,9 +1,10 @@
+import AgentRuntimeCore
 import SwiftUI
 
 /// The single main window: a VRM avatar on top, the conversation transcript in
 /// the middle, and a voice/text input bar at the bottom. Everything the user
-/// says is transcribed locally and sent to Hermes; replies stream back as text
-/// (shown here) and speech (spoken by the avatar).
+/// says is transcribed locally and sent to the selected agent backend; replies
+/// stream back as text (shown here) and speech (spoken by the avatar).
 struct ContentView: View {
     @Bindable var viewModel: DochiViewModel
 
@@ -23,9 +24,102 @@ struct ContentView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+        .confirmationDialog(
+            "도구 실행 승인",
+            isPresented: toolApprovalBinding,
+            titleVisibility: .visible
+        ) {
+            Button("한 번 허용") {
+                viewModel.resolvePendingToolApproval(.allowOnce)
+            }
+            if let request = viewModel.pendingToolApproval,
+               allowsSessionApproval(request) {
+                Button("이번 대화에서 허용") {
+                    viewModel.resolvePendingToolApproval(.allowForSession)
+                }
+            }
+            Button("거부", role: .cancel) {
+                viewModel.resolvePendingToolApproval(.deny(reason: "사용자가 거부했습니다."))
+            }
+        } message: {
+            if let request = viewModel.pendingToolApproval {
+                Text(toolApprovalMessage(for: request))
+                    .privacySensitive()
+            }
+        }
     }
 
     // MARK: Header
+
+    private var toolApprovalBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.pendingToolApproval != nil },
+            set: { isPresented in
+                if !isPresented, viewModel.pendingToolApproval != nil {
+                    viewModel.resolvePendingToolApproval(.deny(reason: "승인 창을 닫았습니다."))
+                }
+            }
+        )
+    }
+
+    private func allowsSessionApproval(_ request: AgentToolApprovalRequest) -> Bool {
+        request.call.name != "memory.persist_sensitive"
+            && request.descriptor.risk != .restricted
+            && request.descriptor.sideEffect != .nonIdempotent
+    }
+
+    private func toolApprovalMessage(for request: AgentToolApprovalRequest) -> String {
+        var lines = [
+            approvalToolName(request.call.name),
+            request.descriptor.description,
+        ]
+
+        switch request.descriptor.risk {
+        case .safe:
+            break
+        case .sensitive:
+            lines.append("민감한 데이터에 접근하거나 변경할 수 있습니다.")
+        case .restricted:
+            lines.append("제한된 기능입니다. 실행 결과를 되돌리기 어려울 수 있습니다.")
+        }
+
+        switch request.descriptor.sideEffect {
+        case .none:
+            break
+        case .idempotent:
+            lines.append("같은 요청을 다시 실행해도 결과가 중복되지 않는 변경입니다.")
+        case .nonIdempotent:
+            lines.append("외부 상태를 변경하며 반복 실행 시 결과가 달라질 수 있습니다.")
+        }
+
+        if request.call.name == "memory.persist_sensitive" {
+            let scope = request.call.arguments["scope"]?.stringValue ?? "알 수 없음"
+            let kind = request.call.arguments["kind"]?.stringValue ?? "알 수 없음"
+            let sensitivity = request.call.arguments["sensitivity"]?.stringValue ?? "알 수 없음"
+            lines.append("기억 범위: \(scope) · 종류: \(kind) · 민감도: \(sensitivity)")
+            if let content = request.call.arguments["content"]?.stringValue {
+                let previewLimit = 400
+                let preview = content.count > previewLimit
+                    ? String(content.prefix(previewLimit)) + "…"
+                    : content
+                lines.append("저장할 내용: \(preview)")
+            }
+            lines.append("위 내용은 이 승인 화면에만 표시되며 감사 로그에는 기록되지 않습니다.")
+        }
+
+        if !request.reason.isEmpty {
+            lines.append("승인 사유: \(request.reason)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func approvalToolName(_ name: String) -> String {
+        switch name {
+        case "memory.persist_sensitive": "민감한 장기 기억 저장"
+        case "memory.archive": "장기 기억 보관 처리"
+        default: "도구: \(name)"
+        }
+    }
 
     private var header: some View {
         HStack(spacing: 8) {
@@ -39,6 +133,7 @@ struct ContentView: View {
                 Image(systemName: "square.and.pencil")
             }
             .buttonStyle(.borderless)
+            .disabled(viewModel.interactionState != .idle || viewModel.pendingToolApproval != nil)
             .help("새 대화")
         }
         .padding(.horizontal, 12)
@@ -47,8 +142,8 @@ struct ContentView: View {
 
     private var connectionBadge: some View {
         let (text, color): (String, Color) = {
-            switch viewModel.hermesConnection {
-            case .connected(let persona): return (persona.map { "Hermes · \($0)" } ?? "Hermes 연결됨", .green)
+            switch viewModel.agentConnection {
+            case .connected(let name): return (name.map { "\($0) 연결됨" } ?? "에이전트 연결됨", .green)
             case .connecting: return ("연결 중…", .orange)
             case .disconnected: return ("연결 끊김", .secondary)
             case .failed: return ("연결 실패", .red)
@@ -58,7 +153,7 @@ struct ContentView: View {
             Circle().fill(color).frame(width: 7, height: 7)
             Text(text).font(.caption).foregroundStyle(.secondary)
         }
-        .help("Hermes 백엔드(dochi-hermes-bridge) 연결 상태")
+        .help("선택한 에이전트 백엔드 연결 상태")
     }
 
     // MARK: Avatar

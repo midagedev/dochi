@@ -9,17 +9,28 @@ request's `correlation_id`.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 from typing import Any, Optional
 
 import websockets
-from websockets.server import WebSocketServerProtocol
+from websockets.asyncio.server import ServerConnection
 
 from . import protocol
 from .runtime import HermesRuntimeProtocol
 
 log = logging.getLogger("dochi_hermes_bridge.server")
+
+
+def is_loopback_host(host: str) -> bool:
+    normalized = host.strip().lower().strip("[]")
+    if normalized == "localhost" or normalized.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 class BridgeServer:
@@ -31,12 +42,21 @@ class BridgeServer:
         host: str = "127.0.0.1",
         port: int = 8765,
     ) -> None:
+        if not is_loopback_host(host):
+            raise ValueError(
+                "BridgeServer only binds to loopback. Use a TLS reverse proxy "
+                "for remote access."
+            )
         self._runtime = runtime
         self._token = token
         self._host = host
         self._port = port
-        # correlation_id -> Task, so `cancel` frames can interrupt a reply.
-        self._inflight: dict[str, asyncio.Task[None]] = {}
+        # correlation_id -> (owning socket, Task). Ownership prevents one
+        # client from cancelling another client's request and lets disconnect
+        # reliably tear down every request started by that socket.
+        self._inflight: dict[
+            str, tuple[ServerConnection, asyncio.Task[None]]
+        ] = {}
 
     async def serve_forever(self) -> None:
         log.info("Dochi-Hermes bridge listening on ws://%s:%d", self._host, self._port)
@@ -50,7 +70,7 @@ class BridgeServer:
         ):
             await asyncio.Future()  # run until cancelled
 
-    async def _handle_client(self, ws: WebSocketServerProtocol) -> None:
+    async def _handle_client(self, ws: ServerConnection) -> None:
         peer = ws.remote_address
         log.info("client connected: %s", peer)
         authed = False
@@ -85,6 +105,7 @@ class BridgeServer:
         except websockets.ConnectionClosed:
             pass
         finally:
+            await self._cancel_client_requests(ws)
             log.info("client disconnected: %s", peer)
 
     async def _ensure_runtime_started(self) -> None:
@@ -98,17 +119,17 @@ class BridgeServer:
         except Exception as exc:  # noqa: BLE001 - still allow the session
             log.warning("runtime warm-up failed: %s", exc)
 
-    async def _dispatch(self, ws: WebSocketServerProtocol, ftype: Optional[str], frame: dict[str, Any]) -> None:
+    async def _dispatch(self, ws: ServerConnection, ftype: Optional[str], frame: dict[str, Any]) -> None:
         if ftype == "ping":
             await self._send(ws, protocol.pong())
         elif ftype == "user_message":
             await self._start_message(ws, frame)
         elif ftype == "cancel":
-            self._cancel(frame.get("correlation_id"))
+            self._cancel(ws, frame.get("correlation_id"))
         else:
             await self._send(ws, protocol.error(f"unknown frame type: {ftype}"))
 
-    async def _start_message(self, ws: WebSocketServerProtocol, frame: dict[str, Any]) -> None:
+    async def _start_message(self, ws: ServerConnection, frame: dict[str, Any]) -> None:
         correlation_id = frame.get("correlation_id")
         text = (frame.get("text") or "").strip()
         if not correlation_id:
@@ -117,14 +138,19 @@ class BridgeServer:
         if not text:
             await self._send(ws, protocol.error("empty text", correlation_id))
             return
+        if correlation_id in self._inflight:
+            await self._send(ws, protocol.error("duplicate correlation_id", correlation_id))
+            return
 
         task = asyncio.create_task(self._run_message(ws, correlation_id, frame, text))
-        self._inflight[correlation_id] = task
-        task.add_done_callback(lambda _t: self._inflight.pop(correlation_id, None))
+        self._inflight[correlation_id] = (ws, task)
+        task.add_done_callback(
+            lambda completed: self._forget_if_current(correlation_id, completed)
+        )
 
     async def _run_message(
         self,
-        ws: WebSocketServerProtocol,
+        ws: ServerConnection,
         correlation_id: str,
         frame: dict[str, Any],
         text: str,
@@ -159,14 +185,41 @@ class BridgeServer:
             log.exception("runtime error for %s", correlation_id)
             await self._send(ws, protocol.error(str(exc), correlation_id))
 
-    def _cancel(self, correlation_id: Optional[str]) -> None:
+    def _cancel(
+        self,
+        ws: ServerConnection,
+        correlation_id: Optional[str],
+    ) -> None:
         if not correlation_id:
             return
-        task = self._inflight.get(correlation_id)
-        if task and not task.done():
+        entry = self._inflight.get(correlation_id)
+        if entry is None:
+            return
+        owner, task = entry
+        if owner is ws and not task.done():
             task.cancel()
 
-    async def _send(self, ws: WebSocketServerProtocol, payload: dict[str, Any]) -> None:
+    def _forget_if_current(
+        self,
+        correlation_id: str,
+        completed: asyncio.Task[None],
+    ) -> None:
+        entry = self._inflight.get(correlation_id)
+        if entry is not None and entry[1] is completed:
+            self._inflight.pop(correlation_id, None)
+
+    async def _cancel_client_requests(self, ws: ServerConnection) -> None:
+        owned = [
+            task
+            for owner, task in self._inflight.values()
+            if owner is ws and not task.done()
+        ]
+        for task in owned:
+            task.cancel()
+        if owned:
+            await asyncio.gather(*owned, return_exceptions=True)
+
+    async def _send(self, ws: ServerConnection, payload: dict[str, Any]) -> None:
         try:
             await ws.send(json.dumps(payload, ensure_ascii=False))
         except websockets.ConnectionClosed:

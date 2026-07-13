@@ -26,5 +26,17 @@
 	<string>음성 인식을 위해 마이크 접근이 필요합니다.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>음성 명령을 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.</string>
+	<key>NSUbiquitousContainers</key>
+	<dict>
+		<key>iCloud.com.hckim.dochi</key>
+		<dict>
+			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
+			<true/>
+			<key>NSUbiquitousContainerName</key>
+			<string>Dochi</string>
+			<key>NSUbiquitousContainerSupportedFolderLevels</key>
+			<string>Any</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

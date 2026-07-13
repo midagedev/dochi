@@ -89,21 +89,54 @@ final class MockKeychainService: KeychainServiceProtocol {
 }
 
 @MainActor
-final class MockHermesBridge: HermesBridgeProtocol {
-    var connectionState: HermesConnectionState = .connected(persona: "테스트")
+final class MockHermesBridge: AgentBackendProtocol {
+    var connectionState: AgentBackendConnectionState = .connected(name: "테스트")
     var onProactiveMessage: (@MainActor (String) -> Void)?
-    var onConnectionStateChanged: (@MainActor (HermesConnectionState) -> Void)?
+    var onConnectionStateChanged: (@MainActor (AgentBackendConnectionState) -> Void)?
 
     /// Scripted events to emit for the next `send`.
-    var scriptedEvents: [HermesEvent] = []
+    var scriptedEvents: [DochiAgentEvent] = []
     private(set) var sentMessages: [String] = []
+    private(set) var sentUsers: [String?] = []
+    private(set) var connectCallCount = 0
+    private(set) var disconnectCallCount = 0
+    private(set) var reconfigureCallCount = 0
+    private(set) var preparedHistories: [String: [DochiAgentHistoryMessage]] = [:]
+    private(set) var removedConversationIDs: [String] = []
 
-    func connect() { connectionState = .connected(persona: "테스트"); onConnectionStateChanged?(connectionState) }
-    func disconnect() { connectionState = .disconnected; onConnectionStateChanged?(connectionState) }
-    func reconfigure(host: String, port: Int) { connect() }
+    func connect() {
+        connectCallCount += 1
+        connectionState = .connected(name: "테스트")
+        onConnectionStateChanged?(connectionState)
+    }
 
-    func send(text: String, conversationId: String, user: String?) -> AsyncThrowingStream<HermesEvent, Error> {
+    func disconnect() {
+        disconnectCallCount += 1
+        connectionState = .disconnected
+        onConnectionStateChanged?(connectionState)
+    }
+
+    func reconfigure(host: String, port: Int) {
+        reconfigureCallCount += 1
+        connect()
+    }
+
+    func replaceConversationHistory(
+        _ history: [DochiAgentHistoryMessage],
+        conversationId: String,
+        user: String?
+    ) {
+        preparedHistories[conversationId] = history
+    }
+
+    func removeConversationHistory(conversationId: String, user: String?) {
+        removedConversationIDs.append(conversationId)
+        preparedHistories[conversationId] = nil
+    }
+
+    func send(text: String, conversationId: String, user: String?) -> AsyncThrowingStream<DochiAgentEvent, Error> {
         sentMessages.append(text)
+        sentUsers.append(user)
         let events = scriptedEvents
         return AsyncThrowingStream { continuation in
             for event in events { continuation.yield(event) }
@@ -112,4 +145,9 @@ final class MockHermesBridge: HermesBridgeProtocol {
     }
 
     func emitProactive(_ text: String) { onProactiveMessage?(text) }
+
+    func emitConnectionState(_ state: AgentBackendConnectionState) {
+        connectionState = state
+        onConnectionStateChanged?(state)
+    }
 }

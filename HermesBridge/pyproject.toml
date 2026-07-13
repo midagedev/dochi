@@ -11,7 +11,7 @@ dependencies = [
 [project.optional-dependencies]
 # Pull in Hermes itself for production use. Echo mode needs none of this.
 hermes = [
-    "hermes-agent",
+    "hermes-agent>=0.15.2,<0.16",
 ]
 
 [project.scripts]

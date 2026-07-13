@@ -1,0 +1,78 @@
+name: Agent Runtime Full Verification
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 17 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "Dochi/Services/Agent/**"
+      - "Dochi/Services/Hermes/**"
+      - "DochiMobile/**"
+      - "HermesBridge/**"
+      - "project.yml"
+      - ".github/workflows/agent-runtime-full.yml"
+
+concurrency:
+  group: agent-runtime-full
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  full-verification:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Run all macOS tests
+        run: |
+          xcodebuild test \
+            -project Dochi.xcodeproj \
+            -scheme Dochi \
+            -destination 'platform=macOS' \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_ENTITLEMENTS= \
+            DEVELOPMENT_TEAM=
+
+      - name: Select iOS Simulator
+        run: |
+          SIMULATOR_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for values in data["devices"].values() for d in values if "iPhone" in d["name"]))')"
+          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+
+      - name: Run iOS unit tests
+        run: |
+          xcodebuild test \
+            -project Dochi.xcodeproj \
+            -scheme DochiMobile \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -only-testing:DochiMobileTests \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build iOS device artifact
+        run: |
+          xcodebuild build \
+            -project Dochi.xcodeproj \
+            -scheme DochiMobile \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Run Hermes echo and real-loop mock tests
+        working-directory: HermesBridge
+        run: |
+          python3 -m venv .ci-venv
+          .ci-venv/bin/pip install -e ".[hermes]"
+          .ci-venv/bin/pip install pytest
+          PYTHONPATH=. .ci-venv/bin/python -m pytest \
+            tests/test_echo_roundtrip.py \
+            tests/test_hermes_roundtrip.py

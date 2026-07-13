@@ -17,7 +17,7 @@ import logging
 import os
 
 from .runtime import EchoRuntime, HermesRuntime
-from .server import BridgeServer
+from .server import BridgeServer, is_loopback_host
 from .token import TOKEN_PATH, resolve_token
 
 
@@ -36,7 +36,13 @@ def _parse_args() -> argparse.Namespace:
                         help="provider hint passed to Hermes")
     parser.add_argument("--user-name", default=os.environ.get("HERMES_USER_NAME"))
     parser.add_argument("--log-level", default="INFO")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not is_loopback_host(args.host):
+        parser.error(
+            "--host must be a loopback address. For remote access keep the "
+            "bridge on loopback and expose it through a TLS reverse proxy."
+        )
+    return args
 
 
 async def _amain(args: argparse.Namespace) -> None:

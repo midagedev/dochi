@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+> **현행 아키텍처 정본:** [`spec/native-agent-runtime.md`](./spec/native-agent-runtime.md). Dochi의 기본
+> 백엔드는 이제 인프로세스 Swift `AgentRuntimeKit`이며, macOS의 Hermes bridge는 선택 경로다.
+> 아래의 Hermes-only 제품 정의·구조 설명은 이전 재초점의 역사적 기록이므로 현행 동작 판단에
+> 사용하지 않는다. 빌드 명령과 Swift/XcodeGen 개발 규칙은 계속 유효하다.
+
 ## 제품 정의
 
 **Dochi는 [Hermes Agent](https://github.com/NousResearch/hermes-agent)의 음성·캐릭터 프론트엔드입니다.**
@@ -28,7 +33,7 @@ open ~/Library/Developer/Xcode/DerivedData/Dochi-*/Build/Products/Debug/Dochi.ap
 cd HermesBridge
 python -m venv .venv && source .venv/bin/activate
 pip install -e .                      # 브리지만 (echo 모드 가능)
-pip install hermes-agent              # 실제 Hermes (Nous Research, 검증: 0.15.2)
+pip install -e ".[hermes]"           # 호환 범위로 고정된 실제 Hermes (검증: 0.15.2)
 python -m dochi_hermes_bridge --echo  # Hermes 없이 음성 파이프라인 검증
 hermes setup                          # Hermes에 LLM 프로바이더 1회 설정 (또는 hermes model)
 python -m dochi_hermes_bridge         # 설치/설정된 Hermes Agent 구동
@@ -41,6 +46,8 @@ PYTHONPATH=. python tests/test_hermes_roundtrip.py   # 풀스택: 브리지→�
 실제 연동은 `run_agent.AIAgent(...).run_conversation(...)`를 사용하며 Hermes의
 `stream_delta_callback`/`tool_start_callback`/`tool_complete_callback`을 브리지 이벤트로 매핑(`runtime.py`).
 LLM 프로바이더 미설정 시 `No LLM provider configured. Run \`hermes model\`…` 에러로 안내됩니다.
+Python 브리지는 loopback에만 bind한다. 원격 연결은 TLS reverse proxy를 앞에 두고 Dochi에
+`wss://` 주소를 설정해야 하며, 원격 `ws://`는 클라이언트에서 거부한다.
 
 ## Code Structure
 

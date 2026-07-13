@@ -210,8 +210,32 @@ class HermesRuntime:
         async with self._lock:
             self._loop = asyncio.get_running_loop()
             self._active_emit = emit
+            worker = asyncio.create_task(
+                asyncio.to_thread(self._agent.run_conversation, text)
+            )
             try:
-                result = await asyncio.to_thread(self._agent.run_conversation, text)
+                # Shield the worker so cancellation of the WebSocket request
+                # does not orphan an untracked thread that continues mutating
+                # the shared Hermes session.
+                result = await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                interrupt = getattr(self._agent, "interrupt", None)
+                if callable(interrupt):
+                    try:
+                        await asyncio.to_thread(
+                            interrupt,
+                            "Dochi bridge request cancelled",
+                        )
+                    except Exception as exc:  # noqa: BLE001 - preserve cancellation
+                        log.warning("failed to interrupt Hermes worker: %s", exc)
+                # Keep the serialization lock until the worker acknowledges
+                # the interrupt. This prevents a new turn from racing the old
+                # thread against the same AIAgent instance.
+                try:
+                    await asyncio.shield(worker)
+                except Exception:  # noqa: BLE001 - cancellation remains authoritative
+                    pass
+                raise
             finally:
                 self._active_emit = None
         if isinstance(result, dict):
