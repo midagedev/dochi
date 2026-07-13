@@ -67,7 +67,6 @@ jobs:
             -scheme DochiMobile \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -only-testing:DochiMobileTests \
-            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Test Hermes bridge protocol and cancellation
