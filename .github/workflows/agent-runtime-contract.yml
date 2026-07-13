@@ -47,10 +47,12 @@ jobs:
             -destination 'platform=macOS' \
             -only-testing:DochiTests/DochiNativeAgentAssemblyTests \
             -only-testing:DochiTests/NativeAgentBackendTests \
+            -only-testing:DochiTests/DochiFileMemoryControllerTests \
             -only-testing:DochiTests/AgentBackendRouterTests \
             -only-testing:DochiTests/HermesAgentBridgeTests \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_ENTITLEMENTS= \
             DEVELOPMENT_TEAM=
 
       - name: Select iOS Simulator

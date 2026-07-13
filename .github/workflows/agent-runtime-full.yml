@@ -42,6 +42,7 @@ jobs:
             -destination 'platform=macOS' \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_ENTITLEMENTS= \
             DEVELOPMENT_TEAM=
 
       - name: Select iOS Simulator
