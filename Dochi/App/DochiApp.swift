@@ -52,6 +52,7 @@ struct DochiApp: App {
     private let keychainService: KeychainService
     private let ttsService: TTSRouter
     private let ttsModelDownloadManager: ModelDownloadManager
+    private let fileMemoryController: DochiFileMemoryController?
 
     init() {
         let settings = AppSettings()
@@ -63,14 +64,18 @@ struct DochiApp: App {
         let conversationService = ConversationService()
         let approvalBroker = AgentToolApprovalBroker()
         let nativeBackend: AgentBackendProtocol
+        let fileMemoryController: DochiFileMemoryController?
         do {
-            nativeBackend = try DochiNativeAgentAssembly.make(
+            let backend = try DochiNativeAgentAssembly.make(
                 settings: settings,
                 approvalBroker: approvalBroker
             )
+            nativeBackend = backend
+            fileMemoryController = backend.fileMemoryController
         } catch {
             Log.app.error("Native agent assembly failed: \(error.localizedDescription)")
             nativeBackend = UnavailableAgentBackend(error: error)
+            fileMemoryController = nil
         }
         let hermesBridge = HermesAgentBridge(
             host: settings.hermesBridgeHost,
@@ -86,6 +91,7 @@ struct DochiApp: App {
         self.keychainService = keychainService
         self.ttsService = ttsService
         self.ttsModelDownloadManager = ttsModelDownloadManager
+        self.fileMemoryController = fileMemoryController
 
         let viewModel = DochiViewModel(
             settings: settings,
@@ -118,7 +124,8 @@ struct DochiApp: App {
                 keychainService: keychainService,
                 ttsService: ttsService,
                 downloadManager: ttsModelDownloadManager,
-                viewModel: viewModel
+                viewModel: viewModel,
+                fileMemoryController: fileMemoryController
             )
         }
     }

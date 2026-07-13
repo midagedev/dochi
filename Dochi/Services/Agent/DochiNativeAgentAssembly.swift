@@ -50,6 +50,18 @@ enum DochiNativeAgentAssembly {
             })
         )
         let memoryContext = MemoryContextProvider(store: memoryStore)
+        let fileMemoryController = DochiFileMemoryController(
+            appID: appID,
+            store: memoryStore,
+            localRootURL: supportDirectory.appendingPathComponent("FileMemory", isDirectory: true),
+            preferencesProvider: {
+                DochiFileMemoryPreferences(
+                    memoryEnabled: settings.nativeMemoryEnabled,
+                    fileMemoryEnabled: settings.nativeFileMemoryEnabled,
+                    location: settings.currentNativeFileMemoryLocation
+                )
+            }
+        )
 
         return NativeAgentBackend(
             runtime: runtime,
@@ -66,25 +78,83 @@ enum DochiNativeAgentAssembly {
                 )
             },
             configurationReloader: {
+                await fileMemoryController.synchronize()
+                try await configureMemoryRegistration(
+                    shouldEnable: settings.nativeMemoryEnabled
+                        && fileMemoryController.allowsMemoryAccess,
+                    runtime: runtime,
+                    context: memoryContext,
+                    bundle: memoryBundle,
+                    registry: toolRegistry
+                )
                 try await registerProviders(
                     settings: settings,
                     registry: providerRegistry,
                     secretStore: secretStore,
                     credentialResolver: credentialResolver
                 )
-                if settings.nativeMemoryEnabled {
-                    await runtime.contexts.register(memoryContext)
-                    for tool in memoryBundle.tools {
-                        try await toolRegistry.replace(tool)
-                    }
-                } else {
-                    await runtime.contexts.remove(identifier: memoryContext.identifier)
-                    for name in ["memory.save", "memory.search", "memory.archive"] {
-                        await toolRegistry.remove(named: name)
-                    }
+            },
+            preRunHook: {
+                await fileMemoryController.synchronize()
+                do {
+                    try await configureMemoryRegistration(
+                        shouldEnable: settings.nativeMemoryEnabled
+                            && fileMemoryController.allowsMemoryAccess,
+                        runtime: runtime,
+                        context: memoryContext,
+                        bundle: memoryBundle,
+                        registry: toolRegistry
+                    )
+                } catch {
+                    Log.runtime.error(
+                        "Failed to apply native memory access gate: \(error.localizedDescription, privacy: .public)"
+                    )
                 }
-            }
+            },
+            fileMemoryController: fileMemoryController
         )
+    }
+
+    private static func configureMemoryRegistration(
+        shouldEnable: Bool,
+        runtime: AgentRuntime,
+        context: MemoryContextProvider,
+        bundle: MemoryToolBundle,
+        registry: AgentToolRegistry
+    ) async throws {
+        guard shouldEnable else {
+            await removeMemoryRegistration(
+                runtime: runtime,
+                context: context,
+                registry: registry
+            )
+            return
+        }
+
+        do {
+            for tool in bundle.tools {
+                try await registry.replace(tool)
+            }
+            await runtime.contexts.register(context)
+        } catch {
+            await removeMemoryRegistration(
+                runtime: runtime,
+                context: context,
+                registry: registry
+            )
+            throw error
+        }
+    }
+
+    private static func removeMemoryRegistration(
+        runtime: AgentRuntime,
+        context: MemoryContextProvider,
+        registry: AgentToolRegistry
+    ) async {
+        await runtime.contexts.remove(identifier: context.identifier)
+        for name in ["memory.save", "memory.search", "memory.archive"] {
+            await registry.remove(named: name)
+        }
     }
 
     private static func registerProviders(

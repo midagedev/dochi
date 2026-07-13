@@ -8,6 +8,7 @@ struct SettingsView: View {
     let ttsService: TTSRouter
     let downloadManager: ModelDownloadManager
     @Bindable var viewModel: DochiViewModel
+    let fileMemoryController: DochiFileMemoryController?
 
     @State private var testPlaying = false
     @State private var googleCloudAPIKey = ""
@@ -648,6 +649,59 @@ struct SettingsView: View {
                         .onChange(of: settings.nativeMemoryEnabled) { _, _ in
                             viewModel.reconnectBackend()
                         }
+                    Toggle("파일 메모리 사용", isOn: $settings.nativeFileMemoryEnabled)
+                        .disabled(
+                            isAgentBusy
+                                || !settings.nativeMemoryEnabled
+                                || fileMemoryController?.status.isSynchronizing == true
+                        )
+                        .accessibilityHint("켜면 관련 Markdown·텍스트 파일 발췌가 선택한 모델 제공자로 전송될 수 있습니다. 발췌마다 별도 승인을 요청하지 않습니다.")
+                        .onChange(of: settings.nativeFileMemoryEnabled) { _, _ in
+                            viewModel.reconnectBackend()
+                        }
+                    Picker("파일 위치", selection: $settings.nativeFileMemoryLocation) {
+                        ForEach(DochiFileMemoryLocation.allCases) { location in
+                            Text(location.displayName).tag(location.rawValue)
+                        }
+                    }
+                    .disabled(
+                        isAgentBusy
+                            || !settings.nativeMemoryEnabled
+                            || !settings.nativeFileMemoryEnabled
+                            || fileMemoryController?.status.isSynchronizing == true
+                    )
+                    .onChange(of: settings.nativeFileMemoryLocation) { _, _ in
+                        viewModel.reconnectBackend()
+                    }
+                    if let fileMemoryController {
+                        LabeledContent("파일 메모리 상태") {
+                            Text(fileMemoryController.status.displayText)
+                                .foregroundStyle(
+                                    fileMemoryController.status.isSynchronizing
+                                        ? Color.secondary
+                                        : Color.primary
+                                )
+                        }
+                        HStack {
+                            Button("지금 새로고침") {
+                                viewModel.reconnectBackend()
+                            }
+                            .disabled(
+                                isAgentBusy
+                                    || fileMemoryController.status.isSynchronizing
+                                    || !settings.nativeMemoryEnabled
+                                    || !settings.nativeFileMemoryEnabled
+                            )
+                            if settings.currentNativeFileMemoryLocation == .local {
+                                Button("메모리 폴더 열기") {
+                                    fileMemoryController.revealLocalFolder()
+                                }
+                            }
+                        }
+                    }
+                    Text("Markdown·텍스트 파일이 원본이며 SQLite는 검색용 색인입니다. '파일 메모리 사용'을 켜는 것은 관련 파일 발췌가 답변 생성을 위해 선택한 모델 제공자로 전송될 수 있음에 동의하는 것입니다. 발췌마다 별도 승인을 요청하지 않습니다. '파일 위치'는 원본을 읽을 이 Mac 또는 iCloud Drive 저장소만 정하는 별도 설정이며 모델 전송 동의가 아닙니다. iCloud Drive를 선택했는데 사용할 수 없으면 로컬 색인을 문맥에서 제외하고, 선택한 iCloud의 마지막 색인만 유지할 수 있습니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     TextEditor(text: $settings.nativeAgentInstructions)
                         .font(.body.monospaced())
                         .frame(minHeight: 140)

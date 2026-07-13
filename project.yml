@@ -15,7 +15,7 @@ packages:
     from: "0.5.0"
   AgentRuntimeKit:
     url: https://github.com/midagedev/AgentRuntimeKit.git
-    from: "0.1.1"
+    from: "0.2.0"
 
 targets:
   Dochi:
@@ -41,8 +41,24 @@ targets:
         NSMicrophoneUsageDescription: "음성 인식을 위해 마이크 접근이 필요합니다."
         NSSpeechRecognitionUsageDescription: "음성 명령을 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다."
         NSCameraUsageDescription: "아바타가 사용자의 얼굴을 따라가기 위해 카메라 접근이 필요합니다."
+        NSUbiquitousContainers:
+          iCloud.com.hckim.dochi:
+            NSUbiquitousContainerIsDocumentScopePublic: true
+            NSUbiquitousContainerName: Dochi
+            NSUbiquitousContainerSupportedFolderLevels: Any
     entitlements:
       path: Dochi/Dochi.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.hckim.dochi
+        com.apple.developer.icloud-services:
+          - CloudDocuments
+        com.apple.developer.ubiquity-container-identifiers:
+          - iCloud.com.hckim.dochi
+    attributes:
+      SystemCapabilities:
+        com.apple.iCloud:
+          enabled: 1
     dependencies:
       - package: onnxruntime-swift-package-manager
         product: onnxruntime
@@ -56,6 +72,8 @@ targets:
         product: AgentRuntimeProviders
       - package: AgentRuntimeKit
         product: AgentRuntimeMemory
+      - package: AgentRuntimeKit
+        product: AgentRuntimeFileMemory
       - package: AgentRuntimeKit
         product: AgentRuntimeApple
     settings:
@@ -111,6 +129,8 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         UIApplicationSupportsIndirectInputEvents: true
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -119,6 +139,24 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        NSUbiquitousContainers:
+          iCloud.com.hckim.dochi:
+            NSUbiquitousContainerIsDocumentScopePublic: true
+            NSUbiquitousContainerName: Dochi
+            NSUbiquitousContainerSupportedFolderLevels: Any
+    entitlements:
+      path: DochiMobile/DochiMobile.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.hckim.dochi
+        com.apple.developer.icloud-services:
+          - CloudDocuments
+        com.apple.developer.ubiquity-container-identifiers:
+          - iCloud.com.hckim.dochi
+    attributes:
+      SystemCapabilities:
+        com.apple.iCloud:
+          enabled: 1
     dependencies:
       - package: AgentRuntimeKit
         product: AgentRuntimeCore
@@ -126,6 +164,8 @@ targets:
         product: AgentRuntimeProviders
       - package: AgentRuntimeKit
         product: AgentRuntimeMemory
+      - package: AgentRuntimeKit
+        product: AgentRuntimeFileMemory
       - package: AgentRuntimeKit
         product: AgentRuntimeApple
     settings:
@@ -136,6 +176,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "6.0"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        CODE_SIGN_ENTITLEMENTS: DochiMobile/DochiMobile.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: XEF9KH7N43
         SWIFT_STRICT_CONCURRENCY: targeted

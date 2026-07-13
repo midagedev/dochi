@@ -5,6 +5,41 @@ import XCTest
 
 @MainActor
 final class NativeAgentBackendTests: XCTestCase {
+    func testPreRunHookCompletesBeforeProviderRequest() async throws {
+        let provider = ScriptedModelProvider(
+            identifier: "native-test",
+            scripts: [[.textDelta("완료"), .finish(.stop)]]
+        )
+        let runtime = AgentRuntime(
+            providers: ModelProviderRegistry(providers: [provider]),
+            tools: try AgentToolRegistry()
+        )
+        var didPrepareMemory = false
+        let backend = NativeAgentBackend(
+            runtime: runtime,
+            agent: AgentDefinition(
+                id: "dochi-native",
+                providerID: "native-test",
+                model: "test",
+                instructions: "테스트"
+            ),
+            preRunHook: {
+                didPrepareMemory = true
+            }
+        )
+        backend.connect()
+
+        _ = try await collect(backend.send(
+            text: "질문",
+            conversationId: "conversation",
+            user: "user"
+        ))
+
+        XCTAssertTrue(didPrepareMemory)
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 1)
+    }
+
     func testMapsRuntimeEventsAndKeepsConversationHistory() async throws {
         let provider = ScriptedModelProvider(
             identifier: "native-test",

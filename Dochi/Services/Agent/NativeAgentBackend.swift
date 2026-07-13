@@ -28,7 +28,9 @@ final class NativeAgentBackend: AgentBackendProtocol {
     private let checkpointStore: (any AgentCheckpointStore)?
     private let definitionProvider: @MainActor () -> AgentDefinition
     private let configurationReloader: (@MainActor () async throws -> Void)?
+    private let preRunHook: (@MainActor () async -> Void)?
     private let appID: String
+    let fileMemoryController: DochiFileMemoryController?
     private var histories: [String: CachedHistory] = [:]
     private var connectionTask: Task<Void, Never>?
     private var connectionAttemptID: UUID?
@@ -38,13 +40,17 @@ final class NativeAgentBackend: AgentBackendProtocol {
         runtime: AgentRuntime,
         agent: AgentDefinition,
         appID: String = "com.hckim.dochi",
-        checkpointStore: (any AgentCheckpointStore)? = nil
+        checkpointStore: (any AgentCheckpointStore)? = nil,
+        preRunHook: (@MainActor () async -> Void)? = nil,
+        fileMemoryController: DochiFileMemoryController? = nil
     ) {
         self.runtime = runtime
         self.checkpointStore = checkpointStore
         self.definitionProvider = { agent }
         self.configurationReloader = nil
+        self.preRunHook = preRunHook
         self.appID = appID
+        self.fileMemoryController = fileMemoryController
     }
 
     init(
@@ -52,13 +58,17 @@ final class NativeAgentBackend: AgentBackendProtocol {
         appID: String = "com.hckim.dochi",
         checkpointStore: (any AgentCheckpointStore)? = nil,
         definitionProvider: @escaping @MainActor () -> AgentDefinition,
-        configurationReloader: @escaping @MainActor () async throws -> Void
+        configurationReloader: @escaping @MainActor () async throws -> Void,
+        preRunHook: (@MainActor () async -> Void)? = nil,
+        fileMemoryController: DochiFileMemoryController? = nil
     ) {
         self.runtime = runtime
         self.checkpointStore = checkpointStore
         self.definitionProvider = definitionProvider
         self.configurationReloader = configurationReloader
+        self.preRunHook = preRunHook
         self.appID = appID
+        self.fileMemoryController = fileMemoryController
     }
 
     func connect() {
@@ -181,6 +191,8 @@ final class NativeAgentBackend: AgentBackendProtocol {
                 }
                 defer { inFlightTasks[runID] = nil }
                 do {
+                    try Task.checkCancellation()
+                    await preRunHook?()
                     try Task.checkCancellation()
                     var messages = await messagesForRun(
                         cachedHistory,

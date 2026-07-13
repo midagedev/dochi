@@ -242,6 +242,44 @@ struct MobileSettingsView: View {
                 .accessibilityIdentifier("mobile-memory-toggle")
                 .accessibilityHint("도치가 기억을 찾고 저장할 수 있게 합니다. 이 스위치를 꺼도 이미 저장된 기억은 삭제되지 않습니다.")
 
+            Toggle("파일 메모리 사용", isOn: $preferences.fileMemoryEnabled)
+                .disabled(
+                    !preferences.memoryEnabled
+                        || controller.fileMemoryStatus.isSynchronizing
+                )
+                .accessibilityIdentifier("mobile-file-memory-toggle")
+                .accessibilityHint("켜면 관련 Markdown·텍스트 파일 발췌가 선택한 모델 프로바이더로 전송될 수 있습니다. 발췌마다 별도 승인을 요청하지 않습니다.")
+
+            Picker("파일 위치", selection: $preferences.fileMemoryLocation) {
+                ForEach(MobileFileMemoryLocation.allCases) { location in
+                    Text(location.displayName).tag(location.rawValue)
+                }
+            }
+            .disabled(
+                !preferences.memoryEnabled
+                    || !preferences.fileMemoryEnabled
+                    || controller.fileMemoryStatus.isSynchronizing
+            )
+            .accessibilityIdentifier("mobile-file-memory-location")
+
+            LabeledContent("파일 메모리 상태") {
+                Text(controller.fileMemoryStatus.displayText)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            Button {
+                Task { await controller.refreshFileMemory() }
+            } label: {
+                Label("파일 메모리 새로고침", systemImage: "arrow.clockwise")
+            }
+            .disabled(
+                controller.isRunning
+                    || controller.fileMemoryStatus.isSynchronizing
+                    || !preferences.memoryEnabled
+                    || !preferences.fileMemoryEnabled
+            )
+            .accessibilityIdentifier("mobile-file-memory-refresh")
+
             NavigationLink {
                 MobileMemoryManagementView(controller: controller)
             } label: {
@@ -253,7 +291,7 @@ struct MobileSettingsView: View {
             Text("기억과 개인정보")
                 .accessibilityAddTraits(.isHeader)
         } footer: {
-            Text("'기억 사용'을 꺼도 저장된 데이터는 삭제되지 않습니다. 영구 삭제는 '저장된 기억 관리'에서 별도로 확인한 뒤 실행합니다. 기억은 보호된 로컬 SQLite 저장소에 범위별로 분리합니다. 민감한 내용을 장기 저장할 때는 도치가 별도로 승인을 요청합니다. 사용자가 보낸 메시지 텍스트와 승인된 기억 문맥은 답변 생성을 위해 선택한 모델 프로바이더로 전송됩니다. 음성 입력의 오디오 원본은 해당 모델 프로바이더로 전송하지 않습니다.")
+            Text("'기억 사용'을 꺼도 저장된 데이터는 삭제되지 않습니다. 영구 삭제는 '저장된 기억 관리'에서 별도로 확인한 뒤 실행합니다. Markdown·텍스트 파일은 원본이고 보호된 SQLite는 검색용 색인입니다. '파일 메모리 사용'을 켜는 것은 관련 파일 발췌가 답변 생성을 위해 선택한 모델 프로바이더로 전송될 수 있음에 동의하는 것입니다. 발췌를 전송할 때마다 별도 승인을 요청하지 않습니다. '파일 위치'는 원본을 읽을 기기 또는 iCloud Drive 저장소만 정하는 별도 설정이며 모델 전송 동의가 아닙니다. iCloud Drive를 명시적으로 선택했는데 사용할 수 없으면 기기 색인을 문맥에서 제외하고, 선택한 iCloud의 마지막 색인만 유지할 수 있습니다. 민감한 내용을 장기 저장할 때는 도치가 별도로 승인을 요청합니다. 사용자가 보낸 메시지 텍스트, 승인된 장기 기억 문맥, 파일 메모리로 허용한 관련 발췌는 답변 생성을 위해 선택한 모델 프로바이더로 전송됩니다. 음성 입력의 오디오 원본은 해당 모델 프로바이더로 전송하지 않습니다.")
                 .accessibilityIdentifier("mobile-memory-privacy-guidance")
         }
     }

@@ -1,8 +1,8 @@
 # Native Agent Runtime Architecture
 
 > 상태: **현행 정본**<br>
-> 적용 대상: `Dochi` macOS 14+, `DochiMobile` iOS 17+, `AgentRuntimeKit` 0.1.x<br>
-> 마지막 코드 대조: 2026-07-12
+> 적용 대상: `Dochi` macOS 14+, `DochiMobile` iOS 17+, `AgentRuntimeKit` 0.2.x<br>
+> 마지막 코드 대조: 2026-07-13
 
 이 문서는 Dochi의 인프로세스 Swift 에이전트 경계와 현재 보안 동작을 정의한다. macOS의 선택형
 Hermes 경로는 [`../HermesBridge/README.md`](../HermesBridge/README.md)가 정본이다. 이 문서에
@@ -29,7 +29,8 @@ macOS의 `AgentBackendProtocol`은 UI가 어느 런타임을 쓰는지 알지 �
 제공자 continuation, 기억 레코드와 도구 정책 타입은 `DochiViewModel`로 새지 않는다.
 
 iOS는 Hermes를 포함하지 않으며 `MobileAgentController`가 AgentRuntimeKit host 역할을 직접 한다.
-두 앱의 런타임 데이터는 서로 동기화하지 않는다.
+두 앱의 SQLite·대화·checkpoint는 각각의 sandbox에 남는다. 사용자가 iCloud Drive 파일 메모리를
+명시적으로 선택하면 canonical Markdown/text 파일만 공유하고 각 앱이 자체 exact scope로 다시 색인한다.
 
 ## 2. 모듈과 host 책임
 
@@ -38,7 +39,8 @@ iOS는 Hermes를 포함하지 않으며 `MobileAgentController`가 AgentRuntimeK
 | `AgentRuntimeCore` | 제한된 모델/도구 루프, 스트림 이벤트, 도구 레지스트리·정책·승인, 체크포인트 계약 | macOS, iOS |
 | `AgentRuntimeProviders` | 제공자 요청/스트림 파싱, 재시도, opaque continuation | macOS, iOS |
 | `AgentRuntimeMemory` | exact-scope 기억, SQLite/FTS, 기억 도구와 보수적 저장 정책 | macOS, iOS |
-| `AgentRuntimeApple` | Keychain, 보호 파일/SQLite, 축약 JSONL 감사 로그 | macOS, iOS |
+| `AgentRuntimeFileMemory` | canonical Markdown/text 전체 스캔, 안정적 chunk, 원자적 source reconciliation | macOS, iOS |
+| `AgentRuntimeApple` | Keychain, 보호 파일/SQLite, 축약 JSONL 감사 로그, 명시적 iCloud Drive adapter | macOS, iOS |
 
 `AgentRuntimeMCP`는 package에 존재하지만 현재 Dochi 네이티브 host는 MCP client나 MCP 도구를
 등록하지 않는다. Hermes 백엔드의 도구·스킬은 Hermes가 별도로 관리하며 네이티브 host의 승인
@@ -128,13 +130,42 @@ macOS는 `~/Library/Application Support/Dochi/AgentRuntime/agent-memory.sqlite`,
 `Application Support/DochiMobile/agent-memory.sqlite`를 사용한다. 보호 wrapper가 DB와 WAL/SHM
 sidecar의 권한과 Apple 파일 보호 속성을 다시 적용한다.
 
-### 5.2 현재 삭제 동작
+### 5.2 파일 기반 기억과 iCloud Drive
+
+파일 메모리는 user-owned Markdown/text 파일을 canonical source로 취급한다. SQLite는 모델 문맥 검색을
+위한 파생 색인이므로 파일 내용과 충돌할 때 파일 스냅샷이 우선한다.
+
+| 위치 | macOS | iOS |
+| --- | --- | --- |
+| 기기 로컬 | `Application Support/Dochi/AgentRuntime/FileMemory/` | Files 앱에 공개되는 app Documents의 `Memory/` |
+| iCloud Drive | `iCloud.com.hckim.dochi/Documents/Dochi/Memory/` | 같은 container와 subdirectory |
+
+- 파일 메모리는 기본적으로 꺼져 있다. 사용자가 토글을 직접 켜야 관련 발췌의 모델 제공자 전송에
+  동의한 것으로 처리한다. 기본 위치는 기기 로컬이며 iCloud Drive도 설정에서 명시적으로 선택한다.
+- source ID는 `local`과 `iCloud Drive` 위치별로 분리한다. 두 host는 위치별 ID를 공유하지만
+  reconciliation scope는 각 host의 exact application scope다.
+- 앱 연결/시작, 모델 run 직전, iOS scene 활성화와 사용자의 수동 새로고침에서 전체 디렉터리를 스캔한다.
+- 한 스냅샷의 upsert와 사라진 chunk 보관은 generation CAS를 사용해 원자적으로 반영한다.
+- 위치를 바꾸기 전에 선택하지 않은 위치의 파생 레코드를 보관 처리한다. 따라서 iCloud 선택 상태에서
+  계정/container/download/conflict 오류가 나도 로컬에서 만든 색인은 모델 문맥에 들어가지 않는다.
+  같은 iCloud source의 마지막 완전한 SQLite 색인만 유지할 수 있으며 기기 로컬 폴더로 자동 fallback하지
+  않는다. source 격리에 실패하면 기억 context와 도구를 fail-closed로 해제하고 UI에 안전한 상태만 표시한다.
+- 파일 본문이나 절대 iCloud account 경로를 로그하지 않는다. symlink, traversal, hidden/binary 파일,
+  invalid UTF-8과 제한을 넘는 파일은 package 경계에서 거부하거나 content-free 진단으로 건너뛴다.
+
+Mac과 iPhone의 실제 공유에는 `iCloud.com.hckim.dochi` container를 두 App ID에 연결한 서명 설정과
+활성 iCloud 계정이 필요하다. 시뮬레이터는 compile·fake adapter 테스트만 검증하며 실제 동기화를
+증명하지 않는다.
+
+### 5.3 현재 삭제 동작
 
 삭제 의미를 UI 문구에서 과장하지 않는다.
 
 | 사용자 동작 | 실제 결과 |
 | --- | --- |
 | 기억 토글 끄기 | 기억 context와 `memory.save/search/archive` 등록을 해제한다. 저장된 레코드는 유지한다. |
+| 파일 메모리 토글 끄기 | canonical 파일은 유지하고 source의 파생 레코드를 보관 상태로 바꿔 활성 문맥에서 제외한다. |
+| 파일 위치 변경 | 선택하지 않은 위치의 파생 레코드를 먼저 보관해 활성 문맥에서 제외한 뒤, 새 위치를 별도 source로 색인한다. 새 위치를 읽지 못해도 이전 위치로 fallback하지 않는다. |
 | macOS 대화 삭제 | 표시용 대화 JSON과 exact app/user/session/agent 체크포인트를 삭제한다. 장기 기억은 유지한다. |
 | iOS 새 대화 | 표시용 snapshot을 새 session으로 교체한다. 안전한 이전 체크포인트는 정리하지만 장기 기억은 유지한다. |
 | iOS 기억 하나 영구 삭제 | 현재 app/user가 소유한 exact scope와 UUID를 다시 검증한 뒤 레코드·이벤트·FTS 흔적을 hard purge한다. |

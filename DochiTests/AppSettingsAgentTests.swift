@@ -3,6 +3,33 @@ import XCTest
 
 @MainActor
 final class AppSettingsAgentTests: XCTestCase {
+    func testFileMemoryDefaultsOffAndPreservesExplicitOptInAndICloudSelection() {
+        let defaults = UserDefaults.standard
+        let keys = ["nativeFileMemoryEnabled", "nativeFileMemoryLocation"]
+        let saved = Dictionary(uniqueKeysWithValues: keys.map { ($0, defaults.object(forKey: $0)) })
+        defer {
+            for key in keys {
+                if let value = saved[key] ?? nil {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+        }
+        for key in keys { defaults.removeObject(forKey: key) }
+
+        let settings = AppSettings()
+        XCTAssertFalse(settings.nativeFileMemoryEnabled)
+        XCTAssertNil(defaults.object(forKey: "nativeFileMemoryEnabled"))
+        XCTAssertEqual(settings.currentNativeFileMemoryLocation, .local)
+
+        settings.nativeFileMemoryEnabled = true
+        settings.nativeFileMemoryLocation = DochiFileMemoryLocation.iCloudDrive.rawValue
+        let restored = AppSettings()
+        XCTAssertTrue(restored.nativeFileMemoryEnabled)
+        XCTAssertEqual(restored.currentNativeFileMemoryLocation, .iCloudDrive)
+    }
+
     func testNativeProvidersUseCurrentSupportedDefaultModels() {
         XCTAssertEqual(NativeModelProviderKind.anthropic.defaultModel, "claude-sonnet-5")
         XCTAssertEqual(NativeModelProviderKind.openAI.defaultModel, "gpt-5.6")

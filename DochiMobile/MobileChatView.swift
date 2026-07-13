@@ -116,9 +116,12 @@ struct MobileChatView: View {
             UIAccessibility.post(notification: .announcement, argument: "도구 사용 승인이 필요합니다.")
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase != .active else { return }
-            speechRecognition.stopListening(cancelRecognition: true)
-            speechOutput.stop()
+            if newPhase == .active {
+                Task { await controller.refreshFileMemory() }
+            } else {
+                speechRecognition.stopListening(cancelRecognition: true)
+                speechOutput.stop()
+            }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: controller.phase)
     }

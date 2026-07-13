@@ -213,6 +213,23 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(nativeMemoryEnabled, forKey: "nativeMemoryEnabled") }
     }
 
+    /// Indexes user-owned Markdown/text files into the protected memory store.
+    /// This is opt-in because matching excerpts can be sent to the selected
+    /// model provider. The canonical location defaults to this Mac; iCloud must
+    /// also be selected explicitly so an unavailable container can never create
+    /// split-brain data.
+    var nativeFileMemoryEnabled: Bool = UserDefaults.standard.object(forKey: "nativeFileMemoryEnabled") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(nativeFileMemoryEnabled, forKey: "nativeFileMemoryEnabled") }
+    }
+
+    var nativeFileMemoryLocation: String = UserDefaults.standard.string(forKey: "nativeFileMemoryLocation") ?? DochiFileMemoryLocation.local.rawValue {
+        didSet { UserDefaults.standard.set(nativeFileMemoryLocation, forKey: "nativeFileMemoryLocation") }
+    }
+
+    var currentNativeFileMemoryLocation: DochiFileMemoryLocation {
+        DochiFileMemoryLocation(rawValue: nativeFileMemoryLocation) ?? .local
+    }
+
     var nativeAgentInstructions: String = UserDefaults.standard.string(forKey: "nativeAgentInstructions") ?? """
     당신은 도치입니다. 사용자의 말을 정확히 이해하고, 필요한 경우 허용된 도구와 기억을 사용하세요. 답변은 기본적으로 자연스러운 한국어로 간결하게 말하세요. 민감하거나 되돌리기 어려운 행동은 실행 전에 승인을 요청하세요.
     """ {

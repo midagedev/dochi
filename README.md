@@ -25,7 +25,7 @@ iOS:   말/텍스트 ─▶ MobileAgentController ─▶ AgentRuntimeKit ─▶ 
 | 입력 | 텍스트, Apple STT, 웨이크워드 | 텍스트, Apple Speech |
 | 출력 | 스트리밍 텍스트, 시스템/Google Cloud/Typecast/Supertonic TTS | 스트리밍 텍스트, 시스템 TTS |
 | 아바타 | 7종 CC0 VRM 3D 모델, 표정·립싱크 | 같은 모델의 7종 2D 미리보기 |
-| 기억 | 범위가 분리된 로컬 SQLite 기억 | 범위가 분리된 로컬 SQLite 기억 |
+| 기억 | 범위 분리 SQLite + Markdown/text 파일 색인 + iCloud Drive 선택 | 범위 분리 SQLite + Files/iCloud Drive 파일 색인 |
 | 도구 | 현재 시각, 기억 저장·검색·보관 | 기억 저장·검색·보관 |
 
 ## 빠른 시작
@@ -34,15 +34,8 @@ iOS:   말/텍스트 ─▶ MobileAgentController ─▶ AgentRuntimeKit ─▶ 
 
 - macOS 14 이상, iOS 17 이상
 - Xcode와 [XcodeGen](https://github.com/yonaskolb/XcodeGen)
-- 이 저장소와 `AgentRuntimeKit`이 같은 상위 디렉터리에 있는 체크아웃
 
-```text
-repo/
-├── AgentRuntimeKit/
-└── dochi/
-```
-
-`project.yml`은 공개 Swift package `AgentRuntimeKit`의 `0.1.x` 릴리스를 참조합니다.
+`project.yml`은 공개 Swift package `AgentRuntimeKit`의 `0.2.x` 릴리스를 참조합니다.
 
 ### 프로젝트 생성과 macOS 실행
 
@@ -82,13 +75,16 @@ xcodebuild -project Dochi.xcodeproj -scheme DochiMobile \
 1. **설정 → 에이전트 → 실행 방식**에서 기본값인 **기기 내 Swift 에이전트**를 선택합니다.
 2. Anthropic, OpenAI, Google Gemini 또는 OpenAI 호환 제공자를 선택합니다.
 3. 모델 이름과 개인 API 키를 입력하고 **키 저장**, **설정 적용**을 누릅니다.
-4. 필요에 따라 **로컬 장기 기억**과 에이전트 지침을 조정합니다.
+4. 필요에 따라 **로컬 장기 기억**, **파일 메모리 색인**, 파일 위치와 에이전트 지침을 조정합니다.
+   파일 메모리는 초기에는 꺼져 있으며, 직접 켜야 모델 제공자 전송에 동의한 것으로 처리합니다.
+   기본 위치는 이 Mac이며 **메모리 폴더 열기**에서 Markdown/text 파일을 관리할 수 있습니다.
 5. **말하기/아바타**에서 TTS와 VRM 아바타를 선택합니다.
 
 ### iOS
 
-대화 화면의 아바타/설정 버튼을 열어 제공자, 모델, API 키, 기억, 음성 입력, 답변 읽기와
-아바타를 설정합니다. 마이크와 음성 인식 권한은 음성 입력을 실제로 시작할 때 요청합니다.
+대화 화면의 아바타/설정 버튼을 열어 제공자, 모델, API 키, 기억, 파일 위치, 음성 입력,
+답변 읽기와 아바타를 설정합니다. 기기 위치의 `Memory` 폴더는 Files 앱에서 편집할 수 있습니다.
+마이크와 음성 인식 권한은 음성 입력을 실제로 시작할 때 요청합니다.
 
 기본 모델 이름은 제공자별 편의 기본값일 뿐이며 설정에서 바꿀 수 있습니다.
 
@@ -111,6 +107,14 @@ OpenAI 호환 서버는 외부 주소일 때 HTTPS만 허용합니다. HTTP는 `
 - **로컬 기억:** 기억은 앱·사용자·에이전트·대화 식별자로 범위를 나눠 로컬 SQLite에 저장합니다.
   비밀값은 기억으로 저장할 수 없고, 건강·금융 정보나 지속 지침 같은 민감한 장기 기억은 저장 전에
   앱 안에서 내용을 보여주고 승인을 받습니다.
+- **파일 메모리:** 초기값은 꺼짐이며 사용자가 직접 켠 경우에만 관련 발췌를 선택한 모델 제공자로
+  보낼 수 있습니다. Markdown/text 파일이 원본이고 보호된 SQLite는 검색용 파생 색인입니다. 앱 시작·
+  연결, 모델 실행 직전, 수동 새로고침 때 전체 스냅샷을 원자적으로 반영하며 없어진 파일의 색인은
+  보관 처리합니다. iCloud Drive는 사용자가 명시적으로 선택해야 합니다. 위치별 색인을 분리하므로
+  선택한 iCloud container를 사용할 수 없을 때 로컬에서 만든 색인은 즉시 활성 문맥에서 제외됩니다.
+  같은 iCloud 위치에서 마지막으로 완성된 색인만 유지할 수 있으며, 기기 로컬 폴더로 조용히 대체하지
+  않습니다. 파일 메모리를 끄면 원본 파일은 그대로 두고 모든 파일 파생 레코드를 보관 상태로 바꿔
+  모델 문맥에서 제외하며, 다시 켜면 현재 파일 전체를 새로 색인합니다.
 - **도구 승인:** safe 도구와 host가 좁게 사전 허용한 기억 검색·정책 제어 저장만 자동으로
   진행합니다. 그 밖에 승인이 필요한 도구는 이름, 위험도, 부작용과 안전하게 요약한 인수를 보여주며
   **한 번 허용**, 조건을 만족할 때만 **이번 대화에서 허용**, 또는 **거부**를 선택하게 합니다.
@@ -124,6 +128,11 @@ OpenAI 호환 서버는 외부 주소일 때 HTTPS만 허용합니다. HTTP는 `
 런타임의 SQLite DB/WAL/SHM, 체크포인트와 축약 감사 로그에는 제한된 파일 권한과 Apple 파일 보호를
 적용합니다. iOS 대화 스냅샷도 파일 보호로 저장합니다. macOS의 표시용 대화 기록은
 `~/Library/Application Support/Dochi/conversations/` 아래 JSON 파일입니다.
+
+Mac과 iPhone에서 같은 iCloud 파일 메모리를 쓰려면 Apple Developer 계정에서
+`iCloud.com.hckim.dochi` container를 생성하고 `com.hckim.dochi`와 `com.hckim.dochi.mobile`
+App ID 모두에 iCloud Documents capability를 연결해야 합니다. 시뮬레이터 빌드는 코드 경로를
+검증하지만 실제 계정 동기화는 서명된 기기 빌드에서 확인해야 합니다.
 
 ## 음성과 아바타
 

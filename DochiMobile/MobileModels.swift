@@ -174,6 +174,8 @@ final class MobileAgentPreferences {
         static let modelPrefix = "mobile.agent.model."
         static let compatibleBaseURL = "mobile.agent.compatibleBaseURL"
         static let memoryEnabled = "mobile.agent.memoryEnabled"
+        static let fileMemoryEnabled = "mobile.agent.fileMemoryEnabled"
+        static let fileMemoryLocation = "mobile.agent.fileMemoryLocation"
         static let speechInputEnabled = "mobile.agent.speechInputEnabled"
         static let speakReplies = "mobile.agent.speakReplies"
         static let hapticsEnabled = "mobile.agent.hapticsEnabled"
@@ -197,6 +199,12 @@ final class MobileAgentPreferences {
     var memoryEnabled: Bool {
         didSet { defaults.set(memoryEnabled, forKey: Key.memoryEnabled) }
     }
+    var fileMemoryEnabled: Bool {
+        didSet { defaults.set(fileMemoryEnabled, forKey: Key.fileMemoryEnabled) }
+    }
+    var fileMemoryLocation: String {
+        didSet { defaults.set(fileMemoryLocation, forKey: Key.fileMemoryLocation) }
+    }
     var speechInputEnabled: Bool {
         didSet { defaults.set(speechInputEnabled, forKey: Key.speechInputEnabled) }
     }
@@ -217,6 +225,10 @@ final class MobileAgentPreferences {
         MobileProviderKind(rawValue: providerKind) ?? .anthropic
     }
 
+    var currentFileMemoryLocation: MobileFileMemoryLocation {
+        MobileFileMemoryLocation(rawValue: fileMemoryLocation) ?? .local
+    }
+
     var selectedAvatar: MobileAvatar { MobileAvatar.named(avatarName) }
 
     private let defaults: UserDefaults
@@ -232,6 +244,12 @@ final class MobileAgentPreferences {
         model = providerModel ?? legacyModel ?? provider.defaultModel
         compatibleBaseURL = defaults.string(forKey: Key.compatibleBaseURL) ?? "http://127.0.0.1:11434/v1"
         memoryEnabled = defaults.object(forKey: Key.memoryEnabled) as? Bool ?? true
+        // File excerpts can leave the device as model context, so only an
+        // explicitly persisted opt-in enables this feature. An absent key from
+        // a new install or an older build must never be treated as consent.
+        fileMemoryEnabled = defaults.object(forKey: Key.fileMemoryEnabled) as? Bool ?? false
+        fileMemoryLocation = defaults.string(forKey: Key.fileMemoryLocation)
+            ?? MobileFileMemoryLocation.local.rawValue
         speechInputEnabled = defaults.object(forKey: Key.speechInputEnabled) as? Bool ?? true
         speakReplies = defaults.object(forKey: Key.speakReplies) as? Bool ?? true
         hapticsEnabled = defaults.object(forKey: Key.hapticsEnabled) as? Bool ?? true

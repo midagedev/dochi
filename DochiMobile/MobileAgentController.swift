@@ -1,5 +1,6 @@
 import AgentRuntimeApple
 import AgentRuntimeCore
+import AgentRuntimeFileMemory
 import AgentRuntimeMemory
 import AgentRuntimeProviders
 import Foundation
@@ -30,6 +31,9 @@ final class MobileAgentController {
     var isMemoryManagementBusy: Bool {
         isLoadingOwnedMemories || purgingMemoryID != nil || isPurgingAllOwnedMemories
     }
+    var fileMemoryStatus: MobileFileMemoryStatus {
+        fileMemoryController?.status ?? .disabled
+    }
 
     private let preferences: MobileAgentPreferences
     private let secretStore: KeychainAgentSecretStore
@@ -41,6 +45,7 @@ final class MobileAgentController {
     private let memoryRepository: MobileOwnedMemoryRepository?
     private let memoryTools: MemoryToolBundle?
     private let memoryContext: MemoryContextProvider?
+    private let fileMemoryController: MobileFileMemoryController?
     private let conversationStore: (any MobileConversationStoring)?
     private var agentHistory: [AgentMessage] = []
     private var runTask: Task<Void, Never>?
@@ -84,6 +89,18 @@ final class MobileAgentController {
                 fileURL: directory.appendingPathComponent("agent-audit.jsonl")
             ))
             let memoryContext = MemoryContextProvider(store: memoryStore)
+            let fileMemoryController = MobileFileMemoryController(
+                appID: Self.appID,
+                store: memoryStore,
+                localRootURL: try Self.localFileMemoryDirectory(),
+                preferencesProvider: {
+                    MobileFileMemoryPreferences(
+                        memoryEnabled: preferences.memoryEnabled,
+                        fileMemoryEnabled: preferences.fileMemoryEnabled,
+                        location: preferences.currentFileMemoryLocation
+                    )
+                }
+            )
 
             self.providerRegistry = providerRegistry
             self.toolRegistry = toolRegistry
@@ -95,6 +112,7 @@ final class MobileAgentController {
             )
             self.memoryTools = memoryTools
             self.memoryContext = memoryContext
+            self.fileMemoryController = fileMemoryController
             self.conversationStore = MobileConversationStore(
                 fileURL: directory.appendingPathComponent("conversation.json")
             )
@@ -118,6 +136,7 @@ final class MobileAgentController {
             memoryRepository = nil
             memoryTools = nil
             memoryContext = nil
+            fileMemoryController = nil
             conversationStore = nil
             phase = .failed
             errorMessage = error.localizedDescription
@@ -170,6 +189,11 @@ final class MobileAgentController {
         guard let providerRegistry, let toolRegistry, let runtime else {
             throw MobileAgentError.notInitialized
         }
+        await fileMemoryController?.synchronize()
+        try await applyMemoryRegistration(
+            runtime: runtime,
+            toolRegistry: toolRegistry
+        )
         let selectedModel = preferences.model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selectedModel.isEmpty else { throw MobileAgentError.emptyModel }
 
@@ -214,17 +238,6 @@ final class MobileAgentController {
             ))
         }
 
-        if preferences.memoryEnabled, let memoryContext, let memoryTools {
-            await runtime.contexts.register(memoryContext)
-            for tool in memoryTools.tools { try await toolRegistry.replace(tool) }
-        } else {
-            if let memoryContext {
-                await runtime.contexts.remove(identifier: memoryContext.identifier)
-            }
-            for name in ["memory.save", "memory.search", "memory.archive"] {
-                await toolRegistry.remove(named: name)
-            }
-        }
     }
 
     func send(_ rawText: String) {
@@ -278,6 +291,7 @@ final class MobileAgentController {
             }
             do {
                 try await self.reloadConfiguration()
+                try Task.checkCancellation()
                 for try await event in runtime.run(request) {
                     try Task.checkCancellation()
                     guard self.activeRunID == request.id else { throw CancellationError() }
@@ -412,6 +426,49 @@ final class MobileAgentController {
     func dismissError() {
         errorMessage = nil
         if phase == .failed, runtime != nil { phase = .ready }
+    }
+
+    func refreshFileMemory() async {
+        await fileMemoryController?.synchronize()
+        guard let runtime, let toolRegistry else { return }
+        do {
+            try await applyMemoryRegistration(
+                runtime: runtime,
+                toolRegistry: toolRegistry
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func applyMemoryRegistration(
+        runtime: AgentRuntime,
+        toolRegistry: AgentToolRegistry
+    ) async throws {
+        let shouldEnable = preferences.memoryEnabled
+            && (fileMemoryController?.allowsMemoryAccess ?? true)
+        guard shouldEnable, let memoryContext, let memoryTools else {
+            if let memoryContext {
+                await runtime.contexts.remove(identifier: memoryContext.identifier)
+            }
+            for name in ["memory.save", "memory.search", "memory.archive"] {
+                await toolRegistry.remove(named: name)
+            }
+            return
+        }
+
+        do {
+            for tool in memoryTools.tools {
+                try await toolRegistry.replace(tool)
+            }
+            await runtime.contexts.register(memoryContext)
+        } catch {
+            await runtime.contexts.remove(identifier: memoryContext.identifier)
+            for name in ["memory.save", "memory.search", "memory.archive"] {
+                await toolRegistry.remove(named: name)
+            }
+            throw error
+        }
     }
 
     func refreshOwnedMemories() async {
@@ -618,6 +675,28 @@ final class MobileAgentController {
         try FileManager.default.setAttributes(
             [.posixPermissions: NSNumber(value: Int16(0o700))],
             ofItemAtPath: directory.path
+        )
+        return directory
+    }
+
+    /// The device-local canonical memory folder is intentionally under the
+    /// app's Documents container so users can edit it in Files. Conversations,
+    /// checkpoints, and the derived SQLite index remain in Application Support.
+    private static func localFileMemoryDirectory() throws -> URL {
+        let documents = try FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = documents.appendingPathComponent("Memory", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [
+                .posixPermissions: NSNumber(value: Int16(0o700)),
+                .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication,
+            ]
         )
         return directory
     }

@@ -20,6 +20,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
@@ -31,7 +33,21 @@
 	<string>도치에게 말로 메시지를 입력할 때 마이크를 사용합니다.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>도치에게 말한 내용을 메시지 텍스트로 바꾸기 위해 음성 인식을 사용합니다.</string>
+	<key>NSUbiquitousContainers</key>
+	<dict>
+		<key>iCloud.com.hckim.dochi</key>
+		<dict>
+			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
+			<true/>
+			<key>NSUbiquitousContainerName</key>
+			<string>Dochi</string>
+			<key>NSUbiquitousContainerSupportedFolderLevels</key>
+			<string>Any</string>
+		</dict>
+	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>

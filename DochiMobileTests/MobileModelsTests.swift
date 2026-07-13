@@ -126,6 +126,23 @@ final class MobileConversationStoreTests: XCTestCase {
 
 @MainActor
 final class MobileAgentPreferencesTests: XCTestCase {
+    func testFileMemoryDefaultsOffAndPersistsExplicitOptInAndICloudSelection() {
+        let suiteName = "MobileAgentPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = MobileAgentPreferences(defaults: defaults)
+        XCTAssertFalse(preferences.fileMemoryEnabled)
+        XCTAssertNil(defaults.object(forKey: "mobile.agent.fileMemoryEnabled"))
+        XCTAssertEqual(preferences.currentFileMemoryLocation, .local)
+
+        preferences.fileMemoryEnabled = true
+        preferences.fileMemoryLocation = MobileFileMemoryLocation.iCloudDrive.rawValue
+        let restored = MobileAgentPreferences(defaults: defaults)
+        XCTAssertTrue(restored.fileMemoryEnabled)
+        XCTAssertEqual(restored.currentFileMemoryLocation, .iCloudDrive)
+    }
+
     func testIdentityPersistsAndNewConversationChangesOnlySession() {
         let suiteName = "MobileAgentPreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
